@@ -18,7 +18,7 @@
 // Compile with tsc, run with node.
 import {
   invoiceStanding, invoiceStandingLabel, invoiceNote, isOwed, owedByCurrency,
-  invoicesEmptyLine, type MemberInvoice,
+  invoicesEmptyLine, owedEmptyLine, invoiceCopyText, type MemberInvoice,
 } from './memberInvoices';
 
 const errors: string[] = [];
@@ -153,6 +153,82 @@ const inv = (over: Partial<MemberInvoice>): MemberInvoice => ({
     'the substitution this whole codebase keeps finding, refused here too');
   ok(invoicesEmptyLine('ready').includes('has not raised any invoices'), 'said as a fact only under a whole read');
   eq(invoicesEmptyLine('loading'), 'Still reading.', 'and nothing is claimed while it is in flight');
+}
+
+/* ── "nothing is outstanding" is a claim about DEBT, not about pots ────────── */
+{
+  // The live defect: an unpaid invoice whose amount nobody recorded produces no
+  // pot, so the screen branched on `pots.length` and told a member who owes
+  // money that everything was settled — directly above its own flag saying two
+  // unpaid invoices were missing from the figure.
+  const unpriced = [inv({ id: 'u1', amountCents: null }), inv({ id: 'u2', currency: null })];
+  eq(owedByCurrency(unpriced, TODAY, 'ready')?.pots.length, 0,
+    'neither can be added, which is right and is what made the sentence wrong');
+  const line = owedEmptyLine(unpriced, TODAY, 'ready');
+  ok(!/Nothing is outstanding/.test(line),
+    'a member who owes their gym money is never told nothing is outstanding');
+  ok(/no figure/.test(line), 'what is missing is the FIGURE, and the sentence says which');
+
+  // A draft is not settled, cancelled or written off either.
+  const drafted = [inv({ id: 'd1', status: 'paid' }), inv({ id: 'd2', status: 'draft' })];
+  const dline = owedEmptyLine(drafted, TODAY, 'ready');
+  ok(/Nothing is outstanding/.test(dline), 'nothing IS owed on a paid invoice and a working copy');
+  ok(/working copy/.test(dline), 'and the working copy is named rather than called settled');
+
+  // The sentence that was always right, kept.
+  ok(owedEmptyLine([inv({ status: 'paid' })], TODAY, 'ready')
+    === 'Nothing is outstanding. Every invoice your gym has raised against you is settled, cancelled or written off.',
+    'a whole read with everything settled still earns the plain sentence');
+
+  // And it may never be said about a read that did not land whole.
+  eq(owedEmptyLine(unpriced, TODAY, 'error'), invoicesEmptyLine('error'),
+    'a failed read keeps the failed-read sentence, whatever the rows on screen say');
+  eq(owedEmptyLine(unpriced, TODAY, 'partial'), invoicesEmptyLine('partial'),
+    'and so does a read that stopped at the ceiling');
+  eq(owedEmptyLine([], TODAY, 'ready'), invoicesEmptyLine('ready'),
+    'an empty whole read is the "your gym has not invoiced you" case and stays there');
+}
+
+/* ── the copy a member can take away keeps every rule the screen keeps ─────── */
+{
+  const mixed = [
+    inv({ id: 'a', number: 41, amountCents: 20000, currency: 'GBP', dueOn: '2026-09-01' }),
+    inv({ id: 'b', number: 42, amountCents: 90000, currency: 'AED', dueOn: '2026-09-30' }),
+  ];
+  const copy = invoiceCopyText(mixed, TODAY, 'ready');
+
+  // Rule 1: every figure names its own currency, through `amount`.
+  ok(copy.includes('GBP 200.00'), 'the pound invoice is written in pounds');
+  ok(copy.includes('AED 900.00'), 'and the dirham one in dirhams');
+  // Rule 2: and no third figure exists.
+  ok(!/1,?100/.test(copy), 'GBP 200 and AED 900 are never added into a number in no currency');
+  ok(copy.includes('different currencies'), 'and the copy says why there are two lines rather than one');
+
+  // Rule 3: the date is the bare column value, unparsed and unlocalised — this
+  // text travels to another device, and 09/01 is two days depending who opens it.
+  ok(copy.includes('2026-09-01'), 'the due date is the ISO day the column holds');
+
+  // Rule 4: a copy off a read that did not land whole says so ABOVE the rows. A
+  // text file outlives the screen it was taken from and gets forwarded as a
+  // statement, which is precisely where an unqualified prefix does its damage.
+  const part = invoiceCopyText(mixed, TODAY, 'partial');
+  ok(part.indexOf('not all of them') < part.indexOf('No. 41'),
+    'the qualification arrives before the first figure, not in a footer');
+  ok(!part.includes('across 2 unpaid invoices'),
+    'and no outstanding total is stated over a prefix of somebody’s debt');
+  const bad = invoiceCopyText(mixed, TODAY, 'error');
+  ok(bad.includes('the read failed'), 'a copy taken over a failed read carries that fact with it');
+
+  // Rule 5: an invoice with no amount is named and is in no figure.
+  const holed = invoiceCopyText([inv({ id: 'h', amountCents: null })], TODAY, 'ready');
+  ok(holed.includes('no amount'), 'the hole is stated rather than absorbed');
+  ok(!/Nothing is outstanding/.test(holed), 'and the debt is not reported as settled');
+
+  // And an empty list is still the read's own sentence, never a blank document.
+  ok(invoiceCopyText([], TODAY, 'ready').includes('has not raised any invoices'),
+    'a member with no invoices gets the sentence, not an empty page');
+  ok(invoiceCopyText([], TODAY, 'error').includes('not because your gym has not invoiced you'),
+    'and one whose read failed is never handed a copy claiming they were never billed');
 }
 
 if (errors.length) {

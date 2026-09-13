@@ -71,17 +71,60 @@ export default function Reminders() {
   const [name, setName] = useState('');
   const [sh, setSh] = useState('08');
   const [sm, setSm] = useState('00');
+  /**
+   * Whether the saved settings have actually been read off this phone.
+   *
+   * ── Why this is three states and not a boolean ───────────────────────────
+   *
+   * Every control above starts at a DEFAULT — hydration on, nine to nine, no
+   * custom reminders, no weigh-in, no photo — and until the store answers,
+   * those defaults are on screen wearing the member's own settings' clothes.
+   * A read that never answers leaves them there for good. The catch below used
+   * to say "the defaults stand, and nothing is scheduled from them", and the
+   * first half was true while the second was not: Save is live, and Save
+   * schedules whatever is on screen.
+   *
+   * What that costs, in order:
+   *
+   *   · It OVERWRITES. `saveAndSchedule` writes `current()` over
+   *     `repple.reminders`, so the member's custom reminders, their weigh-in
+   *     and photo rows and every day list they chose are replaced by the
+   *     starting settings of a screen that never managed to read them.
+   *   · It ORPHANS. `ids` is `[]` after a failed read, so the blob written
+   *     carries no ids, `rescheduleReminders` cancels nothing, and every
+   *     notification the last save scheduled stays live with no id list left
+   *     that can ever cancel it. The header of this file names that exact
+   *     harm — "the next Save cancels a stale set and leaves the live one
+   *     firing forever with nothing on any screen to explain it" — and this
+   *     was the path back into it.
+   *
+   * So a read that failed is said out loud and Save is refused until it lands.
+   * 'loading' is separated from 'error' for the usual reason: one of them is
+   * over in a moment and the other is not, and a member owed a sentence about
+   * their reminders should not be handed "could not be read" while we are
+   * still reading.
+   */
+  const [read, setRead] = useState<'loading' | 'ready' | 'error'>('loading');
 
   // Through `savedFromStored`, not a bare JSON.parse. That function migrates
   // the older shape — which had no day lists at all — by reading an ABSENT list
   // as every day. Parsing the blob here by hand would read it as no days and
   // silently switch off every reminder every existing member has set.
+  //
+  // `savedFromStored(null)` is the defaults and that is the right answer for a
+  // member who has never saved: nothing stored is a fact about them. A read
+  // that THREW is not, and lands in 'error' below rather than in the same
+  // defaults.
   useEffect(() => {
+    let cancelled = false;
     AsyncStorage.getItem(KEY).then((r) => {
+      if (cancelled) return;
       const p = savedFromStored(r);
       setHydration(p.hydration); setEvery(p.every); setStartH(p.startH); setEndH(p.endH);
       setHydrationDays(p.hydrationDays); setSupps(p.supps); setFixed(p.fixed); setIds(p.ids);
-    }).catch(() => { /* the defaults stand, and nothing is scheduled from them */ });
+      setRead('ready');
+    }).catch(() => { if (!cancelled) setRead('error'); });
+    return () => { cancelled = true; };
   }, []);
 
   /** The settings as they stand, in the shape the plan and the store both take. */
@@ -138,6 +181,20 @@ export default function Reminders() {
   );
 
   const saveAndSchedule = async () => {
+    // Nothing is written over settings this screen never managed to read. See
+    // the note on `read`: the controls above are showing their own defaults,
+    // and saving them would replace the member's reminders AND leave the
+    // notifications the last save scheduled live with no id list to cancel
+    // them by.
+    if (read !== 'ready') {
+      Alert.alert(
+        read === 'loading' ? 'Still reading your reminders' : 'Your reminders could not be read',
+        read === 'loading'
+          ? 'Your saved reminders have not come off this phone yet, so what is on screen is not them. Nothing has been changed — try again in a moment.'
+          : 'Your saved reminders could not be read off this phone, so what is on screen is the starting settings rather than yours. Nothing has been changed: saving now would replace the reminders you have set with these. Close this screen and open it again.',
+      );
+      return;
+    }
     // Stored FIRST, then scheduled from what was stored.
     //
     // The order is the whole point. `rescheduleReminders` reads the saved blob,
@@ -248,6 +305,18 @@ export default function Reminders() {
         {!pushAvailable() ? (
           <Notice kicker="Not sending yet" title="Nothing can be scheduled on this build"
             note="You can set your reminders up here and they are kept. They will be scheduled on their own once notifications are working — you do not have to come back to this screen." />
+        ) : null}
+
+        {/* Before any control, because every control below it is showing a
+            starting value that may not be the member's. Said for the fraction
+            of a second the read takes, and said for as long as a read that
+            failed leaves it true. */}
+        {read === 'loading' ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading the reminders you have saved…</Text>
+        ) : read === 'error' ? (
+          <Notice tone={t.warn} kicker="Not read"
+            title="Your saved reminders could not be read on this phone"
+            note="What is set below is this screen's starting point rather than yours, so saving is switched off — it would replace the reminders you have set, and leave the ones already scheduled with no way to stop them. Anything you have already set is still saved and still arriving. Close this screen and open it again." />
         ) : null}
 
         <Rule />
@@ -457,7 +526,16 @@ export default function Reminders() {
         </Section>
 
         <View style={{ marginTop: layout.section }}>
-          <Cta label="Save & Schedule" onPress={saveAndSchedule} wide />
+          {/* Disabled from the same one fact the notice at the top of the
+              screen is drawn from, rather than from a second test that could
+              come to disagree with it. `saveAndSchedule` refuses as well: a
+              disabled button is a courtesy and the refusal is the guarantee. */}
+          <Cta label="Save & Schedule" onPress={saveAndSchedule} wide disabled={read !== 'ready'} />
+          {read === 'error' ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+              Saving is off until your reminders read, so nothing here can be written over them.
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>

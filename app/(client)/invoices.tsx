@@ -57,10 +57,15 @@ import { reportError } from '../../src/lib/reportError';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
 import { amount, fetchMyInvoices } from '../../src/lib/memberRecord';
 import {
-  invoiceStanding, invoiceStandingLabel, invoiceNote, isOwed, owedByCurrency, invoicesEmptyLine,
+  invoiceStanding, invoiceStandingLabel, invoiceNote, isOwed, owedByCurrency, owedEmptyLine,
+  invoicesEmptyLine, invoiceCopyText,
   AMOUNT_AS_RECORDED, COACH_INVOICE_NOT_HERE, NO_PAYMENT_HERE,
   type InvoiceStanding, type MemberInvoice,
 } from '../../src/lib/memberInvoices';
+// The system share sheet with a message in it — already shipped, already used
+// by six screens, and the reason this needs no new dependency. See
+// `invoiceCopyText` for why the copy is text and not a PDF.
+import { shareText } from '../../src/lib/exportShare';
 import { appLocale } from '../../src/lib/locale';
 import { localDate } from '../../src/lib/localDate';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -202,13 +207,14 @@ export default function Invoices() {
             ))
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {owed
-                // A whole read with nothing outstanding. Said as a fact because
-                // it is one — and only here, where it has been earned.
-                ? (rows.length
-                  ? 'Nothing is outstanding. Every invoice your gym has raised against you is settled, cancelled or written off.'
-                  : invoicesEmptyLine(status))
-                : invoicesEmptyLine(status)}
+              {/* NOT `rows.length ? 'nothing is outstanding' : …`. An unpaid
+                  invoice that states no amount or no currency produces no pot
+                  — `sumTaken` counts it and refuses to add it — so "nothing is
+                  outstanding" was being printed as a fact directly above the
+                  flag saying two unpaid invoices are missing from the figure.
+                  A draft was miscounted the same way. `owedEmptyLine` reads the
+                  standings rather than the pots; see its header. */}
+              {owed ? owedEmptyLine(rows, today, status) : invoicesEmptyLine(status)}
             </Text>
           )}
           {owed && owed.unpriced + owed.unlabelled > 0 ? (
@@ -272,6 +278,28 @@ export default function Invoices() {
           )}
           {isWhole(status) && rows.length ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{AMOUNT_AS_RECORDED}</Text>
+          ) : null}
+
+          {/* ── the copy the member could not take away ──────────────────────
+              Every comparable product — Mindbody, Glofox, Wodify, PushPress —
+              lets a member get a billing document out of the app and into an
+              email, a note or an accountant's hands. This one said "ask your
+              gym for a copy" and stopped, on a record the member is already
+              permitted to read. `shareText` is the phone's own share sheet and
+              has shipped for six other screens, so nothing new is needed.
+
+              Offered over ANY list with rows in it, including a cached one and
+              a truncated one, because those are exactly the moments somebody
+              wants the copy — standing at a desk, arguing about a charge. What
+              they get is qualified in its own second line rather than withheld:
+              `invoiceCopyText` writes the read's status above the rows, so a
+              prefix forwarded to somebody else still says it is a prefix. */}
+          {rows.length ? (
+            <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+              <Ghost label="Send Yourself a Copy"
+                a11yLabel="Send yourself a copy of these invoices"
+                onPress={() => { void shareText(invoiceCopyText(rows, today, status), 'Invoices from your gym'); }} />
+            </View>
           ) : null}
         </Section>
 

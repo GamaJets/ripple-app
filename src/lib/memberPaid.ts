@@ -332,18 +332,44 @@ export function refundedLine(t: Taken): string | null {
 }
 
 /**
- * The sentence under a total of nothing, which depends entirely on the read.
+ * The sentence under a total of nothing, which depends entirely on the read —
+ * and, under a whole one, on whether there were any rows at all.
  *
  * "You have paid nothing" may be said only under a whole read of all four
  * sources. Every other status here is a statement about the READ, and the
  * member is told which.
+ *
+ * ── `recorded`, and the sentence it was there to stop ─────────────────────
+ *
+ * Four whole reads produce a `Taken` with NO POTS in two completely different
+ * situations, and the screen printed the same sentence for both:
+ *
+ *   · there genuinely are no rows — the case this sentence was written for;
+ *   · there are rows and not one of them states both an amount and a currency.
+ *     `sumTaken` counts those as `unpriced` / `unlabelled` and refuses to add
+ *     them, exactly as it should, so there is nothing to pot.
+ *
+ * In the second case the screen told a member "Nothing has been recorded
+ * against your account — not at your gym's desk, not on a pass, and not through
+ * Repple", and then, two lines lower and off the same object, `unstatedLine`
+ * said "3 payments on record state no amount, or no currency". Both are
+ * printed; one of them is false; and the false one is the answer, in the
+ * position where the figure should be, on the screen a member takes to a
+ * dispute. `memberPaid` already counts the rows for exactly this kind of
+ * sentence — `payments` — so the count is passed rather than re-derived.
+ *
+ * It defaults to 0 so that the three non-ready sentences, which are about the
+ * read and not about the rows, can still be asked for by status alone.
  */
-export function paidEmptyLine(status: LoadStatus): string {
+export function paidEmptyLine(status: LoadStatus, recorded = 0): string {
   if (status === 'error') {
     return 'Nothing is shown because a read failed, not because nothing was paid. Anything already recorded still stands. Pull down to try again.';
   }
   if (status === 'partial') return 'There is more on record than could be read in one request, so nothing here is a total.';
   if (status === 'loading') return 'Still reading.';
+  if (recorded > 0) {
+    return 'There is no figure here because nothing recorded against your account states both an amount and a currency — not because nothing was paid. What is listed below is real; your gym can tell you what each payment covered.';
+  }
   return 'Nothing has been recorded against your account — not at your gym’s desk, not on a pass, and not through Repple. If you have paid, it has not been entered, and reception can add it.';
 }
 

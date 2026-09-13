@@ -113,6 +113,16 @@ import {
   BUDGET_IS_TYPED_NOT_MEASURED, NO_VARIANCE_WITHOUT_BOTH_SIDES,
   type CostBudget, type CostBudgetDraft, type BudgetLine,
 } from '@lib/costBudgets';
+// The two questions every small-business finance console answers before any of
+// the three this screen already did: who are we paying, and is this category
+// moving. Both are read out of the SAME six complete months `standingCosts`
+// judges over, which are already on this screen — see the header of
+// src/lib/costTrend.ts for what was missing and why nothing here is summed
+// across two currencies.
+import {
+  supplierSpend, categoryTrend, trendNote, unnamedPayeeNote,
+  type TrendLine, type SupplierLine,
+} from '@lib/costTrend';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { saveText } from '@/lib/save';
 
@@ -531,6 +541,14 @@ function Month({ w, costs, templates, past, budgets, ccy, zone, gymName, tenantI
 
       <Where read={costs} pots={byCategory} w={w} />
 
+      {/* Both read the month AND the look-back this screen already holds, so
+          neither costs a round trip. `lookBack` is called once here and the
+          same month list goes to both, so the two sections and `Repeats` above
+          cannot disagree about which months were looked at. */}
+      <Trend w={w} costs={costs} past={past} months={lookBack(w.key)?.months ?? []} />
+
+      <WhoWePay w={w} costs={costs} past={past} months={lookBack(w.key)?.months ?? []} />
+
       <Budgets
         w={w} read={budgets} monthCosts={costs} ccy={ccy} zone={zone}
         tenantId={tenantId} me={me} onChange={onChange}
@@ -644,7 +662,31 @@ function Record({ w, ccy, zone, tenantId, me, onChange, seed }: {
   const [supplier, setSupplier] = useState(seed?.supplier ?? '');
   const [category, setCategory] = useState<GymCostCategory>(seed?.category ?? 'rent');
   const [amountText, setAmountText] = useState(seed?.amountText ?? '');
-  const [paidOn, setPaidOn] = useState(seed?.paidOn ?? initialDay);
+  /**
+   * The day the money went out — null meaning "nobody has chosen", so the box
+   * FOLLOWS the gym's day rather than being frozen at the reader's.
+   *
+   * `useState(...initialDay)` ran its initialiser once, at mount, and this form
+   * mounts before the zone is known: the effect above does `setMe(who)` and
+   * only then awaits `readTenant`, so React has already painted with `zone ===
+   * null` — where `gymDay` returns null and `today` is the reader's own
+   * calendar. The `key` on this component is the month and the fill counter, so
+   * a zone landing inside the same month does not remount it, and the gym's-day
+   * repair on `today` above therefore never reached the value in the box except
+   * on the two days a month where the zone also changes which month it is.
+   *
+   * A London bookkeeper filing an Auckland gym's costs at 22:00 on the 13th was
+   * offered the 13th for money that went out on the 14th — same month, so
+   * nothing moved between months, and a permanent ledger row is still dated a
+   * day before the payment.
+   *
+   * The template's day still wins where it stated one, which is a choice made
+   * by the arrangement rather than by a clock; where it stated none, `null`
+   * falls through to the month's own default exactly as before.
+   */
+  const [pickedDay, setPickedDay] = useState<string | null>(seed?.paidOn ?? null);
+  const paidOn = pickedDay ?? initialDay;
+  const setPaidOn = setPickedDay;
   const [note, setNote] = useState(seed?.note ?? '');
   const [busy, setBusy] = useState(false);
   const [writeErr, setWriteErr] = useState<string | null>(null);
@@ -1050,7 +1092,18 @@ function TemplateForm({ editing, openWith, today, ccy, tenantId, me, onDone, onC
     // hundredth of itself, and saving without touching the box would store it.
     editing ? majorFromMinor(editing.amountCents, editing.currency) : (openWith?.amountText ?? ''));
   const [dueDayText, setDueDayText] = useState(editing?.dueDay != null ? String(editing.dueDay) : '');
-  const [startsOn, setStartsOn] = useState(editing?.startsOn ?? today);
+  /**
+   * The day the arrangement started — null meaning "nobody has chosen", for the
+   * reason spelled out on `pickedDay` in the cost form above: this form mounts
+   * before the zone read lands, so a value latched at mount is the READER's
+   * day and never the gym's.
+   *
+   * Only offered when creating; an edit never sends this column at all, so the
+   * stored day of an existing arrangement is untouched either way.
+   */
+  const [startPicked, setStartPicked] = useState<string | null>(editing?.startsOn ?? null);
+  const startsOn = startPicked ?? today;
+  const setStartsOn = setStartPicked;
   const [note, setNote] = useState(editing?.note ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1334,6 +1387,212 @@ function Where({ read, pots, w }: { read: Read<GymCost>; pots: GymCostPot[]; w: 
           rows={lines} columns={cols} rowKey={(l) => l.key}
           empty={`Nothing is recorded as paid in ${w.label}, so there is nothing to split.`}
         />
+      </Part>
+    </Section>
+  );
+}
+
+/* ── against what this gym has been spending ───────────────────────────────── */
+
+/**
+ * The month on screen against the run rate of the months before it.
+ *
+ * ── Why this is beside the budget section and not inside it ───────────────
+ *
+ * Because a budget is a plan and this is a fact, and most gyms have not set a
+ * plan. `Budgets` answers "against what you meant to spend" and answers nothing
+ * at all for a category nobody has budgeted — which, on the day this ships, is
+ * every category of every gym. "Power is half again what it has been running
+ * at" needs no plan, only the gym's own ledger, and the ledger is already on
+ * this screen: `past` is the six complete months `standingCosts` judges over,
+ * read for `Repeats` above and looked at by nothing else.
+ *
+ * ── The denominator is stated on the screen ──────────────────────────────
+ *
+ * `monthsOnRecord` — the months in that window holding any cost at all, not the
+ * width of the window. A gym four months old would otherwise have every run
+ * rate cut by a third and every category in its books would read as rising. The
+ * heading says which number it divided by, because an average whose denominator
+ * is invisible is a figure nobody can check.
+ *
+ * Nothing here is netted, summed across currencies or called profit. The whole
+ * of that argument is in `GYM_COSTS_ARE_NEVER_NETTED`, printed at the bottom of
+ * this page.
+ */
+function Trend({ w, costs, past, months }: {
+  w: MonthWindow; costs: Read<GymCost>; past: Read<GymCost>; months: string[];
+}) {
+  const trend = useMemo(
+    () => categoryTrend(costs.rows ?? [], past.rows ?? [], months, readStatus(costs), readStatus(past)),
+    [costs, past, months],
+  );
+
+  const cols: Column<TrendLine>[] = [
+    { key: 'label', header: 'Category', value: (l) => l.label },
+    { key: 'currency', header: 'Currency', value: (l) => l.currency },
+    { key: 'now', header: `In ${w.label}`,
+      value: (l) => (l.kind === 'nothing-this-month' ? null : l.thisMonth), numeric: true,
+      // Never a zero for `nothing-this-month`. A category whose invoice is
+      // still in a drawer is not a category the gym spent nothing on, and
+      // "0.00" beside a run rate is the line that reads as a saving.
+      render: (l) => (l.kind === 'nothing-this-month'
+        ? <span className="dash">nothing entered</span>
+        : <>{money(l.thisMonth, l.currency)}</>) },
+    { key: 'rate', header: 'A month, before this one',
+      value: (l) => (l.kind === 'measured' || l.kind === 'nothing-this-month' ? l.average : null),
+      numeric: true,
+      render: (l) => (l.kind === 'measured' || l.kind === 'nothing-this-month'
+        ? <>{money(l.average, l.currency)}</>
+        : <span className="dash">{l.kind === 'no-baseline' ? 'no month on record' : 'nothing like it before'}</span>) },
+    { key: 'diff', header: 'Difference', value: (l) => (l.kind === 'measured' ? l.diff : null), numeric: true,
+      // `deltaSign` and the magnitude, never a hand-rolled `+`. Zero is neither
+      // direction and gets no sign at all, and the figure is printed unsigned
+      // so `money` cannot render a second minus beside it. Same shape, and same
+      // reason, as the budget table below.
+      render: (l) => (l.kind === 'measured'
+        ? (
+          <span style={{ color: l.diff > 0 ? 'var(--warn)' : 'var(--ink2)' }}>
+            {deltaSign(l.diff)}{money(Math.abs(l.diff), l.currency)}
+          </span>
+        )
+        : <span className="dash">no comparison</span>) },
+    { key: 'pct', header: 'Of the run rate', value: (l) => (l.kind === 'measured' ? l.pct : null), numeric: true,
+      render: (l) => (l.kind === 'measured' && l.pct != null
+        ? (
+          <span style={{ color: l.pct > 0 ? 'var(--warn)' : 'var(--ink2)' }}>
+            {deltaSign(l.pct)}{Math.abs(l.pct)}%
+          </span>
+        )
+        // Two different nothings behind one dash, and the sentence beside it
+        // says which: a line with no comparison at all, or a real rise against
+        // a run rate of nothing, where a proportion is not a number.
+        : <span className="dash">&mdash;</span>) },
+    { key: 'note', header: '', value: (l) => l.kind,
+      render: (l) => (
+        <span style={{ fontSize: 12, color: l.kind === 'measured' ? 'var(--ink3)' : 'var(--ink2)' }}>
+          {trendNote(l, w.label, trend?.monthsOnRecord ?? 0)}
+        </span>
+      ) },
+  ];
+
+  return (
+    <Section
+      title="Against what this gym has been spending"
+      sub="Each category this month, beside what it has been running at over the months before it. No budget is needed for this — it is the gym’s own ledger, compared with itself, one currency at a time."
+    >
+      <Part read={costs} what="the recorded costs"
+            cost="what this month spent is unknown, so it is compared with nothing">
+        <Part read={past} what="the months before this one"
+              cost="what this gym has been spending is unknown, so nothing this month is compared against it">
+          <>
+            <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 12.5, maxWidth: '88ch' }}>
+              {trend == null
+                ? 'Both months have to be read in full before anything here can be compared.'
+                : trend.monthsOnRecord === 0
+                  ? <>None of the {trend.monthsLookedAt} complete months before {w.label} holds a single cost, so there is no run rate to compare anything against. That is what a new ledger looks like.</>
+                  : <>
+                      Every figure in the &ldquo;a month&rdquo; column divides by <strong>{trend.monthsOnRecord}</strong>
+                      {' '}&mdash; the {trend.monthsOnRecord === 1 ? 'one month' : `${trend.monthsOnRecord} months`} of the
+                      {' '}{trend.monthsLookedAt} before {w.label} that hold any cost at all, never the width of the
+                      window. A gym four months old divided by six would read as rising in every category it has.
+                    </>}
+              {trend && trend.uncounted > 0 ? (
+                <>
+                  {' '}
+                  <span style={{ color: 'var(--warn)' }}>
+                    {trend.uncounted} cost{trend.uncounted === 1 ? '' : 's'} carr{trend.uncounted === 1 ? 'ies' : 'y'} no
+                    amount or state{trend.uncounted === 1 ? 's' : ''} no currency, so {trend.uncounted === 1 ? 'it is' : 'they are'} in
+                    no figure here. {trend.uncounted === 1 ? 'That is not a nought.' : 'Those are not noughts.'}
+                  </span>
+                </>
+              ) : null}
+            </p>
+            <DataTable noun="category run rates"
+              rows={trend?.lines ?? []} columns={cols} rowKey={(l) => `${l.category}|${l.currency}`}
+              empty={`Nothing is recorded in ${w.label} and nothing in the months before it, so there is nothing to compare. That is a statement about the ledger, not about the gym.`}
+            />
+          </>
+        </Part>
+      </Part>
+    </Section>
+  );
+}
+
+/* ── who this gym pays ─────────────────────────────────────────────────────── */
+
+/**
+ * Every payee in the ledger, ranked by money, one currency at a time.
+ *
+ * ── What this answers that nothing else here does ─────────────────────────
+ *
+ * `standingCosts` asks which suppliers this gym pays every month, and
+ * deliberately withholds a figure the moment two sightings disagree about the
+ * currency or the amount — it is a question about REGULARITY, and a template
+ * suggestion made out of an average of a rent that went up in April would be a
+ * number no invoice anywhere says. So "how much has this gym paid this
+ * engineer" was unanswerable on any screen: the payee has been on every cost
+ * row since part 700 and nothing grouped by it.
+ *
+ * Ranked WITHIN a currency and never across one. Two currencies to one payee is
+ * two lines, because they are two amounts of money and this app holds no rate —
+ * the rule the whole of this screen is built on.
+ *
+ * The window is the month on screen plus the complete months before it, which
+ * is exactly what is already read. A payee with no name is counted out rather
+ * than given one: a "Not stated" row in a supplier league table reads as a
+ * supplier called Not Stated.
+ */
+function WhoWePay({ w, costs, past, months }: {
+  w: MonthWindow; costs: Read<GymCost>; past: Read<GymCost>; months: string[];
+}) {
+  /** Whole only when BOTH are. One side missing makes every payee's figure
+   *  short by an unknown amount, and a league table is exactly the shape in
+   *  which that is invisible. */
+  const status = readStatus(costs) === 'ready' && readStatus(past) === 'ready'
+    ? 'ready' as const
+    : (readStatus(costs) === 'loading' || readStatus(past) === 'loading' ? 'loading' as const : 'error' as const);
+
+  const spend = useMemo(
+    () => supplierSpend([...(costs.rows ?? []), ...(past.rows ?? [])], status),
+    [costs.rows, past.rows, status],
+  );
+
+  const cols: Column<SupplierLine>[] = [
+    { key: 'supplier', header: 'Paid to', value: (l) => l.supplier },
+    { key: 'currency', header: 'Currency', value: (l) => l.currency },
+    { key: 'amount', header: 'Paid', value: (l) => l.minorUnits, numeric: true,
+      render: (l) => <>{money(l.minorUnits, l.currency)}</> },
+    { key: 'count', header: 'Costs', value: (l) => l.count, numeric: true },
+    { key: 'months', header: 'Months seen', value: (l) => l.months, numeric: true },
+    { key: 'last', header: 'Last paid', value: (l) => l.lastPaidOn },
+    { key: 'cats', header: 'Filed under', value: (l) => l.categories.join(', '),
+      render: (l) => <span style={{ whiteSpace: 'normal' }}>{l.categories.join(', ')}</span> },
+  ];
+
+  const note = spend ? unnamedPayeeNote(spend) : null;
+
+  return (
+    <Section
+      title="Who this gym pays"
+      sub="Every payee in the ledger over this month and the complete months before it, biggest first inside each currency. Two currencies to one payee is two lines — there is no rate in this product to make them one."
+    >
+      <Part read={costs} what="the recorded costs"
+            cost="who this gym pays is unknown, not nobody">
+        <Part read={past} what="the months before this one"
+              cost="what this gym has paid each of its suppliers is unknown, and a list short by an unread month is a league table in the wrong order">
+          <>
+            <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '88ch' }}>
+              {w.label} and the {months.length} complete month{months.length === 1 ? '' : 's'} before it.
+              Payees are matched on the name as it was typed, ignoring case &mdash; two spellings of one
+              supplier are two lines, which is worth seeing rather than quietly merging.
+              {note ? <> {note}</> : null}
+            </p>
+            <DataTable noun="payees"
+              rows={spend?.lines ?? []} columns={cols} rowKey={(l) => l.key}
+              empty={`No cost in ${w.label} or the months before it names who it was paid to. A payee is optional on a cost, so this is a statement about how the ledger was filled in.`}
+            />
+          </>
+        </Part>
       </Part>
     </Section>
   );

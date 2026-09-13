@@ -52,7 +52,7 @@
 // `clients.weight_unit` is NULL until somebody taps a unit, so without this the
 // first thing a new American member ever types is recorded against a unit
 // nobody asked them about.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';

@@ -22,7 +22,7 @@
 import {
   FILING_KINDS, FILING_KIND_LABEL, FILINGS_ARE_YOUR_OWN_RECORD,
   MAX_REFERENCE_CHARS, MAX_FILED_BY_CHARS,
-  isFilingKind, covers, filingsFor, kindsInUse, filingBlockers,
+  isFilingKind, filingsFor, kindsInUse, filingBlockers,
   recordFiling, deleteFiling,
   type TaxFiling, type FilingDraft,
 } from './taxFilings';
@@ -203,9 +203,47 @@ for (const st of ['loading', 'error', 'partial'] as const) {
     `under '${st}' "this gym files these kinds" is itself a claim, and there is no answer`);
 }
 
-eq(covers(filing(), '2026-09-30'), true, 'the last day is inside — the span is inclusive at both ends');
-eq(covers(filing(), '2026-10-01'), false, 'and the day after is not');
-eq(covers(filing(), '2026-06-30'), false, 'nor the day before it starts');
+/* ── both ends of a span are inside it ─────────────────────────────────────── */
+
+// There is no exported `covers(f, day)` to test directly — it had no caller but
+// this file and was removed. The inclusivity it stated is a property of
+// `filingsFor`, so it is pinned where a screen can actually feel it: one day
+// short at either end of the period is a gap, and landing exactly on the
+// boundary is not.
+{
+  const exact = [filing({ periodFrom: Q3.from, periodTo: Q3.to })];
+  eq(filingsFor(exact, 'sales_tax', Q3.from, Q3.to, 'ready', Q3.label).state, 'filed',
+    'a filing whose span is the period exactly covers it — both ends are inside the span');
+}
+{
+  // One day short at the END. 29 September is the last day covered, so the 30th
+  // is a gap, and it is named rather than rounded away.
+  const short = [filing({ periodTo: '2026-09-29' })];
+  const s = filingsFor(short, 'sales_tax', Q3.from, Q3.to, 'ready', Q3.label);
+  eq(s.state, 'partly', 'a filing ending the day before the period does not cover the last day');
+  if (s.state === 'partly') {
+    eq(s.from, '2026-09-30', 'and the uncovered day is named — the span end is inclusive, so 29 September is covered and the 30th is not');
+    eq(s.to, '2026-09-30', 'one day, both ends of the gap the same day');
+  }
+  ok(!/not filed/i.test(s.line), 'and one missing day is still not called unfiled');
+}
+{
+  // One day short at the START, which is the other half of the same rule.
+  const late = [filing({ periodFrom: '2026-07-02' })];
+  const s = filingsFor(late, 'sales_tax', Q3.from, Q3.to, 'ready', Q3.label);
+  eq(s.state, 'partly', 'a filing starting the day after the period leaves its first day uncovered');
+  if (s.state === 'partly') eq(s.from, '2026-07-01', 'named as the period’s own first day');
+}
+{
+  // Entirely outside, on either side. Neither is `mine`, so the period reads as
+  // one nobody has answered for — not as one partly answered.
+  const before = [filing({ periodFrom: '2026-04-01', periodTo: '2026-06-30', filedOn: '2026-07-12' })];
+  eq(filingsFor(before, 'sales_tax', Q3.from, Q3.to, 'ready', Q3.label).state, 'unstated',
+    'the quarter before does not answer for this one — its last day is outside the period');
+  const after = [filing({ periodFrom: '2026-10-01', periodTo: '2026-12-31', filedOn: '2027-01-12' })];
+  eq(filingsFor(after, 'sales_tax', Q3.from, Q3.to, 'ready', Q3.label).state, 'unstated',
+    'nor does the quarter after it');
+}
 
 /* ── what will not be recorded ─────────────────────────────────────────────── */
 

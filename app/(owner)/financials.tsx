@@ -95,6 +95,10 @@ import { monthAtGym, gymRecentMonths } from '../../src/lib/gymMonth';
 import { fetchGymZone } from '../../src/lib/gymZone';
 // When the register was read, whether the phone can reach us, and a way to ask
 // again — the three things nineteen of the twenty owner screens did without.
+// Which of this owner's gyms the register below belongs to, and whether there
+// are others. Renders nothing for a single-site owner — see ownerSiteScope.ts.
+import { fetchOwnerSites, SITES_LOADING } from '../../src/lib/ownerSiteScope';
+import { siteNotice, type SiteScope } from '../../src/lib/ownedSites';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -625,6 +629,23 @@ export default function Financials() {
     }
   }, [draft]);
 
+  /* ── whose gym the register below belongs to ────────────────────────────
+   *
+   * The month close, the MRR and the 30-day take on this screen are all ONE
+   * tenant's — `src/ui/tenant.tsx` reads a single row — and nothing said so.
+   * An owner of several gyms closing a month here was closing one of them.
+   *
+   * Null, and therefore absent, for the single-site owner. Under a failed read
+   * the count is unknown rather than 1, and `siteNotice` says that instead of
+   * going quiet. */
+  const [scope, setScope] = useState<SiteScope>(SITES_LOADING);
+  useEffect(() => {
+    let live = true;
+    void fetchOwnerSites(supabase as any).then((s) => { if (live) setScope(s); });
+    return () => { live = false; };
+  }, []);
+  const sites = siteNotice(scope);
+
   const ready = hasFigures(fin);
   // The review quotes amounts inside its sentences, so it needs the currency
   // rather than a formatter: with null it writes the same analysis in
@@ -708,6 +729,12 @@ export default function Financials() {
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           {reviewBasis()}
         </Text>
+        {/* What the register below covers. Absent entirely for the one-gym
+            owner — asserted in ownedSites.test.ts — so this changes nothing
+            for almost everybody. */}
+        {sites ? (
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{sites}</Text>
+        ) : null}
 
         {/* ── the month end ────────────────────────────────────────────────
             Above the typed figures and outside the `hydrated` gate on purpose:

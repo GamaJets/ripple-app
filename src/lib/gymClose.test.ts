@@ -8,9 +8,16 @@
 // it came from would still look right.
 import {
   snapshotOf, closeBlocker, reopenBlocker, driftSince, liveCloseFor, closedMonthBlocker,
+  fetchCloses, closeMonth,
   type MonthCloseRow, type CloseSnapshot,
 } from './gymClose';
-import type { MonthClose } from './monthEnd';
+// The pass half of the comparison lives in src/lib/ownerClose.ts and is read
+// here on purpose. The rule this file is protecting is a JOINT one — what
+// `fetchCloses` puts on a row decides whether `passDriftSince`' absent-versus-
+// null guard fires — and a test that only ever looked at one side of it would
+// pass while the product reported every pre-2970 close as a month that moved.
+import { passSnapshotOf, passDriftSince } from './ownerClose';
+import type { MonthClose, ClosePasses } from './monthEnd';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -256,7 +263,13 @@ eq(reopenBlocker('Late cash from the 31st'), null, 'a reason is a reason');
     takenCents: 420000, invoicedCents: 390000, outstandingCents: 155000,
     payrollCents: 180000,
     takenCurrency: 'GBP', invoicedCurrency: 'GBP', outstandingCurrency: 'GBP', payrollCurrency: 'GBP',
-    currency: null, unmarkedSessions: 0, blockersAtClose: null,
+    currency: null,
+    // The fifth figure rides on the snapshot now. `driftSince` does not read
+    // it — `passDriftSince` does, and `filingOf` appends its lines to these —
+    // so these four are here to satisfy the type and are asserted about below,
+    // where the function that actually compares them lives.
+    passCents: 86000, passCurrency: 'GBP', passesSold: 5, passesPriced: 4,
+    unmarkedSessions: 0, blockersAtClose: null,
   };
   eq(driftSince(stored, same, fmt).length, 0, 'a month that has not moved reports nothing');
 
@@ -340,8 +353,308 @@ eq(reopenBlocker('Late cash from the 31st'), null, 'a reason is a reason');
   eq(closedMonthBlocker('', [closed('2026-08')]), null, 'a date nobody stated cannot be placed in a month');
 }
 
-if (errors.length) {
-  console.error(`gymClose: ${errors.length} failed\n` + errors.map((e) => '  · ' + e).join('\n'));
-  process.exit(1);
+/* ── the fifth figure: what the desk sold over the counter ─────────────────
+ *
+ * The close filed FOUR money figures and the screen showed five. Pass sales
+ * went on moving after a month was signed off, forever, because a figure that
+ * was never stored cannot drift — so an August close handed to an accountant in
+ * September was silent about a real part of August's takings and there was no
+ * later way to recover the number.
+ *
+ * They are not inside `takenCents` and never were: `gym_passes` and
+ * `gym_payments` are two independent registers with no link column, so adding
+ * them double-counts and dropping one loses income.
+ */
+
+const passesOf = (o: Partial<ClosePasses> = {}): ClosePasses => ({
+  cents: 86000, priced: 4, sold: 5, currency: 'GBP', currencies: ['GBP'], mixedCurrency: false, ...o,
+});
+
+{
+  const s = snapshotOf(closeOf({ passes: passesOf() }), GBP);
+  eq(s.passCents, 86000, 'the month’s pass sales are filed, as their own figure');
+  eq(s.passCurrency, 'GBP', 'in the money the passes themselves were sold in');
+  eq(s.passesSold, 5, 'with what the desk sold');
+  eq(s.passesPriced, 4, 'and how many carried a price, which is what says the figure is a sum over four of five');
+  eq(s.takenCents, 420000,
+    'and the card takings are untouched — two registers with no link column, never added and never substituted');
 }
-console.log('gymClose ok');
+
+{
+  /*
+   * Two currencies cannot be added. The FIGURE is withheld and the COUNTS are
+   * filed, because "five passes were sold and there is no single amount for
+   * them" is the true sentence and a 0 is the false one — false in the
+   * direction nobody detects, since a zero reconciles against an absence.
+   */
+  const s = snapshotOf(closeOf({
+    passes: passesOf({ cents: 110000, currency: null, currencies: ['AED', 'GBP'], mixedCurrency: true }),
+  }), GBP);
+  eq(s.passCents, null, 'a month whose priced passes span two moneys files no pass figure');
+  ok(s.passCents !== 0, 'and emphatically not 0, which would claim the gym sold nothing that month');
+  eq(s.passCurrency, null,
+    'nor a code — the gym’s own currency beside a cross-currency sum is the substitution parts/2540 removed');
+  eq(s.passesSold, 5, 'while the count of what was sold survives, so a withheld figure cannot read as an empty counter');
+  eq(s.passesPriced, 4, 'and so does the count that says how much of the month it would have been a sum over');
+  eq(s.takenCents, 420000, 'and one unsayable figure does not empty the rest of the close');
+}
+
+{
+  /*
+   * Cents with NO currency, and it is legitimate.
+   *
+   * `passRevenueCents` puts null in its code set for a priced pass that states
+   * no currency, so a set whose only member is null is ONE UNKNOWN UNIT — a
+   * real sum whose label was never recorded — and not two known ones. The same
+   * distinction `payrollCurrency` already draws for rates snapshotted before
+   * parts/1010. Nothing may coalesce this pair into agreement.
+   */
+  const s = snapshotOf(closeOf({ passes: passesOf({ currency: null, currencies: [] }) }), GBP);
+  eq(s.passCents, 86000, 'priced passes that all state no money are still one real sum, and it is filed');
+  eq(s.passCurrency, null, 'with no code, rather than with the gym’s stamped over a guess');
+}
+
+{
+  // A month that WAS read and had nothing in it, against a month nobody could
+  // read. 0 is the answer to the first and is never the answer to the second.
+  const empty = snapshotOf(closeOf({
+    passes: passesOf({ cents: null, priced: 0, sold: 0, currency: null, currencies: [] }),
+  }), GBP);
+  eq(empty.passesSold, 0, 'a month read and found empty files a counted zero');
+  eq(empty.passesPriced, 0, 'and a counted zero priced');
+  eq(empty.passCents, null, 'with no figure, because there is no priced row to sum — not a 0 amount');
+
+  const unread = snapshotOf(closeOf({ passes: null }), GBP);
+  eq(unread.passesSold, null, 'while a passes slice that never landed files NULL, which is not the same fact as 0');
+  eq(unread.passesPriced, null, 'nor a priced count');
+  eq(unread.passCents, null, 'nor a figure');
+  eq(unread.passCurrency, null, 'nor a code');
+}
+
+{
+  /*
+   * The shape supabase/parts/2970 refuses, refused here too.
+   *
+   * The database checks `pass_cents is null or (passes_priced is not null and
+   * passes_priced > 0)` — money over no rows is the one shape of this set that
+   * cannot be true. A snapshot that produced it would be rejected with a 23514
+   * at the moment an owner pressed Close, which is nothing they could act on.
+   * `passRevenueCents` nulls its sum at `priced === 0`, so it cannot happen;
+   * this is the assertion that says so rather than leaving it reasoned about.
+   */
+  const shapes = [
+    passesOf(),
+    passesOf({ currency: null, currencies: [] }),
+    passesOf({ cents: null, priced: 0, sold: 0, currency: null, currencies: [] }),
+    passesOf({ cents: 110000, currency: null, currencies: ['AED', 'GBP'], mixedCurrency: true }),
+    passesOf({ cents: 4000, priced: 1, sold: 1 }),
+  ];
+  for (const p of shapes) {
+    const s = snapshotOf(closeOf({ passes: p }), GBP);
+    ok(s.passCents == null || (s.passesPriced != null && s.passesPriced > 0),
+      'a filed pass figure always has priced rows behind it — the one shape of these four columns the database refuses');
+    ok(s.passesPriced == null || s.passesSold == null || s.passesPriced <= s.passesSold,
+      'and never more passes priced than sold');
+    ok((s.passesSold ?? 0) >= 0 && (s.passesPriced ?? 0) >= 0, 'and no negative count, which is not a fact about any month');
+  }
+}
+
+{
+  /*
+   * `driftSince` does NOT compare the passes, and that is deliberate.
+   *
+   * `passDriftSince` compares them — it is the only one holding the
+   * absent-versus-null guard a pre-2970 row needs, and it words a null as "not
+   * a single amount" rather than "not known" — and `filingOf` appends its lines
+   * to these. A pass check added here as well would report every movement in
+   * them twice, and the headline counts the lines.
+   */
+  const fmt = (c: number | null, ccy: string | null) => (c == null ? '—' : `${ccy ?? '(no currency)'} ${c}`);
+  const stored = row({ passCents: 86000, passCurrency: 'GBP', passesSold: 5, passesPriced: 4 });
+  const wildlyDifferentPasses = snapshotOf(closeOf({ passes: passesOf({ cents: 900000, priced: 40, sold: 41 }) }), GBP);
+  eq(driftSince(stored, wildlyDifferentPasses, fmt).length, 0,
+    'the four money figures have not moved, so driftSince reports nothing — the passes are passDriftSince’s line to draw, once');
+}
+
+/* ── reading the four columns back, and the silence that must survive it ───
+ *
+ * `passDriftSince` reports nothing for a row carrying NONE of the four keys, so
+ * that a read which never asked about passes cannot manufacture movement. The
+ * moment `fetchCloses` selects the columns that guard stops firing by itself —
+ * so what the read puts on the row is now the only thing standing between a
+ * gym and a false movement line on every month it closed before parts/2970.
+ */
+
+interface Asked { table: string; select: string | null }
+
+function fakeSb(answer: (table: string) => { data: any[] | null; error: unknown }) {
+  const asked: Asked[] = [];
+  const from = (table: string) => {
+    const q: Asked = { table, select: null };
+    asked.push(q);
+    const chain: any = {
+      select: (cols: string) => { q.select = cols; return chain; },
+      eq: () => chain,
+      order: () => chain,
+      limit: () => chain,
+      in: () => chain,
+      range: () => chain,
+      then: (res: (v: unknown) => unknown) => res(answer(table)),
+    };
+    return chain;
+  };
+  return { sb: { from } as any, asked };
+}
+
+/** A `gym_month_closes` row as PostgREST hands it over. */
+const dbRow = (o: Record<string, unknown> = {}) => ({
+  id: 'c1', month_key: '2026-08', closed_at: '2026-09-01T09:00:00Z', closed_by: null,
+  note: null,
+  taken_cents: 420000, invoiced_cents: 390000, outstanding_cents: 155000, payroll_cents: 180000,
+  taken_currency: 'GBP', invoiced_currency: 'GBP', outstanding_currency: 'GBP', payroll_currency: 'GBP',
+  currency: null,
+  pass_cents: null, pass_currency: null, passes_sold: null, passes_priced: null,
+  unmarked_sessions: 0, blockers_at_close: null,
+  reopened_at: null, reopened_by: null, reopen_reason: null,
+  ...o,
+});
+
+const readOne = async (over: Record<string, unknown>) => {
+  const { sb, asked } = fakeSb((t) => (t === 'gym_month_closes' ? { data: [dbRow(over)], error: null } : { data: [], error: null }));
+  const rows = await fetchCloses(sb, 'gym');
+  return { r: rows[0], select: asked.find((q) => q.table === 'gym_month_closes')?.select ?? '' };
+};
+
+async function main() {
+  {
+    const { select } = await readOne({});
+    for (const col of ['pass_cents', 'pass_currency', 'passes_sold', 'passes_priced']) {
+      ok(select.split(/\s*,\s*/).includes(col),
+        `the read asks for ${col} — a column nothing selects is a figure that was filed and can never be read back`);
+    }
+  }
+
+  {
+    // The row every gym already has. Written before parts/2970, so all four are
+    // NULL — and the part says what that means in as many words: this close did
+    // not record the passes. It is not a close that filed nulls, and reporting
+    // it as one would put a false movement line on every month every gym has
+    // ever signed off.
+    const { r } = await readOne({});
+    ok(!('passCents' in r), 'a close that recorded nothing about the passes comes back with no pass figure key at all');
+    ok(!('passCurrency' in r), 'nor a currency key');
+    ok(!('passesSold' in r), 'nor a sold count');
+    ok(!('passesPriced' in r), 'nor a priced count');
+
+    const liveNow = passSnapshotOf(closeOf({ passes: passesOf() }));
+    eq(passDriftSince(r, liveNow, (c, ccy) => `${ccy ?? '?'} ${c}`).length, 0,
+      'so a month closed before the passes were ever filed does not suddenly read as a month that moved');
+  }
+
+  {
+    // A close that DID speak. Every value travels, and it drifts.
+    const { r } = await readOne({ pass_cents: 80000, pass_currency: 'GBP', passes_sold: 5, passes_priced: 4 });
+    eq(r.passCents, 80000, 'a filed pass figure is read back');
+    eq(r.passCurrency, 'GBP', 'with its own code');
+    eq(r.passesSold, 5, 'and the sold count');
+    eq(r.passesPriced, 4, 'and the priced count');
+
+    const liveNow = passSnapshotOf(closeOf({ passes: passesOf() }));
+    const d = passDriftSince(r, liveNow, (c, ccy) => `${ccy ?? '?'} ${c}`);
+    eq(d.length, 1, 'and a pass sale recorded after the close reads as exactly one movement');
+  }
+
+  {
+    // The counts distinguish a month READ AND EMPTY from a month nobody read,
+    // and 0 is not null: these keys must survive the absent rule.
+    const { r } = await readOne({ pass_cents: null, pass_currency: null, passes_sold: 0, passes_priced: 0 });
+    ok('passesSold' in r, 'a close that counted zero passes SPOKE, and its row keeps its keys');
+    eq(r.passesSold, 0, 'the counted zero is read back as 0');
+    eq(r.passesPriced, 0, 'and so is the priced zero');
+    eq(r.passCents, null, 'with no figure beside it, which is right — there was no priced row to sum');
+
+    const liveNow = passSnapshotOf(closeOf({ passes: passesOf() }));
+    const d = passDriftSince(r, liveNow, (c, ccy) => `${ccy ?? '?'} ${c}`);
+    ok(d.length > 0,
+      'and a month that said "nothing was sold" and now shows five sales HAS moved — suppressing that would be the absent rule eating a real fact');
+  }
+
+  {
+    // Cents with no code. Read back as filed, both halves, uncoalesced — and a
+    // month that reads the same way today has not moved.
+    const { r } = await readOne({ pass_cents: 86000, pass_currency: null, passes_sold: 5, passes_priced: 4 });
+    ok('passCents' in r, 'a real sum in an unrecorded unit is a close that spoke');
+    eq(r.passCents, 86000, 'the figure survives');
+    eq(r.passCurrency, null, 'and the missing code is left missing, not filled in from anywhere');
+
+    const unstated = passSnapshotOf(closeOf({ passes: passesOf({ currency: null, currencies: [] }) }));
+    eq(passDriftSince(r, unstated, (c, ccy) => `${ccy ?? '?'} ${c}`).length, 0,
+      'and a month still reading as one unknown unit reports no movement — a coalesced code here would invent one');
+  }
+
+  /* ── and what the insert actually carries ──────────────────────────────── */
+
+  const captureInsert = () => {
+    let payload: any = null;
+    const sb = {
+      from: () => ({
+        insert: (p: any) => { payload = p; return Promise.resolve({ error: null }); },
+      }),
+    } as any;
+    return { sb, taken: () => payload };
+  };
+
+  {
+    const cap = captureInsert();
+    await closeMonth(cap.sb, 'gym', '2026-08', snapshotOf(closeOf({ passes: passesOf() }), GBP), 'owner', null);
+    const p = cap.taken();
+    eq(p.pass_cents, 86000, 'closing a month writes the pass figure — a figure nothing writes can never be read back');
+    eq(p.pass_currency, 'GBP', 'in its own money');
+    eq(p.passes_sold, 5, 'with the sold count');
+    eq(p.passes_priced, 4, 'and the priced count');
+    eq(p.taken_cents, 420000, 'beside the card takings, which are a different register and stay one');
+  }
+
+  {
+    // The write that matters most: a month of two moneys. No figure, no code,
+    // and the counts go in anyway.
+    const cap = captureInsert();
+    const mixed = snapshotOf(closeOf({
+      passes: passesOf({ cents: 110000, currency: null, currencies: ['AED', 'GBP'], mixedCurrency: true }),
+    }), GBP);
+    await closeMonth(cap.sb, 'gym', '2026-08', mixed, 'owner', null);
+    const p = cap.taken();
+    eq(p.pass_cents, null, 'a cross-currency month writes no pass figure');
+    ok(p.pass_cents !== 0, 'and never a 0, which an accountant reconciles against an absence and never questions');
+    eq(p.pass_currency, null, 'and no code');
+    eq(p.passes_sold, 5, 'while the count is written, because passes WERE sold and the record has to say so');
+    eq(p.passes_priced, 4, 'and so is the priced count');
+  }
+
+  {
+    // A close taken over an unread passes slice files four nulls, which is the
+    // honest record of a month nobody could speak for.
+    const cap = captureInsert();
+    await closeMonth(cap.sb, 'gym', '2026-08', snapshotOf(closeOf({ passes: null }), GBP), 'owner', null);
+    const p = cap.taken();
+    eq(p.passes_sold, null, 'an unread passes slice files no count, rather than a 0 nobody counted');
+    eq(p.pass_cents, null, 'and no figure');
+  }
+}
+
+main().then(
+  () => {
+    if (errors.length) {
+      console.error(`gymClose: ${errors.length} failed\n` + errors.map((e) => '  · ' + e).join('\n'));
+      process.exit(1);
+    }
+    console.log('gymClose ok');
+  },
+  (e) => {
+    // A throw is not a pass. Without this the process would exit 0 on an
+    // unhandled rejection under some node versions, which is the "no error
+    // means it worked" reading this whole file is written against.
+    console.error('gymClose: threw before it could finish\n', e);
+    process.exit(1);
+  },
+);

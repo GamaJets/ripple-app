@@ -145,6 +145,10 @@ void (async () => {
   if (one.ok) {
     const r = one.value[0];
     eq(r.amountCents, 9900, 'the amount is a number even when PostgREST hands back a string');
+    // …and an ABSENT amount stays absent. `Number(null)` is 0, and a 0 here is
+    // drawn on the member's own Membership screen as a purchase of "AED 0.00".
+    ok(orderAmount({ amountCents: r.amountCents, currency: 'AED' }).includes('99'),
+      'a real amount still prints');
     eq(r.currency, ' aed ', 'the currency is carried as recorded, not normalised into a guess');
     eq(r.termEndsOn, null, 'an open-ended term is null and not today');
     eq(r.paidAt, null, 'and an unpaid order has no paid-at rather than a falsy date');
@@ -159,6 +163,24 @@ void (async () => {
   if (odd.ok) {
     eq(odd.value[0].status, 'pending', 'an unknown status falls back to the state that claims nothing');
     eq(odd.value[0].intent, 'new', 'and an unknown intent to the one that supersedes nothing');
+  }
+
+  /* ── an amount that did not come back is not an amount of nothing ───────── */
+  {
+    const blank = await fetchMyOrders(sbOk([{
+      id: 'z', kind: 'membership', intent: 'new', status: 'paid',
+      amount_cents: null, currency: 'AED', membership_id: 'm2',
+      created_at: '2026-04-01T00:00:00.000Z',
+    }]) as any, 'me');
+    if (blank.ok) {
+      const r = blank.value[0];
+      eq(r.amountCents, null, 'Number(null) is 0 and 0 is a price somebody could have paid');
+      ok(!/0\.00/.test(orderAmount(r)),
+        'so the member is never shown a purchase of AED 0.00 for a figure nobody recorded');
+      eq(orderAmount(r), '—', 'a dash is the only honest thing to put where the figure goes');
+    } else {
+      errors.push('a row with no amount should still be a row that came back');
+    }
   }
 
   if (errors.length) {

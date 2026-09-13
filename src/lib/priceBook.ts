@@ -164,7 +164,8 @@ export type PriceState =
   | 'other-currency'
   /** No bill has been raised against this membership. Nothing is known. */
   | 'not-billed'
-  /** A figure on one side is missing, so there is nothing to compare. */
+  /** A figure or a currency on one side cannot be read, so there is nothing
+   *  to compare. Never folded into 'on-list'. */
   | 'amount-unstated'
   /** The invoices did not come back whole, so no membership can be placed. */
   | 'bills-unread'
@@ -193,7 +194,7 @@ export const PRICE_STATE_MEANS: Record<PriceState, string> = {
   'above-list': 'The last bill is more than the plan says. Usually the price book is behind what the desk is actually charging.',
   'other-currency': 'The bill and the plan are in different currencies. This app holds no exchange rate and will not invent one, so both are shown and neither is subtracted from the other.',
   'not-billed': 'No invoice has ever been raised against this membership, so nothing in this database says what this member is charged. This is not the list price; it is silence.',
-  'amount-unstated': 'One side of the comparison has no figure on it — an invoice with no amount, or a plan with no price. Nothing can be compared to a blank.',
+  'amount-unstated': 'One side of the comparison cannot be read — an invoice with no amount, a plan with no price, or a currency written as something that is not a three-letter code. Nothing can be compared to a blank, and a currency this app cannot name is a blank with writing on it: two rows both reading "pounds" are not thereby in the same money.',
   'bills-unread': 'The invoices could not be read, or came back as a prefix. Every membership is unplaced while that is true, because the bill that would place it may be one of the rows that did not arrive.',
   'no-plan': 'This membership carries no plan. A plan retired with memberships still running leaves them pointing at nothing, so there is no list price to hold it against.',
   'plan-unread': 'The price book could not be read, or this membership points at a plan that is not in it.',
@@ -210,6 +211,10 @@ export interface PriceRow {
   listCurrency: string | null;
   /** What the last bill asked for. Null wherever there is no readable bill. */
   billedCents: number | null;
+  /** The ISO code, trimmed and upper-cased — or null where what the column
+   *  holds is not a currency code at all. Never the raw string: a caller that
+   *  spelled money with it would print "POUNDS 60.00" off a row this module had
+   *  already refused to compare. */
   billedCurrency: string | null;
   /** The day that bill was issued, as a bare YYYY-MM-DD off a `date` column.
    *  Compared as a string and never parsed into an instant. */
@@ -237,12 +242,26 @@ const LIVE = new Set(['active', 'frozen']);
  *  raised it, and dropping it would silently turn a member into 'not-billed'. */
 const NOT_A_BILL = new Set(['draft', 'void']);
 
-/** ISO 4217 as written down, compared the same way on both sides. Null for
- *  anything that is not three letters of a currency code — including the empty
- *  string, which is not a currency and must not compare equal to another one. */
+/**
+ * ISO 4217 as written down, compared the same way on both sides. Null for
+ * anything that is not three letters of a currency code — including the empty
+ * string, which is not a currency and must not compare equal to another one.
+ *
+ * The shape is CHECKED and not merely described, because the sentence above was
+ * the whole of it and the code only rejected the empty string. Neither
+ * `membership_plans.currency` nor `gym_invoices.currency` is constrained to a
+ * code — both are bare `text not null default 'AED'`, and only `tenants.currency`
+ * carries `~ '^[A-Z]{3}$'` (part 99). So a gym whose rows were imported or typed
+ * can hold "pounds", "GB" or "£" in both columns, and two identical non-codes
+ * compared equal, were SUBTRACTED, and placed the member on the list price —
+ * the exact fold this module exists to refuse, arrived at through the currency
+ * rather than through the amount. `/^[A-Za-z]{3}$/` is the same test
+ * ./coachCosts, ./coachInvoice, ./costBudgets, ./coachReceipts and ./csvImport
+ * already apply to a currency somebody typed.
+ */
 function iso(c: string | null | undefined): string | null {
   const s = (c ?? '').trim().toUpperCase();
-  return s ? s : null;
+  return /^[A-Z]{3}$/.test(s) ? s : null;
 }
 
 /**
@@ -301,9 +320,15 @@ export function priceRows(input: {
       memberName: m.memberName,
       planName: plan?.name ?? m.planName,
       listCents: plan ? plan.priceCents : null,
-      listCurrency: plan ? plan.currency : null,
+      // The normalised code on both sides, for the reason on the field: the
+      // comparison below reads these through `iso`, and handing a caller the
+      // raw string would let a screen spell an amount in a currency this
+      // module would not compare. Null is the honest answer where the column
+      // holds something that is not a code, and ./coachMoney's `moneyIn`
+      // returns null for it rather than inventing a symbol.
+      listCurrency: plan ? iso(plan.currency) : null,
       billedCents: bill?.amountCents ?? null,
-      billedCurrency: bill?.currency ?? null,
+      billedCurrency: bill ? iso(bill.currency) : null,
       billedOn: bill?.issuedOn ?? null,
       state: 'on-list',
       diffCents: null,
@@ -407,7 +432,23 @@ export function summarisePrices(rows: PriceRow[]): PriceDrift {
  */
 export function driftLine(d: PriceDrift, total: number): string {
   if (!total) return 'No live membership to hold against the price book.';
+  // `total` is every live membership in the gym, so it reaches four digits at a
+  // large one and this is NOT a figure that cannot pass 999 — the honest answer
+  // is that there is no formatter this module may call to spell it.
+  //
+  // studio-web/app/members imports this file through `@lib/priceBook`, so the
+  // sentence built here is rendered by Next.js. `num()` from src/lib/format
+  // reaches `appLocale()`, a module-level latch seeded once, which resolves on
+  // the SERVER during render and again in the BROWSER during hydration — two
+  // machines with two locales, and a silent hydration error. That is the whole
+  // reason studio-web/lib/num.ts duplicates the formatter rather than importing
+  // it, and the console's own `num` cannot come the other way either, because
+  // src/lib may not depend on studio-web. ./consoleSearch, ./interventions and
+  // ./siteRollUp all stand here and say the same thing.
+  //
+  // numbers-ok: console-shared module — no reader whose locale could be asked.
   if (!d.placed) {
+    // numbers-ok: as above, a console-shared module has no locale to spell in.
     return `None of the ${total} live ${total === 1 ? 'membership' : 'memberships'} could be held against the price book, so nothing here says anybody is on the list price.`;
   }
   const found = d.offList === 0
@@ -416,6 +457,7 @@ export function driftLine(d: PriceDrift, total: number): string {
   const rest = d.unplaced
     ? ` The other ${d.unplaced} could not be placed either way and ${d.unplaced === 1 ? 'is' : 'are'} listed below as exactly that.`
     : '';
+  // numbers-ok: as above, a console-shared module has no locale to spell in.
   return `Of ${total} live ${total === 1 ? 'membership' : 'memberships'}, ${found}.${rest}`;
 }
 

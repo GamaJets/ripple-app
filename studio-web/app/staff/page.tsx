@@ -572,15 +572,47 @@ function InviteTrainer({ tenantId, ownerId, ownerName }: {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('trainer_invites')
-      .select('id, email, status')
-      .eq('owner_id', ownerId)
-      .order('created_at', { ascending: false })
-      .limit(200);
-    if (error) { setInvites(null); setReadErr(error.message ?? 'The invites already on file could not be read.'); return; }
-    setInvites((data ?? []) as Array<{ id: string; email: string; status: string }>);
-    setReadErr(null);
+    // `readAll`, and not the `.limit(200)` this was.
+    //
+    // Two hundred rows with no probe row past them is the silent truncation
+    // src/lib/rowCap.ts exists to end, and BOTH things this list feeds are
+    // wrong under it. `inviteBlocker` is a duplicate check — its whole reason
+    // for existing is that `(owner_id, email)` is unique and a raw 23505 reads
+    // as a system failure rather than as "you already invited them" — and an
+    // invite outside the two hundred newest is one it cannot see, so the
+    // refusal it was written to give is replaced by the error it was written
+    // to prevent. And `${pending.length} waiting to accept` is a FIGURE, drawn
+    // as the owner's own count, computed over a prefix.
+    //
+    // `readAll` rather than `assertWhole` for the reason that module gives: the
+    // set is finite by construction — it is one owner's invites — the screen
+    // genuinely needs all of it to answer "have I invited them before", and
+    // refusing the section outright would take a working form away.
+    //
+    // Ordered on `id` after `created_at`, because `readAll` requires an order
+    // that cannot tie: invites written in one batch share a timestamp, and
+    // Postgres promises nothing about the order of tied rows across the
+    // separate requests each page is.
+    try {
+      const rows = await readAll<{ id: string; email: string; status: string }>(
+        (from, to) => supabase
+          .from('trainer_invites')
+          .select('id, email, status')
+          .eq('owner_id', ownerId)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, to),
+        'the invites already on file',
+      );
+      setInvites(rows);
+      setReadErr(null);
+    } catch (e: any) {
+      // Null, never []. An empty list here is the claim that this owner has
+      // invited nobody, and `inviteBlocker` refuses on the null rather than
+      // risking the duplicate it cannot see.
+      setInvites(null);
+      setReadErr(e?.message ?? 'The invites already on file could not be read.');
+    }
   }, [ownerId]);
 
   useEffect(() => { load(); }, [load]);

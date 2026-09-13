@@ -91,6 +91,7 @@ import {
 } from '../../src/lib/checklistCopy';
 import { bulkReport, selectAllOffer, type WriteOutcome } from '../../src/lib/bulkActions';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -233,10 +234,49 @@ export default function CoachChecklists() {
     setTickStatus(page.truncated ? 'partial' : 'ready');
   }, []);
 
+  const shown = useMemo(() => (items ? [...items].sort((a, b) => a.sort - b.sort) : null), [items]);
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  const who = client?.name.split(' ')[0] ?? 'They';
+  /**
+   * Whether there is an account behind this person at all.
+   *
+   * This screen did not ask, and it is the screen where not asking costs the
+   * most. A client the coach typed into their own book has a `coach_clients`
+   * row and no `clients` row, and BOTH policies this screen reads through are
+   * `is_my_client()` — an EXISTS over `clients` (02-domain-schema.sql). So for
+   * a hand-added client:
+   *
+   *   · `coach_checklist_items` came back with zero rows and no error, and the
+   *     screen said "You haven't set anything for them";
+   *   · `habit_logs` came back with zero rows and no error, under 'ready', and
+   *     `summariseAdherence` was run over an empty numerator and a real
+   *     denominator to produce, in a Notice, "Nothing at all was logged on 28
+   *     of the last 28 days" — a month of failure attributed to somebody who
+   *     has no app to fail in;
+   *   · Add to Their List wrote a row `coach_checklist_coach_write` refuses,
+   *     and the coach was told to "check your connection and try again" about a
+   *     condition no connection will ever fix.
+   *
+   * Computed at render rather than inside the effect, so a roster that lands
+   * AFTER the reads and says this row was typed in by hand re-runs them and
+   * withdraws the answer. `handAdded` undefined is "the roster has not said",
+   * which goes on asking — only an explicit true withholds.
+   */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useEffect(() => {
     // Set before either read starts, so a response from the previous client
     // that is still in flight fails its check on arrival.
     wanted.current = picked ?? null;
+    if (picked && !askable) {
+      // Nothing is asked, and nothing is left standing that a figure could be
+      // computed over. 'error' on both is the backstop — `adhStatus` is their
+      // worst, so `summary` is null and no Notice, no per-line rate and no
+      // derived list can be drawn. The render has its own branch that says WHY
+      // rather than letting those two statuses print as a failed read.
+      setItems(null); setTicks(null); setStatus('error'); setTickStatus('error');
+      return;
+    }
     if (uid && picked) {
       // Cleared as well as re-read. The previous client's items and ticks stay
       // in state until their replacements land, and while they do the header
@@ -246,10 +286,7 @@ export default function CoachChecklists() {
       void load(uid, picked); void loadTicks(picked);
     }
     else { setItems(null); setTicks(null); setStatus('ready'); setTickStatus('ready'); }
-  }, [uid, picked, load, loadTicks]);
-
-  const shown = useMemo(() => (items ? [...items].sort((a, b) => a.sort - b.sort) : null), [items]);
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  }, [uid, picked, askable, load, loadTicks]);
 
   /* ── pull to refresh ─────────────────────────────────────────────────────
    *
@@ -269,8 +306,8 @@ export default function CoachChecklists() {
    * at that moment is made of. */
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     r.refresh(),
-    ...(uid && picked ? [load(uid, picked), loadTicks(picked)] : []),
-  ]), [r, uid, picked, load, loadTicks]));
+    ...(uid && picked && askable ? [load(uid, picked), loadTicks(picked)] : []),
+  ]), [r, uid, picked, askable, load, loadTicks]));
 
   // Both reads have to be whole before a single figure is drawn. A truncated or
   // failed list of items means unknown denominators; a truncated or failed read
@@ -294,6 +331,27 @@ export default function CoachChecklists() {
     if (!label) { Alert.alert('Nothing to add', 'Type the line you want on their list.'); return; }
     if (label.length > LABEL_MAX) {
       Alert.alert('Too long', `That is ${label.length} characters. A checklist line has to fit on one row of a phone — ${LABEL_MAX} at most.`);
+      return;
+    }
+    /* Appending needs the WHOLE list, and until now this took `items ?? []`.
+     *
+     * Under 'error' that is the empty array, so `nextSort` is 1 and the new
+     * line goes to the TOP of a list the coach cannot see — the exact
+     * reshuffle the sentence below refuses. Under 'partial' it is worse and
+     * quieter: the read is ordered `sort` ASCENDING, so a truncated page is the
+     * BOTTOM of the order by sort and the maximum in hand is not the maximum on
+     * the server; the new line lands in the middle of the client's morning.
+     *
+     * There is no honest append over a list this screen has not seen the end
+     * of, so it refuses and says which of the two it is. Nothing is lost: the
+     * typed line is still in the field. */
+    if (!isWhole(status)) {
+      Alert.alert(
+        'Not added yet',
+        status === 'error'
+          ? `Their list could not be read, so there is no way to tell what a new line should sit after — it would go to the top of ${who}'s morning instead of the end. Pull down to read it again, then add the line.`
+          : `Their list came back at the row limit, so this screen has not seen the end of it and a new line would land in the middle rather than at the bottom. Pull down to read it again, then add the line.`,
+      );
       return;
     }
     setBusy(true);
@@ -437,10 +495,32 @@ export default function CoachChecklists() {
     [shown],
   );
 
-  /** Everybody except the person whose list this is. Copying somebody's list
-   *  onto themselves is the one gesture here with no meaning at all. */
+  /**
+   * Everybody the lines could actually reach.
+   *
+   * Not themselves: copying somebody's list onto themselves is the one gesture
+   * here with no meaning at all.
+   *
+   * And not a client the coach typed in by hand. `coach_checklist_coach_write`
+   * checks `is_my_client()`, an EXISTS over `clients`, so every insert for a
+   * `coach_clients` row is refused — and this panel offered those names, let a
+   * coach tick them, counted them in "Copy to 6", and then reported each one
+   * back as "the server took the request and wrote nothing — they may no longer
+   * be your client", which is a sentence about a coaching relationship ending.
+   * It never existed as an account; there is no list on a phone they have not
+   * got. Offering the tick and explaining the refusal afterwards is worse than
+   * not offering it, so the names are withheld and the reason is said once.
+   */
   const copyCandidates = useMemo(
-    () => r.roster.filter((c) => c.id !== picked), [r.roster, picked]);
+    () => r.roster.filter((c) => c.id !== picked && clientIsQueryable(c.id, c.handAdded)),
+    [r.roster, picked],
+  );
+  /** How many were withheld for that reason, so the absence is explained
+   *  rather than looking like a roster that came back short. */
+  const copyNoAccount = useMemo(
+    () => r.roster.filter((c) => c.id !== picked && !clientIsQueryable(c.id, c.handAdded)).length,
+    [r.roster, picked],
+  );
 
   const copyTargets: CopyTarget[] = useMemo(() => ticked.map((id) => {
     const found = existing?.get(id);
@@ -544,6 +624,12 @@ export default function CoachChecklists() {
           <SectionHead title="Client" />
           {r.roster.length === 0 && isWhole(r.status) ? (
             <EmptyRoster lacks="there is no list to add to" />
+          ) : r.roster.length === 0 && r.status === 'loading' ? (
+            /* An empty chip row while the roster lands reads as a coach with
+               nobody on their book — the claim `EmptyRoster` above is gated on
+               `isWhole` precisely to avoid making. Said in words instead, as
+               app/(trainer)/client-week.tsx says it. */
+            <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
           ) : (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {r.roster.map((c) => (
@@ -557,7 +643,25 @@ export default function CoachChecklists() {
           )}
         </Section>
 
-        {picked ? (
+        {picked && !askable ? (
+          /* ── the third answer ──────────────────────────────────────────
+             Not "you have set them nothing" and not "the read failed". This
+             person is a name in the coach's own book with no account behind
+             it: there is no list to set, no tick to count, and nothing was
+             refused because nothing was ever entitled to be asked.
+
+             The panels below are withheld rather than disabled. A greyed Add
+             field invites a coach to type a line that `coach_checklist_coach_write`
+             will refuse whatever they do, and the copy panel would offer to
+             give somebody else a list that does not exist. */
+          <View>
+            <Rule />
+            <Section>
+              <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                note={`You added ${who} to your book by hand. A checklist is a list on somebody's phone and a tick is something they do on it, so there is nothing here to set and nothing to count — and none of that is a read that failed. Invite them from your client list; from the day they accept, this screen works like everybody else's.`} />
+            </Section>
+          </View>
+        ) : picked ? (
           <View>
             <Rule />
             <Section>
@@ -807,6 +911,16 @@ export default function CoachChecklists() {
                       </View>
                       {selectAll.note ? (
                         <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{selectAll.note}</Text>
+                      ) : null}
+                      {/* Why the list above is shorter than the book. Said
+                          rather than left as an absence a coach reads as a
+                          roster that came back short. */}
+                      {copyNoAccount > 0 ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                          {copyNoAccount === 1
+                            ? 'One client on your book is not here: you added them by hand, so there is no app for a checklist to appear in.'
+                            : `${copyNoAccount} clients on your book are not here: you added them by hand, so there is no app for a checklist to appear in.`}
+                        </Text>
                       ) : null}
 
                       {/* What would actually be written, before it is. Both

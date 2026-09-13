@@ -66,6 +66,11 @@ import { sliceLoading, sliceReady, sliceFailed, rowsOf, type Slice } from '@lib/
 // for something that setting has nothing to do with.
 import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '@lib/sumCurrency';
 import { noGymNote } from '@lib/gymLink';
+// The gym's own calendar day, which is what a pass expiry is compared against
+// everywhere else in this product. `isoDate` is the fallback arm only — the
+// reader's clock for a gym that has never set a zone.
+import { gymDay, parseGymZone } from '@lib/gymZone';
+import { isoDate } from '@lib/format';
 import { Fetched, useFetched } from '@/components/Fetched';
 import { Banner } from '@/components/Banner';
 import { num } from '@/lib/num';
@@ -123,6 +128,30 @@ export default function Passes() {
   // `tenants.currency`. The Paid column sums a person's passes, so it has no
   // single row's currency to borrow and inherits the gym's — or prints nothing.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /**
+   * `tenants.timezone`, or null when the gym has not set one.
+   *
+   * Read here because a PASS EXPIRES AT THE END OF A DAY AT THE GYM, and this
+   * screen was the last one in the console still asking a different clock.
+   * `buildPassConversion` defaults its `today` to `isoDay(new Date())` — the
+   * calendar day on whichever laptop has the tab open — and nothing here was
+   * passing one, so:
+   *
+   *   · `summarisePasses` counted live and expired passes on the reader's day
+   *     while /door and /members counted the same rows on the gym's. An owner
+   *     in Sydney reading a Dubai gym saw a pass called expired that the
+   *     turnstile was still admitting, for hours either side of midnight.
+   *   · `hasLivePass` is what makes a holder UNDECIDED rather than a failure,
+   *     so the same hour moved people on and off the call list this page
+   *     exists to produce — and changed the denominator of the percentage
+   *     above it. Somebody whose pass ran out at a Dubai midnight was rung
+   *     about it from Sydney a day early.
+   *
+   * The gym's day, with the reader's as the FALLBACK for a gym that has never
+   * set a zone, where the reader's clock is the only clock there is — the same
+   * pair, in the same order, as studio-web/app/members/page.tsx.
+   */
+  const [zone, setZone] = useState<string | null>(null);
   const [rec, setRec] = useState<PassConversionRecord>(EMPTY);
   // Null is "not read", never an empty Map: "no phone number recorded" and
   // "we could not ask" send an owner to two different places.
@@ -232,13 +261,19 @@ export default function Passes() {
       // nothing was read.
       if (!who?.tenantId) return;
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency, timezone').eq('id', who.tenantId).single();
       // supabase-js RESOLVES on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
       if (live) {
         setGymName(tErr ? null : t?.name ?? null);
         setGymNameUnread(!!tErr);
         setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+        // `parseGymZone` and not the raw column: an abbreviation or an offset
+        // is not a zone this runtime can resolve, and `gymDay` would answer
+        // null for it anyway — which is the reader's day arriving through the
+        // fallback without anybody having decided that.
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
       // The gym's own contact details, read separately. This page produces a
       // CALL LIST and had no way to call anybody: nothing in the schema carried
@@ -261,7 +296,15 @@ export default function Passes() {
     return () => { live = false; };
   }, [load, refresh]);
 
-  const c = useMemo(() => buildPassConversion(rec), [rec]);
+  /** The instant these four reads landed, and the one every pass on this page
+   *  is judged at. Named rather than left to `buildPassConversion`'s default,
+   *  which is read inside a memo keyed on the ROWS — so on a console left open
+   *  at a front desk the day never turned over, and a pass that ran out at
+   *  midnight stayed live until somebody reloaded the tab. */
+  const nowMs = readAt ?? Date.now();
+  /** The GYM's calendar day, with the reader's as the fallback. See `zone`. */
+  const today = gymDay(nowMs, zone) ?? isoDate(new Date(nowMs));
+  const c = useMemo(() => buildPassConversion(rec, { today }), [rec, today]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -476,6 +519,11 @@ export default function Passes() {
           )
         ) : null}
       </Section>
+
+      {/* Before the call list, deliberately. That list is people the gym has
+          already lost; this one is people it has not lost yet, and only one of
+          the two can still be changed by a phone call this afternoon. */}
+      <RunningOut rec={rec} today={today} contacts={contacts} contactsErr={contactsErr} />
 
       <CallList c={c} rec={rec} contacts={contacts} contactsErr={contactsErr} />
       <Holders c={c} rec={rec} ccy={ccy} contacts={contacts} />
@@ -1057,11 +1105,26 @@ function Money({ c, rec, ccy }: {
           <p style={{ margin: 0, padding: '14px 16px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: 820 }}>
             {MONEY_NOTE}
           </p>
+          {/* ── what this paragraph may say, now that the tile withholds ─────
+              It read: "the pass total above adds unlike amounts. Read it as a
+              count of takings, not as a sum." That was true of the tile it was
+              written under and is not true of the tile that is there now.
+              `passRevenueCents` returns a null CURRENCY the moment the priced
+              passes hold more than one, `money()` withholds without a code, and
+              `Kpi` draws a missing figure as a dash — so under a mix there is
+              no total above this line at all. The sentence sent an owner
+              looking for a blended number to distrust, found them a dash, and
+              then told them to read the dash as "a count of takings".
+              What is worth saying is the thing the dash cannot: WHICH moneys,
+              and that the per-type table further down still names every one of
+              them. Nothing here is missing from the record. */}
           {m.mixedCurrency ? (
-            <p style={{ margin: 0, padding: '0 16px 14px', fontSize: 12.5, color: 'var(--crit)' }}>
-              These passes were sold in more than one currency, so the pass total
-              above adds unlike amounts. Read it as a count of takings, not as a
-              sum.
+            <p style={{ margin: 0, padding: '0 16px 14px', fontSize: 12.5, color: 'var(--ink2)' }}>
+              These passes were sold in more than one currency, so the figure above is withheld
+              rather than blended — there is no rate in this product to blend them with, and a
+              gym that changed its currency legitimately has both on its books. The takings are
+              not lost: <strong style={{ color: 'var(--ink)' }}>What each pass type sold</strong>{' '}
+              below names one amount per currency, per product, and never adds two of them.
             </p>
           ) : null}
         </>
@@ -1215,7 +1278,13 @@ function Sold({ rec, types, typesErr }: {
           />
           {tot ? (
             <p style={{ margin: 0, padding: '14px 16px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: 820 }}>
-              {num(tot.sold)} pass{tot.sold === 1 ? '' : 'es'} sold across {num(tot.types)} type{tot.types === 1 ? '' : 's'}
+              {/* `namedTypes`, not `types`. `types` is how many ROWS the table
+                  has, and one of those rows can be the unattributable bucket —
+                  passes with no pass type on them, or a type that could not be
+                  read. That bucket is not a product the gym sells, and counting
+                  it here told a gym with three pass types that it had four.
+                  LOST_TYPE_NOTE below is where that row is accounted for. */}
+              {num(tot.sold)} pass{tot.sold === 1 ? '' : 'es'} sold across {num(tot.namedTypes)} type{tot.namedTypes === 1 ? '' : 's'}
               {tot.sold > tot.priced ? `, ${num(tot.sold - tot.priced)} of them with no price recorded` : ''}
               {tot.neverSold > 0
                 ? `. ${num(tot.neverSold)} type${tot.neverSold === 1 ? ' has' : 's have'} never been sold at all`

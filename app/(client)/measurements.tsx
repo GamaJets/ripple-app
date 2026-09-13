@@ -39,7 +39,8 @@ import { useSettings } from '../../src/ui/settings';
 import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote, weightLabel } from '../../src/lib/units';
 import { pairScan, gapNote, PAIR_WINDOW_DAYS } from '../../src/lib/tapeVsScan';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
-import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+import { agoLabel, dayLabel, shortDayLabel, daysBetween, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+import { useToday } from '../../src/ui/today';
 import { useClientData } from '../../src/ui/clientData';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
 import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
@@ -144,7 +145,17 @@ export default function Measurements() {
   return metric ? movementIsProgress(d, cd.goal, metric) === true : false;
  };
  const [vals, setVals] = useState<Record<string, string>>({});
- const today = todayISO();
+ // The day every "N days ago" and the staleness sentence below are measured
+ // against. `useToday()`, not a bare `todayISO()` in the render body: src/ui/
+ // today.ts argues the case in full — a bare call "is only right at the moment
+ // something else happens to redraw", and nothing redraws this screen at
+ // midnight. A client who opened Measurements on Sunday evening and came back
+ // to it on Wednesday was still being told their Sunday entry was "today", and
+ // the `STALE_AFTER_DAYS` line — the one that decides whether a figure is
+ // presented as current — was answering Sunday's question about a Wednesday
+ // body. The hook re-settles on the local day rolling over and on the app
+ // coming back to the foreground, and re-renders on neither anything else.
+ const today = useToday();
  // A failed read reaches `entries: []` by the same route an empty history does,
  // and this screen used to answer both with "No measurements logged yet — save
  // your first entry above". src/ui/measurements.tsx added `status` to separate
@@ -400,11 +411,37 @@ export default function Measurements() {
      total. `readFailed` is 'error' only, and that is right for the LIST —
      the rows are real — but a count over them is not. */}
         <SectionHead title="History" note={status === 'ready' && entries.length ? `${entries.length} entries` : undefined} />
+   {/* ── the read that was cut short, said out loud ──────────────────────
+       The count above has been gated on 'ready' since it was written, and
+       that was the whole of what this screen said about a truncated read —
+       so the LIST below it went on rendering as though it were the history.
+       It is not: the read comes back newest-first under a row cap, so what
+       a member scrolls to the bottom of is the newest N entries and the
+       oldest row on screen is not their oldest. This screen exists to show
+       a trend, and a trend whose beginning is missing with nothing saying
+       so reads as a member who started taping themselves in June.
+
+       The figures above are unaffected and the sentence says so: `latest`
+       and `prev` are the two newest rows of a newest-first read, so the
+       hero, its change and every row delta are exactly as whole as they
+       would be under 'ready'. It is only the tail that is short. */}
+   {status === 'partial' ? (
+    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+     You have more measurements on record than this screen can read in one go, so this list stops
+     short of your oldest — the entries shown are your most recent ones. The figures above are
+     measured from your two latest entries and are unaffected.
+    </Text>
+   ) : null}
    {entries.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>{readFailed
      ? 'Your measurement history could not be read, so nothing is listed here. That is not the same as having none — try again once you have a connection, and it will be exactly as you left it.'
      : status === 'loading'
      ? 'Loading your history…'
+     // 'partial' may never reach the empty-history sentence. A truncated read
+     // is a read that found rows, and "no measurements logged yet" is the one
+     // claim about a member's own record that a short read cannot support.
+     : status === 'partial'
+     ? 'Nothing came back in the part of your history that could be read. That is not the same as having none.'
      : 'No measurements logged yet — save your first entry above and the history builds here.'}</Text>
    ) : null}
    {entries.map((e: MeasureEntry, i) => (

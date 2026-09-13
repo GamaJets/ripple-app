@@ -803,6 +803,11 @@ export default function TrainerSessions() {
 
   const undo = async (entry: { s: PtSession; outcome: SessionOutcome }) => {
     if (!uid) return;
+    // The outcome as the coach chose it, named once. Three sentences below have
+    // to say what the RECORD still holds, and three copies of the same lookup is
+    // how they come to describe one row three ways.
+    const stands = OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome;
+    const who = entry.s.clientName ?? 'That session';
     try {
       // ── through the queue, like the mark it takes back ──────────────────
       //
@@ -826,7 +831,33 @@ export default function TrainerSessions() {
         // The server read it and declined, so the outcome stands. Named as what
         // is true of the RECORD, because that is what the coach has to act on.
         Alert.alert('Not undone',
-          `${entry.s.clientName ?? 'That session'} is still recorded as “${OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome}” — the session may no longer exist, or it is not yours to change.`);
+          `${who} is still recorded as “${stands}” — the session may no longer exist, or it is not yours to change.`);
+        return;
+      }
+      /* ── the fourth answer, which this handler did not have ──────────────
+       *
+       * `attempt` has four arms and `mark` above handles all four; this one
+       * stopped at three and fell through on 'full' — so the chip came off the
+       * screen, the row went back to unmarked, and NOTHING was alerted, over a
+       * record that still says "no show".
+       *
+       * It is reachable exactly where it hurts most. The comment above explains
+       * that a retraction supersedes a still-queued mark and so can never be
+       * refused a place in the queue — which is true, and it is why this looked
+       * safe. But the case it does not cover is the one that matters: the mark
+       * REACHED THE SERVER (so there is nothing queued to supersede), the coach
+       * then lost signal, and the queue filled with the morning's other work.
+       * `enqueueAct` refuses at `FLOOR_CAP`, `attempt` returns 'full', and the
+       * retraction is neither sent nor kept.
+       *
+       * Falling through there is the precise failure the header of this handler
+       * was written about, arriving from the other direction: the coach believes
+       * they took back a "no show" they did not, and the gym pays — or does not
+       * pay — on the outcome that is still recorded.
+       */
+      if (out === 'full') {
+        Alert.alert('Not undone',
+          `${who} is still recorded as “${stands}”. ${floorFullLine('Taking that outcome back')}`);
         return;
       }
       setJustMarked((prev) => prev.filter((x) => x.s.id !== entry.s.id));
@@ -847,7 +878,7 @@ export default function TrainerSessions() {
       // and the gym pays, or does not pay, on the outcome that is still
       // recorded.
       reportError('sessions.undo', e);
-      Alert.alert('Not undone', `${entry.s.clientName ?? 'That session'} may still be recorded as “${OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome}”. Check your connection and tap undo again.`);
+      Alert.alert('Not undone', `${who} may still be recorded as “${stands}”. Check your connection and tap undo again.`);
     }
   };
 

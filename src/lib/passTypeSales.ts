@@ -137,6 +137,23 @@ export interface PassTypeSale {
 export interface SalesTotals {
   /** Rows on the table, including the unreadable-type row when there is one. */
   types: number;
+  /**
+   * Rows that ARE a pass type — every row carrying a `typeId`, whether or not
+   * the price book still holds it.
+   *
+   * Separate from `types` above because the two answer different questions and
+   * a screen that says "sold across N types" needs this one. `types` counts
+   * ROWS, and one of those rows can be the unattributable bucket: passes whose
+   * `pass_type_id` is null, or whose type could not be read. That bucket is not
+   * a product. A gym with three types plus a handful of orphaned passes read
+   * "sold across 4 types" and has no fourth type — a count of the gym's own
+   * product range, off by one, with nothing on the figure to doubt.
+   *
+   * Both are kept: `types` is what the table is as many rows long as, which is
+   * the honest denominator for anything about the TABLE, and this is the count
+   * of things the gym actually sells.
+   */
+  namedTypes: number;
   /** Types in the book that have never been sold. Zero when the book was not
    *  read, because none of them are on the table to be counted. */
   neverSold: number;
@@ -273,9 +290,14 @@ export function salesTotals(rows: PassTypeSale[]): SalesTotals {
   let sold = 0;
   let priced = 0;
   let neverSold = 0;
+  let namedTypes = 0;
   for (const r of rows) {
     sold += r.sold;
     priced += r.priced;
+    // A row is a TYPE when it carries a type id. The unattributable bucket —
+    // passes with no `pass_type_id`, or whose type could not be read — is a row
+    // and is not a product, and counting it as one overstates the gym's range.
+    if (r.typeId != null) namedTypes += 1;
     // Only a row from the book can be said never to have sold. A row that
     // exists BECAUSE a pass was sold on it cannot have a zero, and a book that
     // was not read contributes no rows here at all — which is why this count is
@@ -288,7 +310,7 @@ export function salesTotals(rows: PassTypeSale[]): SalesTotals {
       byCcy.set(t.currency, cur);
     }
   }
-  return { types: rows.length, neverSold, sold, priced, take: sortTake(byCcy) };
+  return { types: rows.length, namedTypes, neverSold, sold, priced, take: sortTake(byCcy) };
 }
 
 /**

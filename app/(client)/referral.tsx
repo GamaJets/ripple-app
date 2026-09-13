@@ -34,7 +34,7 @@
 //
 // A signup is also not a conversion, and the screen is explicit about which one
 // it counts: a friend has converted when they log their first workout.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Share, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -95,14 +95,31 @@ export default function Referral() {
    */
   const [listRows, setListRows] = useState(0);
 
+  /**
+   * Which load is the one still wanted.
+   *
+   * `load` is called on mount AND by the pull-to-refresh below, and it holds
+   * three awaits — the code, then the list and the summary together. Two runs
+   * therefore overlap the first time somebody pulls down while the first read is
+   * still out, and whichever finishes LAST wrote the screen. The ordinary case
+   * is harmless and the bad one is not: a slow first read landing after a fast
+   * refresh replaces a current list of invites with an older one, under a
+   * 'ready' status, with nothing to say it went backwards. src/ui/challenges.tsx
+   * guards its own read with exactly this `runRef` for exactly this reason.
+   */
+  const runRef = useRef(0);
+
   const load = useCallback(async () => {
+    const run = ++runRef.current;
     setStatus('loading');
     // The code is asked for first and on its own: it is the thing the screen
     // exists to hand over, and a failure to get it is a different failure from
     // a failure to count what it has done.
     const c = await myReferralCode();
+    if (run !== runRef.current) return;
     setCode(c);
     const [list, sum] = await Promise.all([myReferrals(), myReferralSummary()]);
+    if (run !== runRef.current) return;
     if (!c || !sum) { setStatus('error'); return; }
     setRows(shapeReferrals(list));
     setListRows(list?.length ?? 0);
@@ -143,6 +160,10 @@ export default function Referral() {
    * claiming a copy that happened five minutes ago.
    */
   const [copied, setCopied] = useState<string | null>(null);
+  /** The one timer that clears it. Declared beside the state it clears rather
+   *  than beside the handler that arms it, so a reader can see both halves. */
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
   const copy = async (what: 'link' | 'code') => {
     const text = what === 'link' ? link : code;
     if (!text) return;
@@ -161,7 +182,14 @@ export default function Referral() {
       return;
     }
     setCopied(what === 'link' ? 'Link copied' : 'Code copied');
-    setTimeout(() => setCopied(null), 2500);
+    // One timer, replaced rather than stacked. Copy the link and then the code
+    // inside two and a half seconds and the FIRST timer was still running: it
+    // fired against the second confirmation and cleared it early, so the member
+    // who had just copied their code was shown nothing and had to guess whether
+    // it worked. Cleared on unmount too, so nothing sets state on a screen that
+    // has gone.
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(null), 2500);
   };
 
   const steps = [

@@ -412,6 +412,28 @@ export default function MyCoach() {
       return;
     }
     setLeaving(false);
+    // ── the member's own answer to how they are coached, kept in step ──────
+    //
+    // app/(client)/trainers.tsx does this on its own leave path and says why:
+    // "without this the AI coach would go on being told there is somebody in
+    // the room for their booked sessions." This screen was built to move the
+    // exit OFF that marketplace and onto the screen about the coach somebody
+    // actually has — and it moved the ending without moving this, so leaving
+    // from here left `coachingMode` at 'inperson' or 'hybrid' for good.
+    //
+    // It is not cosmetic and it is not one screen. `coachingMode` is a device
+    // preference, not a server fact: app/(client)/coach.tsx hands it to a
+    // language model as `coaching` and gets back "your coach is in the room
+    // for your booked sessions" about a coach who is not; the dashboard keeps
+    // `booksSessions` true; app/(client)/workouts.tsx keeps waiting on a
+    // programme nobody is going to assign; and the Me hub keeps showing the
+    // rows `soloHide` exists to take away. Every one of those is a claim about
+    // a relationship the server has just ended.
+    //
+    // Only on the server's own `ok`, like everything else here — a refusal
+    // changes nothing, and `ended: false` still means the server is certain
+    // there is no live link.
+    cd.setCoachingMode('solo');
     Alert.alert(
       res.ended ? 'You have left' : 'Nothing to end',
       clientEndOutcomeLine(res.ended, reason != null, (res as { reasonStored?: boolean }).reasonStored === true),

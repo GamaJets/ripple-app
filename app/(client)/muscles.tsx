@@ -122,6 +122,18 @@ export default function Muscles() {
   // difference decides whether the sentence under a short tonnage blames their
   // record or this screen.
   const bodyKnown = isWhole(cd.scansStatus);
+  // And whether it has ANSWERED at all yet, which is a third thing.
+  //
+  // `bodyKnown` is false under 'loading' as well as under 'error' and
+  // 'partial', so the unpriced-sets line below told a member their weight
+  // history "could not be read just now" while the read was still in flight —
+  // the weight read and the two reads behind `board.status` are independent, so
+  // a board that has landed sitting over scans that have not is the ordinary
+  // case rather than a rare one. A failure claimed before there is a failure is
+  // the mirror image of the rule this whole screen is built on, and it is the
+  // half nothing checks for: check-whole.mjs gates a FIGURE on 'did not fail',
+  // and this was a SENTENCE asserting a failure that had not happened.
+  const bodyPending = cd.scansStatus === 'loading';
   const wu = useSettings().weightUnit;
   const unitNote = convertedNote(wu);
 
@@ -444,6 +456,8 @@ export default function Muscles() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
               {bodyKnown
                 ? `${num(e.unpricedSets)} of the sets counted here carry no load on record, so no weight is shown for them.`
+                : bodyPending
+                ? `${num(e.unpricedSets)} of the sets counted here carry no load yet — your weight history is still being read. Nothing is missing from your record.`
                 : `${num(e.unpricedSets)} of the sets counted here carry no load because your weight history could not be read just now. That is this screen rather than a gap in your record.`}
             </Text>
           ) : null}

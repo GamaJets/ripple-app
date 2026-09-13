@@ -71,7 +71,13 @@ import type { LoadStatus } from '../../src/ui/loadStatus';
 
 const when = (iso: string) => {
   const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '';
+  // `fig(null)`, not ''. This is the ROW HEADING — the only thing identifying
+  // which session a credit line is about — and an empty string collapses it to
+  // a blank line with a sentence about somebody's money underneath it and
+  // nothing saying which session that sentence is about. A dash is the house
+  // mark for a fact we do not hold (src/ui/kit.tsx), it keeps the row's shape,
+  // and it is what every other date on these screens already draws.
+  if (!Number.isFinite(d.getTime())) return fig(null);
   // `appLocale()`, never a literal tag — a client in Milan reads their own
   // dates, and `check:locale` fails on a hardcoded one.
   return d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short' })

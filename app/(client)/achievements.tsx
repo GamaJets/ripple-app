@@ -99,6 +99,16 @@ export default function Achievements() {
   // "N left to earn" is a claim about how far they have to go, and it is not one
   // this screen can make while four of the twelve are unreadable.
   const bodyUnknown = !scansWhole && badges.some((b) => b.state === 'unknown') && countable;
+  // …and WHICH of the two silences it is. `scansWhole` is `isWhole`, so it is
+  // false for 'loading' as well as for 'error' and 'partial' — and the log
+  // lands before the scans do often enough that this is an ordinary frame, not
+  // an edge: `countable` goes true, four badges go 'unknown', and the hero said
+  // "Your weight history could not be read" about a read that was still in
+  // flight and about to succeed. A failure stated over a read that has not
+  // finished is the defect this whole screen is otherwise careful about, one
+  // read to the left. The badges stay blank either way — that part was right —
+  // and only the sentence under them changes.
+  const bodyReading = bodyUnknown && cd.scansStatus === 'loading';
 
   // ── The celebration ────────────────────────────────────────────────────
   //
@@ -149,6 +159,7 @@ export default function Achievements() {
           note={logStatus === 'loading' ? 'Reading your training log…'
             : !logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
             : !countable ? 'You have trained more times than this screen can read in one go, so the count is left blank. Anything marked Earned below really is.'
+            : bodyReading ? 'Reading your weight history — the badges priced from your bodyweight sets are blank until it lands.'
             : bodyUnknown ? 'Your weight history could not be read, so the badges priced from your bodyweight sets are left blank rather than shown as locked.'
             : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
         />
@@ -159,7 +170,9 @@ export default function Achievements() {
           <SectionHead title="Badges" />
           {bodyUnknown ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-              A pull-up or a dip is priced from your bodyweight on the day, and that history could not be read just now. The badges that depend on it are blank rather than locked. Nothing you have earned is gone.
+              {bodyReading
+                ? 'A pull-up or a dip is priced from your bodyweight on the day, and that history is still being read. The badges that depend on it are blank until it arrives.'
+                : 'A pull-up or a dip is priced from your bodyweight on the day, and that history could not be read just now. The badges that depend on it are blank rather than locked. Nothing you have earned is gone.'}
             </Text>
           ) : null}
           {badges.map((b, bi) => {

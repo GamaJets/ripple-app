@@ -16,9 +16,14 @@ import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } fro
 import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
-import { shownStreak, longestStreak, freezeBudget } from '../../src/lib/streaks';
+import { shownStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
 import { heatmapDayLabel, heatmapColumnLabel, heatmapSummary } from '../../src/lib/heatmap';
 import { readBoundary, rangeCoverage } from '../../src/lib/sessionHistory';
+// Whether the streak above is a figure or a floor. See src/lib/streakReach.ts:
+// the argument this file already makes for admitting 'partial' establishes that
+// the rows that came back are the NEWEST ones, and does not establish that they
+// reach as far back as the chain does.
+import { streakClaim, boundedStreakUnit, BOUNDED_STREAK_NOTE } from '../../src/lib/streakReach';
 // The member's own median gap, in the member's own words — and computed by the
 // SAME `assessCadence` the coach's nudge board reads, so the two screens cannot
 // come to state different intervals about one person. See src/lib/ownCadence.ts.
@@ -28,7 +33,7 @@ import {
 // `numUpTo` for the gap, because it is a one-decimal median and a bare
 // `${2.5}` writes a full stop in every locale — the note at the top of
 // app/(client)/attendance.tsx is about this exact failure.
-import { fmtFullDay, num, numUpTo } from '../../src/lib/format';
+import { fmtDay, fmtFullDay, num, numUpTo } from '../../src/lib/format';
 import { WEEK_DAYS, startOfWeek } from '../../src/lib/weekStart';
 import { Icon } from '../../src/ui/Icon';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
@@ -160,8 +165,50 @@ export default function Consistency() {
   // Composed here before; it agreed with Home by coincidence rather than by
   // construction. `shownStreak` derives the budget itself, so there is one
   // place where the number is decided.
-  const streak = shownStreak(log);
+  //
+  // `now.getTime()` rather than the default `Date.now()`. Both are the same
+  // instant at the moment of a render, and the point is which renders happen:
+  // this screen is `href: null` and mounts once, so without the dependency the
+  // figure is whatever it was when the log last changed. The grid beside it
+  // already re-settles at midnight off the same `now`; the streak is the figure
+  // a member is most likely to act on and was the one not doing so.
+  const streak = shownStreak(log, now.getTime());
   const best = longestStreak(log);
+
+  // ── is the streak a figure, or a floor ────────────────────────────────
+  //
+  // The `whole-ok` argument at the top of this file establishes that a
+  // truncated read holds the NEWEST rows. It does not establish that they reach
+  // back as far as the chain does, and src/ui/workoutLog.tsx says they may not:
+  // one row per EXERCISE means about seven rows per gym visit, so a thousand
+  // rows is roughly a hundred and forty days of reach. A member who has trained
+  // every day for six months has a chain that runs straight off the bottom of
+  // the read — `currentStreakFrozen` finds no active day there, stops, and this
+  // screen printed the result as "Current Streak · 140 days" to the person with
+  // the longest run in the gym.
+  //
+  // The question is not "was the read whole" but "did the chain end inside what
+  // was read", which is answerable from two things this screen already has: the
+  // oldest day the log contains, and the run's own span. See
+  // src/lib/streakReach.ts.
+  //
+  // `trainedToday` and `oldestLoggedDay` both come off `counts` — the screen's
+  // own map, built with the same local-day key `activeDays` uses — so there is
+  // no second definition of a day here to drift from the one the streak was
+  // counted with.
+  const trainedToday = (counts[key(today)] || 0) > 0;
+  const oldestLoggedDay = Object.keys(counts).reduce<string | null>(
+    (oldest, k) => (oldest == null || k < oldest ? k : oldest), null);
+  // `shownStreak` stays THE figure — src/lib/streaks.ts is explicit that a
+  // screen showing a member their streak calls that and nothing else. This
+  // second call is for the bridged days only: `freezesUsed` is how many
+  // calendar days the chain covers beyond the streak count itself, and `frozen`
+  // is which days they were.
+  const frozenRun = currentStreakFrozen(log, freezes, now.getTime());
+  const claim = streakClaim(
+    streak, frozenRun.freezesUsed, trainedToday, oldestLoggedDay,
+    logStatus === 'partial', now.getTime(),
+  );
 
   // ── the member's own cadence ────────────────────────────────────────────
   //
@@ -190,12 +237,53 @@ export default function Consistency() {
   // own summary and does not need a readout until somebody wants one.
   const [picked, setPicked] = useState<Date | null>(null);
 
+  // ── the days a freeze actually covered ────────────────────────────────
+  //
+  // The budget has been granted and spent silently since it was written.
+  // `shownStreak` bridges a missed day, the hero says "2 freezes in reserve",
+  // and the ONE thing the feature exists to tell somebody — that a day they
+  // missed did not cost them the run — was never said. The member saw an empty
+  // square inside an unbroken number and had to work out for themselves which
+  // of the two the app meant. Duolingo, Streaks and Strava all name the save;
+  // this app granted it and kept quiet.
+  //
+  // `frozenRun.frozen` is the list of day keys a freeze bridged, already
+  // returned by `currentStreakFrozen` and thrown away here until now. Gated on
+  // `known`, like every other figure: under an unread log there is no chain and
+  // therefore nothing to have been covered.
+  const frozenDays = known ? frozenRun.frozen : [];
+  const frozenSet = new Set(frozenDays);
+
   const cell = (d: Date) => {
-    const c = counts[key(d)] || 0;
+    const k = key(d);
+    const c = counts[k] || 0;
     const future = d > today;
+    // A bridged day is drawn as an empty square with the brand on its EDGE: it
+    // is not a day that was trained and must not read as one, and it is not an
+    // ordinary blank either. The legend below carries the third swatch.
+    const saved = !future && c === 0 && frozenSet.has(k);
     const bg = future ? 'transparent' : c === 0 ? t.surface2 : c === 1 ? t.brand : t.brand;
     const op = future ? 0 : c === 0 ? 1 : c === 1 ? 0.6 : 1;
-    return { backgroundColor: bg, opacity: op, borderWidth: future ? 0 : hairline, borderColor: t.ring };
+    return {
+      backgroundColor: bg,
+      opacity: op,
+      borderWidth: future ? 0 : hairline,
+      borderColor: saved ? t.brand : t.ring,
+    };
+  };
+
+  /**
+   * What one square says, spoken.
+   *
+   * `heatmapDayLabel` is shared with src/ui/OwnConsistencyPanel.tsx and knows
+   * nothing about freezes, so the clause is added here rather than there — a
+   * frozen day would otherwise be drawn differently from every other empty
+   * square and read out identically to one, which is the accessibility failure
+   * that whole module was written to end.
+   */
+  const dayLabel = (d: Date) => {
+    const base = heatmapDayLabel(d, known ? (counts[key(d)] || 0) : null, today);
+    return frozenSet.has(key(d)) ? `${base}. A freeze covered this day, so your streak held` : base;
   };
 
   return (
@@ -238,9 +326,21 @@ export default function Consistency() {
         <Hero
           label="Current Streak"
           figure={known ? fig(streak) : fig(null)}
-          unit={known ? (streak === 1 ? 'day' : 'days') : undefined}
+          // "days or more" where the chain runs off the bottom of the read. The
+          // qualifier goes in the unit rather than in front of the figure: the
+          // figure slot is display type shrunk to a single line, and the Hero
+          // speaks label, figure, unit and note as one sentence, so VoiceOver
+          // gets "Current Streak, 140 days or more" rather than a bare 140.
+          unit={!known ? undefined
+            : claim.bounded ? boundedStreakUnit(streak)
+            : streak === 1 ? 'day' : 'days'}
           note={!known
             ? (logStatus === 'loading' ? 'Reading your training log…' : 'Not a broken streak — an unread one.')
+            // Said before the freeze budget and before the best run, because it
+            // is about the figure directly above it rather than about anything
+            // beside it.
+            : claim.bounded
+            ? BOUNDED_STREAK_NOTE
             : !countable
             ? freezes > 0
               ? `${freezes} freeze${freezes === 1 ? '' : 's'} in reserve · best run not all read`
@@ -252,6 +352,25 @@ export default function Consistency() {
             ? `Best ${best} day${best === 1 ? '' : 's'} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
             : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`}
         />
+
+        {/* ── the days a freeze actually covered ────────────────────────────
+            The budget is earned from the log, spent silently, and until now
+            never named. A member looking at an unbroken streak over a grid with
+            an empty square in the middle of it had two readings available —
+            "the app is wrong" and "something saved me" — and no way to choose
+            between them. This is the sentence that chooses.
+
+            Dated, not counted. "A freeze was used" is a fact nobody can check;
+            "Tue 8 Sep" is one they remember, and remembering it is the whole
+            point — the feature exists to tell somebody that the day they missed
+            did not cost them the run. */}
+        {frozenDays.length ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {frozenDays.length === 1
+              ? `A freeze covered ${fmtDay(frozenDays[0])}, so your run carried across it.`
+              : `Freezes covered ${frozenDays.slice().sort().map(fmtDay).join(' and ')}, so your run carried across them.`}
+          </Text>
+        ) : null}
 
         <Rule />
 
@@ -374,7 +493,7 @@ export default function Consistency() {
                         <Pressable key={di}
                           onPress={() => setPicked(d)}
                           accessibilityRole="button"
-                          accessibilityLabel={heatmapDayLabel(d, known ? (counts[key(d)] || 0) : null, today)}
+                          accessibilityLabel={dayLabel(d)}
                           hitSlop={2}
                           style={[{ width: 14, height: 14, borderRadius: 3 }, cell(d)]} />
                       ))}
@@ -389,7 +508,7 @@ export default function Consistency() {
               that, in the same words the screen reader gets. */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
             <Text style={{ ...ty.caption, color: picked ? t.ink2 : t.ink3, flex: 1 }}>
-              {picked ? heatmapDayLabel(picked, known ? (counts[key(picked)] || 0) : null, today) : 'Tap a square to read its date, or step through the days.'}
+              {picked ? dayLabel(picked) : 'Tap a square to read its date, or step through the days.'}
             </Text>
             {/* ── the other way to reach a day ────────────────────────────
                 Eighty-four squares at 14pt, four points apart, are a long way
@@ -410,12 +529,26 @@ export default function Consistency() {
               <Icon name={FORWARD_ICON} size={15} color={t.ink2} />
             </Pressable>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
+          {/* The legend is a picture and reads as nothing, so it is named once
+              for the ear and its three (or four) swatches are hidden from the
+              tree rather than announced as unlabelled views. */}
+          <View accessible accessibilityLabel={frozenDays.length
+            ? 'Key: an empty square is a day with nothing logged, a lighter square is one exercise, a solid square is more, and a square outlined in your gym’s colour is a day a freeze covered.'
+            : 'Key: an empty square is a day with nothing logged, a lighter square is one exercise, and a solid square is more.'}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Less</Text>
             <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }} />
             <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.brand, opacity: 0.6 }} />
             <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.brand }} />
             <Text style={{ ...ty.caption, color: t.ink3 }}>More</Text>
+            {/* Only where there is one to explain. A key to a mark that is not
+                on the grid is a key to nothing. */}
+            {frozenDays.length ? (
+              <>
+                <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.brand, marginStart: sp.sm }} />
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Freeze</Text>
+              </>
+            ) : null}
           </View>
         </Section>
       </ScrollView>

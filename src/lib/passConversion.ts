@@ -778,6 +778,181 @@ export function suppressionSentence(
   return null;
 }
 
+/* ── what a member is about to lose ────────────────────────────────────────── */
+
+/**
+ * How far ahead "about to run out" looks.
+ *
+ * Thirty days, because that is the horizon a desk can act on: long enough that
+ * a member can be rung, told, and get back in before the credits go, short
+ * enough that the list is a list and not the whole pass book. A pack sold on a
+ * ninety-day validity is typically half-used at thirty days out, which is
+ * exactly the conversation.
+ */
+export const EXPIRY_HORIZON_DAYS = 30;
+
+/** One live pass with credits on it and a last day coming up. */
+export interface ExpiringPass {
+  passId: string;
+  holderId: string;
+  name: string | null;
+  passTypeName: string | null;
+  /** What the credits buy. A door-and-classes credit and a personal-training
+   *  credit are not the same thing and are never added — the same split
+   *  `MemberDossier` draws between `passVisitsLeft` and `ptCreditsLeft`. Null
+   *  when the pass type could not be read. */
+  covers: GymPass['covers'];
+  creditsLeft: number;
+  usesTotal: number;
+  /** A bare YYYY-MM-DD off a `date` column, compared as a string. */
+  expiresOn: string;
+  /** Whole days from the gym's today to that day. 0 is "last day today". */
+  daysLeft: number;
+}
+
+/**
+ * What is about to be lost, and what is counted out of that list and why.
+ *
+ * ── The question no screen in this product could answer ───────────────────
+ *
+ * /door shows one pass at a time, /money shows the price book, and this page
+ * showed what pass-giving CONVERTED to. Nothing anywhere said: which members
+ * have paid for credits they are about to lose. That is the report every
+ * leading gym console leads with — Wodify, PushPress and Zen Planner all put
+ * "packs expiring" in front of the desk — and it is the one pass report a gym
+ * acts on the same day, because the member is still a member and the credits
+ * are still spendable for a fortnight.
+ *
+ * ── Four things this refuses ──────────────────────────────────────────────
+ *
+ *  · It never sums credits. Ten door visits and two PT hours are not twelve of
+ *    anything; `covers` is on every row and there is no total.
+ *  · A pass with NO expiry is not "about to run out". It is a decision the gym
+ *    made — `passTypeBlocker` says "leave it blank for a pass that does not
+ *    expire — 0 is not the same thing" — and it is counted separately so an
+ *    empty list does not read as a gym with no live credits.
+ *  · A pass whose `expires_on` could not be read as a date is a THIRD fact,
+ *    kept apart from both. A gym that imported its pass book with a broken
+ *    date column would otherwise see those passes silently fall out of a list
+ *    headed "about to run out" — the same silence as a failed read drawn as an
+ *    empty one, one column down.
+ *  · A pass held by a walk-in with no account is counted, never listed. There
+ *    is no person to ring, and two anonymous passes may be one person twice —
+ *    the rule `attributionSentence` already states for the page above.
+ *
+ * `today` is the GYM's calendar day. Every comparison here is string-on-string
+ * between bare `YYYY-MM-DD` values, which is what `date` columns hold; nothing
+ * is parsed into an instant and re-read on anybody's clock.
+ */
+export interface ExpiringPasses {
+  /** Soonest first. Live, with credits on them, and held by somebody with an
+   *  account. */
+  soon: ExpiringPass[];
+  /** Live passes with credits and a last day inside the horizon, held by a
+   *  walk-in with no account. Counted out of `soon`, never listed. */
+  anonymous: number;
+  /** Live passes with credits and no expiry at all. A decision, not a gap. */
+  neverExpire: number;
+  /** Live passes with credits whose `expires_on` is not a date this app can
+   *  read. Not the same fact as having no expiry, and not evidence of
+   *  anything — they are outside the list rather than assumed safe. */
+  unreadableExpiry: number;
+  /** How many distinct people are on `soon`, which is the size of the job. One
+   *  member holding three expiring packs is one phone call. */
+  people: number;
+  withinDays: number;
+}
+
+export function expiringPasses(
+  passes: readonly GymPass[],
+  today: string,
+  withinDays: number = EXPIRY_HORIZON_DAYS,
+): ExpiringPasses {
+  const soon: ExpiringPass[] = [];
+  let anonymous = 0;
+  let neverExpire = 0;
+  let unreadableExpiry = 0;
+
+  for (const p of passes) {
+    const creditsLeft = remainingUses(p);
+    // Nothing left to lose. A spent pass is a pass that did its job.
+    if (creditsLeft <= 0) continue;
+    // Already gone. This list is about what can still be saved; a pass that
+    // ran out last week is a different conversation and a different screen.
+    if (isExpired(p, today)) continue;
+
+    if (p.expiresOn == null) { neverExpire += 1; continue; }
+    const on = dateOf(p.expiresOn);
+    if (on == null) { unreadableExpiry += 1; continue; }
+
+    const daysLeft = daysBetween(today, on);
+    if (daysLeft == null) { unreadableExpiry += 1; continue; }
+    if (daysLeft > withinDays) continue;
+
+    if (!p.holderId) { anonymous += 1; continue; }
+
+    soon.push({
+      passId: p.id,
+      holderId: p.holderId,
+      name: p.holderName?.trim() || null,
+      passTypeName: p.passTypeName,
+      covers: p.covers,
+      creditsLeft,
+      usesTotal: p.usesTotal,
+      expiresOn: on,
+      daysLeft,
+    });
+  }
+
+  soon.sort(
+    (a, b) => a.daysLeft - b.daysLeft
+      || b.creditsLeft - a.creditsLeft
+      || a.passId.localeCompare(b.passId),
+  );
+
+  return {
+    soon,
+    anonymous,
+    neverExpire,
+    unreadableExpiry,
+    people: new Set(soon.map((s) => s.holderId)).size,
+    withinDays,
+  };
+}
+
+/**
+ * The sentence under the list, naming everything that is NOT in it.
+ *
+ * Null when there is nothing counted out, so a gym with a clean pass book gets
+ * no paragraph. Every clause here is a fact the empty-or-short list would
+ * otherwise be read as denying.
+ */
+export function expiringExclusions(x: ExpiringPasses): string | null {
+  const parts: string[] = [];
+  if (x.anonymous > 0) {
+    parts.push(
+      `${x.anonymous} ${x.anonymous === 1 ? 'pass is' : 'passes are'} held by a walk-in with no `
+      + 'account, so there is nobody here to ring — and they cannot be counted as people either, '
+      + 'since two anonymous passes may be one person twice',
+    );
+  }
+  if (x.neverExpire > 0) {
+    parts.push(
+      `${x.neverExpire} live ${x.neverExpire === 1 ? 'pass has' : 'passes have'} no expiry at all, `
+      + 'which is a decision the gym made rather than a missing date — nothing on those runs out',
+    );
+  }
+  if (x.unreadableExpiry > 0) {
+    parts.push(
+      `${x.unreadableExpiry} live ${x.unreadableExpiry === 1 ? 'pass carries' : 'passes carry'} a `
+      + 'last day this app cannot read as a date, so whether it is close is UNKNOWN rather than no '
+      + '— those are outside the list and are not thereby safe',
+    );
+  }
+  if (!parts.length) return null;
+  return `Not in the list above: ${parts.join('; ')}.`;
+}
+
 /* ── helpers ───────────────────────────────────────────────────────────────── */
 
 /** A plain ISO date from whatever the column holds, or null. Taken from the

@@ -580,7 +580,22 @@ export default function Trends() {
             <View style={{ height: sp.lg }} />
             <KpiRow items={[
               {
-                label: 'Longest Held',
+                // ── the label, and what the figure under it actually is ──
+                //
+                // This read "Longest Held" and printed `holdNow`, which is
+                // `holds[holds.length - 1].secs` — the LATEST day's hold. The
+                // longest is the KPI immediately to its right, labelled
+                // "Best", so a member whose plank has gone 70 s → 45 s → 30 s
+                // read "Longest Held 0:30" beside "Best 1:10" — one row, two
+                // figures, and the smaller of them claiming to be the larger.
+                //
+                // The figure is the right one to lead with and the delta under
+                // it settles which: `holdChangeSecs` is first → last, so it
+                // measures to THIS value and to no other. The name of the
+                // column was what was wrong, and it is the name that changed —
+                // the same pairing the strength row above already uses, where
+                // "Est. 1RM" is the latest and "Best" is the maximum.
+                label: 'Last Hold',
                 value: logKnown && holdNow != null ? holdLabel(holdNow) : fig(null),
                 // Through `deltaLabel`, not a hand-rolled sign — it owns the
                 // arm for nothing moved ("No change since 4 May", never "+0 s")

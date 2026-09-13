@@ -74,6 +74,10 @@ import {
 // src/lib/photoPose.ts, including what it refuses to do: it never looks at a
 // picture, and it never chooses the pair.
 import { fetchPhotoPoses, poseLabel, poseMismatchNote, type Pose } from '../../src/lib/photoPose';
+// The CALENDAR-day distance between the two photographs — see `spanDays`.
+// There are two `daysApart`s in this tree and they answer different questions;
+// this is the one that counts days the way the person living them counts.
+import { daysApart as calendarDaysApart } from '../../src/lib/photoTimeline';
 // The long view of the body. src/lib/longView.ts gave the TRAINING side its
 // year and the body side kept only snapshots — this screen included, which
 // until now showed two days the member had to pick and nothing either side of
@@ -215,6 +219,37 @@ export default function Compare() {
   };
 
   const pair = photos ? comparePair(photos, sel) : null;
+  /**
+   * How far apart the two photographs are, in CALENDAR DAYS.
+   *
+   * ── why this is not `pair.days` ──────────────────────────────────────────
+   *
+   * `comparePair` fills `days` from `daysApart` in src/lib/progressPhotos.ts,
+   * which is `Math.round((b - a) / 86400000)` over two instants — elapsed
+   * 24-hour periods, not days. Everything else on this screen counts calendar
+   * days: `fmtFullDay` prints each photo's own LOCAL day under it, and
+   * `readingOn` pairs a scan to a photo on the LOCAL day through `sameDay`.
+   * So the one line that says how far apart they are was measuring a different
+   * quantity from the two lines directly above it, and the disagreement is
+   * visible on screen in both directions:
+   *
+   *   22:00 and 00:30 the next night — two hours, so "Same day", printed under
+   *   two captions reading 10 Aug and 11 Aug.
+   *   08:00 Monday and 20:00 Tuesday — 36 hours, so "2 days apart", printed
+   *   under two captions one day apart.
+   *
+   * It travels, too: `compareSummary` puts this in the heading of the text a
+   * member shares with their coach, where the dates are beside it.
+   *
+   * `photoTimeline.daysApart` is the same arithmetic done on two local
+   * midnights, which is the version this tree already trusts for a photo
+   * timeline. `progressPhotos` is left alone — app/(client)/scans.tsx reads it
+   * too and is another lane's file this hour.
+   *
+   * Null when either date will not parse, which `spanLabel` prints as a dash
+   * rather than as "Same day".
+   */
+  const spanDays = pair ? calendarDaysApart(pair.before.takenAt, pair.after.takenAt) : null;
   // The rows are only built when the scans are actually known. Under 'error'
   // the table is replaced by a sentence, because a table of dashes says "there
   // was no scan on those days" and that is not what a failed read means.
@@ -239,7 +274,7 @@ export default function Compare() {
 
   const sendFigures = () => {
     if (!pair || !rows) return;
-    void shareText(compareSummary(dayOf(pair.before), dayOf(pair.after), pair.days, rows), 'My progress comparison');
+    void shareText(compareSummary(dayOf(pair.before), dayOf(pair.after), spanDays, rows), 'My progress comparison');
   };
 
   const G = layout.gutter;
@@ -325,7 +360,7 @@ export default function Compare() {
                       </View>
                     ))}
                   </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{spanLabel(pair.days)}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{spanLabel(spanDays)}</Text>
 
                   {/* ── two different views ─────────────────────────────────
                       Above the figures, because it qualifies the pictures and

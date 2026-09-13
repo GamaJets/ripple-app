@@ -1703,6 +1703,48 @@ function Filed({ read, rows, w, zone, tenantId, me, onChange }: {
     }));
   }, [used, rows, w.firstDay, w.lastDay, w.label, status]);
 
+  /**
+   * The filings that actually cover some part of the month on screen.
+   *
+   * The table under this heading listed EVERY filing this gym has ever
+   * recorded, under a subtitle reading "whether anything is recorded as filed
+   * covering {month}". So a gym three years into quarterly returns opened
+   * August and was shown twelve rows, none of which need have anything to do
+   * with August — and the sentence above them said they did. On the page an
+   * accountant is handed, a table whose heading names a period and whose rows
+   * are all time is a document that answers a question it was not asked.
+   *
+   * Taken from `filingsFor`'s own `filings`, which are exactly the rows
+   * overlapping the period, so this set and the sentences above it cannot
+   * disagree about what covers the month. Membership is by id and the ORDER is
+   * `rows`' own — newest filing first, as the read returned them.
+   */
+  const periodIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const l of lines) {
+      if (l.answer.state === 'filed' || l.answer.state === 'partly') {
+        for (const f of l.answer.filings) ids.add(f.id);
+      }
+    }
+    return ids;
+  }, [lines]);
+  const periodRows = useMemo(() => rows.filter((f) => periodIds.has(f.id)), [rows, periodIds]);
+  /**
+   * Everything recorded that covers no day of this month.
+   *
+   * Counted and reachable rather than simply filtered away. A filing typed with
+   * the wrong year — the ordinary typo, and the one whose only repair is
+   * removing the row — covers no month anybody will ever open, so a table that
+   * silently dropped it would make it unremovable from this screen for good. It
+   * also catches a row whose `kind` this build does not recognise, which
+   * `kindsInUse` cannot put in a line above.
+   */
+  const elsewhere = useMemo(() => rows.filter((f) => !periodIds.has(f.id)), [rows, periodIds]);
+  /** Whether the table is showing all time rather than this month. Off by
+   *  default: the heading names a month, so the month is what it must show
+   *  until somebody asks otherwise. */
+  const [showAll, setShowAll] = useState(false);
+
   const draft: FilingDraft = { kind, periodFrom, periodTo, filedOn, reference, filedBy };
   const blockers = filingBlockers(draft, today);
 
@@ -1782,9 +1824,35 @@ function Filed({ read, rows, w, zone, tenantId, me, onChange }: {
               </p>
             ))}
           </div>
+          {/* Which set the table below is, said above it rather than left to
+              be inferred from the rows. The heading names a month; anything
+              wider than that has to announce itself. */}
+          <p style={{ margin: 0, padding: '10px 14px', borderBottom: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '92ch' }}>
+            {showAll
+              ? <>Every filing this gym has recorded, whatever period it covers &mdash; {rows.length} in all.</>
+              : <>The filings that cover some part of {w.label}. Rows covering other periods are not listed here.</>}
+            {elsewhere.length ? (
+              <>
+                {' '}
+                <button type="button" className="no-print" style={linkBtn} onClick={() => setShowAll((s) => !s)}>
+                  {showAll
+                    ? `Show only ${w.label}`
+                    : `Show the ${elsewhere.length} covering other periods`}
+                </button>
+                {showAll ? null : (
+                  <>
+                    {' '}&mdash; a filing typed with the wrong dates covers no month anybody will open,
+                    and removing it is the only repair.
+                  </>
+                )}
+              </>
+            ) : null}
+          </p>
           <DataTable noun="recorded filings"
-            rows={rows} columns={cols} rowKey={(f) => f.id}
-            empty="Nothing recorded. Every period on this screen therefore reads as one nobody has answered for — which is what it is, and is deliberately not the same as a period this gym did not file for."
+            rows={showAll ? rows : periodRows} columns={cols} rowKey={(f) => f.id}
+            empty={rows.length
+              ? `Nothing recorded covers any part of ${w.label}. This gym has recorded ${rows.length === 1 ? 'one filing' : `${rows.length} filings`}, ${rows.length === 1 ? 'and it covers' : 'and they cover'} other periods — which is not the same as this month having been filed for, and not the same as it not having been.`
+              : 'Nothing recorded. Every period on this screen therefore reads as one nobody has answered for — which is what it is, and is deliberately not the same as a period this gym did not file for.'}
           />
         </>
       </Part>
@@ -2070,12 +2138,40 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, drops, me, on
   const [memberId, setMemberId] = useState('');
   const [membershipId, setMembershipId] = useState('');
   const [amount, setAmount] = useState('');
-  const [issuedOn, setIssuedOn] = useState(today);
+  /**
+   * The issue date — null meaning "nobody has chosen", so the box FOLLOWS the
+   * gym's day rather than being frozen at the reader's.
+   *
+   * `useState(today)` ran its initialiser once, at mount, and this component
+   * mounts before the zone is known: the effect on this page does `setMe(who)`
+   * and only then awaits `readTenant` and `fetchGymZone`, so React has already
+   * painted with `zone === null` — where `gymDay` returns null and `today` is
+   * `isoDate(new Date())`, the reader's own calendar. The repair three lines
+   * above therefore had no effect on the value in the box for any gym that has
+   * set a zone, which is every gym it was written for. A London bookkeeper
+   * raising an Auckland gym's invoice at 22:00 was still offered yesterday.
+   *
+   * Same shape as `picked ?? monthNow` on /costs and `picked` above: a chosen
+   * value wins, including the EMPTY string somebody typed by clearing the box,
+   * because `'' ?? x` is `''` and clearing is a choice.
+   */
+  const [issuedPicked, setIssuedPicked] = useState<string | null>(null);
+  const issuedOn = issuedPicked ?? today;
+  const setIssuedOn = setIssuedPicked;
   // Thirty days after the issue date, which is the commonest term and is a
   // SUGGESTION rather than a stored default — an owner who clears it gets an
   // invoice with no due date, which is never overdue and is correct for a
   // receipt. `dueAfter` computes in UTC so it cannot land a day out.
-  const [dueOn, setDueOn] = useState(() => dueAfter(today, 30));
+  //
+  // Derived from `issuedOn` and not latched, which is the other half of the
+  // same defect: this was `dueAfter(today, 30)` computed once at mount, so
+  // moving the issue date back to the 1st left the terms at thirty days from
+  // whenever the tab was opened — an invoice whose stated term is not the term
+  // the comment above claims. Untouched, it now tracks the issue date; once
+  // somebody types in it, what they typed stands.
+  const [duePicked, setDuePicked] = useState<string | null>(null);
+  const dueOn = duePicked ?? dueAfter(issuedOn, 30);
+  const setDueOn = setDuePicked;
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [writeErr, setWriteErr] = useState<string | null>(null);

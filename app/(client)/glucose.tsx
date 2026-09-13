@@ -211,8 +211,17 @@ export default function Glucose() {
           </View>
         </View>
 
+        {/* The quoted range, in the unit the reader picked. It was typed as
+            "3.9–7.8 mmol/L" whatever the toggle below said, so somebody
+            reading in mg/dL — every reading on this screen a three-figure
+            number, every band drawn against it — was given the one number
+            that explains the colours in a unit they had just chosen not to
+            use, and had to convert it in their head to check a reading
+            against it. `formatGlucose` is the same function the readings go
+            through, so the range and the figures it judges cannot come out in
+            two different units again. */}
         <Notice tone={t.s3} kicker="Not medical advice" title="Readings, not recommendations"
-          note={`${BRAND.label} shows what your monitor recorded. It does not tell you what to eat, and the range shown (${TYPICAL_LOW_MMOL}–${TYPICAL_HIGH_MMOL} mmol/L) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
+          note={`${BRAND.label} shows what your monitor recorded. It does not tell you what to eat, and the range shown (${formatGlucose(TYPICAL_LOW_MMOL, unit)}–${formatGlucose(TYPICAL_HIGH_MMOL, unit)} ${unit}) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
 
         {/* ── The window's headline figures ─────────────────────────────── */}
         <Section style={{ marginTop: sp.lg }}>
@@ -433,6 +442,18 @@ export default function Glucose() {
               total. `known` is `status === 'ready'`. */}
           {known && g.readings.length > 60 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Showing the most recent 60 of {g.readings.length}.</Text>
+          ) : g.status === 'partial' && g.readings.length > 0 ? (
+            /* The other half of the same gating. Under 'partial' the count in
+               the heading is withheld and this sentence was withheld with it,
+               so the list simply stopped at sixty rows with nothing said —
+               and `g.readings.length` is the ROW CAP rather than a total, so
+               "of 1,000" would have been a figure taken off a truncated read.
+               What can be stated is that the list is short and why, which is
+               the one thing a reader needs and the one thing they were not
+               told. */
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              Showing the most recent 60. There are more readings on record than we can read at once, so this is not all of them.
+            </Text>
           ) : null}
         </Section>
       </ScrollView>

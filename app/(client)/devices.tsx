@@ -43,7 +43,7 @@ import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/weara
 // src/lib/wearableLink.ts — this screen and that one used to compute it
 // separately and contradict each other in front of the same client.
 import { forgetLink, linkFor, useLinkRevision } from '../../src/lib/wearableLinkLedger';
-import { formatSleepHours, recentNights, type SleepRead } from '../../src/lib/sleepMerge';
+import { formatSleepHours, recentNights, type SleepRead, type SleepReading } from '../../src/lib/sleepMerge';
 // Unlinking a watch used to destroy every night it had measured. See
 // src/lib/retiredSleep.ts and supabase/parts/2650 — the nights are copied to a
 // shelf BEFORE `w.disconnect` runs its delete, and copied back on reconnect.
@@ -504,16 +504,43 @@ export default function Devices() {
  // report sleep says so in its own words; it is not left blank, because blank
  // reads as "nothing recorded".
  const [sleepReads, setSleepReads] = useState<SleepRead[] | null>(null);
+ /**
+  * The WALK failing, which is not the same as the walk finding nothing.
+  *
+  * `readSleepFromDevices` catches per provider and hands back one row each, so
+  * reaching the catch below means the walk itself broke and there are no rows
+  * of any kind. That used to be written to state as `[]` — and `[]` renders as
+  * a Sleep Sources section with a heading, a paragraph promising that sleep is
+  * read from every device, and not one device under it. A read that never
+  * happened, drawn as a list of devices that said nothing.
+  *
+  * It is the same hole src/lib/sleepMerge.ts grew `markNightsUnread` for one
+  * screen along, arriving the same way: the failure reaches the screen as an
+  * ABSENCE of failures. Kept as its own flag rather than folded into
+  * `sleepReads`, so the list and the reason it is missing cannot be confused
+  * for each other.
+  */
+ const [sleepWalkFailed, setSleepWalkFailed] = useState(false);
  const connectedKey = connected.map((p) => p.meta.id).join(',');
  useEffect(() => {
   let cancelled = false;
   (async () => {
    try {
-    const reads = await readSleepFromDevices(w.states, 2);
-    if (!cancelled) setSleepReads(reads);
+    // Seven nights, not two. Two nights can only ever answer "did it record
+    // last night", and the sentence that came out of a no was "Readable —
+    // nothing recorded for last night" — which is what a ring left on the
+    // charger looks like AND what a ring that stopped feeding us three weeks
+    // ago looks like. See `lastRecorded` below: with a week to look at, the
+    // row can name the last night the device actually recorded, which is the
+    // one fact that tells those two apart. Seven is what
+    // src/ui/deviceSleep.tsx already reads for the same devices.
+    const reads = await readSleepFromDevices(w.states, 7);
+    if (!cancelled) { setSleepReads(reads); setSleepWalkFailed(false); }
    } catch (e) {
     reportError('devices.sleepSources', e);
-    if (!cancelled) setSleepReads([]);
+    // Not an empty list. `[]` here would be this screen stating that no device
+    // answered, out of a read that nobody got an answer to.
+    if (!cancelled) { setSleepReads([]); setSleepWalkFailed(true); }
    }
   })();
   return () => { cancelled = true; };
@@ -528,6 +555,38 @@ export default function Devices() {
  // Apple Health can contribute several rows here, because it holds whatever
  // every watch and app on the phone wrote into it.
  const lastNightKey = recentNights(1)[0];
+ /**
+  * The most recent night this source actually recorded, or null for none in
+  * the window.
+  *
+  * ── The fact the row could not state, and what it cost ───────────────────
+  *
+  * "Readable — nothing recorded for last night" is one sentence covering two
+  * situations a member would act on differently: a ring that was on the
+  * charger overnight, and a ring that stopped feeding us a fortnight ago and
+  * will go on not feeding us until somebody notices. WHOOP, Oura and Garmin
+  * all answer this on their own device screens — the last time anything came
+  * through — because a link that has quietly stopped is the failure their
+  * users cannot see. This app had the opposite: `linkFor` catches a token the
+  * server has declared dead, and a live token that simply stops returning
+  * nights was invisible on every screen.
+  *
+  * Only ever a night a named source reported, and `null` when there is none in
+  * the week. A window with nothing in it is not evidence of anything beyond
+  * the window, so the sentence built from a null says how far we looked rather
+  * than how long it has been.
+  *
+  * The nights are compared as bare `YYYY-MM-DD` strings, which sort
+  * lexicographically as dates and are never parsed into a UTC instant.
+  */
+ const lastRecorded = (r: SleepRead): SleepReading | null => {
+  let best: SleepReading | null = null;
+  for (const rd of r.readings) {
+   if (!rd?.night || !(rd.minutesAsleep > 0)) continue;
+   if (!best || rd.night > best.night) best = rd;
+  }
+  return best;
+ };
  // totalKcal counts as a live reading too. WHOOP publishes only that, so
  // testing activeKcal alone hid the whole panel from every WHOOP user the
  // moment its energy stopped being filed under the wrong name.
@@ -942,6 +1001,13 @@ export default function Devices() {
     </Text>
     {sleepReads == null ? (
      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Checking your devices…</Text>
+    ) : sleepWalkFailed ? (
+     // The read never happened. An empty list under this heading would be the
+     // screen saying that none of the devices above answered, which is a
+     // statement about them made out of a failure of ours.
+     <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
+      Your devices could not be asked about sleep just now, so nothing is listed here — that is this app failing to ask rather than your {devicesWord} having nothing to say. Pull down to try again.
+     </Flag>
     ) : (
      <View style={{ marginTop: sp.lg }}>
       {sleepReads.map((r, i) => {
@@ -963,9 +1029,27 @@ export default function Devices() {
             {r.reason || `Cannot report sleep to ${BRAND.label} yet.`}
            </Text>
           )
-         ) : lastNight.length === 0 ? (
+         ) : lastNight.length === 0 ? (<>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Readable — nothing recorded for last night.</Text>
-         ) : (
+          {/* And when it last DID record one, which is the difference between
+              a night off the wrist and a link that has quietly stopped. See
+              `lastRecorded`. Neither sentence is a diagnosis: the first says
+              what the device last gave us and the second says how far back we
+              looked, because a week with nothing in it is not evidence of
+              anything beyond the week. */}
+          {(() => {
+           const seen = lastRecorded(r);
+           return seen ? (
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+             Last night it recorded was {fmtDay(seen.night)} — {formatSleepHours(seen.minutesAsleep)} from {seen.sourceName}.
+            </Text>
+           ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+             Nothing from it in the last seven nights either. It is still connected, so this is a device that has stopped sending nights rather than one that has been unlinked — check it is syncing in its own app.
+            </Text>
+           );
+          })()}
+         </>) : (
           lastNight.map((rd) => (
            <Text key={rd.sourceId} style={{ ...ty.caption, ...numeric, color: t.ink2, marginTop: 2 }}>
             {formatSleepHours(rd.minutesAsleep)} · {rd.sourceName}{rd.basis === 'in-bed' ? ' (time in bed)' : ''}

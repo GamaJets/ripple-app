@@ -23,7 +23,9 @@ import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib
 import { gymDateTimeText, gymTimeText, calendarDateText } from '@lib/gymWhen';
 // Escape, focus and the tab trap these dialogs never had.
 import { useDialog, dialogPanel } from '@/lib/dialog';
-import { parseGymZone } from '@lib/gymZone';
+// `gymWallValue` and `instantAtGym` are the two halves of a `datetime-local`
+// that means the gym's clock rather than the browser's — see `localInputValue`.
+import { parseGymZone, gymWallValue, instantAtGym, NO_ZONE_NOTE } from '@lib/gymZone';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
@@ -75,7 +77,15 @@ import {
   type PtSlot, type TimetableEntry, type FloorSlice,
 } from '@lib/gymPtSchedule';
 import { fetchMemberships, type Membership } from '@lib/gymRecord';
-import { WEEK_DAYS, startOfWeek } from '@lib/weekStart';
+import { WEEK_DAYS } from '@lib/weekStart';
+// The week, the day and the hour AS THE GYM COUNTS THEM. `weekStartOf` opens
+// the week on the gym's calendar, `weekWindow` turns it into the two instants
+// the database is asked for, and `rotaInstant` names a given hour of a given
+// gym day. All three fall back to the reader's clock for a gym with no zone —
+// which is what this board already did — and the difference is that the
+// fallback is now the exception rather than the rule. See `range` below.
+import { weekStartOf, weekDays, shiftWeek, weekWindow } from '@lib/gymRota';
+import { rotaInstant, rotaToday } from '@lib/rotaClock';
 import { Banner, type BannerTone } from '@/components/Banner';
 // The three answers `promote_session_waitlist` can give, read once for the
 // whole product. `src/ui/sessions.tsx` reads the same RPC through the same
@@ -146,23 +156,58 @@ export default function Timetable() {
    *   · autumn back, and the next week's opening hour leaks in and is counted
    *     as this week's, in the fill rate and in the class pay.
    *
-   * So the end is the NEXT week's opening midnight, built the same way the
-   * start is — `setDate(+7)` then `setHours(0,0,0,0)`, which is arithmetic on
-   * the calendar rather than on the clock — minus a millisecond. Both bounds
-   * are then the gym's own midnights whatever its offset did that weekend.
+   * So the end is the NEXT week's opening midnight, minus a millisecond.
+   *
+   * ── And whose midnights those were ──────────────────────────────────────
+   *
+   * The paragraph above says "both bounds are then the gym's own midnights",
+   * and they were not. Both were built by `startOfWeek()` and `setHours` on the
+   * READER's machine — right for the desk standing in the building, wrong for
+   * every owner, bookkeeper and area manager who is not. The comment fixed the
+   * clocks-change bug and left the zone bug behind it, which is why it read as
+   * settled.
+   *
+   * What it costs is a week whose edges belong to somebody else's day. An owner
+   * in Los Angeles opening a London gym's board asks for 00:00 PDT Sunday —
+   * 08:00 Sunday in London — so the gym's Sunday 06:00 and 07:00 classes are
+   * outside the window at one end, and the FOLLOWING Sunday's early classes are
+   * inside it at the other. The board then draws a Sunday morning with nothing
+   * on it, and `clashes()` and floor cover are computed over a set of classes
+   * that is missing an end and carrying somebody else's.
+   *
+   * `weekStartOf` opens the week on the gym's own calendar day and `weekWindow`
+   * turns it into instants through `rotaInstant`, which solves the offset AT the
+   * instant being named — so a week containing a clocks change is still seven
+   * days and still the gym's seven days. With no zone both fall back to the
+   * reader's clock, exactly as before.
+   *
+   * The end stays CLOSED by a millisecond because both readers below bound with
+   * `.lte`: `fetchClasses` and `fetchPtSlots` each filter `starts_at` with
+   * `.gte(from).lte(to)`, and `weekWindow` hands back an exclusive end. Passing
+   * it as it stands would put a class at the next week's opening midnight into
+   * two weeks at once — counted twice in the fill rate and in the class pay.
    */
   const range = useCallback(() => {
-    const weekOpened = startOfWeek();
-    weekOpened.setDate(weekOpened.getDate() + weekOffset * 7);
-    const nextWeek = new Date(weekOpened);
-    nextWeek.setDate(weekOpened.getDate() + 7);
-    nextWeek.setHours(0, 0, 0, 0);
-    const lastMoment = new Date(nextWeek.getTime() - 1);
-    return { from: weekOpened.toISOString(), to: lastMoment.toISOString(), weekOpened };
-  }, [weekOffset]);
+    const weekIso = shiftWeek(weekStartOf(Date.now(), zone), weekOffset);
+    const w = weekWindow(weekIso, zone);
+    // `weekWindow` is null only for a date that is not a date, which
+    // `weekStartOf` cannot produce. Handled rather than asserted away: a null
+    // window means the board asks for nothing rather than for all of time.
+    if (!w) return null;
+    return {
+      from: w.fromISO,
+      to: new Date(Date.parse(w.toISO) - 1).toISOString(),
+      weekIso,
+    };
+  }, [weekOffset, zone]);
 
   const load = useCallback(async (tenantId: string): Promise<boolean> => {
-    const { from, to } = range();
+    const window = range();
+    // No window, no read. Reporting it rather than asking for an unbounded
+    // week: an unbounded read is not a failure anybody would notice, it is a
+    // board that quietly shows every class the gym has ever run.
+    if (!window) { setRaw(null); setLoadFail('the week being shown could not be worked out'); return false; }
+    const { from, to } = window;
     setRaw(null); setLoadFail(null);
     // allSettled, not all: which half failed is the useful part of the message.
     const [c, p] = await Promise.allSettled([
@@ -285,10 +330,21 @@ export default function Timetable() {
     },
   );
 
+  /**
+   * The first read, and every re-read the WINDOW changes under.
+   *
+   * `zone` is in the list because the week the board asks for is now cut on the
+   * gym's clock, so the window genuinely changes when the zone lands. Without
+   * it the first read — fired the moment `setMe` lands, which is before the
+   * `tenants` row comes back — would stand as the week for the rest of the
+   * session, and the board would be showing the reader's week under a label
+   * saying the gym's. `useFetched` coalesces, so the second read replaces the
+   * first rather than racing it.
+   */
   useEffect(() => {
     if (me?.tenantId) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.tenantId, weekOffset]);
+  }, [me?.tenantId, weekOffset, zone]);
 
   // Cancelled classes are OFF the merged board, and everything computed from
   // the board — floor cover, clashes, "on the floor at six" — is therefore
@@ -385,18 +441,15 @@ export default function Timetable() {
   // `refresh` is the hook's, not a second reader. It was a local
   // `() => load(tenantId)`, handed to every write on this board, so adding a
   // class re-read the week WITHOUT moving the stamp under it.
-  const { weekOpened } = range();
-  // The same calendar arithmetic as `range` above, for the same reason: on a
-  // clocks-change week `weekOpened + 6 * DAY` lands an hour either side of
-  // midnight, and the label would name the wrong last day of the week it is
-  // showing.
-  const lastDayLabel = new Date(weekOpened);
-  lastDayLabel.setDate(weekOpened.getDate() + 6);
-  // Calendar days, not instants: both Dates are LOCALLY built midnights, so
-  // drawing them in any zone at all could name the day before.
-  const dayOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // The seven calendar dates this board is showing, on the gym's calendar.
+  // `weekStartOf` has already spent the zone, so these are bare `YYYY-MM-DD`
+  // strings: calendar days, not instants, and `calendarDateText` draws them
+  // without a zone precisely because drawing a bare date in one could name the
+  // day before it.
+  const weekIso = range()?.weekIso ?? weekStartOf(Date.now(), zone);
+  const days = weekDays(weekIso);
   const short = { day: 'numeric', month: 'short' } as const;
-  const weekLabel = `${calendarDateText(dayOf(weekOpened), short) ?? '—'} – ${calendarDateText(dayOf(lastDayLabel), short) ?? '—'}`;
+  const weekLabel = `${calendarDateText(days[0] ?? weekIso, short) ?? '—'} – ${calendarDateText(days[6] ?? weekIso, short) ?? '—'}`;
 
   const classFor = (id: string) => raw?.classes.find((x) => x.id === id) ?? null;
 
@@ -656,12 +709,12 @@ export default function Timetable() {
 
       {conflicts.length ? <Clashes rows={conflicts} zone={zone} /> : null}
 
-      <FloorCover board={board} weekOpened={weekOpened} />
+      <FloorCover board={board} days={days} zone={zone} />
 
       {owner ? (
         <div style={{ display: 'grid', gap: 22, gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', marginBottom: 22 }}>
-          <AddClass tenantId={tenantId} onChange={refresh} />
-          <AddOneToOne tenantId={tenantId} members={members} membersErr={membersErr} onChange={refresh} />
+          <AddClass tenantId={tenantId} zone={zone} onChange={refresh} />
+          <AddOneToOne tenantId={tenantId} zone={zone} members={members} membersErr={membersErr} onChange={refresh} />
         </div>
       ) : null}
 
@@ -772,14 +825,54 @@ function CalledOff({ classes, onPutBack, zone }: {
 
 /* ── correcting a class that is already up ─────────────────────────────────── */
 
-/** Local-time value for an `<input type="datetime-local">`, which takes wall
- *  clock and no zone. `toISOString()` here would show a UK owner their 6am
- *  class as 05:00 in summer and save it an hour early. */
-function localInputValue(iso: string): string {
+/**
+ * Wall-clock value for an `<input type="datetime-local">`, which holds a wall
+ * clock with no zone on it.
+ *
+ * `toISOString()` here would show a UK owner their 6am class as 05:00 in summer
+ * and save it an hour early — which is what the original comment said, and it
+ * is only half the problem. The browser both FILLS this field in and READS IT
+ * BACK as its own zone, so with no zone applied a Dubai gym's 06:00 class
+ * opened in London showed 03:00, and pressing Save wrote 03:00 Dubai: the read
+ * was three hours out and the write MOVED THE CLASS. Nothing on the form said
+ * which clock it was in, so there was nothing to notice — and the people who
+ * find out are the twelve members who turn up at six to a dark room.
+ *
+ * `gymWallValue` puts the gym's own clock in the field; `instantOf` below takes
+ * the gym's own clock back out. The two are exact inverses, including across
+ * the days the clocks move, and they have to stay that way: a form that reads
+ * in one clock and writes in another moves every class it touches.
+ *
+ * With no zone this falls back to the browser's, which is what this field has
+ * always been — the difference is that the forms now say so.
+ */
+function localInputValue(iso: string, zone: string | null): string {
+  const atGym = gymWallValue(iso, zone);
+  if (atGym) return atGym;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** A wall clock out of one of the forms below → the instant it names at the
+ *  gym. The inverse of `localInputValue`, and the half that writes. Falls back
+ *  to the browser's zone for a gym that has not set one, which is the old
+ *  behaviour and is said out loud on the form. */
+function instantOf(wall: string, zone: string | null): string {
+  return instantAtGym(wall, zone) ?? new Date(wall).toISOString();
+}
+
+/**
+ * The sentence a time field carries when the gym has not said what its clock
+ * is.
+ *
+ * Null when it has, because a note on every form is a note nobody reads. One
+ * wording from `NO_ZONE_NOTE`, the same sentence the rest of the console prints
+ * for the same silence.
+ */
+function whenNote(zone: string | null): string | null {
+  return zone ? null : `Times are on this device’s clock — ${NO_ZONE_NOTE}.`;
 }
 
 /**
@@ -806,7 +899,7 @@ function EditClass({ gymClass, tenantId, zone, onClose }: {
   onClose: (changed: boolean) => void;
 }) {
   const [title, setTitle] = useState(gymClass.title);
-  const [when, setWhen] = useState(localInputValue(gymClass.startsAt));
+  const [when, setWhen] = useState(localInputValue(gymClass.startsAt, zone));
   const [duration, setDuration] = useState(String(gymClass.durationMin));
   const [capacity, setCapacity] = useState(String(gymClass.capacity));
   const [room, setRoom] = useState(gymClass.room ?? '');
@@ -881,7 +974,7 @@ function EditClass({ gymClass, tenantId, zone, onClose }: {
         // Time only ever moves one occurrence. See the note above.
         await updateClass(supabase, gymClass.id, {
           ...patch,
-          ...(when ? { startsAt: new Date(when).toISOString() } : {}),
+          ...(when ? { startsAt: instantOf(when, zone) } : {}),
         });
         setMsg('Saved.');
       }
@@ -931,6 +1024,13 @@ function EditClass({ gymClass, tenantId, zone, onClose }: {
             <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" aria-label="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
             <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 120 }} />
           </div>
+          {whenNote(zone) ? (
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--ink3)', maxWidth: '72ch' }}>
+              {/* Whose clock the field above both shows and saves in. Only when
+                  it is not the gym's — see `whenNote`. */}
+              {whenNote(zone)}
+            </p>
+          ) : null}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <select value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, minWidth: 160 }}
                     aria-label="Which coach is teaching this class">
@@ -999,39 +1099,89 @@ function stateLabel(e: TimetableEntry): string {
 
 /* ── is the floor covered at six? ──────────────────────────────────────────── */
 
-function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; weekOpened: Date }) {
+/**
+ * Is the floor covered at six — and whose six.
+ *
+ * ── The hour this panel used to answer about ─────────────────────────────
+ *
+ * Every instant here was built from the READER's midnight: `dayStart` was a
+ * locally-constructed midnight and each column was `dayStart + hour * 3600000`.
+ * So the button marked 18:00 asked "who is on the floor at 18:00 where I am
+ * sitting", and drew the answer under a heading that says the gym's Tuesday.
+ * For an owner in London checking a Dubai gym that is the gym's 22:00: a studio
+ * that is closed reads as a studio with nobody in it, which is the same picture
+ * as a hole in the cover, and the panel exists to find holes in the cover.
+ *
+ * The heading was the tell and it was reasoned about the wrong way round. Its
+ * comment says the day and the hour "are not instants, so neither takes a zone"
+ * — true of the LABEL, and the data underneath it was an instant all along. One
+ * of the two had to move, and it is the data: a calendar day and an hour of it
+ * are what an owner means, and `rotaInstant` is what turns that pair into the
+ * moment it names at the gym.
+ *
+ * `rotaInstant` per hour rather than one midnight plus an offset, because on
+ * the two mornings a year the clocks move those are different instants — it
+ * re-solves the offset at each hour, so 18:00 is 18:00 on the gym's wall on the
+ * spring-forward Sunday too. With no zone it is the reader's own midnight plus
+ * the hour, which is exactly what this panel already did.
+ */
+function FloorCover({ board, days, zone }: {
+  board: TimetableEntry[] | null;
+  /** The seven calendar dates of the week being shown, on the gym's calendar. */
+  days: string[];
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
+}) {
   // Default to today when the shown week contains it, so the first thing an
-  // owner sees is the day they are standing in.
+  // owner sees is the day they are standing in — the GYM's today, because that
+  // is the day the gym is having. An owner in Los Angeles at 17:00 on a
+  // Saturday is looking at a London gym where it is already Sunday, and opening
+  // them on Saturday is opening them on a day that is over.
   const todayIdx = useMemo(() => {
-    // Counted in calendar days rather than by dividing a millisecond gap by
-    // 86,400,000: on a clocks-change week one of those days is 23 or 25 hours
-    // long, and the division lands on the day before or after the one the owner
-    // is standing in.
-    const now = new Date();
-    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const opened = new Date(weekOpened.getFullYear(), weekOpened.getMonth(), weekOpened.getDate()).getTime();
-    const i = Math.round((midnight - opened) / DAY);
-    return i >= 0 && i < 7 ? i : 0;
-  }, [weekOpened]);
+    // Matched as a calendar DATE rather than counted as a span of days: both
+    // sides are `YYYY-MM-DD` on the same calendar, so this is a string compare
+    // and no clocks-change day of 23 or 25 hours can move it.
+    const today = rotaToday(zone);
+    if (!today) return 0;
+    const i = days.indexOf(today);
+    return i >= 0 ? i : 0;
+  }, [days, zone]);
   const [dayIdx, setDayIdx] = useState(todayIdx);
   const [hour, setHour] = useState(18);
   useEffect(() => { setDayIdx(todayIdx); }, [todayIdx]);
 
-  // Local midnight built from parts rather than by adding 86_400_000, so a
-  // clock change does not shift the whole strip by an hour.
-  const dayStart = useMemo(
-    () => new Date(weekOpened.getFullYear(), weekOpened.getMonth(), weekOpened.getDate() + dayIdx),
-    [weekOpened, dayIdx],
+  /** The gym's calendar date this strip is drawn for. */
+  const dayIso = days[dayIdx] ?? days[0] ?? null;
+
+  /** Hour `h` of `dayIso`, as the instant it names at the gym. Null only when
+   *  there is no day — never silently the reader's, which is the bug. */
+  const instantAt = useCallback(
+    (h: number) => {
+      const iso = dayIso ? rotaInstant(dayIso, h, zone) : null;
+      return iso == null ? null : Date.parse(iso);
+    },
+    [dayIso, zone],
   );
 
-  const hours = useMemo(
-    () => (board ? floorByHour(board, dayStart.getTime(), FIRST_HOUR, LAST_HOUR) : null),
-    [board, dayStart],
-  );
-  const slice = useMemo(
-    () => (board ? floorAt(board, dayStart.getTime() + hour * 3_600_000) : null),
-    [board, dayStart, hour],
-  );
+  const hours = useMemo(() => {
+    if (!board || !dayIso) return null;
+    // `floorByHour` takes one day-start and adds whole hours to it, which is
+    // the arithmetic this is replacing — so each column is asked for
+    // individually through `floorAt`, at the instant `rotaInstant` names.
+    const out: FloorSlice[] = [];
+    for (let h = FIRST_HOUR; h <= LAST_HOUR; h++) {
+      const at = instantAt(h);
+      if (at == null || !Number.isFinite(at)) return null;
+      out.push(floorAt(board, at));
+    }
+    return out;
+  }, [board, dayIso, instantAt]);
+
+  const slice = useMemo(() => {
+    if (!board) return null;
+    const at = instantAt(hour);
+    return at == null || !Number.isFinite(at) ? null : floorAt(board, at);
+  }, [board, instantAt, hour]);
 
   const busiest = hours ? Math.max(1, ...hours.map((h) => h.entries.length)) : 1;
 
@@ -1093,7 +1243,7 @@ function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; wee
           </div>
 
           <div style={{ padding: '10px 14px 16px' }}>
-            <SliceDetail slice={slice} hour={hour} day={dayStart} />
+            <SliceDetail slice={slice} hour={hour} day={dayIso} zone={zone} />
           </div>
         </>
       )}
@@ -1101,13 +1251,21 @@ function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; wee
   );
 }
 
-function SliceDetail({ slice, hour, day }: { slice: FloorSlice | null; hour: number; day: Date }) {
-  // `day` is a LOCALLY built midnight — a calendar day, not an instant — and the
-  // hour beside it is the grid's own column, already chosen. Neither is an
-  // instant, so neither takes a zone: rendering this heading in one could name
-  // the day before it for a reader far enough from the gym.
-  const dayIso = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
-  const when = `${calendarDateText(dayIso, { weekday: 'long', day: 'numeric', month: 'short' }) ?? dayIso} at ${String(hour).padStart(2, '0')}:00`;
+function SliceDetail({ slice, hour, day, zone }: {
+  slice: FloorSlice | null; hour: number;
+  /** The gym's calendar date, `YYYY-MM-DD`. */
+  day: string | null;
+  zone: string | null;
+}) {
+  // `day` is a bare calendar date on the GYM's calendar and the hour beside it
+  // is the grid's own column, already chosen. Neither is an instant, so neither
+  // takes a zone here: rendering a bare date in one could name the day before
+  // it. What changed is that the pair now describes the same moment the slice
+  // was cut at — before, this heading said the gym's Tuesday 18:00 over data
+  // taken at the reader's.
+  const when = day
+    ? `${calendarDateText(day, { weekday: 'long', day: 'numeric', month: 'short' }) ?? day} at ${String(hour).padStart(2, '0')}:00`
+    : `${String(hour).padStart(2, '0')}:00`;
   if (!slice) return <Loading />;
 
   if (!slice.entries.length) {
@@ -1388,8 +1546,10 @@ function BookTo({ slot, members, membersErr, onDone }: {
 
 /* ── adding a one-to-one ───────────────────────────────────────────────────── */
 
-function AddOneToOne({ tenantId, members, membersErr, onChange }: {
+function AddOneToOne({ tenantId, zone, members, membersErr, onChange }: {
   tenantId: string;
+  /** `tenants.timezone` — the clock the hour typed below is meant in. */
+  zone: string | null;
   members: Membership[] | null;
   membersErr: string | null;
   onChange: () => void;
@@ -1419,7 +1579,7 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
 
   const draft = {
     trainerId,
-    startsAt: when ? new Date(when).toISOString() : '',
+    startsAt: when ? instantOf(when, zone) : '',
     durationMin: parseInt(duration, 10),
     room,
     blocked: hold,
@@ -1479,6 +1639,17 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
         <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} aria-label="When it starts" style={{ ...field, flex: 2, minWidth: 190 }} />
         <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
+        {/* Whose clock the hour above is meant in, said only when it is not the
+            gym's. A gym with a timezone set needs no caption — the field is
+            already the gym's clock, which is what an owner means when they type
+            06:00. A gym without one is typing into the reader's, and a class
+            written from another country then runs at an hour nobody chose. */}
+        {whenNote(zone) ? (
+          <p style={{ margin: 0, width: '100%', fontSize: 12, color: 'var(--ink3)', maxWidth: '72ch' }}>
+            {whenNote(zone)}
+          </p>
+        ) : null}
+
         {/* Disabled rather than hidden while the hour is held: the two are a
             real either/or (slotBlocker refuses both together) and a control
             that disappears reads as one that was never there. */}
@@ -1514,7 +1685,12 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
 
 /* ── adding classes ────────────────────────────────────────────────────────── */
 
-function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => void }) {
+function AddClass({ tenantId, zone, onChange }: {
+  tenantId: string;
+  /** `tenants.timezone` — the clock the hour typed below is meant in. */
+  zone: string | null;
+  onChange: () => void;
+}) {
   const [title, setTitle] = useState('');
   const [when, setWhen] = useState('');
   const [duration, setDuration] = useState('45');
@@ -1590,7 +1766,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
     setBusy(true); setMsg(null);
     const c = {
       title: title.trim(),
-      startsAt: new Date(when).toISOString(),
+      startsAt: instantOf(when, zone),
       durationMin: parseInt(duration, 10) || 45,
       capacity: parseInt(capacity, 10) || 0,
       room: room.trim() || null,
@@ -1632,6 +1808,17 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
         <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} aria-label="When it starts" style={{ ...field, flex: 2, minWidth: 190 }} />
         <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
         <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
+        {/* Whose clock the hour above is meant in, said only when it is not the
+            gym's. A gym with a timezone set needs no caption — the field is
+            already the gym's clock, which is what an owner means when they type
+            06:00. A gym without one is typing into the reader's, and a class
+            written from another country then runs at an hour nobody chose. */}
+        {whenNote(zone) ? (
+          <p style={{ margin: 0, width: '100%', fontSize: 12, color: 'var(--ink3)', maxWidth: '72ch' }}>
+            {whenNote(zone)}
+          </p>
+        ) : null}
+
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
         {/* The picker first, the free-text name second and disabled once a
             coach is chosen — the same either/or as the one-to-one form above,

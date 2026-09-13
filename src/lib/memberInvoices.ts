@@ -68,7 +68,12 @@
 // Pure — no Supabase, no React.
 import type { LoadStatus } from '../ui/loadStatus';
 import { sumTaken, type Taken } from './coachMoney';
-import { daysBetween } from './memberRecord';
+// `amount` as well as `daysBetween`. It is the one renderer in this product
+// that puts a figure and its own currency together — asking the currency how
+// many minor units make a whole one, and printing a dash rather than guessing
+// when either half is missing. The shareable copy below must not contain a
+// second, looser answer to that question.
+import { amount, daysBetween } from './memberRecord';
 
 /**
  * One invoice the gym raised against this member.
@@ -245,6 +250,63 @@ export function owedByCurrency(
 }
 
 /**
+ * The sentence where there is no outstanding FIGURE — which is a different fact
+ * from nothing being outstanding, and the screen was printing the second one
+ * for both.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * `owedByCurrency` is built on `sumTaken`, which refuses to add an invoice that
+ * states no amount or no currency: it counts those as `unpriced` / `unlabelled`
+ * and leaves them out of every pot. That is right, and it means an unpaid
+ * invoice can be genuinely outstanding and produce NO POT AT ALL. The screen
+ * branched on `owed.pots.length` alone and printed, as a fact:
+ *
+ *     "Nothing is outstanding. Every invoice your gym has raised against you is
+ *      settled, cancelled or written off."
+ *
+ * directly above the flag it already draws, which says "2 unpaid invoices state
+ * no amount, or no currency". Two sentences, an inch apart, contradicting each
+ * other about whether somebody owes their gym money — and the reassuring one
+ * first and in the position of the answer. A member reads the first, stops, and
+ * does not pay a bill their gym is still asking for.
+ *
+ * The second, milder case is a DRAFT. A gym's working copy is listed here on
+ * purpose (see the header), it is not owed, and it is also not settled,
+ * cancelled or written off — so the sentence naming those three states was
+ * false of it too, about a charge that is going to arrive later with an older
+ * date on it.
+ *
+ * ── The rule ──────────────────────────────────────────────────────────────
+ *
+ * "Nothing is outstanding" may be said only where a whole read found no invoice
+ * this app calls owed. Where there are owed invoices with no printable amount,
+ * the honest sentence is that there is no figure — not that there is no debt.
+ * The count is left to the flag beside it rather than repeated here, so the two
+ * cannot drift into disagreeing about how many.
+ */
+export function owedEmptyLine(
+  invoices: readonly MemberInvoice[],
+  today: string,
+  status: LoadStatus,
+): string {
+  // Every non-'ready' status, and an empty list under a whole one, is already
+  // `invoicesEmptyLine`'s subject. Nothing below may be said about a read that
+  // did not land whole.
+  if (status !== 'ready' || !invoices.length) return invoicesEmptyLine(status);
+
+  const standings = invoices.map((inv) => invoiceStanding(inv, today));
+  if (standings.some(isOwed)) {
+    return 'Your gym is still asking to be paid, and none of the unpaid invoices records both an amount and a currency — so there is no figure to put here. It is not a debt of nothing; reception can tell you what these cover.';
+  }
+  const drafts = standings.filter((s) => s.kind === 'draft').length;
+  if (drafts) {
+    return `Nothing is outstanding. Everything your gym has issued against you is settled, cancelled or written off. ${drafts === 1 ? 'One invoice' : `${drafts} invoices`} below ${drafts === 1 ? 'is' : 'are'} still a working copy your gym has not issued, so ${drafts === 1 ? 'it is' : 'they are'} not being asked of you yet.`;
+  }
+  return 'Nothing is outstanding. Every invoice your gym has raised against you is settled, cancelled or written off.';
+}
+
+/**
  * The sentence under an empty list, which depends entirely on the read.
  *
  * "Your gym has not invoiced you" is a claim about a gym's billing, and said
@@ -258,6 +320,122 @@ export function invoicesEmptyLine(status: LoadStatus): string {
   if (status === 'partial') return 'There are more invoices on record than could be read in one request, so what follows is not all of them.';
   if (status === 'loading') return 'Still reading.';
   return 'Your gym has not raised any invoices against your account. What it has recorded taking from you is under Payments.';
+}
+
+/* ── a copy the member can actually take away ─────────────────────────────── */
+
+/**
+ * Every invoice on this screen as plain text, for the phone's share sheet.
+ *
+ * ── Why this exists ───────────────────────────────────────────────────────
+ *
+ * Mindbody, Glofox, Wodify and PushPress all let a member get a copy of a
+ * billing document out of the app — emailed, downloaded, forwarded to whoever
+ * does their books. This app could not produce one at all: the screen said "ask
+ * your gym for a copy" and that was the whole of it, on a record the member is
+ * already permitted to read. A member querying a charge, claiming a corporate
+ * gym allowance, or handing a year to an accountant had to photograph the
+ * screen.
+ *
+ * Nothing new is needed for it. `shareText` in src/lib/exportShare.ts is the
+ * system share sheet with a message, already shipped and already used by six
+ * screens, and the sheet reaches mail, notes, messages and every document app
+ * the phone has. It is TEXT and not a PDF on purpose: a PDF of the app's own
+ * copy would look like the gym's invoice, and it is not — the gym holds the
+ * document, this is a transcription of what the app was able to read.
+ *
+ * ── The rules this copy keeps, which are the screen's rules ───────────────
+ *
+ *   · Every amount carries its own currency, through `amount`, which asks the
+ *     currency how many minor units make a whole one. No figure is ever
+ *     rendered without one.
+ *   · NOTHING IS SUMMED ACROSS CURRENCIES. The outstanding figure is one line
+ *     per currency, off `owedByCurrency`, and where the rows disagree there are
+ *     simply two lines and no third.
+ *   · An invoice with no amount or no currency is named in the copy and is in
+ *     no figure in it — the same `unpriced` / `unlabelled` counts the screen
+ *     draws its flag from.
+ *   · A copy taken over a read that did not land WHOLE says so in its second
+ *     line, before any of the rows. A text file that outlives the screen it was
+ *     taken from is exactly where an unqualified prefix does its damage: it
+ *     gets forwarded to an accountant as a statement.
+ *   · Dates are the bare 'YYYY-MM-DD' the column holds, written out unparsed.
+ *     Deliberately not localised: this is a document that travels to somebody
+ *     else's device and possibly to somebody else's country, and 03/04 is two
+ *     different days depending on who opens it.
+ *
+ * Pure, and takes `today` rather than reading a clock, so the standing in the
+ * copy is the standing the member was looking at when they tapped.
+ */
+/** Where one invoice stands, and the date behind it, in one line of the copy.
+ *
+ *  Not `${invoiceStandingLabel(s)} · due ${dueOn}` for every kind: that reads
+ *  "Due · due 2026-09-30", which is the sort of line that makes a reader
+ *  distrust the rest of the document. The two live states get a verb, and the
+ *  settled ones keep the badge word the screen uses beside them so the copy and
+ *  the screen cannot be read as saying different things about one row. */
+function standingLine(s: InvoiceStanding, dueOn: string | null): string {
+  if (s.kind === 'due') {
+    return dueOn ? `Unpaid · due ${dueOn}` : 'Unpaid · your gym recorded no date it wants this by';
+  }
+  if (s.kind === 'overdue') {
+    return dueOn ? `Overdue · was due ${dueOn}` : 'Overdue · your gym recorded no date it wants this by';
+  }
+  const label = invoiceStandingLabel(s);
+  return dueOn ? `${label} · dated ${dueOn}` : label;
+}
+
+export function invoiceCopyText(
+  invoices: readonly MemberInvoice[],
+  today: string,
+  status: LoadStatus,
+): string {
+  const out: string[] = ['INVOICES FROM YOUR GYM', `The app’s copy, as at ${today}.`];
+
+  // The qualification goes ABOVE the rows, not in a footer. A reader who stops
+  // at the first figure must already have been told what they are holding.
+  if (status !== 'ready') out.push('', invoicesEmptyLine(status));
+
+  if (!invoices.length) {
+    if (status === 'ready') out.push('', invoicesEmptyLine(status));
+    return out.join('\n');
+  }
+
+  out.push('', '— Every invoice —');
+  for (const inv of invoices) {
+    const head = inv.number == null ? `Issued ${inv.issuedOn}` : `No. ${inv.number} · issued ${inv.issuedOn}`;
+    out.push('', `${head} · ${amount(inv.amountCents, inv.currency)}`);
+    out.push(standingLine(invoiceStanding(inv, today), inv.dueOn));
+    out.push(inv.note ?? 'Your gym did not record what this is for.');
+  }
+
+  // Null under anything but a whole read, which is the same refusal the screen
+  // makes: a debt summed over a prefix is not a smaller debt.
+  const owed = owedByCurrency(invoices, today, status);
+  if (!owed) {
+    // No section at all rather than a heading over a repeat of the sentence
+    // already at the top. One line saying the figure is absent and why.
+    out.push('', 'No outstanding figure is stated in this copy, because it was not taken from a complete read of your invoices.');
+  } else {
+    out.push('', '— Still owed —');
+    if (owed.pots.length) {
+      for (const p of owed.pots) {
+        out.push(`${amount(p.minorUnits, p.currency)} across ${p.count} unpaid invoice${p.count === 1 ? '' : 's'}`);
+      }
+      if (owed.pots.length > 1) {
+        out.push('Listed separately because they are different currencies. There is no single figure that adds them together.');
+      }
+    } else {
+      out.push(owedEmptyLine(invoices, today, status));
+    }
+    if (owed.unpriced + owed.unlabelled > 0) {
+      const n = owed.unpriced + owed.unlabelled;
+      out.push(`${n} unpaid invoice${n === 1 ? '' : 's'} state${n === 1 ? 's' : ''} no amount, or no currency, and ${n === 1 ? 'is' : 'are'} in no figure above.`);
+    }
+  }
+
+  out.push('', AMOUNT_AS_RECORDED, '', NO_PAYMENT_HERE);
+  return out.join('\n');
 }
 
 /* ── the sentences that keep the screen from overclaiming ─────────────────── */

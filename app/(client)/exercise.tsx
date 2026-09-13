@@ -473,6 +473,16 @@ export default function ExerciseScreen() {
                       setClipFor({ t: at, exercise: detail?.name || name });
                       setClipNote('');
                       setClipSaid(null);
+                      // And the clip held from the PREVIOUS set, or the Delete
+                      // control below would still be pointing at it. `clipSent`
+                      // is a row, not a flag: `deleteFormClip(clipSent)` acts on
+                      // whichever (workout_id, set_index) is in it, so leaving
+                      // last set's row here put a "Delete It" button under the
+                      // block that has just been opened for a NEW set — and
+                      // pressing it deleted the earlier set's clip while the
+                      // screen said "Deleted" about this one. A destructive
+                      // control must never outlive the thing it was built for.
+                      setClipSent(null);
                       return;
                     }
                     if (out === 'unsent') {
@@ -521,6 +531,17 @@ export default function ExerciseScreen() {
                         {(['camera', 'library'] as const).map((src) => (
                           <Ghost
                             key={src}
+                            // `clipBusy` was set on the way in and cleared on the
+                            // way out and NOTHING read it, so the only thing a
+                            // second press met was the silent `return` at the top
+                            // of the handler. A clip is megabytes over gym wifi:
+                            // for those seconds both buttons looked live and did
+                            // nothing at all. `disabled` refuses the press, drops
+                            // the fill and announces the state, and the line
+                            // below says which of the two things is happening —
+                            // relabelling both buttons "Sending…" would have said
+                            // it twice and named neither.
+                            disabled={clipBusy}
                             label={src === 'camera' ? 'Film It' : 'Choose a Clip'}
                             a11yLabel={src === 'camera' ? 'Film this set now' : 'Choose a clip already on this phone'}
                             onPress={async () => {
@@ -554,7 +575,9 @@ export default function ExerciseScreen() {
                           />
                         ))}
                       </View>
-                      {clipSaid ? (
+                      {clipBusy ? (
+                        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>Sending your clip…</Text>
+                      ) : clipSaid ? (
                         <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{clipSaid}</Text>
                       ) : null}
                       {clipSent ? (

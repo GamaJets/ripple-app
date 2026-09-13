@@ -179,6 +179,9 @@ import { dayKeyOf, instantForDay, readWorkoutEdit, type WorkoutDraftSet } from '
 import { useSettings } from '../../src/ui/settings';
 import { WeightUnitToggle } from '../../src/ui/WeightUnitToggle';
 import { liftIn, liftLabel, readLift, plain, plainExact, volumeHeadline, convertedNote, readNumber, type WeightUnit } from '../../src/lib/units';
+// The plate maths, at the bar rather than two screens away on Tools. Pure and
+// already tested (src/lib/plateMath.test.ts); this screen only calls it.
+import { BARS, loadBar } from '../../src/lib/plateMath';
 // The distance unit a cardio log opens on. Derived from the member's length
 // unit rather than defaulted to km — see src/lib/distance.ts.
 import { distanceUnitFor, distanceUnitName, type DistanceUnit } from '../../src/lib/distance';
@@ -565,8 +568,33 @@ export default function Train() {
    * to Home and taps Train would be bounced back to the programme by an app
    * overruling a choice they just made.
    */
+  /* One arrival per nonce, and this ref is what makes that true.
+   *
+   * The effect below depends on `startMode`, which is DERIVED from `modeParam`
+   * — and the effect fifteen lines further down clears `modeParam` the moment
+   * it has applied it (`router.setParams({ mode: undefined })`), on purpose, so
+   * a second tap on the same link is a change again. The two together undid the
+   * more specific of the two intents: arriving at `?start=abc&mode=recovery`
+   * set the mode to recovery, the mode effect then cleared the param, which
+   * recomputed `startMode` from 'recovery' to 'strength', which re-ran THIS
+   * effect on the same unchanged nonce and set the mode back to the programme.
+   * A member sent to log a sauna landed on their strength plan — the reported
+   * bug this whole path exists to fix, arriving from the other direction.
+   *
+   * `trainIntent(route, mode)` is a documented two-argument API with a test
+   * asserting `?mode=recovery` rides along (src/lib/trainIntent.test.ts), so
+   * this is the receiving half not honouring a contract the sending half keeps.
+   *
+   * The nonce already means "this press differs from the last one", so making
+   * the effect fire once per DISTINCT nonce is the guard the design was asking
+   * for: a fresh press is a fresh token and still lands, and a re-render caused
+   * by clearing another param is not a second arrival.
+   */
+  const startSeen = useRef<string | null>(null);
   useEffect(() => {
     if (!startParam) return;
+    if (startSeen.current === startParam) return;
+    startSeen.current = startParam;
     setMode(startMode);
     setWeekOffset(0);
     setDayIdx(weekIndexOf(new Date()));
@@ -593,7 +621,6 @@ export default function Train() {
   // as-is, and an absent flag has to mean what it meant then.
   const [logged, setLogged] = useState<Record<string, { reps: string; kg: string; bw?: boolean; timed?: boolean }[]>>({});
 
-  const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number | null }[]>([]);
   const [nlw, setNlw] = useState('');
   const logWorkoutNL = async () => {
     // The member's unit, so a bare "135" means what it says on their plates.
@@ -1014,7 +1041,23 @@ export default function Train() {
   // their sessions had been lost and logged them all again.
   const logKnown = workoutLogStatus === 'ready';
   const workedDates = new Set(workoutLog.map((l) => dayKeyOf(l.t)).filter((k): k is string => k != null));
-  if (cardioLog.length) workedDates.add(dstr(today0));
+  // ── and NOT a second list kept on this phone ────────────────────────────
+  //
+  // This line read `if (cardioLog.length) workedDates.add(dstr(today0))`, off a
+  // local array `commitSession` prepended to BEFORE it asked the server and
+  // never took anything back out of. It is the same crossing the note below
+  // says the draft was removed for — "on this phone" counted as "in your log" —
+  // and here it survived a write the server had actively REFUSED: the session
+  // was rejected, the member was told so in an alert, and today still got a
+  // trained mark on the strip, a filled circle in the month grid and a place in
+  // "N days logged".
+  //
+  // Nothing is lost by dropping it. `useWorkoutLog` keeps a QUEUED entry in
+  // `log` — its own header says so in as many words ("they are on the phone,
+  // they are in `log`, they are counted in `unsent`") — so a stored session and
+  // an unsent one both reach `workedDates` through the line above, on the day
+  // key of their own timestamp. Only the refused one did not, and only the
+  // refused one should not.
   // ── typed, and not saved ────────────────────────────────────────────────
   //
   // The draft used to be folded into `workedDates` itself, so two sets typed on
@@ -1629,7 +1672,6 @@ export default function Train() {
     // figure the person typed cannot get one in through the side door either.
     const kIn = extra.kcal ?? 0;
     const kcal = rec ? null : (kIn > 0 ? kIn : cardioKcal(activity, m, cd.weightKg));
-    setCardioLog([{ type: activity, mins: m, dist: d, unit: u, kcal }, ...cardioLog]);
     const out = await logWorkouts([{
       t: new Date().toISOString(),
       exercise: activity,
@@ -1663,9 +1705,22 @@ export default function Train() {
     return true;
   };
 
-  const logCardio = () => {
+  /* `commitSession` answers false for exactly one outcome — a write the server
+   * READ and declined — and its answer was dropped on the floor by the `void`,
+   * after which all four boxes were emptied unconditionally. So the alert said
+   * "it has not been recorded ... logging it again as it is will be rejected
+   * again" over a form that no longer held anything to log again: the minutes,
+   * the distance, the watts and the calories the member had just typed were the
+   * only copy of that session and the app threw them away on the one path where
+   * nothing durable was holding them.
+   *
+   * `logWorkoutNL` forty lines up already states the rule this broke — "the box
+   * is emptied for the two outcomes that KEPT what was typed, and not for the
+   * one that threw it away" — and `saveManual` keeps its sets for the same
+   * reason. This was the one writer on the screen still clearing regardless. */
+  const logCardio = async () => {
     const m = parseInt(mins, 10) || 0; if (!m) return;
-    void commitSession(isSessionKind(mode) ? mode : 'cardio', ctype, m, {
+    const kept = await commitSession(isSessionKind(mode) ? mode : 'cardio', ctype, m, {
       // `readNumber`, not `parseFloat`. Distance is the one cardio figure that is
       // genuinely fractional — 12.7 km is an ordinary run — so its box is a decimal
       // pad, and the decimal key on that pad is a comma in most of Europe.
@@ -1675,6 +1730,9 @@ export default function Train() {
       watts: parseInt(watts, 10) || 0,
       kcal: parseInt(kcalIn, 10) || 0,
     });
+    // True for 'stored' AND for 'unsent' — a queued session is held on this
+    // device by the provider, so the form is no longer the only copy of it.
+    if (!kept) return;
     setMins(''); setDist(''); setWatts(''); setKcalIn('');
   };
   const saveManual = async () => {
@@ -2730,7 +2788,7 @@ export default function Train() {
                     </View>
                   </Field>
                 ) : null}
-                <Pressable onPress={logCardio} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 11, justifyContent: 'center' }}>
+                <Pressable onPress={() => { void logCardio(); }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 11, justifyContent: 'center' }}>
                   <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log</Text>
                 </Pressable>
               </View>
@@ -4122,6 +4180,13 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // runner — the PR check, the warm-up ramp, the entries written to the log —
   // goes on working in the metric the rest of the app is built on.
   const [reps, setReps] = useState(''); const [load, setLoad] = useState('');
+  /* WHICH bar the plate line below is worked out for, by index — never as a
+     number. A bar held as 20 survives a flip to pounds as a "20 lb bar", which
+     is a bar no gym owns; src/lib/plateMath.ts keeps one native list per unit
+     for the same reason. Index 0 is the 20 kg / 45 lb men's bar, which is what
+     is on the rack unless somebody says otherwise, and saying otherwise is one
+     tap. */
+  const [barIdx, setBarIdx] = useState(0);
   const [bwOn, setBwOn] = useState(false);
   // Whether the box above the load is counting SECONDS. Seeded per movement
   // from the coach's own prescription in the effect that follows `idx`, because
@@ -4646,7 +4711,15 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         ...((): { cardio?: { mins: number; dist: number; unit: string; watts?: number } } => {
           if (!isCardioMovement(nameOf(exercises[i]))) return {};
           const raw = cardioAt(i);
-          const d = raw.dist.trim() === '' ? 0 : (parseFloat(raw.dist) || 0);
+          // `readNumber`, not `parseFloat` — the identical box on the two
+          // other cardio writers on this screen (`logCardio`, and the timed
+          // runner's own finish) already says why at length: this is a
+          // `decimal-pad`, and the decimal key on that pad is a COMMA across
+          // most of Europe. `parseFloat('12,7')` is 12, so 700 metres of a run
+          // logged inside the guided session vanished on the way to the record,
+          // silently and only for those members. This was the one distance box
+          // of the three still reading itself in ASCII.
+          const d = raw.dist.trim() === '' ? 0 : (readNumber(raw.dist) ?? 0);
           const w = raw.watts.trim() === '' ? 0 : (parseInt(raw.watts, 10) || 0);
           if (d <= 0 && w <= 0) return {};
           return { cardio: { mins, dist: d, unit: distanceUnit, ...(w > 0 ? { watts: w } : {}) } };
@@ -5202,6 +5275,38 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
    * the recap says so by staying quiet about it.
    */
   const boxRead = readLift(load, unit);
+  /* ── what to put on the bar ──────────────────────────────────────────────
+   *
+   * `loadBar` and `warmupRamp` have been in src/lib since the client app was
+   * written and their only mounts are app/(client)/tools.tsx and the coach's
+   * `LiftingToolsPanel` — two screens nobody is on while holding a bar. Strong,
+   * Hevy and Jefit all put this next to the weight field, because the moment
+   * the arithmetic is wanted is the moment a number has just been typed and
+   * somebody is standing at a rack deciding which discs to pick up.
+   *
+   * Drawn from the BOX and from nothing else. The alternative — inferring that
+   * this movement is a barbell one from its name — is the trap
+   * src/lib/strengthLifts.ts documents at length (Bench Dips, Bench Pull,
+   * Overhead Carry all match the obvious patterns), and a plate breakdown drawn
+   * under a dumbbell press is a lie somebody acts on with a loaded sleeve.
+   * `ProgramExercise` carries no equipment field, so there is no honest signal
+   * here; the member typing a load and reading the line is the signal.
+   *
+   * Withheld for a bodyweight set (the box is what was HUNG off a belt, not a
+   * bar) and for a hold (the first box is seconds). Withheld too when the load
+   * is under the bar, where `loadBar` answers null rather than inventing an
+   * empty sleeve.
+   *
+   * `liftIn` back out of kilograms first, exactly as `LiftingToolsPanel` does:
+   * `PLATES` and `BARS` are native per-unit lists and never converted, because
+   * a 20 kg bar and a 45 lb bar are different objects with different discs
+   * beside them.
+   */
+  const bars = BARS[unit];
+  const bar = bars[Math.min(barIdx, bars.length - 1)];
+  const barLoad = (!bwOn && !timedOn && boxRead.ok && boxRead.kg != null)
+    ? loadBar(liftIn(boxRead.kg, unit), bar, unit)
+    : null;
   const recall = lastTime({
     log,
     status: logStatus,
@@ -5681,6 +5786,57 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
               : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'} />
         </View>
+
+        {/* ── which plates make that ─────────────────────────────────────────
+            Present only when there is a load in the box that a bar could carry.
+            It states the bar it assumed, because a member on a 15 kg bar
+            reading a breakdown for a 20 kg one would load 5 kg too little and
+            nothing on screen would have said which bar was meant — and the bar
+            is the one part of this that cannot be read off the box. */}
+        {barLoad ? (
+          <View style={{ marginTop: sp.lg }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Per side</Text>
+              {/* The bar, switchable. Two entries in `BARS`, so this is a
+                  toggle rather than a picker — and it is a control rather than
+                  a caption because the women's bar is on the rack of most
+                  gyms. */}
+              <Pressable
+                onPress={() => { setBarIdx((i) => (i + 1) % bars.length); tapLight(); }}
+                accessibilityRole="button"
+                accessibilityLabel={`Worked out for a ${plain(bar)} ${unit} bar. Tap to use the ${plain(bars[(barIdx + 1) % bars.length])} ${unit} bar instead.`}
+                hitSlop={hitSlopFor(MIN_TARGET)}
+                style={{ paddingHorizontal: sp.md, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: t.surface2, minHeight: 28, justifyContent: 'center' }}
+              >
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{plain(bar)} {unit} bar</Text>
+              </Pressable>
+            </View>
+            <Text
+              accessible
+              accessibilityRole="text"
+              /* Spoken as a sentence. The visible line is a list of discs read
+                 left to right off a sleeve, which is the right shape to look at
+                 and the wrong one to hear. */
+              accessibilityLabel={barLoad.plates.length
+                ? `Per side: ${barLoad.plates.map((x) => plain(x)).join(', ')} ${unit}. ${barLoad.exact
+                    ? `That makes ${plain(barLoad.total)} ${unit} on the bar.`
+                    : `The nearest these plates make is ${plain(barLoad.total)} ${unit}.`}`
+                : `Just the bar — ${plain(bar)} ${unit}.`}
+              style={{ ...ty.body, ...numeric, color: t.ink, marginTop: sp.xs }}
+            >
+              {barLoad.plates.length ? barLoad.plates.map((x) => plain(x)).join('  ·  ') : 'Just the bar'}
+            </Text>
+            {/* `exact` is the field this refuses to round past. A rack that
+                cannot make 102.3 is a fact about the rack, and quietly drawing
+                the plates for 102.5 under the number somebody typed is how the
+                bar ends up heavier than the set they logged. */}
+            {!barLoad.exact ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                These plates do not make that exactly — the nearest under it is {plain(barLoad.total)} {unit}.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {pendingFeel != null ? (
           <View style={{ marginTop: sp.xl }}>

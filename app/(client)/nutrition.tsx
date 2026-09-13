@@ -33,6 +33,11 @@ import { useToday } from '../../src/ui/today';
 import { startOfWeek } from '../../src/lib/weekStart';
 import { dayKeyOfDate } from '../../src/lib/entryEdit';
 import { groceryTicksKey, readGroceryTicks } from '../../src/lib/groceryTicks';
+// The member's own meal swaps, under a key with their account in it. They lived
+// under a bare `repple.mealOverride` — no account, no sign-out entry — fifteen
+// lines below the grocery ticks that were fixed for exactly that. See
+// src/lib/mealSwaps.ts.
+import { LEGACY_MEAL_SWAPS_KEY, mealSwapsKey, readMealSwaps, writeMealSwaps } from '../../src/lib/mealSwaps';
 import { useWearables } from '../../src/ui/wearables';
 import { caloriesLeft, caloriesNote, dayBurn, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
 import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
@@ -355,9 +360,54 @@ export default function Nutrition() {
       .catch(() => { if (live) setChecked({}); });
     return () => { live = false; };
   }, [grocKey]);
-  // Persist the client's meal swaps so they survive leaving the tab / relaunch.
-  useEffect(() => { AsyncStorage.getItem('repple.mealOverride').then((r) => { if (r) { try { setOverride(JSON.parse(r)); } catch { /* ignore */ } } setOvHydrated(true); }); }, []);
-  useEffect(() => { if (!ovHydrated) return; AsyncStorage.setItem('repple.mealOverride', JSON.stringify(override)).catch(() => {}); }, [override, ovHydrated]);
+  // ── whose swaps ────────────────────────────────────────────────────────
+  //
+  // The same hole the ticks above had, in the same file, and a worse one. These
+  // were `AsyncStorage.getItem('repple.mealOverride')` on mount and a matching
+  // setItem — no account in the key, no entry in src/lib/signOutState.ts — so
+  // the next person to sign in on a shared handset had the previous member's
+  // swaps hydrated into `override`, which is an INPUT to `buildPlan`: it
+  // composes their day, their week, their grocery list and the plan document
+  // they share. And an override is a catalogue index resolved through pools
+  // that diet and exclusions have filtered, so the same number means a
+  // different dinner to a different member. See src/lib/mealSwaps.ts, which
+  // makes the same argument src/lib/mealPlan.ts makes about a coach's plan.
+  //
+  // Keyed on `swapsKey`, not `[]`: `c.id` is 'unknown' until the auth read
+  // lands, and a mount-time read would either miss the member's swaps or write
+  // an empty map over them.
+  const swapsKey = mealSwapsKey(c.id);
+  useEffect(() => {
+    // No account is no store. The swaps still work for this session; they are
+    // simply not kept, which is what `mealSwapsKey` returning null means.
+    if (!swapsKey) { setOverride({}); setOvHydrated(false); return; }
+    let live = true;
+    // Cleared BEFORE the read, not left at whatever the last key's read set
+    // it to. `ovHydrated` is the arming flag for the write effect below, and
+    // it survived the key changing — so an account switch whose read then
+    // failed would have written this member's empty map straight over the
+    // other one's stored swaps, which is the one way to LOSE a swap rather
+    // than merely show the wrong one.
+    setOvHydrated(false);
+    AsyncStorage.getItem(swapsKey)
+      .then((r) => { if (live) { setOverride(readMealSwaps(r)); setOvHydrated(true); } })
+      // An unreadable store is no swaps on screen, and `ovHydrated` stays
+      // false, so nothing is persisted over whatever is actually on the
+      // device. A swap made in this session still works; it is not kept, and
+      // the next launch reads the real bytes again.
+      .catch(() => { if (live) setOverride({}); });
+    return () => { live = false; };
+  }, [swapsKey]);
+  // The unqualified key this replaces, removed rather than migrated: there is
+  // no way to tell a single-owner handset's old swaps from the previous
+  // member's on a shared one, and reading it would be the defect performed once
+  // deliberately. Costs a member who upgrades a handful of re-taps; see the
+  // header of src/lib/mealSwaps.ts.
+  useEffect(() => { AsyncStorage.removeItem(LEGACY_MEAL_SWAPS_KEY).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!ovHydrated || !swapsKey) return;
+    AsyncStorage.setItem(swapsKey, writeMealSwaps(override)).catch(() => {});
+  }, [override, ovHydrated, swapsKey]);
   const [view, setView] = useState<'today' | 'week'>('today');
   const [showAvoid, setShowAvoid] = useState(false);
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
@@ -372,9 +422,16 @@ export default function Nutrition() {
   // today. `adjustUnknown` above is the sentence a member reads when the
   // second of those failed — it tells them to check back in a moment, and this
   // is how they check.
+  // Read here rather than inline at the burn below, so the pull can reach it.
+  // See `burnStale`: this screen tells a member their device could not be
+  // reached and to pull down, and a gesture that retries four reads and not the
+  // fifth makes that instruction a dead one — which is the defect
+  // app/(client)/restaurant.tsx carries a paragraph about.
+  const wear = useWearables();
+  const syncDevices = wear.syncAll;
   const pull = usePullToRefresh(useCallback(() => {
-    c.reload(); void coachNutrition.reload(); goalTracker.reload(); fl.reload();
-  }, [c.reload, coachNutrition, goalTracker.reload, fl.reload]));
+    c.reload(); void coachNutrition.reload(); goalTracker.reload(); fl.reload(); syncDevices();
+  }, [c.reload, coachNutrition, goalTracker.reload, fl.reload, syncDevices]));
   /**
    * Take a meal off today's record, and say so when it did not come off.
    *
@@ -623,7 +680,27 @@ export default function Nutrition() {
   // eat it, with their coach's name on it.
   const coachPlan = coachAdjust?.plan ?? null;
   const coachPlanCurrent = !!coachPlan && !planStale(coachPlan, diet, c.avoid, c.mealsPerDay).stale;
-  const coachDay = planDayIndex(new Date().toISOString());
+  // ── which day of the coach's week the member is standing in ────────────
+  //
+  // Was `planDayIndex(new Date().toISOString())`. The ZONE was never wrong —
+  // `dateParts` in src/lib/localDate.ts parses an instant that carries its own
+  // offset and reads the parts back with the local getters, which is why this
+  // is not a check-utc-day finding and why the weekday is identical in every
+  // zone. What was wrong is WHEN it is asked.
+  //
+  // `new Date()` in a render body is only right at the moment something else
+  // happens to redraw, and nothing redraws a screen that is sitting still.
+  // Expo Router mounts these once and backgrounding does not tear them down,
+  // so a member who left Meals open overnight, or pocketed the phone for two
+  // days, went on being served the coach's day for the day they opened it —
+  // a whole different set of written meals, under the coach's name, with the
+  // Today plan and the swaps composed around it. That is the exact defect
+  // src/ui/today.ts was written for, and this file was already calling it for
+  // the grocery week three lines of state above.
+  //
+  // `todayKeyNow` is that hook: the reader's own `YYYY-MM-DD`, re-stated at
+  // local midnight and when the app comes back to the foreground.
+  const coachDay = planDayIndex(todayKeyNow);
   const coachOverride = useMemo(() => (coachPlanCurrent && coachDay != null
     ? planDayOverride(coachPlan!, coachDay)
     : (coachAdjust?.mealOverride ?? {})), [coachPlanCurrent, coachDay, coachPlan, coachAdjust]);
@@ -735,8 +812,36 @@ export default function Nutrition() {
   // budget it may be compared against — active against the movement the
   // activity multiplier bought, whole-day against the whole TDEE. Null when no
   // device has reported, which shows no burn rather than a zero.
-  const burn = dayBurn(target, useWearables().today);
+  const burn = dayBurn(target, wear.today);
   const cal = caloriesLeft(target.kcal, eaten.kcal, burn?.burned ?? 0, burn?.budgeted ?? 0, burn?.kind);
+  // ── and whether that burn is a CURRENT reading ─────────────────────────
+  //
+  // src/ui/wearables.tsx says it on `todayStatus` in its own words: "A screen
+  // printing a figure off `today` should say so when this is not 'ready'."
+  // This screen prints it, in `caloriesNote` under the hero — "2,648 kcal
+  // burned all day, rest included, 97 more than your activity level assumes" —
+  // and asked nothing. Under 'error' that is not today's movement: it is
+  // whatever the last successful read left behind, which after a night of
+  // failed syncs is yesterday's, and a member reads it as the day they are
+  // standing in.
+  //
+  // What it is NOT is arithmetic. `caloriesLeft` computes `net = target −
+  // eaten` and has never added the burn — nutrition.ts argues that at length —
+  // so no allowance moves and there is nothing to withhold. This is a claim
+  // about a measurement, and the fix is the one the provider was built to make
+  // possible: say which of the two it is. Withholding the figure would be
+  // wrong for the reason that file gives about keeping it — a watch that could
+  // not be reached at three o'clock did not un-burn the morning.
+  //
+  // `isWhole`, not `!== 'error'`: the comparison that reads naturally admits
+  // 'loading' too, and 'loading' gets no banner — a first read still in flight
+  // is not a stale figure, and `burn` is null under it anyway.
+  // Only where a burn is actually PRINTED: `caloriesNote` drops the clause
+  // when the figure is nought, and the whole note is withheld while today's
+  // log is not whole. A banner about a sentence that is not on screen is its
+  // own small lie.
+  const burnStale = dayWhole && (burn?.burned ?? 0) > 0
+    && !isWhole(wear.todayStatus) && wear.todayStatus !== 'loading';
   const cycleNote = dayType === 'training' ? `+${CYCLE_KCAL} kcal, more carbs` : dayType === 'rest' ? `−${CYCLE_KCAL} kcal, fewer carbs` : undefined;
 
   // The same door for the same reason, and `adjustUnknown` goes through it
@@ -866,6 +971,17 @@ export default function Nutrition() {
           arcLabel="of today's calories eaten"
           onPress={() => router.push('/(client)/foodlog')}
         />
+
+        {/* The burn named in the sentence above is the last thing the device
+            told us rather than a current reading. Said here rather than woven
+            into `caloriesNote`, which is shared with screens that know nothing
+            about devices — and said in the same words the two Devices screens
+            use, so a member who reads both is told one thing. */}
+        {burnStale ? (
+          <Flag tone={t.warn}>
+            The calories burned above are the last figures we had, not a current reading — your device could not be reached just now. Pull down to try again.
+          </Flag>
+        ) : null}
 
         <Rule />
 
@@ -1017,8 +1133,17 @@ export default function Nutrition() {
             </View>
           ) : (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+              {/* Three states, not two. This was `loading` / `error` /
+                  everything else, and 'partial' fell into "everything else" —
+                  so a read that stopped at its row cap would have been drawn as
+                  a day with nothing in it, which is the one sentence that sends
+                  somebody to log their breakfast a second time. It takes a
+                  thousand meals in one day to reach, and being right about a
+                  case nobody can get to is the cheap half of the trade;
+                  app/(client)/foodlog.tsx splits the same three already. */}
               {fl.status === 'loading' ? 'Reading today’s food log…'
                 : fl.status === 'error' ? 'We couldn’t read today’s food log. This is not a day with nothing in it — it is a day we can’t see.'
+                : fl.status === 'partial' ? 'You have logged more today than this screen can read in one go, so we can’t list it. This is not a day with nothing in it.'
                 : 'Nothing logged today.'}
             </Text>
           )}

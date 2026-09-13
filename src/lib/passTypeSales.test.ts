@@ -205,6 +205,34 @@ function pass(over: Partial<GymPass> = {}): GymPass {
     'three different silences, three different sentences');
 }
 
+/* ── the unattributable bucket is a row and is not a pass type ────────────── */
+{
+  // Three types in the book, two of which sold, plus two passes whose
+  // `pass_type_id` is null — the shape /passes draws as the unattributable row.
+  const rows = passTypeSales(
+    [type({ id: 't1' }), type({ id: 't2' }), type({ id: 't3' })],
+    [pass({ passTypeId: 't1' }), pass({ passTypeId: 't2' }),
+      pass({ passTypeId: null, passTypeName: null }), pass({ passTypeId: null, passTypeName: null })],
+  );
+  const t = salesTotals(rows);
+  eq(rows.length, 4, 'three types plus the unattributable bucket is four rows');
+  eq(t.types, 4, '`types` counts ROWS, which is what the table is that long');
+  eq(t.namedTypes, 3,
+    'but the gym sells three types — the bucket is not a fourth product, and the '
+    + 'sentence on /passes reading "sold across N types" must not count it');
+  eq(t.sold, 4, 'every pass is still counted as sold, bucket included');
+  eq(t.neverSold, 1, 'and the one type in the book nobody bought is still named');
+}
+
+/* ── a type that left the book is still a type ────────────────────────────── */
+{
+  const t = salesTotals(passTypeSales([], [pass({ passTypeId: 'gone', passTypeName: 'Summer pack' })]));
+  eq(t.namedTypes, 1,
+    'a type no longer in the price book was sold on and is a product, unlike the bucket');
+  const none = salesTotals(passTypeSales([], []));
+  eq(none.namedTypes, 0, 'and nothing at all is nought types, not one');
+}
+
 if (errors.length) {
   console.error(`passTypeSales: ${errors.length} failed\n` + errors.map((e) => '  · ' + e).join('\n'));
   process.exit(1);

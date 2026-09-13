@@ -64,6 +64,9 @@ import { gymDateTimeText } from '@lib/gymWhen';
 // compared against has to be that clock too.
 import { gymDay } from '@lib/gymZone';
 import { Banner } from '@/components/Banner';
+// An account with no gym, said as a sentence rather than as four empty reads.
+// The same pair /costs and /accounting have always used for this.
+import { gymLink, noGymNote } from '@lib/gymLink';
 
 const DAY = 86400000;
 
@@ -228,13 +231,27 @@ export default function EquipmentPage() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) { setKit([]); setClasses([]); setLog([]); setSpend([]); return; }
+      // An account with no gym is NOT a gym that owns no equipment.
+      //
+      // This wrote `[]` into all four slices — a read that RAN and found
+      // nothing — so a member of staff whose profile had lost its tenant link
+      // was shown "Items registered 0", "Out of action 0", "Nothing is marked
+      // out of action", "Nothing is due for service", "Nothing is registered
+      // yet" and "No maintenance money is recorded against any machine": six
+      // claims about a building, made out of a fact about the reader's
+      // profile. /costs and /accounting have both stopped before any figure
+      // for this case since they were written; this screen never did, and
+      // `me.tenantId!` below then carried an undefined tenant id into
+      // `addEquipment`. The render gate added further down stops before any of
+      // it, so the slices stay 'loading' and are never reached.
+      const link = gymLink(who?.tenantId, 'equipment');
+      if (!link.linked) return;
       // The error is read off the result. Not because the name matters — it is
       // a label — but because "we could not ask" and "there is no gym" must not
       // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
       // The currency comes with it now: a service entry can carry a cost, and
       // what an engineer charged is a permanent record that has to say in what.
-      const t = await readTenant(supabase, who.tenantId);
+      const t = await readTenant(supabase, link.tenantId);
       if (live) { setGymName(t.name); setCcy(t.currency); setZone(t.zone); setGymNameUnread(!!t.error); }
     })();
     return () => { live = false; };
@@ -291,7 +308,22 @@ export default function EquipmentPage() {
     );
   }
 
-  const tenantId = me.tenantId!;
+  // Said before any figure, because every count below would otherwise be a
+  // claim about a building built out of a fact about the reader's profile —
+  // and because `me.tenantId!` was an assertion about a nullable column, so an
+  // unlinked owner's "Add" pressed `addEquipment` with an undefined tenant id.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/equipment">
+        <h1>Equipment</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('equipment')}
+        </p>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
   // `refresh` is the hook's, not a second reader — see /money for the same note.
 
   // The gym's own calendar day — the same date every service deadline on this
@@ -480,7 +512,25 @@ function History({ rows, kit, unread, today, ccy, tenantId, me, onChange }: {
 }) {
   const [kind, setKind] = useState<LogKind>('service');
   const [equipmentId, setEquipmentId] = useState('');
-  const [on, setOn] = useState(today);
+  /**
+   * The day it happened — null meaning "nobody has chosen", so the box FOLLOWS
+   * the gym's day instead of being frozen at the reader's.
+   *
+   * `useState(today)` ran once, at mount, and this component mounts before the
+   * zone is known: the effect above does `setMe(who)` and only then awaits
+   * `readTenant`, so React has already painted with `zone === null` — where
+   * `gymDay` returns null and `today` is `isoDate(new Date())`, the reader's
+   * own calendar. The gym's-clock repair on the `today` this takes therefore
+   * never reached the value in the box for any gym that has set a zone. This
+   * date goes onto a permanent log row that is also the gym's accident book,
+   * where the day something happened is the whole record.
+   *
+   * A chosen value wins, the empty string included: `'' ?? x` is `''`, and
+   * clearing the box is a choice.
+   */
+  const [onPicked, setOnPicked] = useState<string | null>(null);
+  const on = onPicked ?? today;
+  const setOn = setOnPicked;
   const [by, setBy] = useState('');
   const [findings, setFindings] = useState('');
   const [cost, setCost] = useState('');
@@ -702,9 +752,27 @@ function WhatItHasCost({ entries, costs, pickable, kit, unread, onChange }: {
     } finally { setBusy(false); }
   };
 
+  /**
+   * Take the link off, and stay on the entry.
+   *
+   * This closed the panel, and closing it is what made CHANGING a link
+   * impossible: `linkBlocker` refuses an entry that already names a cost, so
+   * the only route to a different one is unlink-then-link — and with the panel
+   * gone, an entry carrying no figure of its own appeared in neither list
+   * underneath (the off-books list is entries with a figure and no cost), so
+   * there was nothing left on the screen to link it from. Holding the same
+   * entry with its `cost_id` cleared keeps the picker open on the record
+   * somebody is in the middle of correcting.
+   */
   const unlink = (e: SpendEntry) => {
     unlinkLogFromCost(supabase, e.id)
-      .then(() => { setMsg(null); setDone('Unlinked. Both records are still there — only the sentence joining them has gone.'); onChange(); })
+      .then(() => {
+        setMsg(null);
+        setDone('Unlinked. Both records are still there — only the sentence joining them has gone. Choose the cost it should point at, or leave it.');
+        setLinking({ ...e, costId: null });
+        setCostId('');
+        onChange();
+      })
       .catch((err: any) => setMsg(String(err?.message ?? err)));
   };
 
@@ -780,9 +848,60 @@ function WhatItHasCost({ entries, costs, pickable, kit, unread, onChange }: {
   ];
 
   const linked = useMemo(
-    () => (entries ?? []).filter((e) => !!e.costId),
+    () => offBooksFirst((entries ?? []).filter((e) => !!e.costId)),
     [entries],
   );
+
+  /**
+   * The records that ARE joined to a cost, and which cost each one is.
+   *
+   * This was one sentence and a button reading "Change one", which opened
+   * `linked[0]` — whichever record the read happened to return first. So the
+   * control the aria-label described as changing "which cost a linked
+   * maintenance record points at" could only ever reach one arbitrary record,
+   * and `linkBlocker` then refused the change outright: an entry that already
+   * names a cost is told to unlink first. A machine with four linked repairs
+   * had three of them unreachable and the fourth unchangeable.
+   *
+   * Listed instead, each with its own control, and the cost named beside it —
+   * which is also the answer to the question this section exists for: not just
+   * what a machine cost, but which invoice in the books that was.
+   */
+  const linkedCols: Column<SpendEntry>[] = [
+    { key: 'machine', header: 'Machine', value: (e) => e.equipmentLabel,
+      render: (e) => ((e.equipmentId && kitName.get(e.equipmentId)) || e.equipmentLabel
+        ? <>{(e.equipmentId && kitName.get(e.equipmentId)) || e.equipmentLabel}</>
+        : <span className="dash">not against a machine</span>) },
+    { key: 'kind', header: 'What', value: (e) => e.kind },
+    { key: 'when', header: 'When', value: (e) => e.happenedOn },
+    { key: 'log', header: 'On the log', value: (e) => e.costCents, numeric: true,
+      render: (e) => (e.costCents == null
+        ? <span className="dash">no figure</span>
+        : <>{money(e.costCents, e.currency)}</>) },
+    // The cost it points at. Null is the read not having come back, never "no
+    // cost" — and an id the costs read did not return is said as that rather
+    // than drawn as a blank, because it is usually a cost somebody deleted.
+    { key: 'cost', header: 'The cost in the books', value: (e) => e.costId,
+      render: (e) => {
+        if (costs === null) return <span className="dash">the costs could not be read</span>;
+        const c = e.costId ? costs.get(e.costId) : null;
+        if (!c) return <span className="dash">a cost no longer in the books</span>;
+        return (
+          <span style={{ whiteSpace: 'normal' }}>
+            {c.paidOn} · {c.description}
+            {c.amountCents == null || !c.currency ? null : <> · {money(c.amountCents, c.currency)}</>}
+          </span>
+        );
+      } },
+    { key: 'act', header: '', align: 'right', value: () => null,
+      render: (e) => (
+        <button type="button" style={linkBtn}
+                onClick={() => { setLinking(e); setCostId(''); setMsg(null); setDone(null); }}
+                aria-label={`Change or remove the cost behind the ${e.kind} on ${e.happenedOn}`}>
+          Change it
+        </button>
+      ) },
+  ];
 
   return (
     <Section
@@ -811,17 +930,19 @@ function WhatItHasCost({ entries, costs, pickable, kit, unread, onChange }: {
             </div>
           ) : null}
           {linked.length ? (
-            <p style={{ margin: 0, padding: '11px 14px', borderTop: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12, maxWidth: '90ch' }}>
-              {SPEND_IS_NOT_RECONCILED_NOTE}{' '}
-              {linked.length === 1
-                ? 'One maintenance record is linked to a cost.'
-                : `${linked.length} maintenance records are linked to a cost.`}
-              {' '}
-              <button type="button" style={linkBtn} onClick={() => { setLinking(linked[0]); setCostId(''); }}
-                      aria-label="Change which cost a linked maintenance record points at">
-                Change one
-              </button>
-            </p>
+            <div style={{ borderTop: '1px solid var(--ring)' }}>
+              <div style={{ padding: '11px 14px' }}>
+                <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>
+                  Joined to a cost in the books &mdash; {linked.length}
+                </h3>
+                <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12, maxWidth: '90ch' }}>
+                  {SPEND_IS_NOT_RECONCILED_NOTE} One invoice covering three machines is one cost on
+                  three rows here, and it is counted once in the figures above.
+                </p>
+              </div>
+              <DataTable noun="maintenance records joined to a cost"
+                rows={linked} columns={linkedCols} rowKey={(e) => e.id} empty="—" />
+            </div>
           ) : null}
         </>
       )}
@@ -852,7 +973,7 @@ function WhatItHasCost({ entries, costs, pickable, kit, unread, onChange }: {
               {busy ? 'Linking…' : 'Link it'}
             </button>
             {linking.costId ? (
-              <button type="button" style={linkBtn} onClick={() => { const e = linking; setLinking(null); unlink(e); }}>
+              <button type="button" style={linkBtn} onClick={() => unlink(linking)}>
                 Unlink it
               </button>
             ) : null}

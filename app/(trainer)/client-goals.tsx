@@ -85,6 +85,7 @@ import { kgToLb, lengthLabel, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { localDate } from '../../src/lib/localDate';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BACK_ICON } from '../../src/ui/direction';
 import { num2 } from '../../src/lib/format';
@@ -213,13 +214,48 @@ export default function ClientGoals() {
   // another, which is worse than showing nothing at all.
   const wanted = useRef<string | null>(null);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setGoalStatus('loading'); setScanStatus('loading'); setWeighStatus('loading');
     setMeasStatus('loading');
     setGoals(null); setUnreadableGoals(0); setSeries(EMPTY_SERIES);
     setSites(null); setUnreadableMeas(0);
     const today = isoToday(new Date());
+
+    /* A client the coach typed in by hand has a `coach_clients` row and no user
+     * account, so nothing server-backed is asked for them.
+     *
+     * This screen asked anyway. `coach_clients.id` is `uuid DEFAULT
+     * gen_random_uuid()` — client-report.tsx and client-body.tsx both carry the
+     * note — so the id passes every shape test, all four reads ran, and
+     * `goal_targets_coach_read` / `scans_trainer_read` / `checkins_trainer_read`
+     * / `measurements_coach_read` all hang off `is_my_client()`, which is an
+     * EXISTS over `clients` and is false for a `coach_clients` row. RLS
+     * therefore answered every one of them with zero rows and NO error, and
+     * this screen printed that as:
+     *
+     *     "{who} hasn't set a goal yet. The read came back and it was empty,
+     *      so this is about them rather than about the connection — which
+     *      makes it worth raising."
+     *
+     * A sentence about somebody's own ambition, invented out of the absence of
+     * an account, and it ends by telling the coach to go and raise it with
+     * them. The tape section said the same thing about a tape they have no way
+     * to log with.
+     *
+     * The statuses go to 'error' so that nothing downstream — `goalBoard`,
+     * `measureBoard`, `progressOf`, `projectionOf` — can compute a figure over
+     * an empty list it would otherwise call whole. The render does not print
+     * those as a failed read: `askable` has its own branch up there, because
+     * "they have no account" is a THIRD answer and collapsing it into "the read
+     * failed" is the same flattening src/lib/coachWellness.ts keeps a
+     * `not-asked` kind apart from `unreadable` for.
+     */
+    if (!askable) {
+      setGoalStatus('error'); setScanStatus('error');
+      setWeighStatus('error'); setMeasStatus('error');
+      return;
+    }
 
     // RLS already limits all four of these to clients this coach actually
     // coaches (goal_targets_coach_read, scans_trainer_read,
@@ -325,6 +361,16 @@ export default function ClientGoals() {
     }
   }, []);
 
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  const who = client?.name.split(' ')[0] ?? 'They';
+  /** Whether the server may be asked about this person at all. Computed at
+   *  render rather than inside `load`, so a roster that arrives AFTER the read
+   *  and says this row was typed in by hand re-runs the effect and withdraws
+   *  the answer, instead of leaving four empty sections standing as facts about
+   *  them. `handAdded` undefined is "the roster has not said", which goes on
+   *  asking — only an explicit true withholds. See src/lib/clientRecord.ts. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useEffect(() => {
     if (!USE_SUPABASE) return;
     if (!picked) {
@@ -337,8 +383,8 @@ export default function ClientGoals() {
       setMeasStatus('ready');
       return;
     }
-    void load(picked);
-  }, [picked, load]);
+    void load(picked, askable);
+  }, [picked, askable, load]);
 
   // `load` is one call over four reads — the goals, the scans, the weigh-ins
   // and the tape — and they are asked for together on purpose: every delta on
@@ -347,11 +393,8 @@ export default function ClientGoals() {
   // is the picker and the name at the top.
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     r.refresh(),
-    ...(picked ? [load(picked)] : []),
-  ]), [r, picked, load]));
-
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
-  const who = client?.name.split(' ')[0] ?? 'They';
+    ...(picked ? [load(picked, askable)] : []),
+  ]), [r, picked, askable, load]));
 
   // 'error' hands `goalBoard` a null, which is the only way it can answer
   // 'unreadable'. Under any other status the list is the server's own answer.
@@ -525,6 +568,12 @@ export default function ClientGoals() {
               <SectionHead title="Client" />
               {r.roster.length === 0 && isWhole(r.status) ? (
                 <EmptyRoster lacks="there are no goals to look at" />
+              ) : r.roster.length === 0 && r.status === 'loading' ? (
+                /* An empty chip row while the roster lands reads as a coach
+                   with nobody on their book — the same claim `EmptyRoster`
+                   above is gated on `isWhole` to avoid making. Said in words
+                   instead, exactly as app/(trainer)/client-week.tsx says it. */
+                <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
               ) : (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                   {r.roster.map((c) => (
@@ -538,7 +587,26 @@ export default function ClientGoals() {
               )}
             </Section>
 
-            {picked ? (
+            {picked && !askable ? (
+              /* ── the third answer ────────────────────────────────────────
+                 Not "they have set none" and not "the read failed". This
+                 person is a name the coach typed into their own book: there is
+                 a `coach_clients` row and no account behind it, so there is no
+                 goal to read, no scan, no weigh-in and no tape — and nothing
+                 was ever refused, because nothing was ever entitled to be
+                 asked. Four sections of "could not be read" would tell a coach
+                 to try again on a connection that is working perfectly.
+
+                 The same distinction `wellnessPanel`'s `not-asked` kind keeps
+                 apart from `unreadable` in src/lib/coachWellness.ts. */
+              <View>
+                <Rule />
+                <Section>
+                  <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                    note={`You added ${who} to your book by hand, so there is nothing of theirs on the server to read — no goals, no scans, no weigh-ins and no tape. That is not an empty record and not a failed read: goals are set in the app, and ${who} does not have it. Invite them from your client list and this screen fills in from the day they accept.`} />
+                </Section>
+              </View>
+            ) : picked ? (
               <View>
                 <Rule />
 
@@ -586,7 +654,17 @@ export default function ClientGoals() {
                     ) : null}
 
                     <Section>
-                      <SectionHead title={client?.name ?? 'Their Goals'} note={`${board.open.length} open`} />
+                      {/* `isWhole(goalStatus)`, not the bare length. A count is
+                          a figure, and under 'partial' this one was a subtotal
+                          of a truncated page presented as the whole of what
+                          somebody is working toward — "3 open" over a client
+                          with eleven. The Flag further down already says the
+                          read was cut; it cannot un-say a number a coach has
+                          already read as a total. app/(trainer)/client-week.tsx
+                          gates its own "N marked" on exactly this, and
+                          app/(trainer)/checklists.tsx its "N showing". */}
+                      <SectionHead title={client?.name ?? 'Their Goals'}
+                        note={isWhole(goalStatus) ? `${board.open.length} open` : undefined} />
                       {board.open.map(goalCard)}
                     </Section>
 
@@ -594,7 +672,11 @@ export default function ClientGoals() {
                       <>
                         <Rule />
                         <Section>
-                          <SectionHead title="Reached" note={`${board.achieved.length}`} />
+                          {/* Same gate. The list stands under 'partial' — the
+                              goals in it are real — but the number over it
+                              cannot. */}
+                          <SectionHead title="Reached"
+                            note={isWhole(goalStatus) ? `${board.achieved.length}` : undefined} />
                           {board.achieved.map(goalCard)}
                         </Section>
                       </>
@@ -648,7 +730,17 @@ export default function ClientGoals() {
                   </Section>
                 ) : (
                   <Section>
-                    <SectionHead title="Tape" note={`${tape.sites.length} ${tape.sites.length === 1 ? 'site' : 'sites'}`} />
+                    {/* And the same for the tape. `measStatus === 'partial'`
+                        means the oldest rows fell off the read, and a SITE
+                        whose only readings are old is then missing from
+                        `tape.sites` altogether — so this count is not merely
+                        short, it is a different set from the one the coach
+                        thinks they are being given the size of. The caveat
+                        under the list already says the read was cut. */}
+                    <SectionHead title="Tape"
+                      note={isWhole(measStatus)
+                        ? `${tape.sites.length} ${tape.sites.length === 1 ? 'site' : 'sites'}`
+                        : undefined} />
                     <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>{DIRECTION_CAVEAT}</Text>
                     {tape.sites.map(siteRow)}
                     {/* Only under a whole read. Under 'partial' a site is

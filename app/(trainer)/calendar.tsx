@@ -92,7 +92,7 @@ import { classDayCaveat, classDayHeading, classDayNote, classesOnDay } from '../
 // It went straight to `markOutcome`, so a check-in made down there failed
 // outright and the delivered session — which is money — was lost.
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
+import { floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
 // Paging back into a month the read never reached must not draw an empty grid.
 // See `monthNote` below. Surgical addition alongside the calendar-sync work in
 // this file — three lines of state and one Flag under the grid, nothing else.
@@ -2781,7 +2781,7 @@ export default function TrainerSchedule() {
    * told to try again, the client was in front of them, and the delivered
    * session, which is what the gym settles payroll on, was lost.
    *
-   * The three arms are kept apart, because they mean three different things to
+   * The FOUR arms are kept apart, because they mean four different things to
    * the person holding the phone:
    *
    *   stored   the gym has it. Open their record.
@@ -2790,6 +2790,19 @@ export default function TrainerSchedule() {
    *            saved — but the session IS happening, so the record still opens.
    *   refused  the server read it and declined. Nothing moves, and the coach is
    *            told it is not waiting to send either.
+   *   full     nobody answered AND this phone would not keep it, because it is
+   *            already holding `FLOOR_CAP` acts. Nothing was recorded and
+   *            nothing is coming.
+   *
+   * This comment said "three arms" and the handler had three, which is how the
+   * fourth got missed: `attempt` gained 'full' and nothing here changed, so a
+   * full queue fell past both `if`s and ran `openRecord()` — the success path.
+   * That is worse than any of the three it does handle, because it is not a
+   * missing sentence but an asserted one: the coach is carried to the client's
+   * record with `checkedIn: '1'`, which is that screen's word for "this hour was
+   * delivered", over a session that has no outcome recorded and never will.
+   * `completed` is the outcome payroll settles on. Nothing must navigate as
+   * though it were written when it was not.
    */
   const checkIn = async (s: TrainingSession) => {
     if (!s.clientId) return;
@@ -2830,6 +2843,14 @@ export default function TrainerSchedule() {
     });
     if (out === 'refused') {
       Alert.alert('Not checked in', refusedLine(`${who}’s session`, 'Nothing has been recorded against it.'));
+      return;
+    }
+    // Nothing was kept and nothing is coming, so the record does not open. The
+    // session stays where it actually still is — unmarked, and back on the Mark
+    // Sessions queue, which is where this can be made again once the phone has
+    // emptied.
+    if (out === 'full') {
+      Alert.alert('Not checked in', floorFullLine(`${who}’s session`));
       return;
     }
     if (out === 'unsent') {

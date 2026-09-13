@@ -28,6 +28,12 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/mealSwaps.ts",
+    "src/lib/mealSwaps.test.ts",
+    "src/lib/cancelPolicy.ts",
+    "src/lib/cancelPolicy.test.ts",
+    "src/lib/ownerSiteScope.ts",
+    "src/lib/ownerSiteScope.test.ts",
     "src/lib/ownerCostEntry.ts",
     "src/lib/ownerCostEntry.test.ts",
     "src/lib/appAccounts.ts",
@@ -738,6 +744,18 @@
     "src/lib/sessionWaitlist.ts",
     "src/lib/sessionWaitlist.test.ts",
     "src/lib/bookedAhead.ts",
-    "src/lib/bookedAhead.test.ts"
+    "src/lib/bookedAhead.test.ts",
+    "src/lib/streakReach.ts",
+    "src/lib/streakReach.test.ts",
+    "src/lib/classRoomClash.ts",
+    "src/lib/classRoomClash.test.ts",
+    "src/lib/bodyRate.ts",
+    "src/lib/bodyRate.test.ts",
+    "src/lib/gymSessions.ts",
+    "src/lib/trainerSessions.ts",
+    "src/lib/clientRecord.ts",
+    "src/lib/rosterNextSession.test.ts",
+    "src/lib/costTrend.ts",
+    "src/lib/costTrend.test.ts"
   ]
 }

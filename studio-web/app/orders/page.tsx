@@ -410,10 +410,33 @@ export default function Orders() {
                ? 'older than a Stripe session can live' : rows ? 'none' : undefined} />
         {/* One tile per currency, because there is no such thing as a blended
             total. A gym with one currency sees one tile and notices nothing. */}
-        {pots.length === 0 ? (
-          <Kpi label="Taken online" text={rows ? '—' : null}
-               note={rows ? (rows.length ? 'nothing paid in this period' : 'no orders in this period') : undefined} />
-        ) : pots.map((p) => (
+        {/* ── an empty set of pots is three different facts ─────────────────
+            This note used to be two arms: orders in the period, or none. Both
+            of them said "nothing paid", and `paidPots` has a third exit that
+            neither described — it drops a paid order whose `currency` column is
+            empty, and one whose amount is not a finite number, because neither
+            can be added to money. `gym_orders.currency` is `not null` with no
+            format check of any kind (supabase/parts/281), so an imported or
+            hand-written row satisfies the column and still says nothing this
+            can spell an amount in.
+            So a gym whose online takings were all filed without a currency read
+            "nothing paid in this period" over a list of paid orders. That is
+            the figure-shaped version of the defect this screen exists against:
+            a withheld total presented as a nil.
+            `text` is null rather than the string '—'. Kpi draws its own dash
+            for a missing figure and puts "not recorded" behind it for a screen
+            reader; a literal hyphen passed as text is announced as "hyphen", or
+            not at all, on the one tile that means we cannot say. */}
+        {pots.length === 0 ? (() => {
+          const paid = rows ? rows.filter((o) => o.status === 'paid').length : null;
+          return (
+            <Kpi label="Taken online" text={null}
+                 note={rows == null ? undefined
+                   : rows.length === 0 ? 'no orders in this period'
+                   : paid === 0 ? 'nothing paid in this period'
+                   : `${paid} paid ${paid === 1 ? 'order' : 'orders'}, and not one states both an amount and the currency it was taken in — so there is no figure to write`} />
+          );
+        })() : pots.map((p) => (
           <Kpi key={p.currency} label={`Taken online · ${p.currency}`}
                text={money(p.cents, p.currency) ?? '—'}
                note={`${p.count} paid ${p.count === 1 ? 'order' : 'orders'}`} />
@@ -489,7 +512,17 @@ export default function Orders() {
 
       <Section
         title="By status"
-        sub="Every status in the rows that were read, including one this product has never heard of — a status left out of a total is how a state stops being visible."
+        /* Not "including one this product has never heard of", which is what
+           this line claimed and what the screen cannot do. `countByStatus` is
+           written to survive an unknown status and never sees one:
+           `fetchGymOrders` COERCES anything outside the four to 'pending'
+           before this counts it, so a fifth state would be counted here as
+           Awaiting payment and — past 36 hours — raise the stuck-webhook
+           banner above. The database makes that unreachable today (part 281
+           checks the column against exactly these four), which is why it is
+           stated as a dependency rather than left as a promise the rendering
+           does not keep. See the report against src/lib/gymOrders.ts. */
+        sub="Every status present in the rows that were read, counted. This database permits four — awaiting payment, paid, abandoned, and paid-but-not-granted — and one with no order in this period has no line rather than a line reading nought."
       >
         {rows === null ? (
           <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '26px 20px', color: 'var(--ink3)' }}>

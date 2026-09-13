@@ -57,6 +57,10 @@ import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useToday } from '../../src/ui/today';
 import { BACK_ICON } from '../../src/ui/direction';
+// Which of this owner's gyms these figures are, and whether there are others.
+// Renders nothing for a single-site owner — see src/lib/ownerSiteScope.ts.
+import { fetchOwnerSites, SITES_LOADING } from '../../src/lib/ownerSiteScope';
+import { siteNotice, type SiteScope } from '../../src/lib/ownedSites';
 
 export default function OwnerRevenue() {
   const t = useTheme();
@@ -305,6 +309,24 @@ export default function OwnerRevenue() {
   // owner reading three dashes is told once what they mean.
   const unreadNote = 'Your trainers could not be read';
 
+  /* ── whose gym these figures are ────────────────────────────────────────
+   *
+   * Every number on this screen is ONE tenant's — `src/ui/tenant.tsx` reads a
+   * single row — and until now nothing said so. An owner of four gyms looking
+   * at a 30-day take had no way to tell it was a quarter of their business.
+   *
+   * `siteNotice` returns null for the single-site owner, which is almost
+   * everybody, so this renders nothing at all in the ordinary case. Its other
+   * job is the failed read: under one, the count is unknown rather than 1, and
+   * saying nothing would be indistinguishable from having checked. */
+  const [scope, setScope] = useState<SiteScope>(SITES_LOADING);
+  useEffect(() => {
+    let live = true;
+    void fetchOwnerSites(supabase as any).then((s) => { if (live) setScope(s); });
+    return () => { live = false; };
+  }, [again]);
+  const sites = siteNotice(scope);
+
   const G = layout.gutter;
 
   return (
@@ -323,6 +345,12 @@ export default function OwnerRevenue() {
           {/* Under the title rather than beside the hero, because it is about
               the whole screen and not about one figure. */}
           <Fetched at={fetchedAt} onRefresh={refreshAll} busy={busy} />
+          {/* What these figures cover. Null — and so absent entirely — for the
+              one-gym owner, which is the overwhelming case and is asserted in
+              ownedSites.test.ts. */}
+          {sites ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{sites}</Text>
+          ) : null}
         </View>
 
         {/* ── the hero ───────────────────────────────────────────────────── */}

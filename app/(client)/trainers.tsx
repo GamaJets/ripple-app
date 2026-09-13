@@ -113,6 +113,16 @@ import {
 // rate wants, and it knows the zero-decimal currencies — a ¥50,000 rate divided
 // by a hundred is the bug at the other end of this one.
 import { wholeMoney } from '../../src/lib/coachMoney';
+// How a bare figure is spelled when there is no currency to put in front of it.
+// `String(27.5)` is an English full stop in every locale there has ever been —
+// see `plainExact`'s own header — and this screen prints a session fee bare
+// whenever the coach's gym has not said which money it charges in. So a coach
+// charging 27.50 read "EUR 27,50" on a German handset where the currency was
+// known and "27.5" where it was not: one figure, two spellings, decided by
+// whether a gym had filled in a field. That is exactly the defect
+// `feeAmountLine` in src/lib/booking.ts records and fixes with this same
+// function, and this screen is the other half of it.
+import { plainExact } from '../../src/lib/units';
 import { currencyGapOfStatus, currencyGapLineAbout } from '../../src/lib/currencyGap';
 import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type SessionFee } from '../../src/lib/sessionFee';
 // What may be drawn as somebody's photo, and what may not. `avatarSource`
@@ -896,6 +906,22 @@ export default function FindTrainer() {
     wholeMoney(fee, ccyStatus === 'ready' ? (feeCcy[id] ?? null) : null);
 
   /**
+   * The fee as the reader actually spells numbers, with its currency where the
+   * app has been told one and bare where it has not.
+   *
+   * The bare arm stays bare — that decision is argued at length at the row
+   * below and is not being reopened. What changes is HOW the bare figure is
+   * written. Three call sites handed the raw `number` to a `<Text>` or dropped
+   * it into a template string, and both of those are `String(n)`: a full stop,
+   * always, on a handset that writes a comma everywhere else including in the
+   * priced arm three characters away. `plainExact` changes the separator and
+   * nothing else — it does not round, so no subdivision is invented for a
+   * currency that has none, and it does not group, so the digits are the ones
+   * this screen has always printed.
+   */
+  const feeText = (id: string, fee: number): string => feeMoney(id, fee) ?? plainExact(fee);
+
+  /**
    * Why there is no currency in front of that number, in the third person.
    *
    * The status handed to `currencyGapOfStatus` is per COACH, not per screen: a
@@ -1266,7 +1292,7 @@ export default function FindTrainer() {
                   // priced arm never acquires a currency nobody chose, and the
                   // other three keep the three different nothings apart.
                   sessionFeeAmount(c.sessionFee) != null
-                    ? `${feeMoney(c.id, sessionFeeAmount(c.sessionFee)!) ?? sessionFeeAmount(c.sessionFee)} per session`
+                    ? `${feeText(c.id, sessionFeeAmount(c.sessionFee)!)} per session`
                     : sessionFeeShort(c.sessionFee),
                 ].filter(Boolean).join('. ')}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
@@ -1335,7 +1361,7 @@ export default function FindTrainer() {
                     twenty of them stacked down a directory is unreadable. */}
                 {sessionFeeAmount(c.sessionFee) != null ? (
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ ...value(17), color: t.ink }}>{feeMoney(c.id, sessionFeeAmount(c.sessionFee)!) ?? sessionFeeAmount(c.sessionFee)}</Text>
+                    <Text style={{ ...value(17), color: t.ink }}>{feeText(c.id, sessionFeeAmount(c.sessionFee)!)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>/ session</Text>
                   </View>
                 ) : (
@@ -1369,7 +1395,7 @@ export default function FindTrainer() {
                 {sessionFeeAmount(sel.sessionFee) != null ? (
                   <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                     <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
-                    <Text style={{ ...value(20), color: t.ink }}>{feeMoney(sel.id, sessionFeeAmount(sel.sessionFee)!) ?? sessionFeeAmount(sel.sessionFee)}</Text>
+                    <Text style={{ ...value(20), color: t.ink }}>{feeText(sel.id, sessionFeeAmount(sel.sessionFee)!)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginStart: 4 }}>/ session</Text>
                   </View>
                 ) : (

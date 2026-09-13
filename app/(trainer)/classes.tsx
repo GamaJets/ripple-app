@@ -57,6 +57,18 @@ import {
 // written out again here. app/(trainer)/calendar.tsx makes the argument on
 // `MINUTES`: one list, stated once, so the pickers cannot drift apart.
 import { SERIES_MINUTES } from '../../src/lib/recurring';
+// ── Two classes in one room at one time ───────────────────────────────────
+//
+// app/(trainer)/calendar.tsx checks a PT booking against the classes this coach
+// teaches before writing one (`classClashes`, with `classCheckCaveat` for the
+// unread timetable). The screen where classes are TYPED IN asked nothing, so a
+// Reformer added over the Spin already in Studio 2 went on sale beside it and
+// both filled. Repeat ×12 makes twelve of those from one press.
+//
+// A warning and not a refusal, and never silence under a read that did not
+// finish — src/lib/classRoomClash.ts carries the whole argument.
+import { roomClashesFor, roomClashNote } from '../../src/lib/classRoomClash';
+import { isWhole } from '../../src/ui/loadStatus';
 import { fmtClock, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 // ── Editing a class from the phone ────────────────────────────────────────
 //
@@ -494,8 +506,29 @@ export default function TrainerClasses() {
     ]);
   };
 
-  /** Whether deleting is even offered. Unknown counts are not an empty class. */
-  const canRemove = (c: GymClass) => countsKnown && c.booked === 0 && (c.waiting ?? 0) === 0;
+  /**
+   * Whether deleting is even offered. Unknown counts are not an empty class.
+   *
+   * `c.waiting === 0`, never `(c.waiting ?? 0) === 0`. `GymClass.waiting` is
+   * `number | null` and src/ui/classes.tsx says in so many words why: the
+   * `waiting` column arrived with part 210, a read that cannot produce it
+   * stores null, and "these NEVER settle to zero, because 'nobody is waiting'
+   * is exactly the claim that…". The `??` made that claim anyway, one line
+   * under a comment promising it would not.
+   *
+   * `countsKnown` does not cover it. That flag is about the counts read having
+   * come back at all; a class can be IN that answer with a null `waiting` —
+   * line 271 of the provider maps a non-numeric `waiting` to null per class,
+   * not per read — so a whole, successful read can still carry "we do not know
+   * who is waiting for this one".
+   *
+   * The consequence is the reason this is the guard and not a warning:
+   * `class_bookings.class_id` is `on delete cascade`, so Remove destroys every
+   * booking, every check-in and the whole waiting list with the row. An unknown
+   * waiting list read as an empty one is a queue of members deleted by a coach
+   * who was shown a control that said the class was empty.
+   */
+  const canRemove = (c: GymClass) => countsKnown && c.booked === 0 && c.waiting === 0;
 
   const upcoming = useMemo(() => [...classes].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), [classes]);
 
@@ -543,13 +576,59 @@ export default function TrainerClasses() {
         `${title.trim()} would start ${dayShort(first)} at ${timeLabel(first)}, which is behind you. Members cannot book a class in the past, so it would be on nobody's timetable however many weeks it repeated for. Pick a time that is still ahead.`);
       return;
     }
+    /* ── and what is already in that room ───────────────────────────────
+     *
+     * Every occurrence, not just the first: a term of twelve that collides on
+     * week nine is nine weeks of two classes on sale for one room, and checking
+     * only the opening night would clear it.
+     *
+     * Asked BEFORE `setBusy`, because the coach may answer no and the form has
+     * to stay exactly as they left it. Answered with a confirmation rather than
+     * a refusal — `gym_classes.room` is free text, a hall that splits in two is
+     * a real gym, and this cannot see the room. What it must not do is say
+     * nothing, and under a timetable that did not fully load it says that
+     * instead of implying the hour is free.
+     */
+    const plannedStarts = Array.from({ length: Math.max(1, weeks) }, (_, w) => weeksLater(first, w))
+      .filter((s): s is string => s !== null);
+    const roomNote = roomClashNote(
+      roomClashesFor(plannedStarts, dur, branch.trim(), room.trim(), classes, isWhole(status)),
+      room.trim(),
+      (iso) => `${dayShort(iso)} ${timeLabel(iso)}`,
+    );
+    if (roomNote) {
+      const go = await new Promise<boolean>((resolve) => {
+        Alert.alert('Check the room', roomNote, [
+          { text: 'Change It', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Add Anyway', onPress: () => resolve(true) },
+        ], { cancelable: true, onDismiss: () => resolve(false) });
+      });
+      if (!go) return;
+    }
     setBusy(true);
     try {
-      const base = new Date(startIso());
+      /* ── one instant, read once ────────────────────────────────────────
+       *
+       * This called `startIso()` three more times after the guard above had
+       * checked `first` — so four reads of `new Date()` for one value the coach
+       * chose from two chips and a clock. `startIso` is `new Date()` with the
+       * day offset added and the hour set, which makes it a function of WHEN IT
+       * IS CALLED as much as of what was picked.
+       *
+       * The whole point of the guard is that the instant it approves is the
+       * instant that gets written. It was not: a press that straddles midnight
+       * has `first` validated against one calendar day and `base` — the value
+       * actually written, and `when` — the value read back in the confirmation —
+       * landing on the next one, a full day away from the chip the coach set.
+       * The three could disagree with each other and with the sentence on
+       * screen, and the class that appears is not the class that was approved.
+       *
+       * `first` is already that value. Everything below is derived from it.
+       */
+      const firstIso = first;
       const nm = title.trim(); const br = branch.trim();
-      const when = `${dayShort(startIso())} ${timeLabel(startIso())}`;
+      const when = `${dayShort(firstIso)} ${timeLabel(firstIso)}`;
       let saved = 0;
-      const firstIso = base.toISOString();
       for (let w = 0; w < weeks; w++) {
         // Weeks added on the CALENDAR, not on the clock. This was
         // `base.getTime() + w * 7 * 86400000`, which src/lib/classSeries.ts

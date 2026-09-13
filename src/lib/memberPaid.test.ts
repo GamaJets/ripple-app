@@ -81,6 +81,34 @@ const oneOfEach: PaidSources = {
   eq(p.ledger.reason, null, 'with nothing withheld');
   ok(paidEmptyLine('ready').includes('has not been entered'),
     'and the sentence tells the member what to do about a payment they know they made');
+  eq(p.payments, 0, 'and no rows contributed, which is what makes that sentence true');
+}
+
+/* ── no pots is not always no payments ─────────────────────────────────────── */
+{
+  // The live defect. Four whole reads, three real rows, and not one of them
+  // states both an amount and a currency — so there are no pots, and the screen
+  // printed "Nothing has been recorded against your account" directly above its
+  // own flag saying three payments were missing from the figure.
+  const p = memberPaid({
+    ...NONE,
+    payments: [{ amountCents: 5000, currency: null, takenAt: '2026-01-04T10:00:00Z' }],
+    passes: [{ paidCents: null, currency: 'GBP', issuedOn: '2026-02-01' }],
+    sales: [{ amountCents: null, currency: 'GBP', status: 'paid', createdAt: '2026-02-10T09:00:00Z' }],
+  }, WHOLE);
+  eq(p.ledger.total?.pots.length, 0, 'nothing can be added, which is right');
+  eq(p.payments, 3, 'and three payments are nonetheless on record');
+  const line = paidEmptyLine(p.ledger.status, p.payments);
+  ok(!line.includes('Nothing has been recorded'),
+    'so the screen never says nothing was recorded about somebody with three rows');
+  ok(line.includes('no figure'), 'what is missing is the FIGURE, and the sentence says which');
+  ok((unstatedLine(p.ledger.total!) ?? '').includes('3 payments'),
+    'and the flag beside it agrees rather than contradicting it');
+  // The old call site still answers the same way where there really is nothing.
+  eq(paidEmptyLine('ready'), paidEmptyLine('ready', 0),
+    'the count defaults to none, so the three read-shaped sentences are unchanged');
+  ok(paidEmptyLine('error', 3).includes('a read failed'),
+    'and a failed read is still about the read, whatever rows are on screen');
 }
 
 /* ── two currencies are never one figure ───────────────────────────────────── */

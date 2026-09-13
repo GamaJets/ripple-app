@@ -62,7 +62,23 @@ export interface MemberOrder {
   kind: OrderKind;
   intent: OrderIntent;
   status: OrderStatus;
-  amountCents: number;
+  /**
+   * Minor units, as the order recorded them.
+   *
+   * `gym_orders.amount_cents` is NOT NULL and this is still `number | null`,
+   * for the same reason `currency` directly below it is. The reader was
+   * `Number(r.amount_cents)`, and `Number(null)` is 0 — so a column that came
+   * back null, for any reason a column comes back null (a grant changed, a view
+   * swapped underneath, a hand-written row), rendered on the member's own
+   * Membership screen as a purchase of "AED 0.00". That is not a missing
+   * figure, it is a specific and wrong claim about what somebody paid, and it
+   * is the exact substitution `amount` in src/lib/memberRecord.ts exists to
+   * refuse. Null reaches `amount` and is drawn as a dash.
+   *
+   * A bigint reaching a phone as a STRING still parses — that is what the
+   * `Number` was there for and it is kept.
+   */
+  amountCents: number | null;
   /**
    * ISO 4217 as the order recorded it. NOT NULL in the schema and still typed
    * nullable here, for the reason src/lib/memberRecord.ts gives about every
@@ -108,6 +124,16 @@ const asIntent = (v: unknown): OrderIntent =>
 const asStatus = (v: unknown): OrderStatus =>
   (v === 'paid' || v === 'abandoned' || v === 'failed' ? v : 'pending');
 
+/** Minor units, or null for anything that is not a number. A `bigint` arrives
+ *  as a string often enough that every money reader in this codebase coerces
+ *  one; what none of them may do is coerce an ABSENCE, because `Number(null)`
+ *  is 0 and 0 is a price somebody could have paid. */
+const minorOrNull = (v: unknown): number | null => {
+  if (v == null) return null;
+  const n = typeof v === 'string' ? Number(v.trim()) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+};
+
 /**
  * This member's own orders, newest first.
  *
@@ -141,7 +167,7 @@ export async function fetchMyOrders(sb: Queryable, uid: string): Promise<Read<Me
         kind: asKind(r.kind),
         intent: asIntent(r.intent),
         status: asStatus(r.status),
-        amountCents: Number(r.amount_cents),
+        amountCents: minorOrNull(r.amount_cents),
         currency: typeof r.currency === 'string' && r.currency.trim() ? r.currency : null,
         termStartsOn: r.term_starts_on ?? null,
         termEndsOn: r.term_ends_on ?? null,

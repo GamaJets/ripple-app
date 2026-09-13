@@ -62,7 +62,10 @@ import {
   PAYMENT_TERMS, termDueOn, termOfDue, dueTermLine,
   TERM_STARTS_THE_CHASING, NO_TERM_IS_OFFERED,
 } from '../../src/lib/invoiceTerms';
-import { minorMoney } from '../../src/lib/coachMoney';
+// `majorFromMinor` is how "Bill it again" fills the amount box: it asks the
+// currency how many places it has rather than dividing by a hundred, so a yen
+// invoice comes back whole and a Kuwaiti dinar by a thousand.
+import { minorMoney, majorFromMinor } from '../../src/lib/coachMoney';
 import {
   fetchMyInvoices, fetchInvoiceIssuer, fetchInvoiceCurrency, issueInvoice, voidInvoice, remindInvoice,
   settleInvoice, setInvoiceChaseFrom,
@@ -258,6 +261,81 @@ export default function Invoices() {
   // over. A rate that reappeared on its own would be a statement the coach did
   // not make on THIS document.
   const reset = () => { setBillTo(''); setClientId(null); setDescription(''); setAmountText(''); setDueText(''); setKind('requested'); setNote(''); setTaxRateText(''); setTaxRegistration(''); };
+
+  /**
+   * Start a NEW invoice from one that already exists.
+   *
+   * ── why this exists ───────────────────────────────────────────────────────
+   *
+   * A coach's book is the same handful of people at the same handful of prices,
+   * month after month, and every invoice on this screen was made from a blank
+   * sheet: the name, the description, the amount, the terms, the tax rate and
+   * the tax number retyped each time. Every accounting tool a self-employed
+   * person has ever used offers this, and a screen whose whole subject is a
+   * repeating charge was the one that did not. Retyping is not merely slow —
+   * it is where a digit goes missing on a document that goes to a client.
+   *
+   * ── it is a NEW invoice, and nothing about the old one moves ──────────────
+   *
+   * This only fills in the sheet. It writes nothing, it touches no existing
+   * row, and the number is still allocated server-side when the coach presses
+   * Issue — an invoice in this app is never edited and never reissued, and
+   * "bill it again" must not become a back door to either. Every blocker the
+   * blank sheet has still runs on what comes out of this.
+   *
+   * ── the three things it deliberately does NOT carry over ──────────────────
+   *
+   *   · THE AMOUNT, WHEN THE CURRENCY HAS MOVED. This is the whole reason the
+   *     function is longer than four lines. Repple is white-labelled and a
+   *     coach's currency comes from their gym or their own packages, so it can
+   *     change under them; the new invoice will be issued in `ccy.currency` and
+   *     the old one states its own. Copying "480" from a GBP invoice into an
+   *     AED one is not a stale figure, it is a different amount of money on a
+   *     document with somebody's name at the top. So the box is filled only
+   *     where the two agree, and where they do not it is left empty with the
+   *     reason said out loud rather than a number nobody chose.
+   *
+   *   · THE DUE DATE. It was a day in the past. `NO_TERM_IS_OFFERED` is this
+   *     screen's standing rule — nothing preselects a term, because thirty days
+   *     is a convention in one trade in one country — and a copied deadline
+   *     would be the one exception, arriving already expired.
+   *
+   *   · "ALREADY PAID". `kind` resets to `requested`. 'received' is the coach
+   *     stating that money arrived, and that is a fresh fact about fresh money
+   *     every time; carrying it forward would print their statement about last
+   *     month's payment onto a charge nobody has paid yet.
+   *
+   * The tax rate and registration DO come over, because they are a standing
+   * fact about the coach's own trading rather than about the payment, and the
+   * sheet already re-offers exactly those two from `lastTax`.
+   */
+  const billAgain = (inv: CoachInvoice) => {
+    const was = (inv.currency || '').trim().toUpperCase();
+    const now = (ccy.currency || '').trim().toUpperCase();
+    const sameMoney = !!now && !!was && now === was;
+    setBillTo(inv.billTo);
+    // The same guard `onIssue` applies before it sends one: a name the coach
+    // typed by hand has no account and must not be linked to one.
+    setClientId(inv.clientId && isQueryableId(inv.clientId) ? inv.clientId : null);
+    setDescription(inv.description);
+    // `majorFromMinor` asks the currency how many places it has, so a yen
+    // invoice comes back undivided and a dinar by a thousand. It answers '' for
+    // an amount or a currency it cannot read, which is the empty box this wants
+    // anyway.
+    setAmountText(sameMoney ? majorFromMinor(inv.amountCents, inv.currency) : '');
+    setDueText('');
+    setKind('requested');
+    setNote(String(inv.note ?? ''));
+    setTaxRateText(inv.taxRatePct != null ? String(inv.taxRatePct) : '');
+    setTaxRegistration(String(inv.taxRegistration ?? ''));
+    setOpen(true);
+    if (!sameMoney) {
+      Alert.alert(
+        'Type the amount again',
+        `Invoice ${invoiceNumber(inv.seq)} ${was ? `is in ${was}` : 'has no currency recorded on it'}, and a new one would be issued ${now ? `in ${now}` : 'in whatever currency is set for you'}. Everything else has been filled in for you; the amount has not, because the same number in two currencies is two different amounts of money.`,
+      );
+    }
+  };
 
   const onIssue = async () => {
     const d = draft();
@@ -1039,7 +1117,13 @@ export default function Invoices() {
                     This one has no currency on it, so no amount can be printed on the document either.
                   </Flag>
                 ) : null}
-                <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+                {/* `flexWrap`, which the two ageing rows above already have and
+                    this one did not. With Send, They paid it, Bill it again and
+                    Void all live on one row, a narrow handset at a large text
+                    size pushed the last of them off the edge with no way to
+                    reach it — and the one that goes is whichever is last, which
+                    is the destructive one. */}
+                <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
                   <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
                     accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)}`} style={{ paddingVertical: sp.xs }}>
                     <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Send</Text>
@@ -1068,6 +1152,24 @@ export default function Invoices() {
                       and a constraint name. The same reader the sheet uses, so
                       the control is absent exactly where the act would be
                       refused. */}
+                  {/* ── the same charge, next month ───────────────────────
+                      Offered on every row, voided ones included: an invoice
+                      issued twice by mistake and then voided is precisely the
+                      one a coach re-raises, and what is being copied is the
+                      wording they already agreed with the client, not the
+                      document's standing. It writes nothing — see `billAgain`.
+
+                      Gated on the same `currencyBlocker` as the Issue button
+                      below, because it opens that same sheet: offering a
+                      shortcut into a form that cannot be submitted is the dead
+                      control this screen already refuses everywhere else. */}
+                  {!currencyBlocker ? (
+                    <Pressable onPress={() => billAgain(inv)} hitSlop={8} accessibilityRole="button"
+                      accessibilityLabel={`Start a new invoice from invoice ${invoiceNumber(inv.seq)}`}
+                      style={{ paddingVertical: sp.xs }}>
+                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Bill it again</Text>
+                    </Pressable>
+                  ) : null}
                   {!voidBlocker(inv) ? (
                     <Pressable onPress={() => { setVoidTarget(inv); setVoidReason(''); }} hitSlop={8} accessibilityRole="button"
                       accessibilityLabel={`Void invoice ${invoiceNumber(inv.seq)}`} style={{ paddingVertical: sp.xs }}>

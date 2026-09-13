@@ -15,6 +15,11 @@ import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib
 // month it falls in, and it was being drawn on whichever desk this was open at.
 import { gymDateText, gymDateTimeText, calendarDateText } from '@lib/gymWhen';
 import { parseGymZone } from '@lib/gymZone';
+// The gym's own month, and that month's instants cut on the gym's own clock.
+// A payroll month is the run of days the GYM was open, and `monthAtGym` is the
+// one place that boundary is computed — see the note on `histWindow` below.
+import { gymMonthNow, monthAtGym } from '@lib/gymMonth';
+import { monthsBefore } from '@lib/closeCosts';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
@@ -436,9 +441,32 @@ export default function Sessions() {
    * priced over a period nobody chose.
    *
    * A calendar month, not a rolling window, because a month is the period an
-   * owner reconciles in and the one `payroll_settlements` records against. The
-   * bounds are built with the local Date constructor: a month means the run of
-   * days the gym was actually open, not a UTC slice of them.
+   * owner reconciles in and the one `payroll_settlements` records against.
+   *
+   * ── Whose month, and the run this silently shortened ────────────────────
+   *
+   * The bounds used to be built with the local Date constructor, under a
+   * comment saying "a month means the run of days the gym was actually open,
+   * not a UTC slice of them". The first half of that is the right goal and the
+   * second half names the wrong enemy: it fixed UTC and stopped at the READER's
+   * clock, which is a different clock from the gym's for every owner, and every
+   * bookkeeper, who is not standing in the building.
+   *
+   * What that costs is a payroll run that is internally consistent and wrong.
+   * A London gym's month read from Los Angeles opened at 1 September 08:00
+   * London, so every 06:00 and 07:00 session on the 1st — the busiest hours a
+   * gym has — was outside September's window, and the same hours on 1 October
+   * were inside it. Nothing on the screen disagreed with anything else: the
+   * total, the tally and the trainer lines were all computed over the same
+   * wrong set of rows, and the only person who could tell was the coach whose
+   * session was not in either month's pay.
+   *
+   * So the window is `monthAtGym`, which cuts both ends on `tenants.timezone`
+   * through `gymDayBounds` — the far end computed from the next day's midnight,
+   * so a month containing a clock change is the right length rather than an
+   * hour short. A gym with no zone set keeps the reader's month, which is what
+   * it already had, and `basis` below is what lets the screen say so instead of
+   * passing it off as the gym's.
    */
   const [histOffset, setHistOffset] = useState(0);
   const [hist, setHist] = useState<PtSession[] | null>(null);
@@ -459,37 +487,60 @@ export default function Sessions() {
    * showed September under a picker that said offset 0 is this month, and every
    * label on the record was one month out.
    *
-   * Reduced to year*12 + month rather than kept as the instant so that the
+   * Reduced to a 'YYYY-MM' key rather than kept as the instant so that the
    * window (and the read it triggers) re-settles when the month turns over and
-   * at no other time. Deriving it straight from `nowMs` would rebuild two Date
-   * objects, and re-fire the history read, on every refresh of the page.
+   * at no other time. Deriving it straight from `nowMs` would rebuild the
+   * window, and re-fire the history read, on every refresh of the page.
+   *
+   * The GYM's month, via `gymMonthNow`. A tab open in Los Angeles at 17:00 on
+   * 30 September is looking at a London gym where it is already October, and
+   * the picker's "This month" has to mean the month the gym is in — that is the
+   * month its payroll is being run for.
    */
-  const histMonth = useMemo(() => {
-    const d = new Date(nowMs);
-    return d.getFullYear() * 12 + d.getMonth();
-  }, [nowMs]);
+  const histMonth = useMemo(() => gymMonthNow(zone, nowMs).key, [zone, nowMs]);
 
-  const histWindow = useMemo(() => {
-    const y = Math.floor(histMonth / 12);
-    const m = histMonth % 12;
-    const from = new Date(y, m + histOffset, 1, 0, 0, 0, 0);
-    const to = new Date(y, m + histOffset + 1, 1, 0, 0, 0, 0);
-    return { from, to };
+  /**
+   * The month being shown, as 'YYYY-MM'.
+   *
+   * Calendar arithmetic on the key rather than on a Date: `histOffset` is zero
+   * or negative, and `monthsBefore` walks back whole months without a
+   * month-length table and without a local midnight that some zones do not have.
+   */
+  const shownMonth = useMemo(() => {
+    if (histOffset >= 0) return histMonth;
+    const back = monthsBefore(histMonth, -histOffset);
+    return back.length ? back[back.length - 1] : histMonth;
   }, [histMonth, histOffset]);
+
+  /**
+   * That month's instants, cut on the gym's own clock where it has one.
+   *
+   * `basis` is carried to the screen rather than dropped: a month cut on the
+   * reader's device is a real answer and a different one, and the caption under
+   * the table is what keeps the two apart.
+   */
+  const histWindow = useMemo(() => monthAtGym(shownMonth, zone), [shownMonth, zone]);
 
   const histTenant = me?.tenantId ?? null;
   const histOwner = me?.role === 'owner';
   useEffect(() => {
     if (!histTenant || !histOwner) return;
+    // `monthAtGym` returns null only for a key that is not a month, which
+    // `shownMonth` cannot produce. Null is still handled rather than asserted
+    // away: no window means no read, and the panel says the month could not be
+    // worked out instead of reading an unbounded one.
+    if (!histWindow) { setHist(null); setHistErr('That month could not be worked out, so it has not been read.'); return; }
     let live = true;
     setHist(null); setHistErr(null);
-    // `fetchSessions` bounds with `.lte`, which is inclusive, so the upper end
-    // is a millisecond before the next month begins. Passing the next month's
-    // first instant would count a 00:00 session in two months at once.
+    // `fetchSessions` bounds with `.lte`, which is inclusive, and `monthAtGym`
+    // hands back an EXCLUSIVE `toIso` — the first instant of the next month at
+    // the gym. So the upper end is a millisecond before it. Passing it as it
+    // stands would count a session at the gym's own 00:00 on the 1st in two
+    // months at once, which is the one row a payroll run must not double.
     fetchSessions(
       supabase, histTenant,
-      histWindow.from.toISOString(),
-      new Date(histWindow.to.getTime() - 1).toISOString(),
+      histWindow.window.fromIso,
+      new Date(Date.parse(histWindow.window.toIso) - 1).toISOString(),
     )
       .then((rows) => { if (live) { setHist(rows); setHistErr(null); } })
       .catch((e: any) => {
@@ -756,7 +807,8 @@ export default function Sessions() {
       <Settled runs={settlements} error={settlementsError} zone={zone} />
       <Marked sessions={settled} unread={unread} onClear={undo} ccy={ccy} zone={zone} />
       <History
-        rows={hist} error={histErr} from={histWindow.from} offset={histOffset} zone={zone}
+        rows={hist} error={histErr} month={shownMonth} basis={histWindow?.basis ?? 'device'}
+        note={histWindow?.note ?? null} offset={histOffset} zone={zone}
         onOffset={setHistOffset}
       />
     </Shell>
@@ -1118,22 +1170,28 @@ function Marked({ sessions, unread, onClear, ccy, zone }: {
  * beside them would be a second, differently-scoped answer to "what does this
  * gym owe" with nothing on screen to say which is which.
  */
-function History({ rows, error, from, offset, zone, onOffset }: {
+function History({ rows, error, month, basis, note, offset, zone, onOffset }: {
   rows: PtSession[] | null;
   error: string | null;
-  from: Date;
+  /** The month being shown, as 'YYYY-MM'. A calendar month, never an instant:
+   *  it arrives already decided by `monthAtGym` above, so this component has no
+   *  boundary of its own to get wrong. */
+  month: string;
+  /** Whose clock that month's two ends were actually cut on. 'device' is a real
+   *  answer — a gym with no timezone set — and the caption says so rather than
+   *  letting the figures pass as the gym's. */
+  basis: 'gym' | 'device';
+  /** The sentence `cutAtGym` wrote for this window. */
+  note: string | null;
   offset: number;
   /** `tenants.timezone`, or null when the gym has not set one. */
   zone: string | null;
   onOffset: (fn: (n: number) => number) => void;
 }) {
-  // `calendarDateText`, not the gym's zone and not the reader's. `from` is a
-  // LOCALLY built midnight of the 1st — a calendar month, not an instant — and
-  // rendering it in a zone far enough east would name the month before it.
-  const monthLabel = calendarDateText(
-    `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`,
-    { month: 'long', year: 'numeric' },
-  ) ?? '—';
+  // `calendarDateText`, not the gym's zone and not the reader's. `month` is a
+  // bare 'YYYY-MM' — a calendar month, not an instant — and rendering it in a
+  // zone far enough east would name the month before it.
+  const monthLabel = calendarDateText(`${month}-01`, { month: 'long', year: 'numeric' }) ?? '—';
   // Every row here is inside a month that is over, or inside this one up to
   // now, so the tally is over a whole read — `fetchSessions` refuses a
   // truncated one rather than handing back a prefix, which is what makes these
@@ -1190,6 +1248,24 @@ function History({ rows, error, from, offset, zone, onOffset }: {
           <button style={ghostBtn} onClick={() => onOffset((n) => Math.min(0, n + 1))} disabled={offset >= 0}>Next →</button>
         </div>
       </div>
+
+      {/* Which clock this month's two ends were cut on, said only when it is
+          not the gym's.
+
+          Silent on 'gym', because a caption that appears under every month is a
+          caption nobody reads — and then the one month that needs it is invisible
+          too. On 'device' it is the whole story: the boundary is the reader's
+          machine, so a session in the first hours of the 1st may sit on the
+          other side of it, and this table and a colleague's in another country
+          are two different months wearing one name. */}
+      {basis === 'device' && note ? (
+        <p style={{
+          margin: 0, padding: '10px 14px', fontSize: 12.5, color: 'var(--ink3)',
+          maxWidth: '84ch', borderBottom: '1px solid var(--ring)',
+        }}>
+          {note}
+        </p>
+      ) : null}
 
       {error ? (
         // Named as a read that failed, and named with the month, so an owner is

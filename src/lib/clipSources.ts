@@ -39,15 +39,25 @@ import { exerciseSlug } from './exerciseId';
 import { num } from './format';
 
 /** The minimum a clip has to carry to be attributed. Named as VideoItem names
- *  these fields, so a caller passes its rows straight in. */
+ *  these fields, so a caller passes its rows straight in.
+ *
+ *  `id` is REQUIRED and is not decoration. `useExerciseVideos` hands back
+ *  `[...remote, ...added]`, and an `added` entry — a clip the coach saved while
+ *  the insert was refused — is minted with `trainerId: null`, exactly the shape
+ *  a platform clip has. Classifying on `trainerId` alone therefore filed every
+ *  offline save under the Academy, and this screen told a coach "your client
+ *  sees the Academy clip" about a clip sitting on their own phone that no
+ *  client can see at all. The id prefix is the only thing that tells the two
+ *  apart, and `clipOwner` is where that is written down. */
 export interface SourcedClip {
+  id: string;
   exerciseId: string | null;
   name: string;
   trainerId?: string | null;
 }
 
 /** Which demonstration the screen is actually playing. */
-export type ShownSource = 'mine' | 'academy' | 'other' | 'animation' | 'frames' | 'none';
+export type ShownSource = 'mine' | 'academy' | 'other' | 'local' | 'animation' | 'frames' | 'none';
 
 export interface ClipSources {
   /** Clips this coach recorded. Always 0 while the signed-in id is unknown —

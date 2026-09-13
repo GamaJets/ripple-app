@@ -1307,6 +1307,46 @@ export default function TrainerPayments() {
   const renewMonth = earnedWhole ? sumTaken(since(renewals, mStart)) : null;
   const takenMonth = oneOffMonth && renewMonth ? combineTaken(oneOffMonth, renewMonth) : null;
 
+  // ── what went back out, said beside the gross and never taken off it ──────
+  //
+  // The block below prints "This is the GROSS" and then names the two things
+  // that come out of it: Stripe's processing fee and the platform fee, neither
+  // of which this app is told. It named a third thing nowhere, and this app IS
+  // told about that one — `refunded_cents` is on both tables, written by
+  // connect-refund and by the `charge.refunded` branch of the webhook, and the
+  // Refund button three sections down is what puts it there.
+  //
+  // So a coach who refunded a pack in full read their whole takings back at the
+  // amount they had given away, with no cue anywhere above the fold. The per-row
+  // "Refunded in full" line existed, and it is a row in a list somebody has to
+  // scroll to and add up in their head — which is precisely the sum this screen
+  // exists to do for them.
+  //
+  // NOT SUBTRACTED, and that is deliberate rather than timid. A refund is its
+  // own recorded fact on its own day: `refunded_cents` says how much has gone
+  // back and says nothing about WHEN, so netting it into "This month" would date
+  // it to the sale, and netting it into "All time" alone would leave the two
+  // figures built on different rules. The same argument the Statement of Record
+  // makes about payouts — "taken 4,800, received 4,281" is two facts and not a
+  // subtraction — and the same one the pack row already makes in its own words
+  // ("stated BESIDE the sale rather than taken off the amount above it").
+  //
+  // One currency at a time, because `sumTaken` is the only summer in this file
+  // and it pots by currency: a refund in dirhams and a refund in sterling do not
+  // add, here any more than anywhere else. Rows with nothing given back are
+  // filtered out first, so `unpriced` stays about amounts Stripe never stated
+  // and `unlabelled` about the currency that was only ever on a deleted package.
+  const givenBack = earnedWhole
+    ? sumTaken([
+      ...paid
+        .filter((b) => Number(b.refunded_cents ?? 0) > 0)
+        .map((b): TakenRow => ({ amount_cents: Number(b.refunded_cents), currency: b.currency, created_at: b.created_at })),
+      ...pays
+        .filter((p) => Number(p.refunded_cents ?? 0) > 0)
+        .map((p): TakenRow => ({ amount_cents: Number(p.refunded_cents), currency: p.currency, created_at: p.paid_at ?? '' })),
+    ])
+    : null;
+
   // ── the one figure in here that came from a PREDICTION ────────────────────
   //
   // A discount code on a one-off is the only place this app names a number
@@ -1389,6 +1429,36 @@ export default function TrainerPayments() {
   // within each group is unchanged (newest first, as fetchClientPurchases
   // returns them), so nothing else about the list moves.
   const packsShown = [...packs].sort((a, b) => Number(packRunOut(b)) - Number(packRunOut(a)));
+  // ── the sales that were in every figure and on no list ────────────────────
+  //
+  // `packs` is `sessions_total != null`, and the other half of what this screen
+  // sells is a ONE-OFF MEMBERSHIP: `billingWords` above prints "· one-off
+  // membership" for exactly that package, `addPkg` creates one whenever no
+  // interval and no session count is given, and the stripe-webhook writes it to
+  // `client_purchases` with a null `sessions_total` because there are no credits
+  // on it to count. The webhook's own guard — `meta.package_id && sess.mode !==
+  // 'subscription'` — is what keeps a subscription out of this table, so these
+  // are one-off sales and nothing else: there is no double count with Renewals
+  // Paid below.
+  //
+  // Every one of them was inside `paid`, so it was inside "Taken Through
+  // Stripe" — a coach's headline takings — and it appeared in no list anywhere
+  // on this screen. Three things followed from that, and the third is the bad
+  // one:
+  //
+  //   · The coach could not see who had bought a membership, or when.
+  //   · A membership already refunded went on reading at its full amount in the
+  //     takings, with nothing on the screen saying any of it had gone back —
+  //     `refundedLine` is drawn per row and these had no row.
+  //   · THE REFUND CONTROL WAS UNREACHABLE. `openRefund` is offered on a pack
+  //     row and on a renewal row and nowhere else, so a coach who had to give a
+  //     membership back had no way to do it from this app at all. `refundBlocker`
+  //     would have allowed it; there was simply no button, which is the quietest
+  //     kind of dead end — nothing is disabled and nothing explains itself.
+  //
+  // Listable under 'partial' for the same reason `packs` is: the rows that came
+  // back are real sales. Nothing is counted off them — see the heading note.
+  const memberships = buys.filter((b) => b.status === 'paid' && b.sessions_total == null);
 
   /** A row of money pots, one per currency. Never one figure: AED 600 and
    *  GBP 90 do not add to 690 of anything, and a white-label product sees both
@@ -1731,10 +1801,51 @@ export default function TrainerPayments() {
                   session packs and subscription renewals — in the currency each was charged in, and
                   dated by when Stripe took the money.
                 </Text>
+                {/* ── the refunds, which the GROSS sentence below never named ──
+                    One line per currency, stated as its own fact and taken off
+                    nothing. See `givenBack` above for why it is not a
+                    subtraction: `refunded_cents` carries no date, so it belongs
+                    to no month, and a figure netted into All time but not into
+                    This month would be two totals built on two rules.
+
+                    Drawn only where something HAS gone back — a coach who has
+                    never refunded anything should not be made to read a zero —
+                    and `unlabelled` gets its own sentence for the same reason
+                    the takings' does: a refund whose currency was only ever on a
+                    package since deleted is not an amount of any money, and
+                    leaving it out silently would make this line short by an
+                    amount nobody can see. */}
+                {givenBack && (givenBack.pots.length > 0 || givenBack.unlabelled > 0) ? (
+                  <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 2 }}>Given back, and not taken off the figures above</Text>
+                    {givenBack.pots.map((p) => (
+                      <View key={p.currency} style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: 4 }}>
+                        <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                          {p.count === 1 ? 'On 1 payment' : 'On ' + p.count + ' payments'}
+                        </Text>
+                        <Text style={{ ...ty.caption, color: t.ink2, fontWeight: '500' }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
+                      </View>
+                    ))}
+                    {givenBack.unlabelled ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                        {`${givenBack.unlabelled === 1 ? 'One refund is' : givenBack.unlabelled + ' refunds are'} not in the figures on this line: the package ${givenBack.unlabelled === 1 ? 'the sale was' : 'the sales were'} made from is gone, and the currency was only ever recorded there. Stripe still has ${givenBack.unlabelled === 1 ? 'it' : 'them'}.`}
+                      </Flag>
+                    ) : null}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      A refund happened on its own day and Stripe tells us the amount, not the date, so
+                      this belongs to no month and is subtracted from nothing above. A chargeback is a
+                      different thing again and is under Chargebacks.
+                    </Text>
+                  </View>
+                ) : null}
+
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                   This is the GROSS. Stripe&apos;s processing fee and the platform fee come out of it
                   and Repple is told neither, so nothing here is a payout, a balance, or what has
                   landed in your bank. Your Stripe dashboard is the only place those exist.
+                  {givenBack && (givenBack.pots.length > 0 || givenBack.unlabelled > 0)
+                    ? ' Anything you have refunded is stated above and has not been taken off it.'
+                    : ''}
                 </Text>
               </>) : null}
             </Section>
@@ -2056,8 +2167,17 @@ export default function TrainerPayments() {
                           accessibilityState={{ disabled: creditBusy === b.id, busy: creditBusy === b.id }}
                           accessibilityLabel={`Take a session credit off the pack for ${b.client_name || 'this client'}`}
                           style={{ paddingVertical: sp.xs }}>
-                          <Text style={{ ...ty.label, fontWeight: '500', color: creditBusy === b.id ? t.ink3 : t.ink3 }}>
-                            Take one off
+                          {/* Both arms of this ternary were `t.ink3`, so the
+                              one control on the row that could not say it was
+                              working said nothing: "Give a credit back" dims and
+                              relabels while `adjustPackCredit` is in flight and
+                              this sat there unchanged, inviting a second tap on
+                              a write that moves somebody's session credit. The
+                              label carries the state now, the same way its
+                              sibling does; the colour cannot, because this one
+                              is drawn in the quiet ink to begin with. */}
+                          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>
+                            {creditBusy === b.id ? 'Working…' : 'Take one off'}
                           </Text>
                         </Pressable>
                       ) : null}
@@ -2065,6 +2185,88 @@ export default function TrainerPayments() {
                   </View>
                 );
               })}
+            </Section>
+
+            <Rule />
+
+            {/* ── memberships sold, which were in the takings and on no list ──
+                The other half of what `client_purchases` holds. A pack has
+                credits to count down and gets the section above; a one-off
+                membership has none, which is the only reason it was filtered
+                out of that list — and being uncountable is not a reason to be
+                invisible. See `memberships` for what that cost: the money was
+                in the headline figure, the refund control was reachable from
+                nowhere, and a membership already given back went on reading at
+                its full amount.
+
+                Deliberately thinner than the pack row. There is no balance, no
+                expiry and no credit to move, so the row is who, how much, when,
+                and the two things that can be true of the money afterwards —
+                what has gone back, and the button that sends it. */}
+            <Section>
+              {/* Counted only under a whole read, the same rule as Session
+                  Packs: under 'partial' the rows are real and the COUNT is the
+                  size of one page of somebody's sales. */}
+              <SectionHead title="Memberships Sold" note={buysWhole && memberships.length ? String(memberships.length) : undefined} />
+              {buysStatus === 'error' ? (
+                <Flag tone={t.crit}>
+                  We could not read what your clients have bought, so this is not a list of their
+                  memberships. Anyone who has bought one still has it.
+                </Flag>
+              ) : buysStatus === 'partial' ? (
+                <PartialRead what="purchases" shown={buys.length} onPress={load} />
+              ) : memberships.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Nobody has bought a one-off membership yet. Add a package below with no billing
+                  period and no session count and the sales appear here.
+                </Text>
+              ) : null}
+              {(buysStatus === 'error' ? [] : memberships).map((b, i) => {
+                const target = purchaseTarget(b);
+                return (
+                  <View key={b.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                      <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>
+                        {b.client_name || 'A client whose name could not be read'}
+                      </Text>
+                      {/* `fig` over `minorMoney`, so a sale whose currency was
+                          only ever on a deleted package is a dash rather than a
+                          bare number in a unit nobody chose — the same rule the
+                          takings pots keep. */}
+                      <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>
+                        {fig(minorMoney(b.amount_cents, b.currency))}
+                      </Text>
+                    </View>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                      {b.package_name || 'The package this was bought from has been deleted'}
+                      {' · '}{new Date(b.created_at).toLocaleDateString()}
+                    </Text>
+                    {refundedLine(target) ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refundedLine(target)}</Text>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.xs, flexWrap: 'wrap' }}>
+                      {/* Absent rather than dead where the act would be refused,
+                          and `refundBlocker` is the same reader `openRefund` and
+                          the edge function both use. */}
+                      {refundBlocker(target.rule) === null ? (
+                        <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
+                          disabled={refundBusy === b.id}
+                          accessibilityState={{ disabled: refundBusy === b.id, busy: refundBusy === b.id }}
+                          accessibilityLabel={`Refund the membership sold to ${b.client_name || 'this client'}`}
+                          style={{ paddingVertical: sp.xs }}>
+                          <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === b.id ? t.ink3 : t.brand }}>
+                            {refundBusy === b.id ? 'Refunding…' : 'Refund'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                A membership carries no session credits, so there is no balance to count down and
+                nothing here expires. What a client is entitled to under one is between you and them.
+              </Text>
             </Section>
 
             <Rule />

@@ -27,11 +27,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
-import { num } from '../../src/lib/format';
 import {
   DELIVERED_WINDOW_DAYS, MARK_WINDOW_DAYS, awaitingOutcome, deliveredBetween, fetchMySessions, windowStart,
 } from '../../src/lib/trainerSessions';
 import type { PtSession } from '../../src/lib/gymSessions';
+// The same diary rows, arranged by PERSON. `bookedAhead` is the module
+// app/(trainer)/calendar.tsx already reads for its Booked Ahead section; this
+// screen reads the coach's own sessions anyway, so the roster row costs no
+// extra round trip. See the note on `nextBooked`.
+import { BOOKED_AHEAD_DAYS, bookedAhead } from '../../src/lib/bookedAhead';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
 import {
   compareDrift, bandTitle, bandNote,
@@ -977,12 +983,38 @@ export default function TrainerClients() {
   const [draftClient, setDraftClient] = useState<RosterClient | null>(null);
   const [draftText, setDraftText] = useState('');
   const [draftBusy, setDraftBusy] = useState(false);
+  /**
+   * Whether there is an account behind the client whose sheet is open.
+   *
+   * `sel.id.includes('-')` was the test the photo read below used, on the
+   * belief that a hand-added client carries an id the phone invented. It does
+   * not: `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so it has
+   * dashes and the guard never fired. app/(trainer)/client-report.tsx,
+   * client-body.tsx and client-training.tsx all carry the same note and all
+   * three ask `clientIsQueryable`, which consults the one thing that knows
+   * which table the row came from — the roster's own `handAdded`.
+   *
+   * What it costs on THIS sheet is not a wrong pixel, it is a sentence sent to
+   * a model. `food_logs` is read through a policy that hangs off
+   * `is_my_client()`, an EXISTS over `clients`, so a hand-added client's read
+   * comes back with zero rows and NO error — and `mealsThisWeek` became a
+   * confident `0`, which `genSummary` posts as "0 in the last 7 days" under a
+   * prompt asking for "one concern to watch". The coach then reads, and may
+   * send on, a paragraph about a person not logging their food in an app they
+   * have never been given.
+   */
+  const selAskable = clientIsQueryable(sel?.id, sel?.handAdded);
   useEffect(() => {
     let cancelled = false;
     setAiSummary('');
     if (!sel) { setClientMeals(null); setMealsThisWeek(null); return; }
     setClientMeals(null);
     setMealsThisWeek(null);
+    // Nothing server-backed is asked about somebody with no account. Both stay
+    // null, which is "not known" everywhere downstream — the sheet has its own
+    // sentence for this and `genSummary` tells the model there is no food log
+    // rather than that there is an empty one.
+    if (!selAskable) return;
     (async () => {
       try {
         // `error` was not destructured here. supabase-js resolves rather than
@@ -1016,7 +1048,7 @@ export default function TrainerClients() {
       } catch { if (!cancelled) setMealsThisWeek(null); }
     })();
     return () => { cancelled = true; };
-  }, [sel]);
+  }, [sel, selAskable]);
   // ── progress photos this client SENT ────────────────────────────────────
   // A coach sees a progress photo for exactly one reason: the client sent that
   // photo. There is no roster-wide read and no "linked trainer" policy behind
@@ -1033,9 +1065,15 @@ export default function TrainerClients() {
     setShared(null);
     setSharedErr(null);
     if (!sel) return;
-    // A coach-created client (coach_clients) has no account and therefore no
-    // photos; its id is not a uuid, so asking would be a guaranteed error.
-    if (!sel.id.includes('-')) { setShared([]); return; }
+    // A client the coach typed in by hand has no account, so there is no phone
+    // for a photo to have been sent FROM — an empty list is the true answer
+    // rather than an unread one, and it is what the sheet's third branch says.
+    //
+    // This was `!sel.id.includes('-')`, written in the belief that such a row
+    // carries an id the phone invented. `coach_clients.id` is `uuid DEFAULT
+    // gen_random_uuid()`, so it has dashes, the guard never fired, and the
+    // round trip ran on every one of them. See `selAskable` above.
+    if (!selAskable) { setShared([]); return; }
     const forClient = sel.id;
     (async () => {
       try {
@@ -1047,7 +1085,7 @@ export default function TrainerClients() {
       }
     })();
     return () => { cancelled = true; };
-  }, [sel]);
+  }, [sel, selAskable]);
   const active = roster.length;
   // How many clients there are, as opposed to how many came back.
   //
@@ -1083,7 +1121,23 @@ export default function TrainerClients() {
     if (!coachId) { setMySessions(null); setSessionsUnread(true); return; }
     (async () => {
       try {
-        const rows = await fetchMySessions(supabase, coachId, windowStart(MARK_WINDOW_DAYS), new Date().toISOString());
+        /* The upper bound used to be NOW, because the only two questions asked
+         * of these rows looked backwards. It now reaches `BOOKED_AHEAD_DAYS`
+         * forward so the roster row can say when the coach next sees somebody —
+         * see `nextBooked`.
+         *
+         * Nothing behind it has to change and nothing behind it can drift:
+         * `isAwaitingOutcome` (src/lib/gymSessions.ts) requires the session to
+         * have ENDED — `end <= now` — so a future row can never join the
+         * unmarked queue, and `deliveredBetween` bounds its own upper end at
+         * `Date.now()` by default. A fortnight of a coach's own diary is tens
+         * of rows against a cap of a thousand, and `fetchMySessions` still
+         * refuses a truncated read outright rather than reporting a short one. */
+        const rows = await fetchMySessions(
+          supabase, coachId,
+          windowStart(MARK_WINDOW_DAYS),
+          new Date(Date.now() + BOOKED_AHEAD_DAYS * 86_400_000).toISOString(),
+        );
         if (live) { setMySessions(rows); setSessionsUnread(false); }
       } catch (e) {
         reportError('dashboard.mySessions', e);
@@ -1094,6 +1148,57 @@ export default function TrainerClients() {
   }, [coachId, authLoading, readNonce]);
 
   const unmarked = mySessions === null ? null : awaitingOutcome(mySessions).length;
+
+  /* ── when this coach next sees each of them ────────────────────────────
+   *
+   * `RosterClient.next` is the literal string '—' in all three places
+   * src/ui/roster.tsx builds a client: it is computed nowhere and never has
+   * been, so the row below carried a field called "Next" with a dash after it
+   * until somebody removed the field rather than the dash. Meanwhile every
+   * competitor's roster — TrueCoach, Trainerize, PT Distinction — answers "when
+   * am I next with this person" on the row, and in this app the only way to
+   * find out was to open the diary and tap through a fortnight.
+   *
+   * The rows were already here. `bookedAhead` is the module
+   * app/(trainer)/calendar.tsx reads for its own Booked Ahead section, so this
+   * is the same judgement about what counts as held — an `available` slot
+   * belongs to nobody, a cancelled one has been given back, and a session is
+   * ahead by its END so the hour somebody is standing in is still theirs.
+   *
+   * NULL, NOT AN EMPTY MAP. `mySessions === null` is a diary that did not
+   * answer, and a row that then said nothing would be indistinguishable from a
+   * client with nothing booked — which is the one reading a coach must not take
+   * from this. The row draws nothing at all in that case and the line under the
+   * list says the diary could not be read.
+   *
+   * `today` rather than a clock captured in this memo's body: this screen is a
+   * tab and stays mounted for days, which is the defect `invoiceAgeing` above
+   * carries a paragraph about.
+   */
+  const nextBooked = useMemo(() => {
+    if (mySessions === null) return null;
+    const m = new Map<string, string>();
+    for (const a of bookedAhead(mySessions, Date.now())) m.set(a.clientId, a.startsAt[0]);
+    return m;
+  }, [mySessions, today]);
+
+  /** The line on one roster row, or null when there is nothing honest to put
+   *  there. Three answers: the diary was not read (null — the list says so once,
+   *  underneath, rather than on thirty rows), nothing in the window (null — an
+   *  absence a coach reads off the empty space, and one this screen cannot turn
+   *  into "they have nothing booked with anybody", since these are the coach's
+   *  own rows), and a date. */
+  const nextBookedLine = (clientId: string): string | null => {
+    const at = nextBooked?.get(clientId);
+    if (!at) return null;
+    /* `fmtRelativeDay` and `fmtTime`, never a hand-built date. Both read the
+       instant in the coach's own zone through `localDate`, and `fmtClock` asks
+       Intl whether this reader's locale writes a 12- or a 24-hour clock — "7 am"
+       is not a time to a coach in Berlin, and "Thu 9/12" is two different days
+       either side of the Atlantic. Not lowercased: it would turn "Thu 18 Sep"
+       into "thu 18 sep" for every client further out than tomorrow. */
+    return `Next: ${fmtRelativeDay(at, new Date())}, ${fmtTime(at)}`;
+  };
 
   /* ── why they left: one read, and it does not live here any more ──────
    *
@@ -1749,9 +1854,16 @@ export default function TrainerClients() {
       // It used to be `clientMeals.length` — the length of a six-row display
       // read with no date bound on it — so the number could never pass six and
       // was not about a week at all. See the read.
-      mealsLoggedCount: mealsThisWeek == null
-        ? 'their food log could not be read — do not comment on their food logging'
-        : `${mealsThisWeek} in the last 7 days`,
+      // Three answers, not two. `selAskable` false is "there is no food log",
+      // which is neither a count nor a failed read — and it is the one the
+      // model was previously handed as a confident zero, because a hand-added
+      // client's `food_logs` read is refused by RLS with no error. See
+      // `selAskable`.
+      mealsLoggedCount: !clientIsQueryable(client.id, client.handAdded)
+        ? 'they have no account in the app, so there is no food log at all — do not comment on their food logging'
+        : mealsThisWeek == null
+          ? 'their food log could not be read — do not comment on their food logging'
+          : `${mealsThisWeek} in the last 7 days`,
       programTitle: getProgram(client.id)?.title ?? 'no coach-assigned programme',
     };
     const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only — you have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
@@ -2413,6 +2525,7 @@ export default function TrainerClients() {
             // Drift is stated on the row only where there is something to act
             // on. "Holding their pattern" is said once, by the band heading.
             const showDrift = !!d && d.status !== 'on_track';
+            const nextLine = nextBookedLine(c.id);
             return (
             <View key={c.id}>
               {opensBand ? (
@@ -2461,7 +2574,18 @@ export default function TrainerClients() {
                       after it — a value the app looked as though it had tried
                       and failed to read. Nothing is drawn there instead; why a
                       client has no reading is already said once, above the
-                      list, by the drift notices this screen carries. */}
+                      list, by the drift notices this screen carries.
+
+                      There IS a Next now, and it is read rather than declared —
+                      see `nextBooked`. It sits above the rate because it is the
+                      one line on this row about the future: everything else
+                      here describes what has already happened. Absent, never
+                      dashed, when the diary did not answer or the fortnight is
+                      empty; the difference between those two is said once under
+                      the list rather than thirty times inside it. */}
+                  {nextLine ? (
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{nextLine}</Text>
+                  ) : null}
                   {d ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, ...numeric }}>
                       {`${fig(d.recentPerWeek)} / wk · was ${fig(d.baselinePerWeek)}`}
@@ -2514,6 +2638,27 @@ export default function TrainerClients() {
             </View>
             );
           })}
+
+          {/* What the Next line on those rows is and is not.
+              Said once, under the list, rather than as a caveat on thirty rows.
+              Three things it has to carry:
+                · a diary that did not answer is not an empty diary, and without
+                  this sentence a book with no Next lines on it looks exactly
+                  like a book where nobody is coming in;
+                · the window is a fortnight, so "no Next" means nothing in the
+                  next 14 days and not nothing ever;
+                · these are the COACH's own rows. A client training with another
+                  coach in the same gym has a session this screen cannot see,
+                  and reading a blank as "they have stopped booking" is the one
+                  wrong conclusion available here. The same sentence
+                  src/lib/bookedAhead.ts ends its header with. */}
+          {driftRows.length > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+              {nextBooked === null
+                ? 'Your diary could not be read, so no row below says when you next see anybody. That is the read, not an empty book.'
+                : `“Next” is the first session in your own diary in the next ${BOOKED_AHEAD_DAYS} days. A row without one has nothing booked with you in that fortnight — it does not mean they have nothing booked with anybody.`}
+            </Text>
+          ) : null}
         </Section>
 
       </ScrollView>
@@ -2879,7 +3024,19 @@ export default function TrainerClients() {
                 )}
               </View>
 
-              {clientMeals === null ? (
+              {/* Three answers, kept apart. "No account" is not "could not be
+                  read": nothing was asked, nothing was refused, and telling a
+                  coach their connection let them down about a person they
+                  typed into their own book sends them to retry something that
+                  will never work. */}
+              {!selAskable ? (
+                <View style={{ marginBottom: sp.xl }}>
+                  <SheetHead t={t} title="Recent Meals Logged" />
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    You added {sel.name.split(' ')[0]} to your book by hand, so there is no food log — meals are logged in the app and they do not have it. Invite them and this fills in from the day they accept.
+                  </Text>
+                </View>
+              ) : clientMeals === null ? (
                 <View style={{ marginBottom: sp.xl }}>
                   <SheetHead t={t} title="Recent Meals Logged" />
                   <Text style={{ ...ty.label, color: t.ink3 }}>

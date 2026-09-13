@@ -87,7 +87,17 @@ export default function Offers() {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     const { data, error } = await supabase.rpc('my_promo_redemptions');
     if (error) { setStatus('error'); return; }
-    const rows = Array.isArray(data) ? data : [];
+    // `Array.isArray(data) ? data : []` swallowed the one answer this screen
+    // cannot interpret. `my_promo_redemptions()` returns a set, so PostgREST
+    // gives `[]` for a member who has redeemed nothing — an empty ARRAY, which
+    // is a real answer and passes the test above. Anything that is not an array
+    // is a reply we did not understand, and turning it into an empty list makes
+    // the screen print "None yet. Codes you redeem appear here." to somebody
+    // whose codes are already spent. That is the sentence that sends them to
+    // the desk to claim a discount they have used. A failed read is not an
+    // empty list.
+    if (!Array.isArray(data)) { setStatus('error'); return; }
+    const rows = data;
     setMine(rows.map((r: any) => ({
       code: String(r.code), discount: discountOf(r.discount), redeemedAt: String(r.redeemed_at),
     })));

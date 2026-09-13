@@ -43,7 +43,6 @@ import { withDeadline } from '../../src/lib/readDeadline';
 // closes, and — where it closed with credits on it — how many they paid for and
 // did not take. Never a silent zero. See src/lib/packExpiry.ts.
 import { expiryLine } from '../../src/lib/packExpiry';
-import { isoToday } from '../../src/lib/dayPlan';
 import { useAuth } from '../../src/ui/auth';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
 import { fmtFullDay } from '../../src/lib/format';
@@ -322,10 +321,24 @@ export default function ClientPackages() {
   // its balance says — part 612 reduces `sessions_total` so that every draw site
   // in the database stops at it — so it is not the pack anything comes off next.
   const nextPackId = balance.lines.find((l) => !l.exhausted && !l.expired && l.left > 0)?.id ?? null;
-  // Fixed for the render. Every expiry sentence below is about a calendar day,
-  // and a bound recomputed per row would let two lines on the same screen
-  // disagree about what today is across a midnight.
-  const todayKey = isoToday(new Date());
+  // ── ONE today, not two ────────────────────────────────────────────────
+  //
+  // This was `isoToday(new Date())`, computed in the render body, on a screen
+  // that already holds `today` from `useToday()` six lines above — so the same
+  // component carried two independent answers to "what day is it", and they
+  // are both used to decide things about somebody's money. `today` decides
+  // whether a gym PT pass is still live and therefore whose money pays for the
+  // next session; `todayKey` decides every "ran out of time" sentence on the
+  // pack list. `useToday` re-reads at the next local midnight and on every
+  // return to the foreground, and a bare `new Date()` in the render body only
+  // moves when something else causes a render — so across a midnight this
+  // screen could draw a pass as lapsed and a pack as still in its window, or
+  // the reverse, from one read.
+  //
+  // They were the same call underneath — `todayKey()` in offlineQueue.ts is
+  // `isoToday` in local parts — so this is one source for one fact rather than
+  // a change of meaning.
+  const todayKey = today;
   // Subscriptions the client is actually on the hook for. A cancelled one from
   // last year is history, not a thing they are paying.
   const liveSubs = (subs ?? []).filter((s) => isLive(s.status));
@@ -551,7 +564,14 @@ export default function ClientPackages() {
 
             {/* ── what recurs ────────────────────────────────────────────── */}
             <Section>
-              <SectionHead title="Your Subscriptions" note={subs && liveSubs.length ? String(liveSubs.length) : undefined} />
+              {/* `!subsFailed`, not `subs` alone. Under a failed read `subs` is
+                  whatever this phone last cached — up to a week old — so the
+                  count beside the heading was a confident figure drawn straight
+                  above the flag saying the state of each one is not confirmed.
+                  A subscription cancelled since is exactly the one still in it.
+                  Every sibling screen withholds its count the same way (see the
+                  heads on invoices.tsx and receipts.tsx, both `isWhole`). */}
+              <SectionHead title="Your Subscriptions" note={!subsFailed && subs && liveSubs.length ? String(liveSubs.length) : undefined} />
               {subs === null ? (
                 <Flag tone={t.crit}>
                   We couldn't read your subscriptions. This is not a statement that you have none — if you

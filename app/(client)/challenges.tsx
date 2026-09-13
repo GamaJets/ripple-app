@@ -51,6 +51,9 @@ import { notifySuccess } from '../../src/ui/haptics';
 // the row, so it follows the reading direction rather than a physical side.
 import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 import { useReachability } from '../../src/ui/reachability';
+// The clock this screen judges every challenge against, kept live. See the note
+// at `useNow()` below and src/ui/today.ts.
+import { useNow } from '../../src/ui/today';
 import { retryLine } from '../../src/lib/reachability';
 
 const EMPTY_BOARD: BoardResult = { rows: [], status: 'loading', message: null };
@@ -64,6 +67,26 @@ export default function Challenges() {
   // gesture people already try; see src/ui/pullToRefresh.tsx.
   const pull = usePullToRefresh(useCallback(() => { ch.reload(); }, [ch]));
   const reach = useReachability();
+  // ── the clock, and why it is state ────────────────────────────────────
+  //
+  // `challengePhase`, `canJoin` and `windowLine` all default their `now` to
+  // `Date.now()`, which is right at the instant of a render and says nothing
+  // about when the next one happens. This screen is registered `href: null`
+  // (app/(client)/_layout.tsx), so it mounts once and is never torn down;
+  // backgrounding the app does not unmount it either. Left open across a
+  // midnight it went on saying "Last day" about a challenge that had closed,
+  // and — worse, because it is a control rather than a caption — went on
+  // offering a Join that `cp_self_join` refuses once `now() >= ends_at`. The
+  // member taps it, the insert comes back with no rows, and the screen tells
+  // them "that did not save" over a challenge that is simply over.
+  //
+  // This is the second half of the defect check:frozen-day catches, described
+  // at the top of src/ui/today.ts: not a value frozen in a `useMemo`, but one
+  // that is recomputed correctly on every render by a screen that has no reason
+  // to render. `useNow` re-settles at the next local midnight and whenever the
+  // app comes back to the foreground, which is both of the moments that matter.
+  const now = useNow();
+  const nowMs = now.getTime();
   const [open, setOpen] = useState<ChallengeRow | null>(null);
   const [board, setBoard] = useState<BoardResult>(EMPTY_BOARD);
   // What went wrong with the last Join or Leave. A write that silently did not
@@ -97,6 +120,21 @@ export default function Challenges() {
   }, [fetchBoard]);
 
   useEffect(() => {
+    // The notice is about ONE challenge and names it: "You are not on Summer
+    // Streak — that did not save". It was set by `doJoin`/`doLeave` and cleared
+    // by nothing except the next attempt, and it is rendered in two places — at
+    // the foot of the list and inside the sheet. So a failed Join on Summer
+    // Streak, followed by opening any other challenge, printed Summer Streak's
+    // failure inside that challenge's sheet, under that challenge's title,
+    // directly above its own Join button. A member reading it has been told the
+    // thing they are looking at did not save, about a thing they never tapped.
+    //
+    // Retired here rather than in the two handlers, because "the sheet changed"
+    // is the one event that covers opening a different challenge, opening the
+    // one it is about, and dismissing the sheet altogether. `doJoin` and
+    // `doLeave` still clear it on their own way in, so a second attempt does not
+    // read the first one's answer.
+    setNotice(null);
     if (!open) { boardRun.current += 1; setBoard(EMPTY_BOARD); return; }
     loadBoard(open.id);
     return () => { boardRun.current += 1; };
@@ -176,7 +214,7 @@ export default function Challenges() {
           ) : null}
 
           {ch.challenges.map((c, ci) => {
-            const phase = challengePhase(c);
+            const phase = challengePhase(c, nowMs);
             return (
               <View key={c.id}>
                 {ci > 0 ? <Rule /> : null}
@@ -213,7 +251,7 @@ export default function Challenges() {
                       <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={1}>{standingLine(ch.status, c)}</Text>
                     </Pressable>
                     <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{windowLine(c)}</Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{windowLine(c, nowMs)}</Text>
                       {/* The rows below a "we couldn’t check" banner are the
                           last thing that was true, and they stay — hiding them
                           would say the gym is running nothing, which is the
@@ -233,7 +271,7 @@ export default function Challenges() {
                         // behind it has always said "Leave Challenge".
                         <Ghost label="Leave" a11yLabel={`Leave ${c.title}`} onPress={() => doLeave(c)} />
                       ) : (
-                        <Cta label={phase === 'upcoming' ? 'Join Early' : 'Join'} disabled={!canJoin(c)}
+                        <Cta label={phase === 'upcoming' ? 'Join Early' : 'Join'} disabled={!canJoin(c, nowMs)}
                           a11yLabel={`${phase === 'upcoming' ? 'Join early' : 'Join'}: ${c.title}`}
                           onPress={() => doJoin(c)} />
                       )}
@@ -263,7 +301,7 @@ export default function Challenges() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '80%', ...elevation.e2 }}>
           {sheet && (
             <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>{cohortLabel(sheet)} · {windowLine(sheet)}</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>{cohortLabel(sheet)} · {windowLine(sheet, nowMs)}</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{sheet.title}</Text>
               {/* Only a participant has a board to be ranked on. The effect
                   above fetches one whenever a sheet opens, joined or not, and
@@ -375,7 +413,7 @@ export default function Challenges() {
                 ) : sheet.joined ? (
                   <Ghost label="Leave Challenge" onPress={() => doLeave(sheet)} />
                 ) : (
-                  <Cta label="Join Challenge" wide disabled={!canJoin(sheet)} onPress={() => doJoin(sheet)} />
+                  <Cta label="Join Challenge" wide disabled={!canJoin(sheet, nowMs)} onPress={() => doJoin(sheet)} />
                 )}
               </View>
               {notice ? (

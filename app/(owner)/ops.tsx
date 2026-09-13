@@ -70,6 +70,11 @@ import { fetchAllFeedbackPage, type FeedbackRow } from '../../src/ui/appFeedback
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings';
+// Both cancellation-policy fields. The fee is MONEY and is read through the
+// currency that denominates it; the hours are a COUNT and the column is an
+// `integer`. One shared `Number()` was the right reader for neither — see the
+// header of src/lib/cancelPolicy.ts for the list of what it accepted.
+import { parseCancelFee, parseCancelHours } from '../../src/lib/cancelPolicy';
 import { fetchGymMerchant, merchantState, startGymOnboarding, type GymMerchant } from '../../src/lib/gymMerchant';
 import { Fetched } from '../../src/ui/fetched';
 import { oldestFetch } from '../../src/lib/freshness';
@@ -278,6 +283,11 @@ export default function OwnerOps() {
   const [feeDraft, setFeeDraft] = useState<string | null>(null);
   const feeField = feeDraft ?? sessionFeeFieldValue(tenant?.sessionFee ?? null, tenant?.currency ?? null);
   const [feeBusy, setFeeBusy] = useState(false);
+  /* The currency picker's own in-flight flag. It had none: every pill stayed
+   * live while a write was going, so two taps sent two UPDATEs whose order
+   * nothing controls, and the gym ended up priced in whichever one the server
+   * happened to finish last while the message on screen named the other. */
+  const [curBusy, setCurBusy] = useState(false);
   const [feeMsg, setFeeMsg] = useState<{ bad: boolean; text: string } | null>(null);
 
   /* ── what a late class cancellation costs ────────────────────────────────
@@ -487,24 +497,17 @@ export default function OwnerOps() {
    * still refused rather than stored.
    */
   const savePolicy = async () => {
-    const num = (raw: string): { ok: true; v: number | null } | { ok: false } => {
-      const trimmed = raw.trim();
-      if (!trimmed) return { ok: true, v: null };
-      const n = Number(trimmed);
-      return Number.isFinite(n) && n >= 0 ? { ok: true, v: n } : { ok: false };
-    };
-    const hours = num(noticeField);
-    const fee = num(cancelFeeField);
-    if (!hours.ok || !fee.ok) {
-      setPolicyMsg({ bad: true, text: 'Those are not numbers this can save. Nothing has changed — clear a field entirely to withdraw that half of the policy.' });
-      return;
-    }
-    if (hours.v != null && hours.v > 336) {
-      setPolicyMsg({ bad: true, text: 'A notice period longer than two weeks is refused. Nothing has changed.' });
-      return;
-    }
+    /* Each field is refused in its own words, rather than by the single shared
+     * "those are not numbers this can save" that used to cover both: an owner
+     * who typed a fine notice period and a bad fee was told neither which field
+     * was wrong nor what about it. The hours are checked first because that is
+     * the order they are read on screen. */
+    const hours = parseCancelHours(noticeField);
+    if (!hours.ok) { setPolicyMsg({ bad: true, text: hours.reason }); return; }
+    const fee = parseCancelFee(cancelFeeField, cur);
+    if (!fee.ok) { setPolicyMsg({ bad: true, text: fee.reason }); return; }
     setPolicyBusy(true);
-    const saved = await updateTenant({ classCancelHours: hours.v, classCancelFee: fee.v });
+    const saved = await updateTenant({ classCancelHours: hours.value, classCancelFee: fee.value });
     setPolicyBusy(false);
     if (!saved) {
       setPolicyMsg({ bad: true, text: 'Not saved. Your policy is unchanged, and members are still being told this app does not hold it.' });
@@ -514,10 +517,56 @@ export default function OwnerOps() {
     setCancelFeeDraft(null);
     setPolicyMsg({
       bad: false,
-      text: hours.v == null
+      text: hours.value == null
         ? 'Withdrawn. Members are told this app does not hold your policy, which is true again.'
         : 'Saved. Members cancelling inside that window are now told so before they confirm.',
     });
+  };
+
+  /* ── changing what a gym is priced in ───────────────────────────────────
+   *
+   * The same shape as `askZone` above, for the same reason and with the same
+   * two branches: setting a currency a gym has never had is harmless and goes
+   * straight through, and CHANGING one is not, so it is confirmed first.
+   *
+   * This picker had neither the confirm nor the guard. One mis-tap on a pill
+   * beside the one an owner meant split their ledger permanently — nothing
+   * already recorded is re-denominated, by design, so from that moment the gym
+   * holds two currencies and every total that spans them is withheld rather
+   * than added up. That is the correct behaviour for the DATA and a very poor
+   * thing to be able to do by brushing a screen. The timezone two sections up
+   * has been asking first all along.
+   *
+   * `saved` is `updateTenant`'s row COUNT, not the absence of an error: a
+   * refused UPDATE under RLS raises nothing and touches nothing. */
+  const askCurrency = (next: string) => {
+    if (curBusy || next === cur) return;
+    if (!cur) { void saveCurrency(next); return; }
+    Alert.alert(
+      'Change what this gym is priced in?',
+      `This gym is priced in ${cur}. Nothing already recorded is re-denominated — payments, plans and passes keep the currency they were written in — so this gym would hold both ${cur} and ${next}, and any total that mixes them is withheld rather than added up.`,
+      [
+        { text: `Keep ${cur}`, style: 'cancel' },
+        { text: `Use ${next}`, style: 'destructive', onPress: () => { void saveCurrency(next); } },
+      ],
+    );
+  };
+
+  const saveCurrency = async (next: string) => {
+    setCurBusy(true); setFeeMsg(null);
+    const saved = await updateTenant({ currency: next });
+    setCurBusy(false);
+    // No claim about what came before, and no claim that anything already
+    // recorded has moved. The rows keep the currency they were written in — a
+    // payment is a historical fact.
+    setFeeMsg(saved
+      ? {
+          bad: false,
+          text: cur
+            ? `Your gym is now priced in ${next}. Nothing already recorded has been re-denominated: payments, plans and passes keep the currency they were written in, and any total that mixes the two is withheld rather than added up.`
+            : `Your gym is priced in ${next}. That is what every figure written from here on is denominated in.`,
+        }
+      : { bad: true, text: cur ? `Not saved. Your gym is still priced in ${cur}.` : 'Not saved. Your gym still has no currency set.' });
   };
 
   const saveFee = async () => {
@@ -819,25 +868,9 @@ export default function OwnerOps() {
                   {CURRENCY_CHOICES.map((c) => {
                     const on = c === cur;
                     return (
-                      <Pressable key={c} onPress={async () => {
-                        if (on) return;
-                        const saved = await updateTenant({ currency: c });
-                        // No claim about what came before, and no claim that
-                        // anything already recorded has moved. The rows keep
-                        // the currency they were written in — a payment is a
-                        // historical fact — so a gym that changes this has two
-                        // currencies in its ledger and every total that mixes
-                        // them is withheld rather than added up.
-                        setFeeMsg(saved
-                          ? {
-                              bad: false,
-                              text: cur
-                                ? `Your gym is now priced in ${c}. Nothing already recorded has been re-denominated: payments, plans and passes keep the currency they were written in, and any total that mixes the two is withheld rather than added up.`
-                                : `Your gym is priced in ${c}. That is what every figure written from here on is denominated in.`,
-                            }
-                          : { bad: true, text: cur ? `Not saved. Your gym is still priced in ${cur}.` : 'Not saved. Your gym still has no currency set.' });
-                      }} accessibilityRole="button"
-                        accessibilityState={{ selected: on }}
+                      <Pressable key={c} onPress={() => { askCurrency(c); }}
+                        disabled={curBusy || on} accessibilityRole="button"
+                        accessibilityState={{ selected: on, disabled: curBusy || on }}
                         accessibilityLabel={on ? `This gym is priced in ${c}` : `Price this gym in ${c}`}
                         style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
                         <Text style={{ ...ty.label, ...numeric, color: on ? t.brandInk : t.ink2 }}>{c}</Text>
@@ -965,9 +998,11 @@ export default function OwnerOps() {
                       placeholder="—"
                       placeholderTextColor={t.ink3}
                       /* decimal-ok: hours of notice are whole — a gym does not
-                         run a 12.5-hour window — and `savePolicy` reads this
-                         with Number and refuses anything that is not a
-                         non-negative number. */
+                         run a 12.5-hour window — and `savePolicy` now refuses
+                         a non-integer in as many words. This comment used to
+                         claim that refusal while the code did no such thing:
+                         `Number('12.5')` is finite and non-negative, so it
+                         passed, and the `integer` column rounded it. */
                       keyboardType="number-pad"
                       accessibilityLabel="Hours of notice before a class"
                       style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}

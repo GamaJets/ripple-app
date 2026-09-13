@@ -61,7 +61,20 @@ import { minorFromWhole } from '@lib/coachMoney';
 import { runCurrency, totalNote } from '@lib/gymRateCurrency';
 // The middle of the three layers that price a session — what this gym pays THIS
 // coach. RLS hands a coach their own row and nobody else's.
-import { fetchTrainerPay, withResolvedRates, type PayIndex } from '@lib/gymPay';
+//
+// …and the two things a run pays for that are NOT sessions. `gym_class_pay` and
+// `payroll_adjustments` both carry a `_self_r` select policy (supabase/parts/183)
+// precisely so a coach can see their own, and this screen asked for neither —
+// see the note on `classPay` below for what that cost. The arithmetic is the
+// same `runTotal` / `runCurrencyBlocker` / `scopedToRun` the owner's run uses,
+// imported rather than re-derived, because a coach's screen and the screen that
+// pays them disagreeing about what a run comes to is the whole failure.
+import {
+  fetchTrainerPay, withResolvedRates, fetchClassPay, fetchAdjustments,
+  scopedToRun, runScopeOf, runTotal, runCurrencyBlocker, adjustmentsTotal,
+  ADJUSTMENT_LABEL, CLASS_PAY_LABEL,
+  type PayIndex, type ClassPayLine, type Adjustment,
+} from '@lib/gymPay';
 import { payPolicyOf, PAY_POLICY_LABEL, type PayPolicyCode } from '@lib/gymPolicy';
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit, capped, readAll, type CappedRead } from '@lib/rowCap';
@@ -454,6 +467,53 @@ export default function CoachEarnings() {
    */
   const [pay, setPay] = useState<PayIndex | null>(null);
   const [payErr, setPayErr] = useState<string | null>(null);
+
+  /**
+   * The two halves of a run that are not sessions, and why this screen now
+   * reads them.
+   *
+   * /payroll pays a coach for three things: delivered sessions, classes taught,
+   * and adjustments. This screen read the first and nothing else, which made
+   * two separate false statements to the one person least able to check them.
+   *
+   *   · the payment list. `paidHere` matched runs to the month by the
+   *     settlement id stamped on this month's SESSIONS, so a run that paid for
+   *     four classes and no one-to-ones had no session to be found by and did
+   *     not appear at all — money that left the gym, addressed to this coach,
+   *     on the screen whose job is to list exactly that. /payroll carries the
+   *     same repair (`paidHere` there adds the class and adjustment ids) with
+   *     the same sentence over it: "settled, real, and not on the screen that
+   *     lists what has been settled";
+   *   · the outstanding figure. A coach who teaches is owed for teaching, and
+   *     a deduction is owed back. Neither reached the tile, so the number a
+   *     coach checks their payslip against was not the number the run would
+   *     hand over — silently smaller for the classes, silently larger for a
+   *     deduction, and identical in shape to a correct one.
+   *
+   * Null is a read that did not land, never []. [] is the gym saying this coach
+   * taught nothing and has no adjustments, which is a real and common answer;
+   * null is nobody knowing, and on this screen the two differ by a month's
+   * teaching. Each carries its own reason for the same reason `payErr` does.
+   */
+  const [classPay, setClassPay] = useState<ClassPayLine[] | null>(null);
+  const [classPayErr, setClassPayErr] = useState<string | null>(null);
+  const [adjustments, setAdjustments] = useState<Adjustment[] | null>(null);
+  const [adjErr, setAdjErr] = useState<string | null>(null);
+  /**
+   * Whether the gym row has come back at all — which is NOT `zone !== null`.
+   *
+   * A gym that has set no timezone and a gym whose row has not arrived yet both
+   * leave `zone` null, and the class-pay read must not go out in the second
+   * state. `fetchClassPay` DATES its lines at read time and they cannot be
+   * re-dated afterwards: cut on the reader's calendar, a class taught at 01:00
+   * on 1 September at a Dubai gym is dated the 31st and joins August, and at
+   * UTC+14 it dates past the period and `runScopeOf` holds it off this month
+   * entirely. So the read waits for the gym row rather than firing early and
+   * re-firing. Set on the refused branch as well — a gym row that will not read
+   * is still an ANSWER about the zone, and the note below says whose clock the
+   * lines were then cut on.
+   */
+  const [gymRead, setGymRead] = useState(false);
 
   /**
    * Read the month.

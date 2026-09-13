@@ -940,6 +940,18 @@ function AppAccounts({ rec, nowMs }: { rec: MemberRecord; nowMs: number }) {
       </div>
 
       <p style={{ margin: 0, padding: '11px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+        {/*
+          * numbers-ok: a SENTENCE, not a figure. `COUNTS_ARE_NOT_A_TOTAL` in
+          * src/lib/appAccounts.ts is the paragraph saying why the four tiles
+          * above may not be added together; check:numbers matches the bare word
+          * "total" inside the CONSTANT'S NAME, and there is no number on this
+          * line for a separator to go into.
+          *
+          * The same kind of claim as `kcalNote`, `grams` and `payrollMoney` on
+          * that gate's SMALL list — "is not a number at all" rather than "cannot
+          * reach 999" — made at the site rather than in SMALL, because SMALL is
+          * keyed on a NAME and this one belongs to one screen.
+          */}
         {COUNTS_ARE_NOT_A_TOTAL}
       </p>
 
@@ -1006,12 +1018,36 @@ function PriceAgainstPaid({ rec, plans, invoices }: {
       // Each side carries its OWN currency and is drawn in it. A column headed
       // with one currency over figures denominated in two is how a gym reads a
       // EUR bill as pounds.
-      render: (r) => money(r.listCents, r.listCurrency) ?? <span className="dash">not read</span>,
+      //
+      // ── two silences, and only one of them is a failed read ────────────
+      //
+      // `money()` withholds for two quite different reasons and this cell used
+      // to answer "not read" for both. `PriceRow.listCurrency` is now the
+      // NORMALISED code out of `iso()` in src/lib/priceBook.ts, which admits
+      // only /^[A-Z]{3}$/ — and neither `membership_plans.currency` nor
+      // `gym_invoices.currency` is constrained to a currency code in the
+      // schema, so a hand-typed or imported plan priced "60.00 pounds" arrives
+      // here as a perfectly readable 6000 with a null code beside it.
+      //
+      // "Not read" about that row is false twice over: the price book came back
+      // whole, and it sends an owner to reload a page that will say the same
+      // thing forever. The row it belongs to is already labelled Amount Not
+      // Stated and PRICE_STATE_MEANS explains the case; this cell now says
+      // which of the two silences it is rather than blaming the query.
+      render: (r) => money(r.listCents, r.listCurrency)
+        ?? <span className="dash">{r.listCents == null
+          ? 'not read'
+          : 'priced, but not in a currency this app can name'}</span>,
     },
     {
       key: 'billed', header: 'Last Bill', value: (r) => r.billedCents ?? null, numeric: true,
+      // The same three answers as the list price beside it, in the same order:
+      // no bill at all, a bill whose amount did not arrive, and a bill carrying
+      // an amount whose currency column holds something that is not a code.
       render: (r) => money(r.billedCents, r.billedCurrency)
-        ?? <span className="dash">{r.state === 'not-billed' ? 'never billed' : 'not read'}</span>,
+        ?? <span className="dash">{r.state === 'not-billed' ? 'never billed'
+          : r.billedCents == null ? 'not read'
+          : 'billed, but not in a currency this app can name'}</span>,
     },
     {
       key: 'diff', header: 'Difference', value: (r) => r.diffCents ?? null, numeric: true,

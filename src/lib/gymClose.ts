@@ -70,10 +70,46 @@
 // verbatim, and a close made over them reads as exactly that — a decision
 // somebody took, with the reasons they took it over printed beside it.
 
+// ── The fifth figure: what the desk sold over the counter ────────────────
+//
+// The close stored four money figures. /close shows FIVE — `buildClose` reads
+// five parts of a month and the fifth is `passes` — and not one column here
+// recorded it. So four figures stopped moving the moment a month was filed and
+// the fifth went on moving forever: a pass voided in September changed what
+// August sold, `driftSince` compares stored against live figure by figure, and
+// a figure that was never stored cannot drift. The owner who handed their
+// accountant an August close in September held a document silent about a real
+// part of August's takings, with no later way to recover the number.
+//
+// Pass sales are NOT inside `takenCents` and never were. `gym_passes` and
+// `gym_payments` are two independent registers with no link column between
+// them, so adding them double-counts and dropping one loses income; that is
+// why `buildClose` holds them apart and why the close has to file them apart.
+// supabase/parts/2970 adds the four columns and this module writes all four.
+
 import { assertWrote } from './wroteRows';
 import { assertWhole, capLimit } from './rowCap';
 import { readByIds } from './idLookup';
 import type { MonthClose } from './monthEnd';
+/*
+ * The pass derivation, IMPORTED rather than copied.
+ *
+ * `passSnapshotOf` decides the three cases that matter — the passes were not
+ * read, the priced passes span two moneys, or there is a real figure — and a
+ * second copy of that decision here is how the stored row and the screen come
+ * to disagree about the same month, which is the fault this file's header is
+ * already about. So it is taken from where it was written.
+ *
+ * This makes gymClose ⇄ ownerClose a cycle, and it is safe because neither
+ * module touches the other at MODULE level: every reference is inside a
+ * function body, resolved on the first call, by which time both module objects
+ * are populated under CommonJS and under every bundler this repo builds with.
+ * It is still a cycle, and the right cure is moving `passSnapshotOf` and
+ * `PassSnapshot` down here beside `CloseSnapshot`, where the other four
+ * figures' rules already live — not available to this lane, which does not own
+ * src/lib/ownerClose.ts.
+ */
+import { passSnapshotOf, type PassSnapshot } from './ownerClose';
 
 type Queryable = { from: (table: string) => any };
 
@@ -106,6 +142,37 @@ export interface MonthCloseRow {
    * read it.
    */
   currency: string | null;
+  /**
+   * What the close filed about the month's pass sales — supabase/parts/2970.
+   *
+   * OPTIONAL, and the optionality is the load-bearing part of this type.
+   * ABSENT IS NOT NULL. `passDriftSince` in src/lib/ownerClose.ts reports
+   * nothing at all for a row carrying none of these four keys, precisely so
+   * that a row which was never asked the question cannot produce a movement
+   * line; the keys being present is what turns that check on. `fetchCloses`
+   * below is the only thing in the product that decides which of the two a
+   * stored row is, and the rule it applies is written there.
+   *
+   * The four are one fact in four columns and must be read together:
+   *
+   *   · `passCents` null is NEVER zero. It is either "the passes could not be
+   *     read at the close" or "the priced passes spanned more than one money,
+   *     and a sum across two moneys is not an amount of anything".
+   *   · `passCurrency` is null wherever `passCents` is, so the pair can never
+   *     disagree — and ALSO null over a REAL figure whose rows stated no code
+   *     at all, which is one unknown unit rather than two known ones. That
+   *     shape — cents present, currency null — is legitimate and is not to be
+   *     coalesced into anything.
+   *   · `passesSold` is a COUNT and survives a withheld figure. It is what
+   *     stops a null `passCents` reading as "no passes were sold".
+   *   · `passesPriced` says what fraction of the month `passCents` is a sum
+   *     OVER: four priced out of five sold is a figure with a known hole in
+   *     it, four out of four is a total.
+   */
+  passCents?: number | null;
+  passCurrency?: string | null;
+  passesSold?: number | null;
+  passesPriced?: number | null;
   unmarkedSessions: number | null;
   blockersAtClose: string | null;
   reopenedAt: string | null;
@@ -114,9 +181,18 @@ export interface MonthCloseRow {
   reopenReason: string | null;
 }
 
-/** What is written when a month is closed. Every figure may be absent, and so
- *  may the currency of any one of them, independently of the other three. */
-export interface CloseSnapshot {
+/**
+ * What is written when a month is closed. Every figure may be absent, and so
+ * may the currency of any one of them, independently of the other three.
+ *
+ * `extends PassSnapshot` and not four hand-copied fields: the pass half of a
+ * close is one shape, `passSnapshotOf` is the one thing that derives it, and a
+ * second declaration of the same four would be free to drift away from the
+ * rules written on that one. Every field it brings is REQUIRED here, unlike on
+ * `MonthCloseRow` — a snapshot is the answer to the question, so it always has
+ * all four, even when all four of them are null.
+ */
+export interface CloseSnapshot extends PassSnapshot {
   takenCents: number | null;
   invoicedCents: number | null;
   outstandingCents: number | null;
@@ -212,6 +288,18 @@ export function snapshotOf(c: MonthClose, ccy: CloseCurrencies): CloseSnapshot {
     payrollCurrency: c.payroll ? c.payroll.currency : null,
     // Never again. The column stays for the rows that predate the split.
     currency: null,
+    /*
+     * The fifth figure, derived by the one function that derives it.
+     *
+     * Spread rather than restated so that the three cases `passSnapshotOf`
+     * decides between — passes unread, two moneys, a real figure — are decided
+     * ONCE and read the same way on the owner's phone and in the stored row.
+     * Note what it does NOT do: a mixed-currency month files null cents with
+     * the real COUNTS beside them, because two currencies cannot be added but
+     * the number of passes sold is still a fact, and a 0 there would be the
+     * one claim an accountant cannot detect as false.
+     */
+    ...passSnapshotOf(c),
     unmarkedSessions: c.payroll ? c.payroll.total.unmarked : null,
     blockersAtClose: c.blockers.length ? c.blockers.map((b) => b.text).join('\n') : null,
   };
@@ -342,7 +430,7 @@ export function reopenBlocker(reason: string): string | null {
 export async function fetchCloses(sb: Queryable, tenantId: string): Promise<MonthCloseRow[]> {
   const { data, error } = await sb
     .from('gym_month_closes')
-    .select('id, month_key, closed_at, closed_by, note, taken_cents, invoiced_cents, outstanding_cents, payroll_cents, taken_currency, invoiced_currency, outstanding_currency, payroll_currency, currency, unmarked_sessions, blockers_at_close, reopened_at, reopened_by, reopen_reason')
+    .select('id, month_key, closed_at, closed_by, note, taken_cents, invoiced_cents, outstanding_cents, payroll_cents, taken_currency, invoiced_currency, outstanding_currency, payroll_currency, currency, pass_cents, pass_currency, passes_sold, passes_priced, unmarked_sessions, blockers_at_close, reopened_at, reopened_by, reopen_reason')
     .eq('tenant_id', tenantId)
     .order('month_key', { ascending: false })
     .order('closed_at', { ascending: false })
@@ -367,6 +455,7 @@ export async function fetchCloses(sb: Queryable, tenantId: string): Promise<Mont
     outstandingCurrency: r.outstanding_currency ?? null,
     payrollCurrency: r.payroll_currency ?? null,
     currency: r.currency ?? null,
+    ...passColumnsOf(r),
     unmarkedSessions: numOrNull(r.unmarked_sessions),
     blockersAtClose: r.blockers_at_close ?? null,
     reopenedAt: r.reopened_at ?? null,
@@ -374,6 +463,57 @@ export async function fetchCloses(sb: Queryable, tenantId: string): Promise<Mont
     reopenedByName: r.reopened_by ? names.get(r.reopened_by) ?? null : null,
     reopenReason: r.reopen_reason ?? null,
   }));
+}
+
+/**
+ * The pass columns off a stored row — or NO KEYS AT ALL, which is a different
+ * answer and the whole reason this is a function.
+ *
+ * ── the silence a `select` must not invent ────────────────────────────────
+ *
+ * `passDriftSince` reports nothing for a row carrying none of the four keys,
+ * so that a read which never asked about passes cannot produce movement lines.
+ * The moment the select above asks for the columns, that guard stops firing on
+ * its own — every row would carry all four keys — and every close filed before
+ * supabase/parts/2970 would start reading as a month whose passes had moved.
+ * Those rows are not that. They are closes that RECORDED NOTHING about the
+ * passes, which is exactly what the part says of them in as many words: "NULL
+ * on a row written before this part means 'this close did not record the
+ * passes', which is precisely what happened."
+ *
+ * So the row itself says which it is, and the rule is the only one the four
+ * columns can support: all four null is a close that said nothing about the
+ * passes, and it is handed on ABSENT. Anything else is a close that spoke, and
+ * every one of its four values travels, nulls included.
+ *
+ * A month whose passes were read and had nothing in them is NOT caught by
+ * this: it files `passesSold: 0` and `passesPriced: 0` beside a null figure,
+ * and 0 is not null. That is the distinction the house rule is about in both
+ * directions — 0 is never the answer for an unknown, and an unknown is never
+ * quietly promoted to 0. The test is `== null` per field and never truthiness,
+ * because `if (!sold)` here would file a real, counted, empty month as a month
+ * nobody read.
+ *
+ * The case this rule cannot separate is a close written AFTER the part whose
+ * passes slice failed — it also stores four nulls, and it also means "this
+ * close could not speak for the passes". Two identical facts, read identically,
+ * which is why one rule is enough: null means nobody can say, and nothing that
+ * cannot be said is reported as movement.
+ */
+function passColumnsOf(r: any): {
+  passCents?: number | null;
+  passCurrency?: string | null;
+  passesSold?: number | null;
+  passesPriced?: number | null;
+} {
+  const passCents = numOrNull(r.pass_cents);
+  const passCurrency = r.pass_currency ?? null;
+  const passesSold = numOrNull(r.passes_sold);
+  const passesPriced = numOrNull(r.passes_priced);
+  if (passCents == null && passCurrency == null && passesSold == null && passesPriced == null) {
+    return {};
+  }
+  return { passCents, passCurrency, passesSold, passesPriced };
 }
 
 /** The close currently in force for a month, or null if the month is open. */
@@ -430,6 +570,13 @@ export function driftSince(
   check('Billed', stored.invoicedCents, stored.invoicedCurrency, now.invoicedCents, now.invoicedCurrency);
   check('Still owed', stored.outstandingCents, stored.outstandingCurrency, now.outstandingCents, now.outstandingCurrency);
   check('Payroll', stored.payrollCents, stored.payrollCurrency, now.payrollCents, now.payrollCurrency);
+  // The PASS figure is deliberately not checked here. `now` carries it — a
+  // `CloseSnapshot` holds all five figures — but `passDriftSince` in
+  // src/lib/ownerClose.ts is what compares it, because only that function
+  // holds the absent-versus-null guard a pre-2970 row needs, and it words a
+  // null as "not a single amount" rather than "not known". `filingOf` appends
+  // its lines to these; checking the passes in both places would report every
+  // movement in them twice.
   if (stored.unmarkedSessions !== now.unmarkedSessions) {
     out.push(`${stored.unmarkedSessions ?? 'An unknown number of'} session(s) were unmarked at the close; ${now.unmarkedSessions ?? 'an unknown number'} are now.`);
   }
@@ -472,6 +619,20 @@ export async function closeMonth(
     outstanding_currency: snap.outstandingCurrency,
     payroll_currency: snap.payrollCurrency,
     currency: snap.currency,
+    // The fifth figure — supabase/parts/2970. All four go in, and the counts
+    // go in even when the money does not: a month whose priced passes span two
+    // currencies files `pass_cents` null beside a real `passes_sold`, because
+    // two moneys cannot be added and the number of passes sold is still a
+    // fact. A 0 there would claim the gym sold nothing, which is false in the
+    // one direction an accountant cannot detect — a zero reconciles against an
+    // absence and nobody goes looking. The database refuses the shape that
+    // cannot be true (`pass_cents` over no priced passes) and deliberately
+    // permits cents with no code, which is one unknown unit, not two known
+    // ones.
+    pass_cents: snap.passCents,
+    pass_currency: snap.passCurrency,
+    passes_sold: snap.passesSold,
+    passes_priced: snap.passesPriced,
     unmarked_sessions: snap.unmarkedSessions,
     blockers_at_close: snap.blockersAtClose,
   });

@@ -35,7 +35,7 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useBrand } from '../../src/ui/brand';
 import { memberNoFrom, MEMBER_NO_CHANGED_NOTE } from '../../src/lib/membership';
-import { code39Segments } from '../../src/lib/barcode';
+import { code39Fit } from '../../src/lib/barcode';
 import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Access() {
@@ -44,38 +44,47 @@ export default function Access() {
   const c = useClientData();
   const { appName } = useBrand();
   const memberNo = memberNoFrom(c.name, c.id, appName);
-  const segs = useMemo(() => code39Segments(memberNo), [memberNo]);
   // ── whether this card may be shown at all ────────────────────────────────
   //
-  // The number is derived from the member's own name and id, both of which come
-  // from the profile read. A profile that failed to read hands this screen a
-  // name of '' and therefore a DIFFERENT barcode — one reception has never
-  // seen — and it was printed at full size, on a black card, with nothing
-  // saying so. The defect was written down in this comment and answered with a
-  // pull gesture, which is not an answer: the member is at a turnstile with a
-  // queue behind them and no reason to pull anything.
+  // `c.id` is the whole of it, and this used to also require a name.
   //
-  // So the read is asked. `c.id` is 'unknown' when nobody is signed in, and an
-  // empty name is what a failed profile read leaves behind — either one means
-  // the number below is not this person's, and a barcode that is not theirs
-  // must not be drawn.
+  // The reasoning written here was that "a profile that failed to read hands
+  // this screen a name of '' and therefore a DIFFERENT barcode". That is not
+  // what `memberNoFrom` does: it seeds on `id || name || 'repple'`, so once the
+  // id is known the name contributes NOTHING to the number — the same member,
+  // named or nameless, gets the same nine characters. The name gate was
+  // therefore withholding a correct barcode, and telling the member the number
+  // "is not yours" about a number that was.
+  //
+  // It withheld it in exactly the place it is needed. `sbUid` comes from
+  // `supabase.auth.getUser()` and `name` comes from a second read of `profiles`
+  // (src/ui/clientData.tsx); on a fresh handset on a gym's captive-portal wifi
+  // the first lands and the second does not, which is a member standing at a
+  // turnstile being shown "We couldn't read your account" over a card that
+  // would have worked.
+  //
+  // What the id gate is for stays exactly as it was: `c.id` is the literal
+  // string 'unknown' when nobody is signed in, the derivation is pure, and so
+  // every member of a brand would otherwise be shown the SAME number. That one
+  // must never be drawn.
   const idKnown = !!c.id && c.id !== 'unknown';
   const nameKnown = !!c.name.trim();
-  const canShow = idKnown && nameKnown;
+  const canShow = idKnown;
   // Read, and not yet confirmed. A cached name gives the right number, so the
   // card is still drawn — with the caveat on it rather than in a comment.
   const confirmed = isWhole(c.profileStatus);
   const pull = usePullToRefresh(useCallback(() => { c.reload(); }, [c.reload]));
-  // The bar width used to be a pinned 2. The number is longer now — nine base-36
-  // characters instead of four digits, because four digits was nine thousand
-  // buckets and two members of one gym could share one — so a fixed unit runs
-  // off the side of a phone and a laser reads half a barcode. It is computed
-  // from the space the card actually has, capped at 2 so a short number on a
-  // tablet does not become a wall.
+  // The bar width used to be a pinned 2, then `Math.max(1, Math.min(2, …))`.
+  // Both drew a symbol wider than the card on a 320-point screen, and a clipped
+  // Code 39 has lost its start and stop guards and decodes as nothing. The
+  // ratio is chosen along with the width now — see `code39Fit` in
+  // src/lib/barcode.ts, which drops from 3:1 to the equally legal 2:1 rather
+  // than let the symbol run off the edge.
   const { width: screenW } = useWindowDimensions();
   const available = Math.max(120, screenW - sp.xl * 4);
-  const totalUnits = segs.reduce((n, sg) => n + sg.w, 0);
-  const unit = Math.max(1, Math.min(2, available / Math.max(1, totalUnits)));
+  const fit = useMemo(() => code39Fit(memberNo, available), [memberNo, available]);
+  const segs = fit.segs;
+  const unit = fit.unit;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }} edges={['top']}>
@@ -84,10 +93,11 @@ export default function Access() {
           <Icon name={BACK_ICON} size={20} color="#fff" />
         </Pressable>
         {!canShow ? (
-          /* No card at all. A barcode built off a name of '' encodes a
-             different number, and one wrong barcode held up at a turnstile
-             costs more than no barcode: the member stands there scanning
-             something that cannot work and has nothing to tell the desk. */
+          /* No card at all, and only ever for one reason: nobody is signed in,
+             or the session read has not landed. The number is then derived from
+             the literal string 'unknown', which is the SAME number for every
+             member of this brand — and one member holding up another member's
+             barcode at a turnstile costs more than no barcode. */
           <View style={{ alignItems: 'center', paddingHorizontal: sp.xl }}>
             <Text style={{ ...ty.title, color: '#fff', textAlign: 'center' }}>
               {c.profileStatus === 'loading' ? 'Reading your account…' : 'We couldn’t read your account'}
@@ -118,13 +128,26 @@ export default function Access() {
           <Text style={{ ...value(15), letterSpacing: 3, color: '#000', marginTop: sp.md }}>{memberNo}</Text>
         </View>
 
-        {/* Drawn off a name this session could not confirm. The number is
-            almost certainly right — it is the one this device last read — and
-            "almost certainly" is a thing the person holding it up is entitled
-            to know before a queue forms behind them. */}
-        {!confirmed ? (
+        {/* Two different things this session may not have confirmed, and they
+            deserve two different sentences.
+
+            The NAME is the one above the barcode, and it is the only part of
+            this card a failed profile read can take away — the number is
+            derived from the account id alone (see the gate at the top), so it
+            is right whether or not the name arrived. Saying "this is the ID
+            this phone last read for you" about a number that was derived a
+            frame ago would be inviting doubt where there is none.
+
+            The profile READ not having settled is the other, and it is where
+            that sentence is true: the name on screen is a cached one and it is
+            worth a pull to check. */}
+        {canShow && !nameKnown ? (
           <Text style={{ ...ty.caption, color: '#8a8a8a', textAlign: 'center', marginTop: sp.lg }}>
-            Your account could not be confirmed just now, so this is the ID this phone last read for you. Pull down to check it.
+            Your name could not be read just now, so it is not on the card. The ID below it is built from your account and is yours — reception can look you up on it.
+          </Text>
+        ) : !confirmed ? (
+          <Text style={{ ...ty.caption, color: '#8a8a8a', textAlign: 'center', marginTop: sp.lg }}>
+            Your account could not be confirmed just now, so this is the name this phone last read for you. The ID is built from your account and is unaffected. Pull down to check it.
           </Text>
         ) : null}
 

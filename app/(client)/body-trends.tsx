@@ -100,10 +100,19 @@ import {
 import {
   isConvertibleMass, compositionUnitOf, compositionDecimals, compositionIn, compositionDeltaIn,
 } from '../../src/lib/compositionUnit';
+// How FAST it is moving, which this screen has never said. The total change
+// since the first reading grows for ever and is mostly a fact about how long
+// ago somebody started; the rate is the figure that says whether what they are
+// doing this month is working, and it is what InBody's own app, Withings,
+// Renpho and Happy Scale all lead with. See src/lib/bodyRate.ts, including why
+// the printed grain is derived from the window rather than fixed.
+import { rateOf, rateDecimals, rateGapNote } from '../../src/lib/bodyRate';
+import { KG_PER_LB } from '../../src/lib/units';
 import {
   bodyReadings, measuredNote, stalenessNote, mixedSourceNote, readingsLabel,
-  dayLabel, todayISO, type BodyReading,
+  dayLabel, type BodyReading,
 } from '../../src/lib/bodyFigures';
+import { useToday } from '../../src/ui/today';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { goalOfKind, goalOnBody } from '../../src/lib/goalOnBody';
@@ -217,7 +226,15 @@ export default function BodyTrends() {
   // them. Both are server reads and both can fail on their own.
   const pull = usePullToRefresh(useCallback(() => { cd.reload(); reloadGoals(); }, [cd.reload, reloadGoals]));
   const scans = useMemo(() => [...(cd.scans || [])].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [cd.scans]);
-  const today = todayISO();
+  // The day `measuredNote` and `stalenessNote` are both measured against, and
+  // it has to keep moving. A bare `todayISO()` in the render body is only right
+  // at the moment something else happens to redraw (src/ui/today.ts says so in
+  // those words), and this screen is reached from Progress and left mounted: a
+  // member who opened it a fortnight ago and came back to it was reading
+  // "14 days ago" under a figure that is now 28 days old, and STALE_AFTER_DAYS
+  // — the threshold that decides whether the screen warns them at all — never
+  // fired, because it was still being asked a fortnight-ago question.
+  const today = useToday();
   const G = layout.gutter;
 
   // clientData appends the logged weigh-in past the last scan, so the number of
@@ -461,6 +478,37 @@ export default function BodyTrends() {
             // measured against a different series from the figure above it is
             // exactly the "two screens, one body, two answers" this file's
             // header was written about, reproduced inside one screen.
+            /* ── how fast, as opposed to how much ───────────────────────────
+             *
+             * The line above says the total change since the first reading, and
+             * a member three months into a cut reads the same growing number
+             * for weeks while the weekly loss quietly falls to nothing. This is
+             * the other half, and the rules it follows are src/lib/bodyRate.ts':
+             *
+             *   · it refuses a window shorter than MIN_TREND_DAYS rather than
+             *     dividing two weigh-ins a day apart into a weekly figure;
+             *   · it NAMES the window it measured, so a rate over a truncated
+             *     read is a true statement about the days it had rather than a
+             *     claim about the member's training block;
+             *   · the decimals are derived from that window, because a rate is
+             *     a difference divided by weeks and the grain of the readings
+             *     is divided with it. Whole-pound weights over a fortnight
+             *     print whole pounds a week; ten weeks of them earn a tenth.
+             *
+             * The per-week SPAN converts once, unrounded, and is rounded at the
+             * grain above — never `weightDeltaIn`, which rounds to the grain of
+             * a single BODY WEIGHT and would flatten every real rate under half
+             * a pound a week to "holding steady" for a pounds reader.
+             */
+            const massLike = !!m.weight || mass;
+            const rateAns = rateOf(readings.map((r) => ({ at: r.at, value: r.value })));
+            const ratePerWeek = rateAns.rate
+              ? (massLike && wu === 'lb' ? rateAns.rate.perWeek / KG_PER_LB : rateAns.rate.perWeek)
+              : null;
+            // One endpoint step in the unit this metric is PRINTED in, which is
+            // exactly what `dp` above already decided.
+            const rateDp = rateAns.rate ? rateDecimals(10 ** -dp, rateAns.rate.days) : 0;
+            const rateGap = rateGapNote(rateAns.gap, rateAns.days);
             const gk = m.goalKind;
             const target = gk && isWhole(goalStatus)
               ? goalOnBody(goalOfKind(goals, gk), readings.map((r) => ({ t: r.at, v: r.value })), { weight: !!m.weight, unit: m.unit, wu })
@@ -502,6 +550,24 @@ export default function BodyTrends() {
                       <Text style={{ ...ty.caption, color: t.ink3 }}>No change since {dayLabel(readings[0].at)}</Text>
                     )}
                   </View>
+                  {/* ── the rate ──────────────────────────────────────────
+                      Through `deltaLabel` like every other movement in this
+                      app, so the sign, the zero case and the separator are the
+                      house's rather than this screen's — "Holding steady"
+                      replaces "No change" only because a rate that rounds to
+                      nothing is a statement about a body rather than about two
+                      readings. The window is printed beside it: a rate whose
+                      period is not stated is a rate nobody can check, and under
+                      a truncated read it is the difference between a true
+                      sentence and a claim about a training block. */}
+                  {rateAns.rate ? (
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2, marginTop: 4 }}>
+                      {deltaLabel(ratePerWeek, { since: null, unit: `${unit}/wk`, decimals: rateDp, noChange: 'Holding steady' })}
+                      {` over the last ${rateAns.rate.days} days`}
+                    </Text>
+                  ) : rateGap ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{rateGap}</Text>
+                  ) : null}
                   {/* What this metric is aiming at, and how far there is left.
                       Under a failed goal read this is simply absent — an empty
                       `goals` list under 'error' means the targets could not be

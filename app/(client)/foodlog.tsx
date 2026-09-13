@@ -85,8 +85,13 @@ import { Rule, Section, SectionHead, Hero, Cta, Ghost, ListRow, Flag, Field, Kpi
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { BACK_ICON } from '../../src/ui/direction';
 
-type Food = { n: string; k: number; p: number; c: number; f: number };
-type Logged = Food & { via: string };
+// Gone with `add` below: a local `Food` shape (`{ n, k, p, c, f }`) and a
+// `Logged = Food & { via: string }` that nothing referred to. Every food on
+// this screen is a `FoodFacts` now — the shape src/ui/LogFoodSheet.tsx and
+// src/lib/foodPortion.ts agree on, which is the one that carries `basis` and
+// admits a macro nobody has supplied. A second local spelling of "a food",
+// with `kcal` called `k` and no room for a missing figure, is how the two come
+// to disagree.
 // The twelve-row FOOD_DB that used to sit here is gone, into `src/lib/foods.ts`
 // as ~90 COMMON_FOODS. It held chicken breast, oats and a banana, and it was
 // the ONLY answer this screen had for a food without a barcode — so "rice",
@@ -98,7 +103,6 @@ type Logged = Food & { via: string };
 // backend was unavailable — so photographing any plate produced the same invented
 // 520 kcal, shown to the client as an AI reading of their own food. When there is no
 // real read, the fields stay empty and the UI says so.
-const round = (n: number) => Math.round(n);
 
 export default function FoodLog() {
  const t = useTheme();
@@ -329,11 +333,15 @@ export default function FoodLog() {
      `No connection, so ${what} is not in your food log on the server yet. It is counting toward today and goes up on its own next time you have signal.`)
    : Alert.alert('Not logged',
      `${what} was rejected by your food log, so it is not saved and it is not counting toward today. Adding it again as it is will be rejected again.`);
- const add = async (f: Food, via: string) => {
-  const out = await fl.logFood({ name: f.n, kcal: f.k, protein: f.p, carbs: f.c, fat: f.f, via: via as any });
-  if (out !== 'stored') warnUnsaved(f.n, out);
-  return out === 'stored';
- };
+ // Gone: an `add(f: Food, via: string)` helper with no caller anywhere below
+ // the line it was written on. Every way food reaches the log on this screen
+ // goes through `LogFoodSheet.onLog` or `logNL` now, and both call
+ // `fl.logFood` directly. What made it worth deleting rather than leaving is
+ // the `via: via as any` in it: `food_logs.via` carries a CHECK constraint
+ // listing search / barcode / photo / manual, and a cast that silences the
+ // compiler on exactly that column is the shape of the defect this file
+ // already records twice — a described meal inserted as 'ai', refused by the
+ // database, and shown to the member as logged.
  const logNL = async () => {
    const text = nl.trim(); if (!text) return;
    setNlBusy(true);
@@ -504,9 +512,15 @@ export default function FoodLog() {
  // the profile the target is scaled to, the coach's adjustment to that target,
  // and the goals it is weighted by. `adjustUnknown` above withholds the whole
  // target when the coach's half failed — this is the way back from that.
+ // Read here rather than at the burn below, so the pull can reach it. See
+ // `burnStale`: this screen tells a member their device could not be reached
+ // and to pull down, and a gesture that retries five reads and not the sixth
+ // makes that a dead instruction.
+ const wear = useWearables();
+ const syncDevices = wear.syncAll;
  const pull = usePullToRefresh(useCallback(() => {
-   fl.reload(); hist.reload(); cd.reload(); void coachNutrition.reload(); goalTracker.reload();
- }, [fl.reload, hist.reload, cd.reload, coachNutrition, goalTracker.reload]));
+   fl.reload(); hist.reload(); cd.reload(); void coachNutrition.reload(); goalTracker.reload(); syncDevices();
+ }, [fl.reload, hist.reload, cd.reload, coachNutrition, goalTracker.reload, syncDevices]));
  const [openDay, setOpenDay] = useState<string | null>(null);
  const histWhole = isWhole(hist.status);
  // Today is drawn by everything above and does not need a row of its own down
@@ -618,9 +632,53 @@ export default function FoodLog() {
   setPendingTitle(undefined); setPendingNote(null); setPendingPhoto(null); setPendingVia('manual');
   setPending({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, basis: null });
  };
- const wToday = useWearables().today;
+ /**
+  * The same again, off a day in the fortnight behind today.
+  *
+  * `Recent` and `Often` are derived and capped at five rows each, so a meal
+  * eaten once last Tuesday was in this screen's own history with no way to act
+  * on it — while every app a member is likely to have used before this one
+  * (MyFitnessPal, Lose It, Cronometer, Yazio) copies a meal off an earlier day
+  * as a matter of course.
+  *
+  * A NEW row against today, with the figures as they were logged, and the
+  * sheet still asks how much. It does not touch the day it came from: copying
+  * a meal forward and back-dating one are different acts, and only the first
+  * is something this screen can honestly do — see the note under `saveEdit`
+  * about the log always being today's.
+  */
+ const relogEntry = (fe: FoodEntry) => {
+  setPendingTitle(undefined); setPendingPhoto(null); setPendingVia('manual');
+  setPendingNote('Logged against today, as a new meal. The day you took it from is unchanged.');
+  setPending({ name: fe.name, kcal: fe.kcal, protein: fe.protein, carbs: fe.carbs, fat: fe.fat, basis: null });
+ };
+ const wToday = wear.today;
  const burn = target ? dayBurn(target, wToday) : null;
  const burned = burn?.burned ?? 0;
+ // ── and whether that burn is a CURRENT reading ──────────────────────────
+ //
+ // src/ui/wearables.tsx says it on `todayStatus` in its own words: "A screen
+ // printing a figure off `today` should say so when this is not 'ready'." This
+ // screen prints it in the hero's note — "1,900 kcal eaten · 610 kcal burned" —
+ // and asked nothing. Under 'error' that is not today's movement: it is what
+ // the last successful read left behind, which after a night of failed syncs is
+ // yesterday's.
+ //
+ // Not arithmetic: `caloriesLeft` is `target − eaten` and has never added the
+ // burn, so no allowance moves. It is a claim about a measurement, and the fix
+ // is to say which of the two it is rather than to withhold it — the provider
+ // keeps the figure on purpose, because a watch that could not be reached at
+ // three o'clock did not un-burn the morning. Same words as
+ // app/(client)/devices.tsx and the Meals tab.
+ //
+ // `isWhole`, not `!== 'error'`: that admits 'loading' as well, and a first read
+ // still in flight is not a stale figure — `burn` is null under it anyway.
+ // Only where a burn is actually PRINTED: the hero's note drops the clause
+ // when the figure is nought and withholds the whole sentence while today's log
+ // is not whole. A banner about a sentence that is not on screen is its own
+ // small lie.
+ const burnStale = dayWhole && (burn?.burned ?? 0) > 0
+  && !isWhole(wear.todayStatus) && wear.todayStatus !== 'loading';
  // Same function the Meals tab calls, so the two cannot drift apart again.
  // null, not 0, when there is no target to subtract from. `dayWhole` is true
  // for a member with no weight on record — the log read perfectly well — so the
@@ -784,6 +842,16 @@ export default function FoodLog() {
  arcLabel="of today's calories eaten"
  tone={dayWhole && remK != null && remK < 0 ? t.crit : undefined}
  />
+
+ {/* The burn named in the note above is the last thing the device told us
+     rather than a current reading. Same sentence as the Meals tab and the two
+     Devices screens, so a member who reads more than one of them is told one
+     thing. */}
+ {burnStale ? (
+ <Flag tone={t.warn}>
+ The calories burned above are the last figures we had, not a current reading — your device could not be reached just now. Pull down to try again.
+ </Flag>
+ ) : null}
 
  <Rule />
 
@@ -1022,7 +1090,11 @@ export default function FoodLog() {
 
  {/* ── today's entries, or an honest empty state ──────────────────── */}
  <Section>
- <SectionHead title="Logged Today" note={dayWhole ? `${tot.k} kcal` : undefined} />
+ {/* `num()`, not the raw figure: a day's calories passes a thousand routinely
+     and "3500 kcal" is a reader's own separator missing from the one place on
+     this screen that states the day's total. Every other figure here already
+     goes through it. */}
+ <SectionHead title="Logged Today" note={dayWhole ? `${num(tot.k)} kcal` : undefined} />
  {/* Meals on this phone that the server has not taken. They count toward
      today here and they are not lost — but they are not in the log a coach
      or another device reads, and only one of those two things is obvious
@@ -1120,11 +1192,30 @@ export default function FoodLog() {
       </Pressable>
       {open ? (
        <View style={{ paddingBottom: sp.md }}>
+        {/* Tappable, and that is the gap this closes. MyFitnessPal, Lose It,
+            Cronometer and Yazio all let somebody copy a meal off an earlier
+            day — it is how people who eat the same Tuesday dinner every week
+            log it — and this list was the one place in the app holding those
+            meals with no way to act on them. Recents and Often above are
+            derived and capped at five each, so anything eaten more than a few
+            days ago and not often was unreachable from anywhere.
+
+            Through the same review sheet as everything else: a re-log is a NEW
+            row with the figures exactly as they were the first time, and the
+            sheet still asks how much of it you had. Nothing here edits or
+            moves the original — that day's record is untouched, which is the
+            difference between copying a meal and back-dating one. */}
         {d.entries.map((fe) => (
-         <View key={fe.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: 6 }}>
+         <Pressable key={fe.id}
+          onPress={() => relogEntry(fe)}
+          accessibilityRole="button"
+          accessibilityLabel={`Log ${fe.name} again, ${num(fe.kcal)} calories`}
+          accessibilityHint="Opens a sheet to say how much of it you had, and logs it against today"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: 6 }}>
           <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
           <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(fe.kcal)} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
-         </View>
+          <Icon name="plus" size={14} color={t.brand} />
+         </Pressable>
         ))}
        </View>
       ) : null}

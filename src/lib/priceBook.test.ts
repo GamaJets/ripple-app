@@ -88,6 +88,42 @@ const oneState = (ms: Membership[], ps: PricedPlan[], bs: GymInvoiceRow[]): Pric
   // An empty string is NOT a currency and must not compare equal to another one.
   eq(oneState([member()], [plan({ currency: '' })], [bill({ currency: '' })]), 'amount-unstated',
     'two blanks are not a matching currency');
+
+  // Neither `membership_plans.currency` nor `gym_invoices.currency` is
+  // constrained to a code — both are bare `text not null default 'AED'`, so an
+  // imported or hand-typed gym holds whatever was written. Two rows carrying
+  // the SAME non-code compared equal and were subtracted, which put a member on
+  // the list price through the currency rather than through the amount. It is
+  // the flattering error this module exists to refuse, so it is pinned here
+  // with the two sides also agreeing on the figure, which is the shape that
+  // would read as compliance.
+  for (const junk of ['pounds', 'GB', '£', 'GBP1', 'A$']) {
+    eq(oneState([member()], [plan({ currency: junk })], [bill({ currency: junk })]), 'amount-unstated',
+      `"${junk}" is not a currency code, so two rows holding it are not thereby in the same money`);
+    eq(rowsFor([member()], [plan({ currency: junk })], [bill({ currency: junk })])[0].diffCents, null,
+      `and nothing is subtracted across "${junk}"`);
+  }
+  ok(PRICE_STATE_MEANS['amount-unstated'].includes('three-letter'),
+    'and the state says that an unreadable currency is one of the things it covers');
+
+  // The row hands on the code the COMPARISON accepted, not the string the
+  // column happened to hold: a screen spelling money with the raw value would
+  // print "POUNDS 60.00" off a row this module had already refused to compare.
+  const padded = rowsFor([member()], [plan({ currency: ' gbp ' })], [bill({ currency: 'GBP' })])[0];
+  eq(padded.listCurrency, 'GBP', 'the plan currency is carried normalised, not as it was typed');
+  eq(padded.billedCurrency, 'GBP', 'and so is the bill currency');
+  const unreadable = rowsFor([member()], [plan({ currency: 'pounds' })], [bill({ currency: 'pounds' })])[0];
+  eq(unreadable.listCurrency, null, 'a currency that is not a code is carried as null, never as itself');
+  eq(unreadable.billedCurrency, null, 'on both sides');
+  eq(unreadable.listCents, 6000, 'while the figure itself is still carried — it was read, its currency was not');
+
+  // The two-sided version: one readable, one not. This is not 'other-currency',
+  // because "these are two different currencies" is a claim, and one of the two
+  // is not a currency at all.
+  eq(oneState([member()], [plan({ currency: 'GBP' })], [bill({ currency: 'sterling' })]), 'amount-unstated',
+    'one readable side and one unreadable one is a silence, not a currency difference');
+  eq(otherCurrencyNote(rowsFor([member()], [plan({ currency: 'GBP' })], [bill({ currency: 'sterling' })])[0]), null,
+    'and the other-currency sentence is not printed where it would not be true');
 }
 
 /* ── the six silences, none of them folded into on-list ───────────────────── */

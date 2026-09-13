@@ -146,11 +146,16 @@ export const FILINGS_ARE_YOUR_OWN_RECORD =
 
 /* ── what a period has had done about it ──────────────────────────────────── */
 
-/** A filing covers a day when that day is inside its span. Both ends
- *  inclusive, matching the shape supabase/parts/2910 stores. */
-export function covers(f: TaxFiling, day: string): boolean {
-  return day >= f.periodFrom && day <= f.periodTo;
-}
+// There is no exported `covers(f, day)` here, and its absence is deliberate.
+// It existed, mirroring `covers` in src/lib/gymTaxHistory.ts, and nothing ever
+// called it but the test that asserted it worked. The question a screen
+// actually asks of this module is never "is this one day inside this one
+// filing" — it is "what has been recorded against this PERIOD", which is
+// `filingsFor`, and the rows it hands back in its `partly` and `filed` arms are
+// already the ones overlapping the period. A day-containment predicate is the
+// wrong tool for that question, so exporting one invites the wrong call. Both
+// ends are inclusive, matching the shape supabase/parts/2910 stores, and that
+// is pinned by the boundary cases in taxFilings.test.ts.
 
 export type PeriodFiling =
   /**
@@ -263,10 +268,17 @@ function describeFilings(mine: readonly TaxFiling[]): string {
  *  the anchoring cancels and no reader's clock can move the boundary. */
 function dayAfter(day: string): string | null {
   if (!isoDay(day)) return null;
-  // utc-day-ok: two bare days in one calendar, one added, the same calendar
-  // out — exactly `dueAfter`'s argument in src/lib/gymInvoices.ts.
   const t = Date.parse(`${day}T00:00:00Z`);
   if (!Number.isFinite(t)) return null;
+  // utc-day-ok: exactly `dueAfter`'s argument in src/lib/gymInvoices.ts. `day`
+  // is a bare day off a `date` column, it is anchored at UTC midnight, one day
+  // is added, and a bare day of the SAME calendar comes back — UTC is the
+  // carrier on both sides and it cancels. No reader's clock and no tenant's
+  // zone is consulted anywhere in here, so neither can move the boundary; the
+  // only caller is the gap walk in `filingsFor`, which compares the result
+  // against other bare days as strings and never prints it beside a clock.
+  // Reading it back with the local getters would INTRODUCE the shift this gate
+  // exists to catch.
   return new Date(t + 86400000).toISOString().slice(0, 10);
 }
 

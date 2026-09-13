@@ -146,7 +146,6 @@ export default function Receipts() {
   const [renewalStatus, setRenewalStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   /** When the list was last confirmed, or null when it just was. */
   const [cachedAt, setCachedAt] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) {
@@ -234,7 +233,7 @@ export default function Receipts() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const refresh = useCallback(async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }, [load]);
+  const refresh = useCallback(async () => { await load(); }, [load]);
   // Was four hand-written lines of RefreshControl, with its own spinner colour.
   // The shared hook is the same gesture plus the guard against a second pull
   // firing the read again while the first is still out.
@@ -316,8 +315,15 @@ export default function Receipts() {
           ) : (
             // One sentence, and which one depends entirely on the reads. The
             // `reason` is member-voiced on purpose — see `paidReason`.
+            //
+            // `paid.payments` is passed because four whole reads with no pots
+            // is TWO different facts: nothing recorded, or rows recorded that
+            // state no amount or no currency. Without the count the second one
+            // printed "Nothing has been recorded against your account" an inch
+            // above the flag saying three payments were missing from the
+            // figure. See `paidEmptyLine`.
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {paid.ledger.reason ?? paidEmptyLine(paid.ledger.status)}
+              {paid.ledger.reason ?? paidEmptyLine(paid.ledger.status, paid.payments)}
             </Text>
           )}
           {(paid.ledger.total?.pots.length ?? 0) > 1 ? (

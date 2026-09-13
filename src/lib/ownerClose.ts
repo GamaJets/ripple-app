@@ -167,6 +167,165 @@ export function figureCurrencies(c: MonthClose): { taken: string | null; invoice
   return { taken, invoiced: agreedIn(c.owed), outstanding: agreedIn(c.arrears) };
 }
 
+/* ── pass sales, snapshotted ──────────────────────────────────────────────── */
+
+/**
+ * The pass figures a close files, and the four columns they are written to.
+ *
+ * Pass sales are the one part of a month `CloseSnapshot` did not carry. Every
+ * other figure on the sheet — taken, billed, still owed, payroll — stops moving
+ * the moment the month is filed; the passes kept moving, so a close that an
+ * owner handed to an accountant said what the gym took at the card machine and
+ * said nothing at all about what it sold over the counter, and there was no
+ * later way to recover the figure. `buildClose` holds `passes` apart from
+ * `income` on purpose (the two tables have no link column and adding them would
+ * double-count), which is exactly why the close has to store it separately too:
+ * it is not inside `takenCents` and never was.
+ *
+ * Held as its own interface rather than folded into `CloseSnapshot` because
+ * that type lives in src/lib/gymClose.ts, which this lane does not own — see
+ * the note on `passDriftSince` about what is still wired and what is not.
+ */
+export interface PassSnapshot {
+  /**
+   * Minor units across the month's priced passes, or null.
+   *
+   * NULL IS NOT ZERO HERE, and it is the whole point of this field. A close row
+   * is a record of what was true at close, and there are two true states that
+   * are not a number:
+   *
+   *   · the passes were never read, so nothing is known;
+   *   · the priced passes span more than one currency, so a single figure does
+   *     not exist. `ClosePasses.cents` is still a raw sum in that case — its
+   *     own comment says so, and says a caller must WITHHOLD it — because
+   *     `passRevenueCents` has no opinion about money. Adding AED 860 to
+   *     GBP 240 gives 1,100 of nothing.
+   *
+   * Zero would be a claim that the gym sold nothing, which is a different and
+   * false statement about a gym that sold four passes in two currencies. So it
+   * goes in null, and `passesSold` beside it still carries the count — the
+   * figure is withheld, the fact that passes were sold is not.
+   *
+   * Every reader must handle the null: it is a dash on screen, never a 0, and
+   * never a licence to reach for `tenants.currency`.
+   */
+  passCents: number | null;
+  /**
+   * What `passCents` is denominated in, or null.
+   *
+   * Null whenever `passCents` is null, so the pair can never disagree. Null
+   * ALSO where a real sum exists whose rows stated no code at all — priced
+   * passes that all say nothing are one unknown unit, not two known ones, which
+   * is the same distinction `payrollCurrency` draws in gymClose.ts.
+   */
+  passCurrency: string | null;
+  /** How many passes were issued in the month. Null only when the passes were
+   *  not read — it survives a mixed-currency month, which is what stops a
+   *  withheld total reading as "nothing was sold". */
+  passesSold: number | null;
+  /** How many of those carried a recorded price. The number that says what
+   *  fraction of the month `passCents` is a sum over. */
+  passesPriced: number | null;
+}
+
+/**
+ * The month's pass sales, reduced to what gets filed.
+ *
+ * Three cases and they are three different records:
+ *
+ *   · `c.passes` null — the passes slice did not land. All four null. Not a
+ *     month with no passes in it; a month nobody can speak for.
+ *   · mixed currency — the counts are filed and the money is not, for the
+ *     reason written on `passCents`.
+ *   · otherwise — the figure and its own code, straight off the rows the figure
+ *     is a sum of, exactly as `figureCurrencies` takes the other three.
+ */
+export function passSnapshotOf(c: MonthClose): PassSnapshot {
+  const p = c.passes;
+  if (!p) return { passCents: null, passCurrency: null, passesSold: null, passesPriced: null };
+  // The counts are true of the month either way, and they are what stops the
+  // withheld figure being read as an empty counter.
+  const counts = { passesSold: p.sold, passesPriced: p.priced };
+  if (p.mixedCurrency) return { passCents: null, passCurrency: null, ...counts };
+  return { passCents: p.cents, passCurrency: p.currency, ...counts };
+}
+
+/**
+ * The pass columns as a stored close carries them.
+ *
+ * Every field OPTIONAL, and that is a statement about today rather than about
+ * the schema. `fetchCloses` in src/lib/gymClose.ts does not select these
+ * columns yet — that half of the change belongs to the file this lane does not
+ * own — so a row handed to `filingOf` right now has no `passCents` KEY on it at
+ * all, which is not the same fact as a `pass_cents` column that is null.
+ *
+ * Optional rather than `| undefined` so that a plain `MonthCloseRow` still
+ * satisfies it, and so that the day `MonthCloseRow` gains the four fields this
+ * type is already describing them.
+ */
+export interface StoredPassColumns {
+  passCents?: number | null;
+  passCurrency?: string | null;
+  passesSold?: number | null;
+  passesPriced?: number | null;
+}
+
+/**
+ * What the passes say now, against what the close filed about them.
+ *
+ * The pass half of `driftSince`, and the same argument: a closed month whose
+ * pass sales have since moved is not an error — a pass voided in September
+ * correctly changes what August sold — but somebody holding the filed figure
+ * has to be told.
+ *
+ * ── the silence this refuses ──────────────────────────────────────────────
+ *
+ * A row that carries NONE of the four keys was read by a select that did not
+ * ask for the columns, and it answers nothing. It is emphatically not a close
+ * that recorded null passes: reporting it as one would put "pass sales were not
+ * one figure at the close" on every filed month in the product, permanently,
+ * off a read that never posed the question. So a row with no pass keys produces
+ * no lines, and the check becomes real the moment `fetchCloses` selects them.
+ *
+ * ── and the null it does report ───────────────────────────────────────────
+ *
+ * Where the keys ARE present, null on either side is named rather than dashed,
+ * and it is named as what it is — "not a single amount", never "0" and never
+ * "not known", because a mixed-currency month is a month whose figure exists
+ * and is not one number. The counts are compared separately and carry on
+ * speaking through it.
+ */
+export function passDriftSince(
+  stored: MonthCloseRow & StoredPassColumns,
+  now: PassSnapshot,
+  fmt: (cents: number | null, currency: string | null) => string,
+): string[] {
+  const asked = 'passCents' in stored || 'passCurrency' in stored
+    || 'passesSold' in stored || 'passesPriced' in stored;
+  if (!asked) return [];
+
+  const out: string[] = [];
+  const wasCents = stored.passCents ?? null;
+  const wasCcy = stored.passCurrency ?? null;
+  // A CHANGE OF CURRENCY is a drift line on its own, for the reason driftSince
+  // states at length: 860 recorded in GBP and reading 860 in AED today has not
+  // moved as a number and has moved as money.
+  if (wasCents !== now.passCents || wasCcy !== now.passCurrency) {
+    const side = (cents: number | null, ccy: string | null) =>
+      cents == null ? 'not a single amount' : fmt(cents, ccy);
+    out.push(`Pass sales were ${side(wasCents, wasCcy)} at the close and are ${side(now.passCents, now.passCurrency)} now.`);
+  }
+  const wasSold = stored.passesSold ?? null;
+  if (wasSold !== now.passesSold) {
+    out.push(`${wasSold ?? 'An unknown number of'} pass(es) were sold in the month at the close; ${now.passesSold ?? 'an unknown number'} are now.`);
+  }
+  const wasPriced = stored.passesPriced ?? null;
+  if (wasPriced !== now.passesPriced) {
+    out.push(`${wasPriced ?? 'An unknown number'} of them carried a price at the close; ${now.passesPriced ?? 'an unknown number'} do now.`);
+  }
+  return out;
+}
+
 /**
  * The sentence at the top of the section.
  *
@@ -212,17 +371,28 @@ function headlineFor(c: MonthClose | null, label: string, filing: Filing): strin
  * record. With `c` null the filed row is reported with no drift rather than
  * with drift against nothing: `snapshotOf` over a half-read month would compare
  * the filed figures against nulls and report every one of them as moved.
+ *
+ * The pass lines come from `passDriftSince` and are appended to the money ones
+ * rather than held apart, because the question the headline counts is "how many
+ * figures have moved since this was filed" and pass sales are one of the
+ * figures. Its own guard is what keeps it silent until `fetchCloses` selects
+ * the columns — see the note on it.
  */
 export function filingOf(
   monthKey: string,
-  closes: { status: LoadStatus; rows: readonly MonthCloseRow[] | null },
+  closes: { status: LoadStatus; rows: readonly (MonthCloseRow & StoredPassColumns)[] | null },
   c: MonthClose | null,
   fmt: (cents: number | null, currency: string | null) => string,
 ): Filing {
   if (!isWhole(closes.status) || !closes.rows) return { state: 'unknown' };
   const live = liveCloseFor(monthKey, [...closes.rows]);
   if (!live) return { state: 'open' };
-  const drift = c ? driftSince(live, snapshotOf(c, figureCurrencies(c)), fmt) : [];
+  const drift = c
+    ? [
+        ...driftSince(live, snapshotOf(c, figureCurrencies(c)), fmt),
+        ...passDriftSince(live, passSnapshotOf(c), fmt),
+      ]
+    : [];
   return {
     state: 'filed',
     at: live.closedAt,
@@ -245,7 +415,7 @@ export function ownerCloseView(
   link: GymLink,
   month: { key: string; label: string } | null,
   close: MonthClose | null,
-  closes: { status: LoadStatus; rows: readonly MonthCloseRow[] | null },
+  closes: { status: LoadStatus; rows: readonly (MonthCloseRow & StoredPassColumns)[] | null },
   fmt: (cents: number | null, currency: string | null) => string,
 ): OwnerCloseView {
   if (link === 'unknown') return { kind: 'unread', note: CLOSE_UNREAD_NOTE };
