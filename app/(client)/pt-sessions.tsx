@@ -93,6 +93,12 @@ import {
   BEST_EFFORT_NOTE, RECORD_START_NOTE, ENDED_SERIES_NOTE, NOT_A_VERDICT_NOTE,
   type CancelAction,
 } from '../../src/lib/sessionCancellations';
+// What a session was filed as being worth, read in the row's OWN currency.
+// `rate_cents` and `rate_currency` have been on every session row since
+// supabase/parts/33 and /1010 and the client mapper dropped both, so the member
+// could see that an hour had been delivered and nothing about what it was
+// worth. The pair is never split: the integer alone names no money.
+import { RATE_MEANING_NOTE, sessionRate } from '../../src/lib/sessionRate';
 import { useMyCancellations } from '../../src/ui/cancellations';
 import { useAuth } from '../../src/ui/auth';
 import { num } from '../../src/lib/format';
@@ -663,6 +669,11 @@ export default function PtSessions() {
             <Text style={{ ...ty.label, color: t.ink3 }}>{emptyHistoryLine(sessionStatus, 'sessions')}</Text>
           ) : history.map((s, i) => {
             const v = pastVerdict(s);
+            // What the session was filed as being worth. Both columns or
+            // neither — the integer alone names no money, because the
+            // minor-unit factor belongs to the currency and is 1, 100 or 1000.
+            // See src/lib/sessionRate.ts and supabase/parts/1010.
+            const rate = sessionRate(s.rateCents, s.rateCurrency);
             return (
               <View key={s.id}>
                 {i > 0 ? <Rule /> : null}
@@ -677,6 +688,22 @@ export default function PtSessions() {
                     {PAST_STATE_NOTE[v.state]}
                     {v.at ? ` Recorded ${fmt(v.at)}.` : ''}
                   </Text>
+                  {/* The rate, in the ROW's own currency and in no other. A
+                      session delivered last year is priced in the money it was
+                      priced in then, which is the entire purpose of the
+                      snapshot — labelling it with the gym's setting today is the
+                      relabelling part 1010 refused to backfill.
+
+                      'none' draws nothing at all: most rows carry no rate and a
+                      line on every one of them would bury the 'unstated' case,
+                      which is the one that matters. */}
+                  {rate.state === 'priced' ? (
+                    <Text style={{ ...ty.label, ...numeric, color: t.ink2, marginTop: 4 }}>
+                      Recorded at {rate.amount}
+                    </Text>
+                  ) : rate.note ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{rate.note}</Text>
+                  ) : null}
                   {/* The member's own answer, beside the record and never
                       instead of it. A session marked delivered that the member
                       disputed is both things at once, and hiding either half is
@@ -695,6 +722,16 @@ export default function PtSessions() {
               </View>
             );
           })}
+
+          {/* Said once, and only where a figure was actually drawn. A rate on
+              this screen looks like a bill and is not one — Repple takes no PT
+              payment and has nowhere to settle one — so a member reading a
+              figure without this sentence goes looking for a Pay button that
+              does not exist. No total sits beside it either: two sessions in two
+              currencies are two amounts and no sum (src/lib/sumCurrency.ts). */}
+          {history.some((s) => sessionRate(s.rateCents, s.rateCurrency).state === 'priced') ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RATE_MEANING_NOTE}</Text>
+          ) : null}
 
           {/* Where the record stops, stated rather than left to be inferred
               from a list that simply ends. Only under 'partial' is there a

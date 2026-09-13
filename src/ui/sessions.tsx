@@ -251,10 +251,25 @@ const toServerCancel = (d: any): ServerCancel => ({
 // `pastVerdict` in src/lib/sessionHistory.ts that decides what an outcome this
 // build has never heard of means, and it reads it as unmarked rather than as
 // delivered work.
+// `rate_cents` and `rate_currency` are the same story one column later. Both have
+// been on every row since supabase/parts/33 and /1010 respectively, both arrive
+// on the same `select('*')`, and this mapper dropped the pair — so a member could
+// see that an hour had been booked and delivered and nothing about what it was
+// worth, on a row `sessions_client_read` already lets them read whole.
+//
+// Carried as a PAIR and never separately. The integer is minor units and the
+// factor is a property of the currency (1, 100 or 1000), so `rate_cents` without
+// `rate_currency` names no money — part 1010's comment on the column says so in
+// those words. `sessionRate` in src/lib/sessionRate.ts is the only reader.
+// `toNum` for the amount because PostgREST returns integers as strings often
+// enough that Number(null) === 0 is a live hazard, and a 0 here reads as a
+// session somebody decided was free.
 const rowToSession = (r: any): TrainingSession => ({
   id: String(r.id), trainerId: r.trainer_id, clientId: r.client_id,
   startsAt: r.starts_at, durationMin: r.duration_min, status: r.status, released: !!r.released,
   outcome: r.outcome ?? null, outcomeAt: r.outcome_at ?? null,
+  rateCents: toNum(r.rate_cents),
+  rateCurrency: typeof r.rate_currency === 'string' ? r.rate_currency : null,
 });
 
 const Ctx = createContext<SessionsValue | null>(null);
@@ -1627,6 +1642,32 @@ export interface LateCancelCharge {
   /** When the coach forgave it. The row stays either way — a waived fee is a
    *  fact about what happened, not an absence. */
   waivedAt: string | null;
+  /**
+   * `charges.reason`, verbatim.
+   *
+   * Free text in the table — `reason text not null`, no CHECK — and it was
+   * never selected here at all, on either audience. The member's list filtered
+   * on the literal 'late_cancellation' and then rendered a heading that said so,
+   * which made the filter invisible: a charge under any other word was in the
+   * database, readable by the member under `charges_client_r`, on their coach's
+   * screen, and missing from theirs with nothing on screen to suggest anything
+   * had been left out.
+   *
+   * Carried raw rather than narrowed to a union. src/lib/chargeReasons.ts turns
+   * it into words, and its whole argument is that a reason from a build ahead of
+   * this one must reach the member as itself.
+   */
+  reason: string;
+  /**
+   * Who recorded it — `charges.coach_id`, snapshotted at the moment the fee was
+   * raised (supabase/parts/189), NOT a join to the live coaching relationship.
+   *
+   * Null on a row raised before that part whose client had already moved on,
+   * which part 189 records as unrecoverable. An opaque id: this hook resolves no
+   * names, and a screen that wants one has to read it from somewhere a member is
+   * actually allowed to read names from.
+   */
+  coachId: string | null;
 }
 
 /**
@@ -1710,15 +1751,32 @@ export function useLateCancelCharges(audience: ChargesAudience): {
       // assembled behind an `if` is opaque to scripts/check-schema.mjs and to
       // anybody grepping for which column scopes this read, and an unreadable
       // scope is a scope nothing checks.
+      //
+      // ── why 'mine' no longer filters on a reason ─────────────────────────
+      //
+      // Because the member is entitled to the whole of their own ledger, and
+      // the filter hid the rest of it from them alone. `charges_client_r` (part
+      // 142) is `client_id = auth.uid()` with no clause about `reason`, so every
+      // row this filter dropped was one the database was already willing to hand
+      // them. `reason` is free text — part 243 turned down a 'late_reschedule'
+      // fee explicitly because "both screens that read this table filter on the
+      // literal string […] a fee neither party can see is worse than no fee" —
+      // and part 189's subject is a fee that outlives the coaching, which is a
+      // charge raised for something other than a late cancellation.
+      //
+      // 'my-clients' KEEPS the filter. It feeds two coach screens whose headings
+      // and whose waive control are about late cancellations specifically, and
+      // widening the rows under an unchanged heading would put a charge of
+      // another kind behind a button labelled for this one. That is a decision
+      // for those screens to make, on their own terms, with their own copy.
       const { data, error } = audience === 'mine'
         ? await supabase.from('charges')
-          .select('id, client_id, session_id, amount, currency, created_at, waived_at')
-          .eq('reason', 'late_cancellation')
+          .select('id, client_id, coach_id, session_id, amount, currency, reason, created_at, waived_at')
           .eq('client_id', uid)
           .order('created_at', { ascending: false })
           .limit(capLimit())
         : await supabase.from('charges')
-          .select('id, client_id, session_id, amount, currency, created_at, waived_at')
+          .select('id, client_id, coach_id, session_id, amount, currency, reason, created_at, waived_at')
           .eq('reason', 'late_cancellation')
           .order('created_at', { ascending: false })
           .limit(capLimit());
@@ -1730,6 +1788,12 @@ export function useLateCancelCharges(audience: ChargesAudience): {
         sessionId: r.session_id ? String(r.session_id) : null,
         amount: toNum(r.amount),
         currency: typeof r.currency === 'string' ? r.currency : null,
+        // Verbatim, and an empty string where the column came back as nothing.
+        // NOT defaulted to 'late_cancellation': that default is the whole defect
+        // restated inside the mapper, and it would print a specific, wrong
+        // explanation over a charge whose reason simply did not arrive.
+        reason: typeof r.reason === 'string' ? r.reason : '',
+        coachId: r.coach_id ? String(r.coach_id) : null,
         createdAt: r.created_at,
         waivedAt: r.waived_at ?? null,
       })));

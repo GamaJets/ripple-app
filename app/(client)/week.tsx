@@ -13,11 +13,22 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, type as ty, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, Notice, Flag, PartialRead } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+// What they were on BEFORE. `assigned_program_history` has had a client read
+// policy since supabase/parts/176 — `client_id = auth.uid()`, granted at the
+// same moment the coach's was — and until now the only screen that asked was
+// the coach's. So the member whose training it records was the one person who
+// could not see it: the row was theirs, the permission was theirs, and every
+// block they had ever been moved off was visible to somebody else and not to
+// them. The hook and the rules module are the coach screen's; nothing here is
+// a second copy of either.
+import { useProgramHistory } from '../../src/ui/programHistory';
+import { historyBoard, historyLine, blockSpanLine } from '../../src/lib/programHistory';
+import { dayLabel } from '../../src/lib/adherence';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { buildProgram } from '../../src/lib/programs';
@@ -51,15 +62,23 @@ export default function ThisWeek() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { getProgram, status: programStatus, reload: reloadPrograms, cachedNote } = useAssignedPrograms();
+  const { getProgram, status: programStatus, reload: reloadPrograms, startsOn, cachedNote } = useAssignedPrograms();
   const coachProgram = getProgram(c.id);
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
-  // What the coach assigned, what has been trained against it, and the profile
-  // the generic fallback programme is built from. A programme assigned this
-  // morning was invisible here until the app was killed.
+  // Their own earlier blocks. Null rather than 'unknown' when there is no
+  // signed-in uid: 'unknown' is the provider's placeholder id (src/ui/clientData),
+  // and handing it to a uuid column is a read that cannot succeed rather than a
+  // read that has not been made. Either way nothing below claims they have no
+  // history — `historyBoard` answers 'unreadable' for both.
+  const history = useProgramHistory(c.id === 'unknown' ? null : c.id);
+  // What the coach assigned, what has been trained against it, the blocks that
+  // came before it, and the profile the generic fallback programme is built
+  // from. A programme assigned this morning was invisible here until the app
+  // was killed — and a block replaced this morning is exactly what somebody
+  // pulls this screen to check.
   const pull = usePullToRefresh(useCallback(() => {
-    reloadPrograms(); reloadLog(); c.reload();
-  }, [reloadPrograms, reloadLog, c.reload]));
+    reloadPrograms(); reloadLog(); c.reload(); history.reload();
+  }, [reloadPrograms, reloadLog, c.reload, history.reload]));
   // Under 'error' a null from getProgram means "we could not find out", not
   // "your coach has not assigned you one" — and which of the two it is decides
   // what the client trains all week. The `??` below fell through to the generic
@@ -77,6 +96,18 @@ export default function ThisWeek() {
   // 'ready' is a null we cannot read as "no coach plan".
   const programUnknown = coachProgram == null && programStatus !== 'ready';
   const program = coachProgram ?? buildProgram(c.goal, c.bodyFatPct);
+  // The timeline, built from the SAME module the coach's screen builds theirs
+  // from, so the two cannot come to disagree about what somebody was training
+  // in the spring. `coachProgram` and not `program`: the generated fallback is
+  // not something anybody assigned, and putting it at the top of a record of
+  // assignments would file this app's own guess as a block the member was put
+  // on. Both statuses go in separately — the live assignment and the history
+  // are two reads that fail independently, and "this is what you are on; what
+  // came before could not be read" is two true sentences.
+  const hist = useMemo(
+    () => historyBoard(history.rows, history.status, coachProgram ?? null, startsOn[c.id] ?? null, programStatus),
+    [history.rows, history.status, coachProgram, startsOn, c.id, programStatus],
+  );
   // The week they are on, and its days. Identical to `program.days` for every
   // one-week programme, which is every programme this app generates and every
   // one written before blocks existed.
@@ -327,6 +358,49 @@ export default function ThisWeek() {
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{planCheck.caveat}</Text>
             </>
+          ) : null}
+        </Section>
+
+        <Rule />
+
+        {/* ── what you were on before ─────────────────────────────────────
+            Read-only, and the member's own record: `assigned_program_history`
+            is written by a trigger and granted SELECT to nobody but the coach
+            and the person it is about (supabase/parts/176). There is no control
+            here and there must not be — putting an old block back is an assign,
+            which is the coach's act, and a member who could do it would be
+            overwriting what their coach wrote for this evening.
+
+            `historyLine` carries the sentence that stops the true answer being
+            read as the wrong one: programmes replaced before the record existed
+            were overwritten and cannot be recovered, so "no earlier programme"
+            is silent about anything before that, not a claim about a member who
+            has been training here for two years. */}
+        <Section>
+          <SectionHead title="Programmes You've Been On"
+            note={hist.earlierCount == null ? undefined : `${hist.earlierCount} earlier`} />
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{historyLine(history.status, hist, 'you')}</Text>
+          {hist.entries.map((e, i) => (
+            <View key={e.key} style={{ marginTop: sp.md, paddingTop: i ? sp.md : 0, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+                <Text style={{ ...ty.body, fontWeight: e.current ? '600' : '400', color: e.current ? t.ink : t.ink2, flex: 1 }}>
+                  {e.title}
+                </Text>
+                <Text style={{ ...ty.micro, color: e.current ? t.brand : t.ink3 }}>
+                  {e.current ? 'Now' : `${e.weeks} wk`}
+                </Text>
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{blockSpanLine(e, dayLabel)}</Text>
+            </View>
+          ))}
+          {/* A capped page is a PREFIX of an unknown set, so the count above is
+              already withheld by `historyBoard`; this is the offer to go and
+              read the rest rather than a second sentence about the same cap. */}
+          {history.status === 'partial' ? (
+            <View style={{ marginTop: sp.md }}>
+              <PartialRead what="earlier programmes" shown={hist.entries.filter((e) => !e.current).length}
+                onPress={history.reload} />
+            </View>
           ) : null}
         </Section>
 

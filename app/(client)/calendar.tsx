@@ -80,7 +80,13 @@ import { useClientReminders } from '../../src/ui/clientReminders';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { canOfferMove } from '../../src/lib/reschedule';
-import { feeAmountLine } from '../../src/lib/booking';
+import { feeAmountLine, unstatedCurrency } from '../../src/lib/booking';
+// What a charge was FOR. The read under this section used to filter on the one
+// literal string 'late_cancellation', so every other charge levied against this
+// member was invisible to them and to nobody else. See src/lib/chargeReasons.ts.
+import {
+  UNKNOWN_REASON_NOTE, chargeReasonLabel, chargeReasonNote, chargesLine, hasUnknownReason,
+} from '../../src/lib/chargeReasons';
 import { isUpcoming } from '../../src/lib/upcomingWindow';
 import { useNow } from '../../src/ui/today';
 import { useClientData } from '../../src/ui/clientData';
@@ -1529,43 +1535,88 @@ export default function Calendar() {
 
         <Rule />
 
-        {/* ── what a late cancellation cost ──────────────────────────────
+        {/* ── everything you have been charged ────────────────────────────
             Only drawn when there is something to say. Repple does not take
             these payments and never has — the row says what is owed and to
             whom, and the member settles it with their coach. The section
             exists because a fee somebody was told about in an alert three
-            weeks ago, and can no longer find anywhere, is not a record. */}
+            weeks ago, and can no longer find anywhere, is not a record.
+
+            It used to be titled "Late-Cancellation Fees" and the read under it
+            filtered on that one literal string, which made the narrowing
+            invisible: a charge raised under any other reason was in the
+            database, readable by this member, on their coach's screen, and
+            missing from here with nothing to hint at it. The read is now the
+            member's whole ledger and each row says what it was for.
+
+            NO TOTAL, deliberately. `charges.currency` is snapshotted per row
+            (supabase/parts/126) precisely so nothing has to assume one, and two
+            rows in two currencies are two amounts with no sum between them —
+            there is no rate anywhere in this product to make one. See
+            src/lib/sumCurrency.ts. */}
         {feeStatus === 'error' || myFees.length > 0 ? (
           <>
             <Section>
-              <SectionHead title="Late-Cancellation Fees" note={feeStatus === 'error' ? 'Not read' : feeStatus === 'partial' ? 'Part of the list' : undefined} />
+              <SectionHead title="Charges" note={feeStatus === 'error' ? 'Not read' : feeStatus === 'partial' ? 'Part of the list' : undefined} />
               {feeStatus === 'error' ? (
-                <Text style={{ ...ty.label, color: t.ink3 }}>
-                  We couldn’t read your late-cancellation fees. That is not a statement that you have none — anything already recorded still stands.
-                </Text>
+                <Text style={{ ...ty.label, color: t.ink3 }}>{chargesLine('error')}</Text>
               ) : (<>
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                  Recorded when you cancelled inside your coach’s notice period. {BRAND.label} doesn’t take these payments — settle them with your coach.
+                  {chargesLine(feeStatus === 'partial' ? 'partial' : 'ready')}
                 </Text>
-                {myFees.map((c, ci) => (
-                  <View key={c.id}>
-                    {ci > 0 ? <Rule /> : null}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.waivedAt ? t.surface3 : t.warn }} />
-                      <View style={{ flex: 1 }}>
-                        {/* A dash, never a zero: the fee exists and its figure
-                            did not come back, which is not the same as owing
-                            nothing. */}
-                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: c.waivedAt ? t.ink3 : t.ink }}>
-                          {c.amount == null ? fig(null) : feeAmountLine(c.amount, c.currency)}
-                        </Text>
-                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                          {fmtFullDay(c.createdAt)}{c.waivedAt ? ' · your coach waived this — nothing to pay' : ' · outstanding with your coach'}
-                        </Text>
+                {myFees.map((c, ci) => {
+                  const why = chargeReasonNote(c.reason);
+                  return (
+                    <View key={c.id}>
+                      {ci > 0 ? <Rule /> : null}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.waivedAt ? t.surface3 : t.warn }} />
+                        <View style={{ flex: 1 }}>
+                          {/* What it was for leads. The figure without it was
+                              readable only because the heading named the one
+                              reason the query allowed. */}
+                          <Text style={{ ...ty.body, fontWeight: '500', color: c.waivedAt ? t.ink3 : t.ink }}>
+                            {chargeReasonLabel(c.reason)}
+                          </Text>
+                          {/* A dash, never a zero: the fee exists and its figure
+                              did not come back, which is not the same as owing
+                              nothing. In the row's OWN currency — never the
+                              gym's, which is what it is set to today rather than
+                              what this was raised in. */}
+                          <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: c.waivedAt ? t.ink3 : t.ink, marginTop: 2 }}>
+                            {c.amount == null ? fig(null) : feeAmountLine(c.amount, c.currency)}
+                          </Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                            {fmtFullDay(c.createdAt)}{c.waivedAt ? ' · your coach waived this — nothing to pay' : ' · outstanding with your coach'}
+                          </Text>
+                          {/* Only where this app actually knows how the row came
+                              to exist, which is the late-cancellation one and
+                              nothing else. A generic "your coach recorded this"
+                              under a reason that arrived from somewhere else
+                              would be this screen asserting what it did not see.
+                              The unstated-currency clause rides with it because
+                              a bare figure in a sentence is read in whatever
+                              money the reader is thinking in. */}
+                          {why ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                              {why}{c.amount == null ? '' : unstatedCurrency(c.currency)}
+                            </Text>
+                          ) : null}
+                        </View>
                       </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
+                {/* Said once, under the list. A label derived from a raw reason
+                    looks exactly like a label this app wrote, and a member who
+                    knows the wording came off the record asks their coach a
+                    sharper question than one who thinks we chose it. */}
+                {hasUnknownReason(myFees.map((c) => c.reason)) ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{UNKNOWN_REASON_NOTE}</Text>
+                ) : null}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {BRAND.label} doesn’t take these payments — settle them with your coach.
+                </Text>
               </>)}
             </Section>
 

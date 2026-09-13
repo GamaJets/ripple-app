@@ -21,20 +21,27 @@
 //    their goal progress and their coach's view are all computed from. The
 //    field now says which unit it wants, the bound is expressed in that unit,
 //    and the number is converted on the way to storage.
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Spark, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { fmtFullDay } from '../../src/lib/format';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, kgToLb, plain, convertedNote, readNumber } from '../../src/lib/units';
 import { useCheckIns } from '../../src/ui/checkins';
+// The rest of what they already sent. Energy, sleep, mood and adherence have
+// been filed weekly on a 1–5 scale and read back by the provider all along;
+// this screen rendered `latest` and threw the remainder away, so the one
+// question a weekly rating exists to answer — is this going up or down — could
+// not be asked by the person answering it every Sunday. Their coach has read
+// the same rows since src/lib/coachCheckins.ts was written.
+import { checkinTrend, seriesNote, trendLine } from '../../src/lib/checkinTrend';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isPending } from '../../src/lib/wellnessSync';
 import { unsentNote } from '../../src/lib/offlineQueue';
@@ -73,6 +80,14 @@ export default function CheckIn() {
   const pull = usePullToRefresh(useCallback(() => { ci.reload(); cd.reload(); }, [ci.reload, cd.reload]));
 
   const wu = useSettings().weightUnit;
+
+  // Four lines out of one pass, so a series and its dates cannot be reversed
+  // apart — which would put every point over the wrong week and render
+  // perfectly while doing it. Pending check-ins are IN it on purpose: they are
+  // this member's own answers, they are what the chart is about, and the only
+  // thing a pending row must never imply is that the coach has read it — which
+  // is the "Waiting to Send" section's job and not the chart's.
+  const trend = useMemo(() => checkinTrend(ci.checkins, ci.status), [ci.checkins, ci.status]);
 
   // Blank unless there is a weight actually on record for this client, and in
   // the unit that client reads in.
@@ -266,6 +281,53 @@ export default function CheckIn() {
             </Section>
           </View>
         ) : null}
+
+        {/* ── the weeks before this one ────────────────────────────────────
+            Four ratings, filed weekly, read back by the provider since it was
+            written and rendered by nothing. `latest` answered "what did I say
+            last week"; a member wants to know whether it is going up.
+
+            Drawn ONLY from real scores. The scale is 1–5 and a week that
+            recorded nothing arrives here as the number 0 — `rowToCI` in
+            src/ui/checkins.tsx coerces with `Number(x) || 0` — so
+            `checkinTrend` turns everything outside the scale into a null and
+            `Spark` breaks the line across it. A 0 plotted on a 1–5 axis is the
+            worst week of somebody's year, invented.
+
+            No average anywhere, under any status. A mean over four weeks of a
+            five-point scale is a figure that reads as a measurement and is a
+            summary of four taps; and under 'partial' it would be computed from
+            an unknown fraction of the set, which src/ui/loadStatus.ts rules out
+            outright. */}
+        <View>
+          <Rule />
+          <Section>
+            <SectionHead title="How the Weeks Have Gone"
+              note={trend.charted == null ? undefined : `${trend.charted}`} />
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{trendLine(ci.status, trend)}</Text>
+            {trend.state === 'some' ? trend.series.map((s) => {
+              const note = seriesNote(s, trend.labels.length);
+              return (
+                <View key={s.key} style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, marginBottom: sp.xs }}>{s.label}</Text>
+                  {/* `Spark` draws nothing under two readable points, which is
+                      correct — a line needs two — and `seriesNote` is what says
+                      so where that happens, rather than leaving a heading over
+                      empty space. */}
+                  <Spark data={s.values} labels={trend.labels} unit="/5" />
+                  {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{note}</Text> : null}
+                </View>
+              );
+            }) : null}
+            {/* The oldest end is what the row cap eats, so a truncated read is
+                short of exactly the weeks a member scrolls back for. */}
+            {ci.status === 'partial' ? (
+              <View style={{ marginTop: sp.md }}>
+                <PartialRead what="check-ins" shown={trend.labels.length} onPress={ci.reload} />
+              </View>
+            ) : null}
+          </Section>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

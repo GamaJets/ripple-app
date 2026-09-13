@@ -201,6 +201,26 @@ export interface TrainingSession {
    *  row marked before the column existed, which is not the same thing, so the
    *  two are never collapsed into one. */
   outcomeAt?: string | null;
+  /**
+   * What this session was filed as being worth, in MINOR units of
+   * `rateCurrency`. `sessions.rate_cents`, snapshotted at the moment of
+   * delivery by src/lib/rateSnapshot.ts.
+   *
+   * Meaningless without the field below and must never be read without it: the
+   * minor-unit factor is a property of the currency and is 1, 100 or 1000, so
+   * the integer alone names no money. supabase/parts/1010 says exactly that on
+   * the column. Read it through `sessionRate` in src/lib/sessionRate.ts, which
+   * is the only thing in this codebase that turns the pair into a figure.
+   *
+   * It rode in on `select('*')` all along and was thrown away by the row mapper,
+   * exactly as `outcome` was, so the member could see that an hour had been
+   * delivered and nothing about what it was worth.
+   */
+  rateCents?: number | null;
+  /** The currency `rateCents` is in, as it stood when the rate was snapshotted.
+   *  NULL means the unit was never recorded — every row written before part
+   *  1010 — and must be read as UNKNOWN, never as the gym's currency today. */
+  rateCurrency?: string | null;
 }
 
 export interface CancellationResult {
