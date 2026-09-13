@@ -27,7 +27,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 // takes today's bundle and has no ExpoImage in it. A bare import would take
 // this whole screen down while it loaded. React Native's own <Image> is the
 // fallback and is in every binary ever built.
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, TextInput } from 'react-native';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -62,6 +62,9 @@ import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 import { ExerciseTrail } from '../../src/ui/ExerciseHistory';
 import { LogSetRow } from '../../src/ui/LogSetRow';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useScrollPad } from '../../src/ui/keyboardPad';
+import { pickFormClip, sendFormClip, fetchFormClip, deleteFormClip, type FormClip } from '../../src/ui/formClips';
+import { MEMBER_CONSENT_NOTE, clipRefusal, clipRefusalLine } from '../../src/lib/formCheck';
 import { useSettings } from '../../src/ui/settings';
 import { exerciseIndex } from '../../src/lib/exerciseHistory';
 import { exerciseSlug } from '../../src/lib/exerciseId';
@@ -109,6 +112,29 @@ export default function ExerciseScreen() {
 
   // ── this member's own record of this movement ──────────────────────────
   const { log, status: logStatus, unsent: unsentSets, logWorkouts, reload: reloadLog } = useWorkoutLog();
+  /* ── a clip of the set just logged ───────────────────────────────────────
+     Offered HERE and not on Train, because this screen is already about one
+     movement — which is exactly when somebody wonders whether they are doing
+     it right. The set logged from this screen is its own `workouts` row with a
+     single set, so the clip's (workout_id, set_index) is that row and 0.
+
+     Held by timestamp and name rather than by id, because the id does not
+     exist yet at the moment it is logged: `send` in src/ui/workoutLog.tsx
+     adopts the server's id into the entry a moment after the write lands, and
+     this looks it up when it is there. Until then the block says it is still
+     saving rather than offering a button that would attach to nothing. */
+  const pad = useScrollPad();
+  const [clipFor, setClipFor] = useState<{ t: string; exercise: string } | null>(null);
+  const [clipNote, setClipNote] = useState('');
+  const [clipBusy, setClipBusy] = useState(false);
+  const [clipSaid, setClipSaid] = useState<string | null>(null);
+  /* The clip now on that set, once one is there. Held so the member can remove
+     it — `MEMBER_CONSENT_NOTE` promises they can delete it at any time, and a
+     promise with no control behind it is worse than not making it. */
+  const [clipSent, setClipSent] = useState<FormClip | null>(null);
+  const clipWorkoutId = clipFor
+    ? (log.find((e) => e.t === clipFor.t && e.exercise === clipFor.exercise)?.id ?? null)
+    : null;
   // Three reads: the movement itself, the coach's clips for it, and this
   // member's own history of the lift underneath.
   const pull = usePullToRefresh(useCallback(() => {
@@ -142,7 +168,20 @@ export default function ExerciseScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+      {/* `automaticallyAdjustKeyboardInsets` and a dismissable keyboard, because
+          this scroller now holds a text field — the form-check question — and
+          check:keyboard caught it sitting behind the keyboard.
+          `useScrollPad` and NOT the bare constant: 220pt of permanent padding
+          is what made pages "go blank at the bottom after there is no more
+          wording", which was a real report. The hook gives the headroom only
+          while a keyboard is actually up. */}
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 + pad }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={pull}
+        automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive"
+      >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
           <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
             <Icon name={BACK_ICON} size={20} color={t.ink} />
@@ -418,14 +457,24 @@ export default function ExerciseScreen() {
                   if (saving) return;
                   setSaving(true);
                   try {
+                    const at = new Date().toISOString();
                     const out = await logWorkouts([{
-                      t: new Date().toISOString(),
+                      t: at,
                       exercise: detail?.name || name,
                       sets: [[set.value, set.kg ?? 0]],
                       ...(set.bw ? { bw: [true] } : {}),
                       ...(set.timed ? { timed: [true] } : {}),
                     }]);
-                    if (out === 'stored') { tapLight(); return; }
+                    if (out === 'stored') {
+                      tapLight();
+                      // Offered only after the set is actually on the server.
+                      // A clip attached to a set that is still queued would
+                      // have no row to hang off.
+                      setClipFor({ t: at, exercise: detail?.name || name });
+                      setClipNote('');
+                      setClipSaid(null);
+                      return;
+                    }
                     if (out === 'unsent') {
                       Alert.alert('Saved on this phone',
                         'No connection, so this set has not reached your training log yet — nothing is lost. It is saved here and goes up on its own next time you have signal.');
@@ -436,6 +485,109 @@ export default function ExerciseScreen() {
                   } finally { setSaving(false); }
                 }}
               />
+              {/* ── send your coach a clip of that set ────────────────────
+                  The consent sentence is shown BEFORE the camera opens, not
+                  after the upload: consent that arrives once the file exists
+                  is not consent. src/lib/formCheck.ts owns it, and the
+                  storage policies in supabase/parts/2617 are what make it
+                  true. */}
+              {clipFor ? (
+                <View style={{ marginTop: sp.lg, padding: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
+                  {(() => {
+                    const stop = clipRefusal({
+                      hasCoach: !!(cd as any).trainerId,
+                      setExists: !!clipWorkoutId,
+                    });
+                    // A set still being saved is not a member without a coach,
+                    // and the two must not share a sentence.
+                    if (stop === 'no-set') {
+                      return <Text style={{ ...ty.label, color: t.ink3 }}>Saving that set… the form check appears once it lands.</Text>;
+                    }
+                    if (stop) {
+                      return <Text style={{ ...ty.label, color: t.ink3 }}>{clipRefusalLine(stop)}</Text>;
+                    }
+                    return (<>
+                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>Send your coach a form check</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{MEMBER_CONSENT_NOTE}</Text>
+                      <TextInput
+                        value={clipNote}
+                        onChangeText={setClipNote}
+                        placeholder="What do you want them to look at?"
+                        placeholderTextColor={t.ink3}
+                        accessibilityLabel="What to ask your coach about this set"
+                        style={{ ...ty.body, color: t.ink, backgroundColor: t.surface, borderRadius: radius.sm, padding: sp.md, marginTop: sp.md }}
+                      />
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
+                        {(['camera', 'library'] as const).map((src) => (
+                          <Ghost
+                            key={src}
+                            label={src === 'camera' ? 'Film It' : 'Choose a Clip'}
+                            a11yLabel={src === 'camera' ? 'Film this set now' : 'Choose a clip already on this phone'}
+                            onPress={async () => {
+                              if (clipBusy || !clipWorkoutId) return;
+                              setClipBusy(true); setClipSaid(null);
+                              try {
+                                const picked = await pickFormClip(src);
+                                if (picked.error) { setClipSaid(picked.error); return; }
+                                if (!picked.clip) return;
+                                const out = await sendFormClip({
+                                  memberId: cd.id === 'unknown' ? '' : cd.id,
+                                  workoutId: clipWorkoutId,
+                                  setIndex: 0,
+                                  clip: picked.clip,
+                                  note: clipNote,
+                                  hasCoach: !!(cd as any).trainerId,
+                                });
+                                setClipSaid(out.ok
+                                  ? 'Sent. Your coach sees it against this set.'
+                                  : out.error);
+                                if (out.ok) {
+                                  setClipNote('');
+                                  // Read back rather than assumed: the row is
+                                  // what the coach sees, so the control that
+                                  // removes it is built from the row that
+                                  // actually exists.
+                                  setClipSent(await fetchFormClip(clipWorkoutId, 0));
+                                }
+                              } finally { setClipBusy(false); }
+                            }}
+                          />
+                        ))}
+                      </View>
+                      {clipSaid ? (
+                        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{clipSaid}</Text>
+                      ) : null}
+                      {clipSent ? (
+                        <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                          <Ghost
+                            label="Delete It"
+                            a11yLabel="Delete the clip you sent your coach"
+                            onPress={() => {
+                              Alert.alert(
+                                'Delete this clip?',
+                                'It goes from your coach’s screen and from this app. Deleting it is final — there is no copy anywhere else.',
+                                [
+                                  { text: 'Keep it', style: 'cancel' },
+                                  { text: 'Delete', style: 'destructive', onPress: async () => {
+                                    const gone = await deleteFormClip(clipSent);
+                                    // `deleteFormClip` counts the rows, so a
+                                    // delete that matched nothing says so
+                                    // rather than reporting success over a
+                                    // video that is still there.
+                                    setClipSaid(gone.ok ? 'Deleted. Your coach can no longer see it.' : gone.error);
+                                    if (gone.ok) setClipSent(null);
+                                  } },
+                                ],
+                              );
+                            }}
+                          />
+                        </View>
+                      ) : null}
+                    </>);
+                  })()}
+                </View>
+              ) : null}
+
               {/* Sets on this phone that the server has not taken. They are
                   not lost and they are not in the log a coach reads, and only
                   one of those two is obvious from looking at the screen. */}

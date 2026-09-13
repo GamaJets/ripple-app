@@ -72,13 +72,16 @@ import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { setsSummary } from '../../src/lib/ownTraining';
 import { liftLabel, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { num, fmtTime } from '../../src/lib/format';
+import { num, fmtTime, fmtRelativeDay } from '../../src/lib/format';
 import { dayLabel } from '../../src/lib/adherence';
 import {
   sessionsOf, attributionOf, attributionLabel, trainingBoard, unitFor,
   type LoggedSession, type TrainingDay, type Attribution,
 } from '../../src/lib/clientTraining';
 import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHistory';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { fetchFormClipsFor, formClipUrl, type FormClip } from '../../src/ui/formClips';
+import { clipNoteLine } from '../../src/lib/formCheck';
 // ── the two modules the coach could not reach ──────────────────────────────
 //
 // P1 and P2. `muscleVolume.ts` answers "have I trained legs this week" and its
@@ -1445,6 +1448,14 @@ export default function ClientTraining() {
                   </>
                 )}
 
+                {/* ── what they asked you to look at ───────────────────────
+                    Clips the member attached to a set, newest first. They come
+                    through `form_clips_coach_read`, which is `is_my_client` —
+                    so a coach who is no longer theirs sees nothing here and
+                    the signed URL below is refused by the same rule.
+                    supabase/parts/2617. */}
+                {picked ? <FormChecks memberId={picked} /> : null}
+
                 {/* ── what they were on before ────────────────────────────
                     Until supabase/parts/176 there was no copy of it anywhere:
                     `assigned_programs` is one row per client and an assign is an
@@ -1505,5 +1516,83 @@ export default function ClientTraining() {
 
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+/**
+ * The clips this client attached to their own sets.
+ *
+ * Read here rather than folded into the training read above, because it is a
+ * different question with a different answer when it fails: a training log
+ * that did not load and a client who has sent no clips are both "nothing on
+ * screen", and only one of them is worth a sentence. `null` from
+ * `fetchFormClipsFor` is the failed read and says so — a coach told "they have
+ * not sent you any" over a failed read stops looking.
+ */
+function FormChecks({ memberId }: { memberId: string }) {
+  const t = useTheme();
+  const [clips, setClips] = useState<FormClip[] | null | undefined>(undefined);
+  const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setClips(undefined);
+    void fetchFormClipsFor(memberId).then((rows) => { if (live) setClips(rows); });
+    return () => { live = false; };
+  }, [memberId]);
+
+  // Nothing at all while the first read is in flight, and nothing when the
+  // client has sent none: a heading over an empty space on every client who has
+  // never used the feature is noise on a screen that is already long.
+  if (clips === undefined) return null;
+  if (clips !== null && clips.length === 0) return null;
+
+  return (<>
+    <Rule />
+    <Section>
+      <SectionHead title="Form Checks" note={clips ? `${clips.length}` : undefined} />
+      {clips === null ? (
+        <Text style={{ ...ty.label, color: t.ink2 }}>
+          Their form checks could not be read just now. This is not a statement that they have sent none —
+          pull down to ask again.
+        </Text>
+      ) : clips.map((c, i) => (
+        <View key={c.id} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+          <Text style={{ ...ty.body, color: t.ink }}>{clipNoteLine(c.note, fmtRelativeDay(c.createdAt))}</Text>
+          {playing?.id === c.id ? (
+            <FormClipPlayer url={playing.url} />
+          ) : (
+            <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+              <Ghost label="Watch" a11yLabel="Watch this form check"
+                onPress={async () => {
+                  setSaid(null);
+                  const url = await formClipUrl(c.path);
+                  // A link that could not be signed is the access rule saying
+                  // no, or the object being gone. Both are worth a sentence
+                  // rather than a button that does nothing when pressed.
+                  if (!url) { setSaid('That clip could not be opened. It may have been deleted by them, or you may no longer be their coach.'); return; }
+                  setPlaying({ id: c.id, url });
+                }} />
+            </View>
+          )}
+        </View>
+      ))}
+      {said ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{said}</Text> : null}
+    </Section>
+  </>);
+}
+
+/** One clip, playing. Its own component because `useVideoPlayer` is a hook and
+ *  cannot be called inside the list's map. */
+function FormClipPlayer({ url }: { url: string }) {
+  const player = useVideoPlayer(url, (p) => { p.loop = true; });
+  return (
+    <VideoView
+      player={player}
+      style={{ width: '100%', aspectRatio: 9 / 16, borderRadius: radius.sm, marginTop: sp.sm }}
+      contentFit="contain"
+      nativeControls
+    />
   );
 }
