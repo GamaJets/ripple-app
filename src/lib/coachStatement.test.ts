@@ -335,6 +335,17 @@ eq(majorToPlain(5000, 'JPY'), '5000', 'a zero-decimal fee has no decimals at all
 eq(majorToPlain(25, null), null, 'a fee with no currency states no amount');
 eq(majorToPlain(null, 'GBP'), null, 'and a missing fee amount is null, never zero');
 
+// A currency that is STATED and is not one. `currencyDecimals` answered 2 for
+// these, so both writers put a figure into an accountant's spreadsheet off a
+// row nobody could name the money of — the same fault the KWD block further
+// down defends against, arriving through a different door. The `currency`
+// column in CSV_HEADER still carries whatever the row said; it is the AMOUNT
+// cell that must be empty rather than confidently wrong.
+eq(minorToPlain(48000, 'pounds'), null, 'a word is not a currency — this wrote "480.00"');
+eq(minorToPlain(12340, '£'), null, 'nor is a symbol — this wrote "123.40"');
+eq(majorToPlain(12.345, 'pounds'), null, 'and a fee against a non-currency states nothing — this wrote "12.35", a fils short');
+eq(minorToPlain(48000, 'ZZZ'), '480.00', 'a stated but unrecognised CODE is still two places — the silence is about non-codes, not unknown ones');
+
 /* ── 5. fees: waived rows out of the figure, and said out loud ────────────*/
 
 {

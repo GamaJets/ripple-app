@@ -88,7 +88,7 @@ import { buildChecklist, scheduledFocus, type ChecklistGap, type ChecklistSource
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import {
-  habitStreaks, daysBefore, nextDay, STREAK_WINDOW_DAYS,
+  habitStreaks, tickReadCoverage, daysBefore, STREAK_WINDOW_DAYS,
   type HabitStreak, type HabitTickRow,
 } from '../lib/habitStreaks';
 import { WATER_CAP, clampGlasses, mergeCount, type CountAt } from '../lib/wellnessSync';
@@ -691,19 +691,13 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
             habit: String(r.habit),
             done_on: String(r.done_on ?? '').slice(0, 10),
           }));
-          // Ordered `done_on` descending, so the last row carries the oldest
-          // day that came back.
-          const oldestRead = windowRows.length ? windowRows[windowRows.length - 1].done_on : null;
-          // THE OLDEST DAY THIS READ CAN SPEAK FOR, which is not the oldest day
-          // it contains. On a truncated read the ceiling fell somewhere inside
-          // that oldest day — some of its rows are here and some are not — so
-          // the oldest day that is WHOLE is the one above it. Getting this
-          // wrong by one is how a run gets stated as a fact off a day that was
-          // only half read.
-          const coverFrom = page.truncated
-            ? (oldestRead ? nextDay(oldestRead) : day)
-            : (windowFrom ?? day);
-          setHistory({ rows: windowRows, coverFrom });
+          // The split itself is arithmetic, and it lives in
+          // src/lib/habitStreaks.ts where it is asserted — including the
+          // off-by-one that decides whether a run is a fact or a floor, and the
+          // case where the truncation reaches today itself. An async effect is
+          // no place to keep a rule nobody can run.
+          const cover = tickReadCoverage(windowRows, day, windowFrom, page.truncated);
+          setHistory({ rows: windowRows, coverFrom: cover.coverFrom });
           setHistoryStatus(page.truncated ? 'partial' : 'ready');
           // Replaces rather than merges — and then re-applies the toggles the
           // server has not been TOLD about. Those are two different things and
@@ -723,7 +717,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           // it is a habit the member ticked on SOME day — feeding the lot into
           // the tick set would light up the checklist with anything they had
           // ever kept.
-          const server = new Set(windowRows.filter((r) => r.done_on === day).map((r) => r.habit));
+          const server = new Set(cover.todayHabits);
           for (const [habit, on] of pendingRef.current) { if (on) server.add(habit); else server.delete(habit); }
           applyDone(server);
           // Today is whole unless the truncation reached today itself — which
@@ -736,8 +730,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           // Note the asymmetry with `historyStatus` above, and that it is the
           // point: a truncated read leaves today's ticks whole and the history
           // short, and those are two different sentences to a member.
-          const todayWhole = !page.truncated || (oldestRead !== null && oldestRead < day);
-          setTicksStatus(todayWhole ? 'ready' : 'partial');
+          setTicksStatus(cover.todayWhole ? 'ready' : 'partial');
 
           // And now they go up. A failure is neither fatal nor silent: the
           // toggle stays queued, stays counted in `unsent`, and is tried again

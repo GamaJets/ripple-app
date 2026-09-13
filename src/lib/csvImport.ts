@@ -42,6 +42,31 @@ const NO_CURRENCY =
   + 'set the gym’s currency, or give the file a currency column';
 
 /**
+ * The sentence a row gets when the currency IS stated and is not a currency.
+ *
+ * A separate sentence, not a second wording of `NO_CURRENCY`, because this is
+ * the one place in the money family that is reading SOMEBODY ELSE'S FILE. The
+ * other six consumers of `currencyDecimals` scale figures this product wrote,
+ * where a non-code means a row of ours is corrupt; here it means a column of
+ * theirs says "Pounds" or "£" or "GBP " with a stray character in it, which is
+ * an ordinary thing for an export from another gym system to do and is fixable
+ * in thirty seconds BY THE PERSON LOOKING AT THE SCREEN — but only if the
+ * message names the value it could not read instead of telling them no currency
+ * is set. `NO_CURRENCY` sends them to the gym's settings, which is the wrong
+ * place and, for a file carrying its own currency column, would not help.
+ *
+ * Refusing rather than guessing is the same answer as everywhere else, and it
+ * has to be: this is the import a gym runs once at setup, and the figure goes
+ * into `gym_payments.amount_cents` as the permanent record of what a member
+ * paid. Reading "12.340" from a file labelled 'pounds' as 1234 is not a
+ * rendering fault the next release corrects.
+ */
+const NOT_A_CURRENCY = (stated: string): string =>
+  `“${stated.length > 24 ? stated.slice(0, 24) + '…' : stated}” is not a currency code, so this figure `
+  + 'cannot be read into minor units — a three-letter code (GBP, JPY, KWD) says '
+  + 'how many decimal places the money has, and nothing else does';
+
+/**
  * Parse a money column into integer minor units, in the currency it is in.
  *
  * ── Why the currency is an argument and not an assumption ─────────────────
@@ -61,7 +86,11 @@ const NO_CURRENCY =
  * there is therefore no default number of decimal places either, so with no
  * currency this REFUSES rather than assuming two. `currencyDecimals` in
  * src/lib/coachMoney.ts is the one place that answers the question, and it
- * answers null — not 2 — when nobody has said which money it is.
+ * answers null — not 2 — when nobody has said which money it is, or when what
+ * was said is not a currency code. The second half matters more here than
+ * anywhere else in the money family: the currency column in an incoming file
+ * was typed by another system, and "Pounds", "£" and "GBP " were all read as
+ * two-place money and scaled accordingly.
  *
  * The caller always has it: studio-web/app/import/page.tsx reads
  * `tenants.currency` and already refuses the whole import for a gym that has
@@ -95,8 +124,9 @@ const NO_CURRENCY =
  */
 export function parseMoneyCents(raw: string, currency?: string | null): Parsed<number> {
   const dp = currencyDecimals(currency);
-  if (dp == null) return { ok: false, reason: NO_CURRENCY };
   const cur = String(currency ?? '').trim().toUpperCase();
+  // Two refusals, because they have two different fixes. See NOT_A_CURRENCY.
+  if (dp == null) return { ok: false, reason: cur ? NOT_A_CURRENCY(cur) : NO_CURRENCY };
 
   const t = raw.trim();
   if (t === '') return { ok: false, reason: 'empty' };

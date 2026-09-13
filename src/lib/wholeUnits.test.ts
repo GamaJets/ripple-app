@@ -82,6 +82,20 @@ const eq = (a: unknown, b: unknown, msg: string) =>
   eq(wholeFromMinor(1250, 'ZZZ'), 13,
     'an unrecognised but stated code takes the two-place default the rest of the money family uses');
 
+  // The gap the comment above did NOT cover, and the reason it read as complete:
+  // "present but unrecognised" was doing the work of two different cases. 'ZZZ'
+  // is a three-letter code nobody has heard of, which is a currency this build
+  // does not know. 'pounds' is not a code at all, and it went down the same
+  // branch — so a gym whose currency column held a WORD had its MRR scaled by
+  // an assumed hundred and compared, as a number, against the figure the owner
+  // typed. The "your figures and your records disagree" notice fires off that
+  // comparison, and financials.tsx offers a button that overwrites the owner's
+  // correct figure with it.
+  eq(wholeFromMinor(1250, 'pounds'), null, 'a word is not a code — this was 13');
+  eq(wholeFromMinor(500_000, '£'), null, 'nor is a symbol — this was 5000');
+  eq(wholeFromMinor(1250, 'GB'), null, 'nor two letters of one — this was 13');
+  ok(wholeFromMinor(1250, 'pounds') !== 0, 'and the withheld answer is null, never a zero — a zero is a claim about revenue');
+
   eq(wholeFromMinor(null, 'GBP'), null, 'no amount is not zero either');
   eq(wholeFromMinor(undefined, 'GBP'), null, 'nor is undefined');
   eq(wholeFromMinor(NaN, 'GBP'), null, 'and NaN is not a figure to compare anything against');

@@ -5,7 +5,8 @@
 // notice window, which would be a fact about the gym's policy that this app has
 // never been told.
 import {
-  hoursUntil, startsInLine, classCancelBody, classChargeLine, CLASS_POLICY_UNKNOWN_NOTE,
+  hoursUntil, startsInLine, classCancelBody, classChargeLine, cancelStanding,
+  CLASS_POLICY_UNKNOWN_NOTE,
   type ClassCancelPolicy,
 } from './classCancel';
 
@@ -123,6 +124,61 @@ eq(classCancelBody('Spin', inHours(2), NOW), classCancelBody('Spin', inHours(2),
   'omitting the policy is the same as a read that found none');
 ok(classCancelBody('Spin', inHours(2), NOW).includes(CLASS_POLICY_UNKNOWN_NOTE),
   'and still says we do not hold the policy');
+
+/* ══ part 3060 ══ which word the cancellation is FILED as ══════════════════
+ *
+ * `class_bookings.status` gains 'cancelled' and 'late_cancelled', and
+ * `cancel_class` has to choose. The point of `cancelStanding` is that it is the
+ * SAME comparison `classChargeLine` makes, so the sentence the member reads and
+ * the word the database stores cannot disagree — which is the failure where
+ * somebody is shown a fee and has an ordinary cancellation filed, or is told it
+ * is free and is charged. */
+
+const twelve: ClassCancelPolicy = { notice: 12, fee: 8.5, currency: 'GBP' };
+
+eq(cancelStanding(twelve, inHours(2), NOW), 'late_cancelled',
+  'two hours before a twelve-hour notice is a late cancellation');
+eq(cancelStanding(twelve, inHours(40), NOW), 'cancelled',
+  'and well outside it is an ordinary one');
+
+// The boundary, to the hour, on both sides. `hoursUntil` floors, so a class
+// exactly twelve hours out is 12, which is NOT less than 12 and is therefore
+// outside — the same `<` the fee sentence uses.
+eq(cancelStanding(twelve, inHours(12), NOW), 'cancelled', 'exactly on the notice is outside it');
+eq(cancelStanding(twelve, inHours(11.99), NOW), 'late_cancelled', 'a minute inside it is late');
+
+// THE one: the two readers agree at every hour across the boundary. A drift of
+// one hour between them is a member charged a fee the app said they would not
+// pay.
+for (let h = 0; h <= 24; h++) {
+  const standing = cancelStanding(twelve, inHours(h), NOW);
+  const line = classChargeLine(twelve, inHours(h), NOW) ?? '';
+  const sentenceSaysLate = line.includes('inside your');
+  eq(standing === 'late_cancelled', sentenceSaysLate,
+    `the stored word and the sentence agree at ${h}h out`);
+}
+
+// A stated zero-hour notice means nothing is ever late. Zero is a STATEMENT and
+// not a silence, so it gets an answer rather than a null.
+const zero: ClassCancelPolicy = { notice: 0, fee: null, currency: null };
+eq(cancelStanding(zero, inHours(0), NOW), 'cancelled',
+  'a gym that runs no notice period never records a late cancellation');
+eq(cancelStanding(zero, inHours(99), NOW), 'cancelled', 'at any distance');
+
+// Null, three ways, and every one of them means the same thing: the app does not
+// know, and `cancel_class` must file 'cancelled'. Recording a late cancellation
+// against a window nobody stated would be this app inventing a gym's policy,
+// which is the whole subject of this file's header.
+eq(cancelStanding(null, inHours(1), NOW), null, 'a read that did not land is not a late cancellation');
+eq(cancelStanding({ notice: null, fee: 8.5, currency: 'GBP' }, inHours(1), NOW), null,
+  'nor is a fee with no window — a price is not a policy');
+eq(cancelStanding(twelve, 'not a date', NOW), null,
+  'nor is a class whose start time cannot be parsed');
+
+// A class that has already begun. `hoursUntil` floors at 0, never negative, so
+// this lands inside any stated window rather than wrapping out the far side.
+eq(cancelStanding(twelve, inHours(-5), NOW), 'late_cancelled',
+  'cancelling a class that already started is inside the notice, not outside it');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('classCancel.test.ts — all assertions passed');

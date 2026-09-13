@@ -113,6 +113,16 @@ export function sessionFeeFieldValue(
   // units, so the whole figure is scaled by the currency's factor first —
   // never by a hundred.
   const dp = currencyDecimals(currency);
+  // Null now covers a stated-but-unreadable currency ('pounds', '£') as well as
+  // an absent one, and `String(fee)` is still the right answer to both — it is
+  // the number the row already holds, in the whole units the column stores,
+  // with no scale claimed for it. Not '': blanking the box would hide a fee the
+  // owner set, and the owner would then type it again. Not a 2-place string
+  // either, which is the claim there is no basis for.
+  //
+  // `parseSessionFee` above refuses to SAVE against a currency in this state,
+  // through the same null, so the pair is consistent: the stored figure is
+  // shown as it stands and cannot be written back until the currency is a code.
   if (dp == null) return String(fee);
   return majorFromMinor(Math.round(fee * 10 ** dp), currency);
 }

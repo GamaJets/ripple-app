@@ -9,7 +9,7 @@ import {
   canOfferMove, rescheduleRefusalLine, rescheduleLines, moveConfirm, noSlotsLine,
   pausePreviewLine, pauseOutcomeLines, pausedRangeLine, resumeConfirm, resumedLine,
   pauseRangeRefusal, pauseRangeConfirm,
-  NOT_MOVED, COACH_NOT_MOVED, coachMoveRefusalLine, coachMovedLine,
+  NOT_MOVED, COACH_NOT_MOVED, coachMoveRefusalLine, coachMovedLine, queueLength,
   type RescheduleReport, type RescheduleRefusal, type PauseReport, type CoachMoveReport,
 } from './reschedule';
 import type { CancellationPolicy } from './booking';
@@ -118,6 +118,81 @@ ok(/back on your coach/.test(rescheduleLines(moved, 'a', 'b').join(' ')),
   'an unwanted slot with nobody waiting goes back on the calendar');
 ok(/gone straight to them/.test(rescheduleLines({ ...moved, promoted: true }, 'a', 'b').join(' ')),
   'and one somebody was waiting for is reported as gone, from the server’s own answer');
+
+/* ── the member's third arm: a freed slot whose queue nobody counted ────── */
+//
+// `RescheduleReport.waiting` was a plain `number` and both providers read it as
+// `Number(r.waiting) || 0` (src/ui/sessions.tsx:703 and :733), so an absent
+// key, a null, an empty string and a NaN all arrived here as a counted zero.
+// The coach's side of the same act grew its third sentence first; this is the
+// member's, and it is the same rule: a count nobody took is not an empty queue.
+
+const uncountedMine = rescheduleLines({ ...moved, waiting: null }, 'Tue 7:00 am', 'Thu 6:00 pm').join(' ');
+ok(/back on your coach/.test(uncountedMine), 'the slot is still said to be back on the calendar, which is known');
+ok(!/nobody was waiting/.test(uncountedMine), 'an uncounted queue is never called empty');
+ok(!/gone straight to them|somebody was waiting/i.test(uncountedMine),
+  'and no queue is invented either; nobody knows which way it goes');
+ok(/cannot say whether anybody else is in line/.test(uncountedMine), 'it says the app could not find out');
+ok(!/null|undefined|NaN/.test(uncountedMine), 'without rendering the gap as a word');
+
+// The counted arms, so all four states read differently and none is the others.
+const queuedMine = rescheduleLines({ ...moved, waiting: 2 }, 'a', 'b').join(' ');
+ok(/2 other people are waiting for it/.test(queuedMine), 'a counted queue is stated as the number it is');
+ok(!/nobody was waiting/.test(queuedMine), 'and is not called empty while two people are in line');
+ok(/one other person is waiting for it/.test(rescheduleLines({ ...moved, waiting: 1 }, 'a', 'b').join(' ')),
+  'one is singular');
+ok(/nobody was waiting for it/.test(rescheduleLines({ ...moved, waiting: 0 }, 'a', 'b').join(' ')),
+  'a counted empty queue may still be called empty, because somebody counted it');
+
+const mineStates = new Set([
+  rescheduleLines({ ...moved, promoted: true, waiting: 1 }, 'a', 'b').join(' '),
+  queuedMine,
+  rescheduleLines({ ...moved, waiting: 0 }, 'a', 'b').join(' '),
+  rescheduleLines({ ...moved, waiting: null }, 'a', 'b').join(' '),
+]);
+eq(mineStates.size, 4, 'promoted, queued, counted-empty and uncounted each read differently');
+
+// The ordering trap, pinned here as it is pinned on the coach's side: `null > 0`
+// is false, so a null tested after the `> 0` branch falls into the
+// counted-empty sentence. If the null check moves below it, or any caller
+// coalesces the null to 0 on the way here, this assertion fails.
+ok(rescheduleLines({ ...moved, waiting: null }, 'a', 'b').join(' ')
+   !== rescheduleLines({ ...moved, waiting: 0 }, 'a', 'b').join(' '),
+  'an uncounted queue does not collapse into the counted-empty sentence');
+
+// A promotion answers the question by itself: somebody has the slot.
+ok(/gone straight to them/.test(rescheduleLines({ ...moved, promoted: true, waiting: null }, 'a', 'b').join(' ')),
+  'a promotion is stated even with no count beside it');
+ok(!/cannot say whether/.test(rescheduleLines({ ...moved, promoted: true, waiting: null }, 'a', 'b').join(' ')),
+  'and does not also admit to not knowing something it was not asked');
+
+// The sentinel. A move that never reached the server counted nobody.
+eq(NOT_MOVED.waiting, null, 'the fallback report carries no count rather than a zero');
+
+/* ── the reading itself ─────────────────────────────────────────────────── */
+//
+// The rule both providers now use for the server's `waiting` key, identical to
+// `queueLength` in src/ui/coachMoveAt.ts. Everything that is not a count of
+// people comes back null, and nothing that is not a count settles to zero.
+
+eq(queueLength(0), 0, 'a reported zero is a count and survives as one');
+eq(queueLength(3), 3, 'and so is three');
+eq(queueLength('0'), 0, 'a digit string is the server having counted, via jsonb');
+eq(queueLength('12'), 12, 'and so is a longer one');
+eq(queueLength(' 4 '), 4, 'with surrounding space tolerated');
+eq(queueLength(undefined), null, 'an absent key is not a count');
+eq(queueLength(null), null, 'a null is not a count, which is the whole defect');
+eq(queueLength(''), null, 'an empty string is not a count, though Number("") is 0');
+eq(queueLength('   '), null, 'and neither is whitespace');
+eq(queueLength(NaN), null, 'a NaN is not a count');
+eq(queueLength(Infinity), null, 'nor is an infinity');
+eq(queueLength(-1), null, 'a negative is not a number of people');
+eq(queueLength(2.5), null, 'and neither is half a person');
+eq(queueLength('two'), null, 'a word is not a count');
+eq(queueLength('3.0'), null, 'nor is a decimal string, which this server never sends');
+eq(queueLength(true), null, 'and a boolean is not a count, though Number(true) is 1');
+eq(queueLength({}), null, 'nor is an object');
+eq(queueLength([]), null, 'nor an array, though Number([]) is 0');
 
 const mc = moveConfirm('Tue 7:00 am', 'Thu 6:00 pm');
 ok(/Nothing is charged/.test(mc.body), 'the confirm says it before the tap as well as after');

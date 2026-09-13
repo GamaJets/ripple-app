@@ -106,10 +106,15 @@ export function classChargeLine(
   policy: ClassPolicyRead, startsAt: string, now: number = Date.now(),
 ): string | null {
   if (!policy || policy.notice == null) return null;
-  const h = hoursUntil(startsAt, now);
-  if (h == null) return null;
-  const inside = h < policy.notice;
-  if (!inside) {
+  // The boundary is `cancelStanding`'s and is asked for rather than repeated.
+  // It used to be `hoursUntil(...) < policy.notice` written out here, and part
+  // 3060 gives `cancel_class` the same decision to make about which word to
+  // STORE — so the moment there were two copies of this comparison, a member
+  // could be shown the fee sentence and have an ordinary cancellation filed, or
+  // be told it was free and be charged. One comparison, two readers.
+  const standing = cancelStanding(policy, startsAt, now);
+  if (standing == null) return null;
+  if (standing === 'cancelled') {
     return policy.notice === 0
       // A stated zero-hour window means nothing is ever late, and "you are
       // outside the 0-hour notice" is not a sentence anybody should read.
@@ -137,6 +142,46 @@ export function classChargeLine(
     return `${window} Your gym charges a late cancellation fee, and there is no currency on their record here, so this app cannot state the amount \u2014 ask them what it is.`;
   }
   return `${window} Your gym charges ${amount} for one.`;
+}
+
+/**
+ * The standing part 3060 will record this cancellation as, or null when the
+ * policy cannot be read.
+ *
+ * ── why this is here and not only in SQL ──────────────────────────────────
+ *
+ * `class_bookings.status` gains 'cancelled' and 'late_cancelled' in part 3060,
+ * spelled as `sessions.outcome` spells them, and `cancel_class` has to choose
+ * between them at the moment the member taps. There are then TWO places that
+ * decide where the boundary sits — the RPC, and `classChargeLine` above, which
+ * has been telling the member "cancelling now is inside your gym's 12-hour
+ * notice" since part 2615.
+ *
+ * If those two disagree by so much as a rounding rule, a member is shown the
+ * fee sentence and the database files an ordinary cancellation, or the reverse:
+ * told it is free and charged. So the test is written ONCE, here, and
+ * `classChargeLine` above now calls it rather than repeating it — the two
+ * sentences and the stored word cannot come apart, because they are the same
+ * comparison. (It is declared below its caller, which a function declaration
+ * permits, so that the reasoning sits beside the thing it is about.)
+ *
+ * NULL IS NOT 'cancelled'. It is the policy not having been read, and it is
+ * returned rather than collapsed because the caller has a real decision to make
+ * about it. `cancel_class` must default a null to 'cancelled': a gym that has
+ * stated no notice period has no late window, and recording a late cancellation
+ * against a window nobody set is this app inventing the fact it refuses to
+ * invent in prose four paragraphs above.
+ */
+export function cancelStanding(
+  policy: ClassPolicyRead, startsAt: string, now: number = Date.now(),
+): 'cancelled' | 'late_cancelled' | null {
+  if (!policy || policy.notice == null) return null;
+  const h = hoursUntil(startsAt, now);
+  if (h == null) return null;
+  // `<` and not `<=`, matching `classChargeLine` exactly — and a stated notice
+  // of 0 therefore makes nothing late, which is the sentence that function
+  // already gives for it.
+  return h < policy.notice ? 'late_cancelled' : 'cancelled';
 }
 
 /**

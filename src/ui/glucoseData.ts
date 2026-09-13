@@ -24,6 +24,38 @@
 // carries no file — so it is now kept and sent on the reconnect, as 'glucose'.
 // See src/lib/recordQueue.ts for why the health-store IMPORT is deliberately
 // not queued alongside it.
+//
+// ── The meals this device knows about and the server does not ─────────────
+//
+// The pairing below lines readings up against a fortnight of `food_logs`, read
+// straight from the server, once. src/ui/foodLog.tsx holds two kinds of meal
+// that read cannot contain, and BOTH belong to the same member on the same
+// phone:
+//
+//   1. A meal back-dated to an earlier day — `logFood(f, loggedAt)`. It goes
+//      into the provider's `owed` queue, never into `entries`, and it reaches
+//      the server on its own write or on the next flush. `pastRevision` is
+//      bumped once per accepted back-date and once per flush, and it is in
+//      `refreshMeals`'s dependencies here for exactly the reason it is in
+//      `useFoodHistory`'s: a day this hook has ALREADY drawn a pairing for has
+//      just changed, and leaving the old one on screen is a settled figure
+//      moving underneath somebody without being re-read.
+//
+//   2. A meal this device is holding and the server has never heard of —
+//      the same `owed` rows before they land, and today's `local:` entries
+//      logged with no signal. Those cannot arrive through a re-read at all,
+//      however many times it runs, so they are merged in from the provider.
+//
+// Both matter more here than in a plain day total, because `pairMeals` closes
+// each meal's window at the NEXT meal: a missing dinner does not just lose its
+// own row, it leaves lunch's window open across the evening and hands lunch the
+// rise that dinner caused.
+//
+// Only for the member's OWN readings. A coach reading a client (`personId` set)
+// gets nothing from this provider — it holds the COACH's food log, and merging
+// the coach's breakfast into a client's glucose pairing would be this file
+// inventing a meal for somebody else. There is no honest way to see a client's
+// undelivered rows from here; they are on their phone.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BRAND } from '../lib/brands';
 import { supabase } from '../lib/supabase';
@@ -39,6 +71,13 @@ import { classifyWrite, type WriteOutcome } from '../lib/offlineQueue';
 // whose answer was lost can be offered again without becoming a second reading.
 import { newRowId } from '../lib/outbox';
 import { keptOnPhoneNote, notKeptNote } from '../lib/recordQueue';
+// The member's own food log, as this device holds it. See the note above: the
+// `owed` rows and the pending entries are meals the fortnight read below cannot
+// return, and `pastRevision` is what says a past day has changed.
+import { useFoodLog, type FoodEntry } from './foodLog';
+// A `local:` id is a row that has never been accepted by the server, which is
+// what makes merging one impossible to double-count against the read.
+import { isPending } from '../lib/wellnessSync';
 import { useOutbox } from './outbox';
 import { useToast } from './toast';
 
@@ -63,7 +102,9 @@ export interface GlucoseData {
    */
   paired: MealGlucose[];
   pairedStatus: LoadStatus;
-  /** Re-read from the server. */
+  /** Re-read from the server — the readings AND the meals they are paired
+   *  against, because a pull-to-refresh that re-read only half of the pairing
+   *  left the other half as it was at mount. */
   refresh: () => Promise<void>;
   /**
    * Pull anything new out of the phone's health store and save it. Own
@@ -131,10 +172,24 @@ export function useGlucose(personId?: string): GlucoseData {
   const [rows, setRows] = useState<Row[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [shared, setShared] = useState<boolean | null>(null);
-  const [meals, setMeals] = useState<MealRef[]>([]);
+  // What the SERVER holds. The list the pairing actually runs over is built
+  // below out of this and whatever the device is still carrying.
+  const [serverMeals, setServerMeals] = useState<MealRef[]>([]);
   const [mealsStatus, setMealsStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // The start of the window the meal read last asked for, in ms. Null until one
+  // has been asked — which is a real state, not a zero: with no window read
+  // there is nothing to hold this device's own meals to, and a fortnight
+  // invented here instead would be a second clock.
+  const [mealsSince, setMealsSince] = useState<number | null>(null);
 
   const readOnly = !!personId;
+  // This device's own food log. Read unconditionally, because a hook cannot be
+  // called on a condition, and used only when these are the signed-in member's
+  // own readings — see the note at the top of this file.
+  const food = useFoodLog();
+  // Zero for a coach, so a coach's own back-dated dinner cannot re-read a
+  // client's meals. The value itself is never shown; only its CHANGE matters.
+  const mealRevision = readOnly ? 0 : food.pastRevision;
   // The device's queue, for the one write here that is allowed to wait. Null
   // when there is no provider above the screen, which is a real state and not an
   // error — see `useOutbox`.
@@ -190,7 +245,7 @@ export function useGlucose(personId?: string): GlucoseData {
 
   const target = personId ?? uid;
 
-  const refresh = useCallback(async () => {
+  const refreshReadings = useCallback(async () => {
     if (!USE_SUPABASE || !target) return;
     const since = new Date();
     since.setDate(since.getDate() - WINDOW_DAYS);
@@ -240,6 +295,12 @@ export function useGlucose(personId?: string): GlucoseData {
     if (!USE_SUPABASE || !target) return;
     const since = new Date();
     since.setDate(since.getDate() - WINDOW_DAYS);
+    // The window this read actually asked for, kept so the device's own meals
+    // below can be held to the SAME one. Written before the answer comes back
+    // because it is a fact about the question, not about the reply — and a
+    // fortnight computed a second time, from a clock read somewhere else, is
+    // the other half of a window disagreeing with itself.
+    setMealsSince(since.getTime());
     const { data, error } = await supabase
       .from('food_logs')
       .select('id, name, logged_at, carbs')
@@ -248,14 +309,68 @@ export function useGlucose(personId?: string): GlucoseData {
       .order('logged_at', { ascending: false })
       .limit(ROW_CAP);
     if (error) { setMealsStatus('error'); return; }
-    setMeals((data ?? []).map((m: any) => ({
+    setServerMeals((data ?? []).map((m: any) => ({
       id: String(m.id), name: String(m.name), loggedAt: String(m.logged_at),
       carbs: m.carbs == null ? null : Number(m.carbs),
     })));
     setMealsStatus((data ?? []).length >= ROW_CAP ? 'partial' : 'ready');
-  }, [target]);
+    // `mealRevision` is not read in the body. It is here because an accepted
+    // back-date — or a flush that landed one — means a day this hook has
+    // already paired has changed on the server, and the only way to find out
+    // what it now holds is to ask again. src/ui/foodLog.tsx · `pastRevision`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, mealRevision]);
 
-  useEffect(() => { void refresh(); void refreshShared(); void refreshMeals(); }, [refresh, refreshShared, refreshMeals]);
+  /**
+   * Re-read everything this hook shows.
+   *
+   * The meals as well as the readings, which is what the pull-to-refresh on
+   * app/(client)/glucose.tsx was missing: this read used to run once per mount,
+   * on a screen that is not remounted by being backgrounded, so a meal logged
+   * after it had run was paired against nothing until the app was killed. The
+   * writers below deliberately call `refreshReadings` instead — a typed reading
+   * does not change the food log, and re-reading a fortnight of meals after
+   * every finger-prick is a query nobody asked for.
+   */
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshReadings(), refreshMeals()]);
+  }, [refreshReadings, refreshMeals]);
+
+  useEffect(() => { void refreshReadings(); void refreshShared(); void refreshMeals(); }, [refreshReadings, refreshShared, refreshMeals]);
+
+  /**
+   * The meals this device is holding that the server has not accepted.
+   *
+   * Both kinds, and neither can reach the read above however often it runs:
+   * `owed` is the back-dated and left-over rows, `entries` filtered to
+   * `isPending` is today's, logged with no signal. A row with a `local:` id has
+   * never been stored, so merging it cannot double-count against the server's
+   * copy — and the moment one IS stored `foodLog` drops it from the queue and
+   * bumps `pastRevision`, which re-reads.
+   *
+   * Empty for a coach. These are the signed-in account's meals.
+   *
+   * Held to the window the READ asked for — `mealsSince`, not a fortnight
+   * counted again from a clock read here. The food queue never expires a row
+   * for age (src/ui/foodLog.tsx says why, at length), so a meal owed from a
+   * month ago is a real row this device is still carrying, and it belongs in
+   * the food log rather than in a fortnight of glucose pairing.
+   */
+  const deviceMeals = useMemo<MealRef[]>(() => {
+    if (readOnly || mealsSince == null) return [];
+    const held: FoodEntry[] = [...food.owed, ...food.entries.filter((e) => isPending(e.id))];
+    return held
+      .filter((e) => {
+        const t = Date.parse(e.at);
+        return Number.isFinite(t) && t >= mealsSince;
+      })
+      .map((e) => ({ id: e.id, name: e.name, loggedAt: e.at, carbs: e.carbs }));
+  }, [readOnly, mealsSince, food.owed, food.entries]);
+
+  const meals = useMemo(
+    () => (deviceMeals.length ? [...deviceMeals, ...serverMeals] : serverMeals),
+    [deviceMeals, serverMeals],
+  );
 
   const readings = useMemo(() => rows.map(toReading), [rows]);
   const summary = useMemo(() => summarise(readings), [readings]);
@@ -299,19 +414,19 @@ export function useGlucose(personId?: string): GlucoseData {
       // what stops somebody importing again and again to fix a number that was
       // never going to move.
       if (error.code === '23505') {
-        await refresh();
+        await refreshReadings();
         return { added: 0, status: 'ready', reason: `Those readings are already in ${BRAND.label}, so nothing new was added.` };
       }
       return { added: 0, status: 'error', reason: 'Those readings could not be saved. Try again in a moment.' };
     }
-    await refresh();
+    await refreshReadings();
     // A null count is "nobody counted", not "none" — the same rule
     // src/lib/wroteRows.ts states for updates and deletes.
     if (count == null) {
       return { added: 0, status: 'error', reason: 'They were sent, but the server did not say how many it stored. Pull down to refresh and check before importing again.' };
     }
     return { added: count, status: 'ready' };
-  }, [readOnly, target, rows, refresh]);
+  }, [readOnly, target, rows, refreshReadings]);
 
   /**
    * One reading somebody typed.
@@ -361,7 +476,7 @@ export function useGlucose(personId?: string): GlucoseData {
       }).select('id');
       out = classifyWrite(error as any, data ? data.length : 0);
     } catch { out = 'unsent'; }
-    if (out === 'stored') { await refresh(); return true; }
+    if (out === 'stored') { await refreshReadings(); return true; }
     // 'refused' is the server having read the row and declined it. Offering the
     // same bytes again gets the same answer, so it is not queued and the screen
     // says it was not saved.
@@ -373,7 +488,7 @@ export function useGlucose(personId?: string): GlucoseData {
     if (result !== 'queued') { say(notKeptNote('reading', result === 'full' ? 'full' : 'unavailable')); return false; }
     say(keptOnPhoneNote('reading'));
     return true;
-  }, [readOnly, target, refresh, outbox, say]);
+  }, [readOnly, target, refreshReadings, outbox, say]);
 
   const remove = useCallback(async (id: string): Promise<boolean> => {
     if (readOnly || !target) return false;
@@ -384,9 +499,9 @@ export function useGlucose(personId?: string): GlucoseData {
       .from('glucose_readings').delete({ count: 'exact' })
       .eq('id', id).eq('client_id', target);
     if (error || !count) return false;
-    await refresh();
+    await refreshReadings();
     return true;
-  }, [readOnly, target, refresh]);
+  }, [readOnly, target, refreshReadings]);
 
   const setSharedFlag = useCallback(async (on: boolean): Promise<boolean> => {
     if (readOnly || !target) return false;

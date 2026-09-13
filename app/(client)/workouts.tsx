@@ -113,7 +113,7 @@ import { usePlanEdits } from '../../src/ui/planEdits';
 // Starting today from a session already in the log. The conversion is the whole
 // of it and none of it is here — src/lib/repeatSession.ts carries the reasoning
 // about what a logged set can and cannot be turned into.
-import { pastSessions, repeatSession, sessionSummary, type PastSession } from '../../src/lib/repeatSession';
+import { loggedSessions, repeatSession, sessionSummary, type PastSession } from '../../src/lib/repeatSession';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useToast } from '../../src/ui/toast';
@@ -123,7 +123,7 @@ import { useToast } from '../../src/ui/toast';
 // "it will be gone when you next open the app" on this screen had become false
 // in the one direction that makes somebody retype an hour of training.
 import { unsentNote, type WriteOutcome } from '../../src/lib/offlineQueue';
-import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
+import { importSources, withHr, useImportedIds, isLogged, readRecent, readNote } from '../../src/ui/watchImport';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos, type VideoItem, type LibraryStatus } from '../../src/ui/exerciseVideos';
 // `isWhole`, not `cd.injuries.length`. An empty injury list that was READ and
@@ -149,6 +149,10 @@ import { RepdbInlineCredit } from '../../src/ui/Attribution';
 // this whole screen down while it loaded. React Native's own <Image> is the
 // fallback and is in every binary ever built.
 import { videoForExercise, exerciseSlug, type ExerciseRef } from '../../src/lib/exerciseId';
+// One classifier for "whose clip is this". A null trainer is a platform clip
+// AND a handset entry whose upload was refused; only the id prefix tells them
+// apart, and src/lib/clipOwner.ts is where that is written down.
+import { clipOwner, type ClipOwner } from '../../src/lib/clipOwner';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { DidYouKnow } from '../../src/ui/DidYouKnow';
@@ -937,14 +941,42 @@ export default function Train() {
   // choose to log, so this offers rather than assumes.
   const { ids: importedIds, mark: markImported } = useImportedIds();
   const [pending, setPending] = useState<WorkoutSample[]>([]);
+  /**
+   * The sentence about a device that did not answer, or null.
+   *
+   * This tab OFFERS workouts; it never claimed there were none, so a whole read
+   * with nothing in it says nothing here — `readNote` returns that sentence
+   * only under `emptyAndWhole`, and the filter below drops it. What must be
+   * said is the opposite case: with Apple Health and WHOOP both connected and
+   * WHOOP refusing, the offer below is Apple's alone, and a member who cannot
+   * see their WHOOP session in it would otherwise read the omission as the app
+   * having lost it. So the refusal is stated beside the offer.
+   */
+  const [watchNote, setWatchNote] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const canImport = importSources(w.states).length > 0;
   useFocusEffect(useCallback(() => {
-    if (!canImport) { setPending([]); return; }
+    if (!canImport) { setPending([]); setWatchNote(null); return; }
     let live = true;
     (async () => {
-      const found = await fetchRecent(w.states, 14);
-      if (live) setPending(found.filter((sm) => !isLogged(sm, importedIds, workoutLog)));
+      // `readRecent`, not `fetchRecent`: the deprecated wrapper THROWS when
+      // every provider asked failed, and there is no catch on a focus effect —
+      // an unhandled rejection. More to the point, a provider that refused is
+      // a fact this screen has to print, and the wrapper cannot express it.
+      let r;
+      try {
+        r = await readRecent(w.states, 14);
+      } catch (e) {
+        // `readRecent` resolves for every provider outcome, so reaching here
+        // means the read itself broke. Say nothing rather than guess: an
+        // unexplained silence is not "no workouts from your watch".
+        reportError('workouts.watchImport', e);
+        return;
+      }
+      if (!live) return;
+      setPending(r.samples.filter((sm) => !isLogged(sm, importedIds, workoutLog)));
+      const note = readNote(r, '14 days', 'your devices');
+      setWatchNote(r.emptyAndWhole ? null : note);
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1204,7 +1236,7 @@ export default function Train() {
    * READ and not of what there is. The control below is drawn off it and says
    * which it is looking at; nothing on this screen says "you have no past
    * sessions" without `workoutLogStatus` agreeing. */
-  const repeatable = useMemo(() => pastSessions(workoutLog), [workoutLog]);
+  const repeatable = useMemo(() => loggedSessions(workoutLog), [workoutLog]);
   /* The movements this screen can still put a name to.
    *
    * NOT the 615-row `exercises` catalogue. `useExerciseCatalogue` is a third of
@@ -3310,6 +3342,24 @@ export default function Train() {
                         </Notice>
                       </View>
                     ) : null}
+                    {/* A device that did not answer, named. The offer above is
+                        what the devices that DID answer held; without this
+                        line a WHOOP that refused is simply absent from it, and
+                        an absence on this tab reads as "the app lost it" —
+                        which is the conclusion this whole import exists to
+                        stop. Warn, not crit: nothing is broken and nothing is
+                        lost, the read just has a hole in it and trying again
+                        usually closes it. */}
+                    {watchNote ? (
+                      <View style={{ marginBottom: sp.lg }}>
+                        <Notice
+                          tone={t.warn}
+                          kicker="From your watch"
+                          title="Not everything could be read"
+                          note={watchNote}
+                        />
+                      </View>
+                    ) : null}
                     <KpiRow items={[
                       { label: 'Exercises', value: fig(dayEntries.length) },
                       { label: 'Sets', value: fig(daySets) },
@@ -4252,6 +4302,42 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
  * Mounted only while it is open, so a five-exercise session does not fire five
  * catalogue reads at the moment somebody presses Start.
  */
+/**
+ * Where a client is told this demonstration came from.
+ *
+ * The line was `clip.trainerId ? 'Recorded by your coach' : 'From the Repple
+ * library'`, and that one expression made TWO false statements, because a null
+ * trainer and a non-null trainer are each two different things:
+ *
+ *   · `trainerId` is null for a clip stranded in this handset's AsyncStorage
+ *     after its insert was refused — character for character the shape of a
+ *     platform clip, and separable from one only by the id prefix. So a coach's
+ *     un-uploaded phone recording was captioned as the library's. Worse than
+ *     wrong: the AsyncStorage key is not namespaced by account and is not
+ *     cleared on sign-out, so on any handset that has ever been a coach's, a
+ *     later CLIENT session reads those entries back and is told the platform
+ *     published them.
+ *   · `trainerId` is non-null for ANOTHER coach's clip, published and visible
+ *     here — captioned "Recorded by your coach", about a coach the member has
+ *     never met.
+ *
+ * Asked through `clipOwner` (src/lib/clipOwner.ts), which is the one place this
+ * app answers it, so this caption cannot drift from the library row, the
+ * coverage report and the player's own precedence — all of which ask it too.
+ */
+function clipCaption(owner: ClipOwner): string {
+  switch (owner) {
+    case 'mine': return 'Recorded by your coach';
+    // Real, published, and not theirs. Named as a coach's rather than as the
+    // library's, because the library's means nobody's.
+    case 'other': return `Recorded by a coach on ${BRAND.label}`;
+    case 'platform': return `From the ${BRAND.label} library`;
+    // Never the library's. There is no row behind this clip, nobody but this
+    // device can see it, and no coach put it here for this member.
+    case 'local': return 'Saved on this device only — not from the library, and not your coach’s';
+  }
+}
+
 function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   t: Theme; name: string; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null;
 }) {
@@ -4265,7 +4351,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
       <View style={{ paddingVertical: sp.sm }}>
         <ExerciseVideo video={clip} exerciseName={name} />
         <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
-          {clip.trainerId ? 'Recorded by your coach' : `From the ${BRAND.label} library`}
+          {clipCaption(clipOwner({ id: clip.id, trainerId: clip.trainerId ?? null }, preferTrainerId))}
         </Text>
       </View>
     );

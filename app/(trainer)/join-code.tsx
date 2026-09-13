@@ -32,16 +32,30 @@
 // to fix what was a dropped request. `codeToGive` never produces that sentence
 // and src/lib/handOutCode.test.ts holds it shut.
 //
-// ── No QR code ─────────────────────────────────────────────────────────────
+// ── The QR code ────────────────────────────────────────────────────────────
 //
-// A QR would be the right affordance here and there is no encoder in
-// package.json — react-native-svg can draw one but cannot compute one. Adding a
-// dependency for it would mean a native-ish bundle change on a product that
-// ships over the air, so the text, the link and the system share sheet are what
-// this screen offers. The share sheet already reaches every messaging app on the
-// phone, which is how most of these actually get handed over.
-import { useCallback, useEffect, useState } from 'react';
+// This header used to say there was no QR, because there was no encoder in
+// package.json and adding one was thought to mean a native bundle change. Half
+// of that was right. `qrcode-generator` is pure JavaScript with no dependencies
+// and no native code, so it ships over the air like any other module, and
+// react-native-svg — which draws the result — has been a dependency for far
+// longer than this screen has existed. The rules are src/lib/joinQr.ts's.
+//
+// It is drawn BESIDE the six characters and never instead of them. A QR is
+// useless over a phone call, on a poster photographed badly, to somebody whose
+// camera is broken, and to anybody reading this screen with VoiceOver. The
+// typed code, the link, the share sheet and the QR are four ways out of the
+// same fact and the screen offers all four.
+//
+// The states are the load-bearing part. `joinQr` takes the value `codeToGive`
+// already produced rather than a code, so the picture and the sentence beside
+// it read one decision: there is no expression on this screen that draws a
+// scannable symbol over a code the words are calling unread. That matters more
+// here than anywhere else on the screen, because a mistyped code fails in front
+// of the person who typed it and a wrong QR does not fail at all.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
+import Svg, { Path, Rect } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -57,7 +71,31 @@ import {
   HOW_THEY_USE_IT, codeUptakeLine, uptakeNeedsAnswering, type CodeRead,
 } from '../../src/lib/handOutCode';
 import { codeCountLine } from '../../src/lib/joinCodes';
+import { joinQr, qrPath, QR_QUIET_ZONE } from '../../src/lib/joinQr';
 import { BACK_ICON } from '../../src/ui/direction';
+
+/**
+ * The QR's two colours, which are deliberately not theme tokens.
+ *
+ * Everything else on this screen follows the reader's light or dark setting.
+ * This must not. A scanner is measuring reflectance between adjacent modules,
+ * and while many readers cope with an inverted symbol, the specification's
+ * symbol is dark-on-light and the cheap camera stacks that do not cope are
+ * exactly the ones a coach meets on a gym floor. Drawing a coach's invite in
+ * ink-on-surface would make it theme-correct and, for some fraction of the
+ * people pointing a phone at it, unscannable — which is a failure nobody in the
+ * room could diagnose.
+ *
+ * So the tile is white and the modules are black in both themes, and the white
+ * tile also supplies the contrast the quiet zone needs against a dark
+ * background. See QR_QUIET_ZONE in src/lib/joinQr.ts.
+ */
+const QR_LIGHT = '#FFFFFF';
+const QR_DARK = '#000000';
+
+/** Drawn size in points. Big enough to scan across a gym-floor arm's length,
+ *  and small enough to leave the six characters above it the hero. */
+const QR_SIZE = 200;
 
 export default function CoachJoinCode() {
   const t = useTheme();
@@ -99,7 +137,22 @@ export default function CoachJoinCode() {
 
   const pull = usePullToRefresh(load);
 
-  const give = codeToGive(read);
+  /**
+   * ONE decision, read by both the words and the picture.
+   *
+   * Memoised on `read` rather than recomputed, because `joinQr` below is keyed
+   * on this value and a fresh object every render would encode a QR on every
+   * scroll frame. `read` is state and changes only when the read does.
+   */
+  const give = useMemo(() => codeToGive(read), [read]);
+  /**
+   * The QR, from the SAME value. `joinQr` takes `give` rather than `read` or a
+   * code string on purpose — see the header. There is no argument this call
+   * could be given that would draw a symbol the sentence beside it contradicts.
+   */
+  const qr = useMemo(() => joinQr(give), [give]);
+  /** The path is the expensive half of drawing, and it depends on nothing else. */
+  const qrD = useMemo(() => (qr.show ? qrPath(qr.matrix) : ''), [qr]);
   const named = codesToHandOut(codes.rows);
   const namedLine = namedCodesLine(codes.status, codes.rows);
   const clipboardNote = copyBlockedNote(HAS_NATIVE_CLIPBOARD);
@@ -166,6 +219,56 @@ export default function CoachJoinCode() {
                 {give.hand.code}
               </Text>
             </View>
+
+            {/* ── the same code, for a camera ──────────────────────────────
+                Below the characters, never in place of them. `qr.show` can only
+                be true under `give.give`, so this cannot draw over a code the
+                block above is calling unread — but the three not-shown cases
+                still have to be handled, and they are, underneath. */}
+            {qr.show ? (
+              <View style={{ alignItems: 'center', marginTop: sp.lg }}>
+                {/* One element, one label. A screen reader meets "QR code for
+                    your coaching code…" rather than an unnamed image, and the
+                    six characters stay separately reachable in the box above —
+                    the label deliberately does not repeat them. */}
+                <View
+                  accessible
+                  accessibilityRole="image"
+                  accessibilityLabel={qr.a11yLabel}
+                  style={{ borderRadius: radius.md, overflow: 'hidden' }}
+                >
+                  {/* The quiet zone is in the viewBox, not in padding, so it is
+                      exactly four modules at any rendered size. The Rect paints
+                      it: without a light margin a scanner often never finds the
+                      symbol at all. */}
+                  <Svg
+                    width={QR_SIZE}
+                    height={QR_SIZE}
+                    viewBox={`${-QR_QUIET_ZONE} ${-QR_QUIET_ZONE} ${qr.matrix.count + QR_QUIET_ZONE * 2} ${qr.matrix.count + QR_QUIET_ZONE * 2}`}
+                  >
+                    <Rect
+                      x={-QR_QUIET_ZONE}
+                      y={-QR_QUIET_ZONE}
+                      width={qr.matrix.count + QR_QUIET_ZONE * 2}
+                      height={qr.matrix.count + QR_QUIET_ZONE * 2}
+                      fill={QR_LIGHT}
+                    />
+                    <Path d={qrD} fill={QR_DARK} />
+                  </Svg>
+                </View>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
+                  They point a camera at this, or type the code above. Both land in the same place.
+                </Text>
+              </View>
+            ) : qr.why === 'unencodable' ? (
+              // The code was read and is good; only the picture could not be
+              // made. Said in its own words so it cannot be mistaken for the
+              // block above, which is about the code itself. The other two
+              // cases — still reading, and could not be read — are already
+              // stated there, and saying them twice would be the screen
+              // apologising twice for one fact.
+              <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{qr.note}</Flag>
+            ) : null}
 
             <View style={{ marginTop: sp.lg }}>
               <Cta label="Share the Invite" wide onPress={() => shareInvite(give.hand.code)} />

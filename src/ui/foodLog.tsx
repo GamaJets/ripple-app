@@ -484,6 +484,101 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [authRev, readTick]);
 
+  /* ── has this account ever logged a meal ─────────────────────────────────
+   *
+   * A separate, tiny read, and separate on purpose. The hydrate above is the
+   * day, with a cache behind it, a queue to flush and a `status` four screens
+   * gate their macros on; nothing here may touch any of that. A failure here
+   * costs a dash on one checklist row and nothing else.
+   *
+   * ── why not `useFoodHistory(14)` ────────────────────────────────────────
+   *
+   * Because a fortnight is still a window, and the question is not "lately". A
+   * member who logged for six months and then stopped for three weeks has
+   * still logged a meal; answering off a fourteen-day read would un-tick their
+   * row on the fifteenth morning, which is the same defect this replaces with
+   * a slower clock. It is also much the bigger read — every row of a fortnight,
+   * ordered, capped and summed — and neither screen that needs this mounts it.
+   *
+   * ── what it costs ───────────────────────────────────────────────────────
+   *
+   * At most one `select id … limit 1` per provider mount, and only when this
+   * device has no latch. A member who has logged before writes the latch on
+   * their first run and never asks again; a member who never has pays one
+   * one-row query per launch, and they are the member the checklist is for.
+   * Nothing is re-read on navigation — the provider is mounted once above the
+   * whole client app, so the dashboard and Getting Started share this one
+   * answer rather than asking twice.
+   */
+  const [everRead, setEverRead] = useState<boolean | null>(null);
+  /** The account `everRead` is an answer ABOUT. A refresh keeps the answer it
+   *  already has; signing in as somebody else throws it away. */
+  const everForRef = useRef<string | null>(null);
+  /** The account whose latch this session has already written, so a member
+   *  eating six meals does not write the same key six times. */
+  const everWroteForRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // No backend: the device is the whole record and the day above is
+      // already 'ready'. There is no absent server to misreport, so this is an
+      // answer rather than a silence — the same reading useFoodHistory gives.
+      if (!USE_SUPABASE) { setEverRead(false); return; }
+      let id: string | null = null;
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        id = sess?.session?.user?.id ?? null;
+      } catch { /* no local session; treated as signed out below */ }
+      if (cancelled) return;
+      // Only a CHANGE of account discards what we know. Clearing on every
+      // reload would flash a dash onto a settled tick each time somebody pulls
+      // to refresh, which is churn dressed as honesty.
+      if (everForRef.current !== id) { everForRef.current = id; setEverRead(null); }
+      // Signed out is a true answer about an empty history, not a failed read.
+      if (!id) { setEverRead(false); return; }
+      try {
+        const raw = await AsyncStorage.getItem(everKey(id));
+        if (raw === '1') {
+          // Already known, and known forever. No query at all on this launch.
+          if (!cancelled) { everWroteForRef.current = id; setEverRead(true); }
+          return;
+        }
+      } catch { /* no usable latch; the query below is the only source */ }
+      if (cancelled) return;
+      try {
+        // No date floor, no order, one row. "Is there any at all" is the whole
+        // question, and asking it this way is cheaper than asking for a day.
+        const { data, error } = await supabase.from('food_logs')
+          .select('id').eq('client_id', id).limit(1);
+        if (cancelled) return;
+        // `serverRows`, so a refused read is null and not an empty history.
+        // Telling a member who has logged for a year that they have never
+        // logged a meal is the one thing this row must not do — and under this
+        // it does not say anything at all.
+        const rows = serverRows<any>(error, data);
+        setEverRead(rows === null ? null : rows.length > 0);
+      } catch { if (!cancelled) setEverRead(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [authRev, readTick]);
+
+  // A meal on this device is proof whatever any read did, so the latch is
+  // written off the rows rather than off the query — a member who logs their
+  // first breakfast in a basement with no signal is still somebody who has
+  // logged a meal, and their next launch should not have to ask.
+  //
+  // Only ever a '1'. Nothing here writes a false, and nothing clears it: a
+  // deleted row is a correction to what they ate, not a retraction of the day
+  // they learned to use the screen.
+  useEffect(() => {
+    if (!USE_SUPABASE || !uid) return;
+    if (everWroteForRef.current === uid) return;
+    if (!(entries.length > 0 || owed.length > 0 || everRead === true)) return;
+    everWroteForRef.current = uid;
+    AsyncStorage.setItem(everKey(uid), '1').catch(() => { /* the query answers next launch */ });
+  }, [uid, entries, owed, everRead]);
+
   /**
    * Send everything this device is holding that the server has never heard of.
    *
@@ -665,7 +760,7 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
   const logFoodStable = useCallback((...a: Parameters<typeof logFood>) => impl.current.logFood(...a), []);
   const removeFoodStable = useCallback((...a: Parameters<typeof removeFood>) => impl.current.removeFood(...a), []);
   const updateFoodStable = useCallback((...a: Parameters<typeof updateFood>) => impl.current.updateFood(...a), []);
-  const value = useMemo<FoodLogValue>(() => ({ entries, consumed, status, addFood: addFoodStable, logFood: logFoodStable, removeFood: removeFoodStable, updateFood: updateFoodStable, unsent, owed, pastRevision, reload }), [entries, consumed, status, addFoodStable, logFoodStable, removeFoodStable, updateFoodStable, unsent, owed, pastRevision, reload]);
+  const value = useMemo<FoodLogValue>(() => ({ entries, consumed, status, addFood: addFoodStable, logFood: logFoodStable, removeFood: removeFoodStable, updateFood: updateFoodStable, unsent, owed, pastRevision, everLogged: everRead, reload }), [entries, consumed, status, addFoodStable, logFoodStable, removeFoodStable, updateFoodStable, unsent, owed, pastRevision, everRead, reload]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

@@ -75,7 +75,7 @@ import { GUIDE_SEEN_KEY } from '../guide';
 import { isWhole } from '../../src/ui/loadStatus';
 import {
   showBody, showFuel, showWeek,
-  checklist, checklistDone, checklistLeft, nextTodo, showChecklist,
+  checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, showChecklist,
 } from '../../src/lib/firstRun';
 import { FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
@@ -435,7 +435,13 @@ export default function Home() {
     guide: guideSeen,
     coach: c.coachLinked,
     workout: isWhole(logStatus) ? log.length > 0 : (log.length > 0 ? true : null),
-    meal: isWhole(foodLog.status) ? foodLog.entries.length > 0 : (foodLog.entries.length > 0 ? true : null),
+    // The same fact as app/(client)/getting-started.tsx, from the same rule, and
+    // it has to stay that way: a checklist that disagrees with itself between
+    // the home row and the screen the home row opens is worse than one that is
+    // wrong on both. `foodLog.entries` is TODAY ONLY, so reading the item off
+    // it made "Log Something You Ate" outstanding again every midnight — this
+    // row therefore never left the home screen of anybody, ever.
+    meal: everLoggedMeal({ loggedToday: foodLog.entries.length, unsentEarlier: foodLog.owed.length, everLogged: foodLog.everLogged }),
     device: wearableKnown ? wearableConnected : null,
     solo,
   });

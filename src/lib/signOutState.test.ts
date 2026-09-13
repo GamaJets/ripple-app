@@ -42,7 +42,31 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
   // their devices.
   ok(isPersonalDeviceKey('repple.spotify.token'),
     'and so is the Spotify token, which is a credential for an account outside Repple entirely');
-  eq(PERSONAL_DEVICE_KEYS.length, 4, 'and nothing has joined the list without a line in this file about it');
+  // Three consents, found by sweeping every AsyncStorage key in the tree for
+  // the shape `repple.mealOverride` and `repple.exerciseVideos` had. A consent
+  // is the clearest case this list takes: forgetting one costs a question being
+  // asked, and keeping one answers a question in somebody else's voice.
+  ok(isPersonalDeviceKey('repple.coachShare'),
+    'and the answer to whether a coach may see this person’s health data, which the next member inherited as a yes');
+  ok(isPersonalDeviceKey('repple.photoAI'),
+    'and the consent to send a photograph of a machine to an AI service');
+  ok(isPersonalDeviceKey('repple.photoAI.meal'),
+    'and the separate one for a photograph of somebody’s dinner');
+  eq(PERSONAL_DEVICE_KEYS.length, 7, 'and nothing has joined the list without a line in this file about it');
+}
+
+/* ── 1b · one that is deliberately absent ──────────────────────────────── */
+
+{
+  // `repple.motivation.armed` holds OS notification ids, exactly as
+  // `repple.reminders` does. Clearing it WITHOUT cancelling those ids first
+  // leaves a stranger's evening nudge firing on the next member's phone with
+  // nothing left in the app that knows its id — so it may only join this list
+  // together with a cancel in src/ui/signOutState.ts. Asserted rather than
+  // commented, because the next person to sweep these keys will find it again
+  // and the reason it is missing has to be discoverable from the failure.
+  ok(!isPersonalDeviceKey('repple.motivation.armed'),
+    'the armed motivation nudges are not cleared here — their OS ids must be cancelled first, as the reminders are');
 }
 
 /* ── 2 · what must not go ──────────────────────────────────────────────── */

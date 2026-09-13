@@ -26,10 +26,15 @@ import { Shell } from '@/components/Shell';
 import { Fetched, useLiveFetched } from '@/components/Fetched';
 import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
-import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+// `currencyNote` is deliberately not imported. It answers "has the GYM set a
+// currency", which stopped being the question the moment the payroll figure
+// took its label from the rates it is a sum of — see `totalCurrencyNote`.
+// `amount` stays: the Settle panel below prices what is about to be STAMPED
+// with the gym's code, which is a different figure asking a different question.
+import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
   fetchSessions, markOutcome, clearOutcome,
-  isAwaitingOutcome, payrollByTrainer, payrollTotal, settlementBlocker,
+  isAwaitingOutcome, payrollByTrainer, payrollTotal, settlementBlocker, payableRate,
   settleableSessions, settlementAmount, settleBlocker, recordSettlement, fetchSettlements,
   type Settlement,
   PAY_DELIVERED_ONLY, SETTLEMENT_METHODS, SETTLEMENT_METHOD_LABEL,
@@ -43,7 +48,7 @@ import { money } from '@lib/gymRecord';
 // permanent payment row, and it must not be stamped with a currency the
 // sessions it covers were not priced in.
 import { minorFromWhole } from '@lib/coachMoney';
-import { settleCurrencyBlocker } from '@lib/gymRateCurrency';
+import { settleCurrencyBlocker, totalNote } from '@lib/gymRateCurrency';
 // What this gym pays THIS coach, which is the middle of the three layers that
 // price a session. This screen had two of them — the rate snapshotted at
 // delivery, then the gym's standard fee — and settled from that, while /payroll
@@ -372,6 +377,27 @@ export default function Sessions() {
   // Totalling nothing gives zeros, which is fine here only because every place
   // that renders one of them checks `sessions` first and shows a dash instead.
   const total = useMemo(() => payrollTotal(lines ?? []), [lines]);
+
+  /*
+   * The sentence that goes where the payroll figure cannot be printed.
+   *
+   * `payableRate` over the resolved rows is `payrollOf`'s recipe from
+   * src/lib/monthEnd.ts verbatim: exactly the rates `payrollByTrainer` added up,
+   * which is exactly the set /close asks the same question of. One recipe across
+   * the three screens, so one run cannot be described three ways.
+   *
+   * `totalNote` is null when the run states one currency or prices nothing at
+   * all, and a sentence when it does not — the pre-part-1010 case ("that would
+   * be a guess about the past") and the more-than-one-money case.
+   */
+  const totalCurrencyNote = useMemo(
+    () => totalNote(
+      (priced ?? [])
+        .map((s) => payableRate(s, policy, null))
+        .filter((r): r is { rateCents: number; rateCurrency: string | null } => r != null),
+    ),
+    [priced, policy],
+  );
 
   // What each trainer is actually owed RIGHT NOW: marked, priced, payable and
   // not already settled. Derived from the sessions rather than from the payroll
@@ -744,14 +770,31 @@ export default function Sessions() {
                : policy.payNoShows ? 'no-shows included' : 'delivered only'} />
         <Kpi
           label="Payroll, 30 days"
-          text={amount(total.cents, ccy)}
+          // `total.currency`, never `ccy`. This read `amount(total.cents, ccy)`
+          // — the gym's code TODAY over a sum of rates snapshotted whenever each
+          // session was marked — and /payroll printed the identical figure the
+          // identical wrong way. `payrollTotal` has returned the honest label
+          // since part 1010 and both screens ignored it, so a gym that changed
+          // `tenants.currency` saw its GBP payroll called AED here, and a gym
+          // whose rates predate that part saw an unlabelled sum stamped with
+          // whatever it charges in now.
+          //
+          // `money()` and not `amount()`: `amount()` is for figures that inherit
+          // the gym's currency and this one carries its own. Null currency gives
+          // no figure at all rather than a bare number — the argument
+          // studio-web/lib/currency.ts already settled — and the note says which
+          // silence it is.
+          text={money(total.cents, total.currency)}
           // No note at all when the sessions are unknown: "ready to settle" on a
           // period nobody could read is the worst of the available sentences.
-          // A missing currency is its own reason and names the setting, rather
-          // than being reported as something wrong with the sessions.
+          // A withheld label is its own reason, and the reason is a fact about
+          // the RATES rather than about the gym's setting — which is why
+          // `totalCurrencyNote` stands where `currencyNote(total.cents, ccy)`
+          // used to. Same sentence /payroll and /close print under the same
+          // withheld figure.
           note={sessions === null
             ? undefined
-            : (blocker ?? currencyNote(total.cents, ccy) ?? 'ready to settle')}
+            : (blocker ?? totalCurrencyNote ?? 'ready to settle')}
         />
       </div>
 
@@ -801,11 +844,11 @@ export default function Sessions() {
       </Section>
 
       <Awaiting sessions={awaiting} unread={unread} zone={zone} onMark={mark} />
-      <Payroll lines={lines} unread={unread} ccy={ccy} />
+      <Payroll lines={lines} unread={unread} />
       <Settle owed={owed} unread={unread} settling={settling} onSettle={settle}
               method={method} onMethod={setMethod} ccy={ccy} />
       <Settled runs={settlements} error={settlementsError} zone={zone} />
-      <Marked sessions={settled} unread={unread} onClear={undo} ccy={ccy} zone={zone} />
+      <Marked sessions={settled} unread={unread} onClear={undo} zone={zone} />
       <History
         rows={hist} error={histErr} month={shownMonth} basis={histWindow?.basis ?? 'device'}
         note={histWindow?.note ?? null} offset={histOffset} zone={zone}
@@ -877,8 +920,11 @@ function Awaiting({ sessions, unread, zone, onMark }: {
 
 /* ── per-trainer payroll ───────────────────────────────────────────────────── */
 
-function Payroll({ lines, unread, ccy }: {
-  lines: ReturnType<typeof payrollByTrainer> | null; unread: boolean; ccy: TenantCurrency;
+// No `ccy` prop any more: every figure in this table is denominated by the
+// sessions its line was summed from, so the gym's own currency has nothing to
+// say here and passing it in was how it came to be printed over them.
+function Payroll({ lines, unread }: {
+  lines: ReturnType<typeof payrollByTrainer> | null; unread: boolean;
 }) {
   const cols: Column<NonNullable<typeof lines>[number]>[] = [
     { key: 'name', header: 'Trainer', value: (l) => l.trainerName ?? '',
@@ -892,9 +938,19 @@ function Payroll({ lines, unread, ccy }: {
         : <span style={{ color: 'var(--warn)' }}>{l.unmarked}</span> },
     { key: 'pay', header: 'Pay', value: (l) => l.cents ?? -1, numeric: true,
       // Null is unpriced work, not free work.
+      //
+      // And `l.currency`, not the gym's — the field `PayrollLine` carries for
+      // exactly this, whose own comment says a screen supplying the gym's code
+      // over the top is the defect it exists to make impossible. A coach paid in
+      // EUR at a gym that charges in GBP had their month printed here in pounds,
+      // beside a Settle panel that refuses to make that payment at all. A coach
+      // whose own month straddles two moneys has a `cents` that is a sum across
+      // them, which is not an amount and is withheld rather than labelled with
+      // either. Same cell, same two sentences, as the payroll table on /close.
       render: (l) => l.cents == null
         ? <span className="dash">not priced</span>
-        : (amount(l.cents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+        : (money(l.cents, l.currency)
+            ?? <span className="dash">{l.mixedCurrency ? 'more than one currency' : 'no currency recorded'}</span>) },
   ];
   return (
     <Section title="Payroll by trainer" sub="Priced from confirmed sessions at the rate snapshotted when each was marked.">
@@ -1112,9 +1168,9 @@ function Settled({ runs, error, zone }: { runs: Settlement[] | null; error: stri
 
 /* ── the marked history, so a mistake can be undone ────────────────────────── */
 
-function Marked({ sessions, unread, onClear, ccy, zone }: {
+// `ccy` is gone from here too — a snapshotted rate carries its own unit.
+function Marked({ sessions, unread, onClear, zone }: {
   sessions: PtSession[] | null; unread: boolean; onClear: (id: string) => void;
-  ccy: TenantCurrency;
   /** `tenants.timezone` — a session happened at the gym's hour, not the reader's. */
   zone: string | null;
 }) {
@@ -1126,10 +1182,14 @@ function Marked({ sessions, unread, onClear, ccy, zone }: {
       render: (s) => s.clientName ?? <span className="dash">—</span> },
     { key: 'outcome', header: 'Outcome', value: (s) => s.outcome ?? '',
       render: (s) => s.outcome ? OUTCOME_LABEL[s.outcome] : <span className="dash">—</span> },
+    // The row's OWN unit, snapshotted beside the rate by supabase/parts/1010 so
+    // that changing the gym's currency cannot rewrite what a past session cost.
+    // This cell used `ccy` — the code the gym charges in today — over rates
+    // recorded whenever each of these sessions was marked.
     { key: 'rate', header: 'Rate', value: (s) => s.rateCents ?? -1, numeric: true,
       render: (s) => s.rateCents == null
         ? <span className="dash">—</span>
-        : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+        : (money(s.rateCents, s.rateCurrency) ?? <span className="dash">no currency recorded</span>) },
     { key: 'undo', header: '', value: () => 0, align: 'right',
       render: (s) => <button style={linkBtn} onClick={() => onClear(s.id)}>Undo</button> },
   ];

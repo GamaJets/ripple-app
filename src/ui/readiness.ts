@@ -84,7 +84,16 @@ export function useReadiness(): ReadinessView {
   const nowMs = useNow().getTime();
 
   return useMemo(() => {
-    const sleep = readinessSleep(nights, typed, READINESS_NIGHTS);
+    // The window and the memo key are ONE clock read, not two. `readinessSleep`
+    // defaults its `now` to a fresh `new Date()`, which is correct today —
+    // this memo re-runs when the day rolls over or the app foregrounds, so the
+    // default is read again each time. But it is a second read of the clock
+    // beside `nowMs`, and src/ui/deviceSleep.tsx records that exact drift
+    // having shipped once: "the seven night keys were the seven ending on the
+    // day this provider first mounted". Passing the instant the memo is
+    // already keyed on means the nights the average may use and the sessions
+    // counted beneath it cannot come from two different moments.
+    const sleep = readinessSleep(nights, typed, READINESS_NIGHTS, new Date(nowMs));
 
     // Days with a session in the last two, not entries — three sets on Monday
     // are one day of training. `log` is EMPTY under 'error', so the count is

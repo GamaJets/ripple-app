@@ -8,7 +8,8 @@
 //   2. A read that is refused, still in flight, or CUT names nobody. A cut read
 //      can lose the head of a queue, and the head is the only name that carries
 //      a promise.
-import { fetchSessionWaitlists, waitlistWhoLine, WAITLIST_NAMED_MAX } from './sessionWaitlist';
+import { fetchSessionWaitlists, waitlistWhoLine, WAITLIST_NAMED_MAX, waitlistLine } from './sessionWaitlist';
+import { waitlistLine as countedWaitlistLine } from './booking';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -37,6 +38,57 @@ ok(!(waitlistWhoLine(['Priya Raman'], 'partial') ?? '').includes('Priya'),
   'and it really does not leak the name it happens to be holding');
 eq(waitlistWhoLine([], 'error'), 'Who is waiting couldn’t be read, so they aren’t named here.',
   'an empty list under a failed read is the failure, never an empty queue');
+
+/* ── the queue length nobody counted ───────────────────────────────────────
+ *
+ * Every reader of the three waitlist RPCs in src/ui/sessions.tsx settled an
+ * unread `waiting` to 0 with `toNum(r.waiting) ?? 0`, and 0 is the value
+ * src/lib/booking.ts's `waitlistLine` says "Nobody is waiting for this slot
+ * yet." about. Three states, not two, and the null is tested FIRST — `null > 0`
+ * and `null > 1` are both false, so a null tested after either of them lands in
+ * the sentence this exists to prevent.
+ */
+
+/* The two counted arms are unchanged, and are still src/lib/booking.ts's. */
+eq(waitlistLine(0, 0), countedWaitlistLine(0, 0), 'a counted empty queue still says what it always said');
+eq(waitlistLine(0, 3), countedWaitlistLine(0, 3), 'a counted queue is still worded by the module that has always worded it');
+eq(waitlistLine(1, 4), countedWaitlistLine(1, 4), 'and so is the head of one');
+eq(waitlistLine(3, 4), countedWaitlistLine(3, 4), 'and a place in the middle of one');
+ok(waitlistLine(0, 0).includes('Nobody is waiting'), 'a COUNTED zero is still allowed to say nobody is waiting');
+
+/* The third arm. Every one of these fails against `waiting ?? 0`. */
+const unreadFree = waitlistLine(0, null);
+const unreadHead = waitlistLine(1, null);
+const unreadMid = waitlistLine(3, null);
+
+for (const [what, line] of [['not on the queue', unreadFree], ['head of it', unreadHead], ['third in it', unreadMid]] as const) {
+  ok(!line.includes('Nobody is waiting'),
+    `an unread count never says nobody is waiting (${what}) — that is a claim about other people made from an unknown`);
+  ok(!/\bnull\b|NaN|undefined/.test(line), `and never leaks the unknown itself into the sentence (${what})`);
+  ok(line.includes('No waitlist count came back'),
+    `it says the count did not come back (${what}), in the voice src/lib/reschedule.ts already uses for this`);
+  ok(line.includes('open this screen again') || line.includes('Open this screen again'),
+    `and tells the reader what to do about it (${what})`);
+  ok(!line.includes('0 people') && !line.includes('of 0'), `no fabricated figure reaches the words (${what})`);
+}
+
+ok(unreadFree.includes('whether anybody is already in line'),
+  'a member not on the queue is told the one thing that is unknown, and not told the queue is empty');
+ok(unreadHead.includes('You’re next in line'),
+  'the head of the queue still gets the promise, which does not depend on the count');
+ok(unreadHead.includes('how many are behind you'),
+  'and is told exactly which part of it is missing');
+ok(unreadMid.includes('You’re 3rd in line'),
+  'a place in the queue is still stated, because the position is known even when the length is not');
+ok(!unreadMid.includes('of 3') && !unreadMid.includes('in line of'),
+  'and never invents the "of N" that the counted sentence puts after it');
+ok(unreadMid.includes('how long the queue is'),
+  'the missing half is named rather than left for the reader to notice');
+
+/* The trap, stated as an assertion rather than as a comment: this is what the
+ * whole arm hangs on, and it is what the ordering in `waitlistLine` protects. */
+ok(!((null as any) > 0), 'null > 0 is false in JavaScript, which is why the null is tested first');
+ok(!((null as any) > 1), 'and null > 1 is too, which is the second test it would have fallen past');
 
 /* ── the read ─────────────────────────────────────────────────────────────── */
 

@@ -25,7 +25,7 @@ import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
-import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
+import { importSources, withHr, useImportedIds, isLogged, readRecent, readNote, type RecentRead } from '../../src/ui/watchImport';
 import { isWhole } from '../../src/ui/loadStatus';
 import type { WriteOutcome } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
@@ -174,7 +174,23 @@ export default function Devices() {
  const [lookback, setLookback] = useState<number>(14);
  const lookbackLabel = (d: number) => (d >= 365 ? '1 year' : d >= 90 ? '90 days' : `${d} days`);
  const importLabel = sources.length === 1 ? sources[0].meta.name : 'your devices';
- const [wk, setWk] = useState<WorkoutSample[] | null>(null);
+ // The whole outcome of the read, not just the rows it produced.
+ //
+ // This used to be `WorkoutSample[] | null`, and that shape is exactly the
+ // defect: it has two states where there are three. An empty array meant both
+ // "every device answered and none of them had anything" and "the device that
+ // had your session refused to hand it over", and this screen printed the first
+ // sentence over the second. `RecentRead` keeps the three apart, and
+ // `emptyAndWhole` is the only one of them that may be called "no workouts
+ // found" — see src/ui/watchImport.ts.
+ const [wkRead, setWkRead] = useState<RecentRead | null>(null);
+ // Still null before the first Find; the rows once there has been one.
+ const wk: WorkoutSample[] | null = wkRead ? wkRead.samples : null;
+ // The one sentence about this read, or null when there is nothing to say.
+ // Safe to word with the CURRENT lookback because changing the lookback clears
+ // `wkRead`, so a note never outlives the window it describes.
+ const wkNoteFor = (r: RecentRead) => readNote(r, lookbackLabel(lookback), importLabel);
+ const wkNote = wkRead ? wkNoteFor(wkRead) : null;
  const [wkBusy, setWkBusy] = useState(false);
  const { ids: importedIds, mark: markImported } = useImportedIds();
  // Every figure on this screen comes off a device that can stop answering, and
@@ -199,9 +215,17 @@ export default function Devices() {
    }
    setWkBusy(true);
    try {
-     const merged = await fetchRecent(w.states, lookback);
-     setWk(merged);
-     if (!merged.length) Alert.alert('Import workouts', `No workouts found in the last ${lookbackLabel(lookback)} from ${importLabel}.`);
+     const r = await readRecent(w.states, lookback);
+     setWkRead(r);
+     // The alert used to fire on `!merged.length` and say "No workouts found",
+     // which is a claim about the member's training made out of a read that may
+     // have failed. `readNote` writes whichever of the sentences is true —
+     // "no workouts found" ONLY under `emptyAndWhole` — and it is raised here
+     // only when there are no rows to look at, because with rows on screen the
+     // same sentence sits under the list where it can be read against them
+     // rather than over the top of them.
+     const note = wkNoteFor(r);
+     if (!r.samples.length && note) Alert.alert('Import workouts', note);
    } catch (e: any) {
      Alert.alert('Import workouts', e?.message || 'Could not read your workouts.');
    } finally {
@@ -865,7 +889,7 @@ export default function Devices() {
       return (
        <Pressable
         key={d}
-        onPress={() => { setLookback(d); setWk(null); }}
+        onPress={() => { setLookback(d); setWkRead(null); }}
         accessibilityRole="button"
         accessibilityState={{ selected: on }}
         accessibilityLabel={`Look back ${lookbackLabel(d)}`}
@@ -885,9 +909,36 @@ export default function Devices() {
       ? <View style={{ alignSelf: 'flex-start', paddingVertical: sp.md }}><ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Looking for your workouts…" /></View>
       : <View style={{ alignSelf: 'flex-start' }}><Cta label="Find My Workouts" onPress={findWorkouts} /></View>
     ) : wk.length === 0 ? (
-     <Text style={{ ...ty.label, color: t.ink3 }}>No workouts found in the last {lookbackLabel(lookback)}.</Text>
+     /* No rows. Which of the three reasons decides what may be said.
+        `emptyAndWhole` — every device asked answered and none held anything —
+        is the ONLY one that is a fact about the member's training, and the only
+        one this screen is allowed to state flatly. Anything else is a fact
+        about the READ, so it gets the warn mark and a way to ask again: the
+        control that would fetch the session used to disappear behind a sentence
+        claiming it had already answered. */
+     wkRead?.emptyAndWhole ? (
+      <Text style={{ ...ty.label, color: t.ink3 }}>{wkNote ?? `No workouts found in the last ${lookbackLabel(lookback)}.`}</Text>
+     ) : (
+      <Notice
+       tone={t.warn}
+       kicker="Import workouts"
+       title="Nothing to show, and not because there is nothing"
+       note={wkNote ?? 'Your workouts could not be read.'}>
+       <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={findWorkouts} /></View>
+      </Notice>
+     )
     ) : (
      <View>
+      {/* Rows, and a device that did not hand any over. Said ABOVE the list,
+          because the list is the thing the sentence qualifies — these are real
+          and they are not all of them. */}
+      {wkNote ? (
+       <Notice
+        tone={t.warn}
+        kicker="Import workouts"
+        title="This is not all of your training"
+        note={wkNote} />
+      ) : null}
       {wk.map((sm, i) => {
        const done = alreadyLogged(sm);
        return (

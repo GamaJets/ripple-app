@@ -68243,6 +68243,8 @@ comment on table public.gym_month_closes is
 -- ═══════════════════════════════════════════════════════════════════════════
 -- A client's card failed, and this database kept no record that it ever had.
 --
+-- APPLIED to the live database on 13 Sep 2026 as part_3000_subscription_failures.
+--
 -- ── The defect ─────────────────────────────────────────────────────────────
 --
 -- Part 132 added `client_subscription_payments` and closed the larger hole: a
@@ -68560,3 +68562,1677 @@ grant all    on public.client_subscription_failures to service_role;
 --     PaymentIntent is a second network call away and is about a card, which is
 --     the client's and not the coach's to be shown. The four facts in the
 --     header are what this table is for.
+
+-- ▶ withdrawing-consent-was-a-sentence-and-not-a-mechanism.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The product promised a member could withdraw consent. Nothing anywhere let
+-- them, and nothing anywhere recorded it if they had.
+-- APPLIED to the live database on 13 Sep 2026 as part_3030_agreement_revocations.
+--
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- `SIGNING_RULE` in src/lib/gymSigning.ts is the one sentence a member reads
+-- before they agree to anything their gym asks for. It ends:
+--
+--     "...it cannot be edited or taken back afterwards — withdrawing consent
+--      later is a new record, not the quiet disappearance of this one."
+--
+-- Part 185 says the same thing in its own comment, above the two policies that
+-- deny the member UPDATE and DELETE on `gym_agreement_signatures`:
+--
+--     "Withdrawing consent is a real right and it is a NEW record of the
+--      withdrawal, not the quiet disappearance of the record that consent was
+--      ever given."
+--
+-- Both sentences are correct about the half they were written to defend. The
+-- signature is immutable, and it should be. What neither of them mentions is
+-- that THE NEW RECORD DOES NOT EXIST. There is no table it could be written
+-- to, no policy that would admit it, no function that writes one, and no
+-- control on any screen — member-side or console-side — that offers it. A
+-- grep of this repository for revoke, revocation, withdraw or rescind finds
+-- join codes, invitations, staff roles, account-deletion requests and a member
+-- deleting a progress photograph. It finds nothing at all about consent.
+--
+-- So the sentence describes a mechanism to somebody in the act of relying on
+-- it. A member reads "withdrawing consent later is a new record" and agrees on
+-- that basis; what the product actually offers them, for ever, is the row they
+-- just wrote.
+--
+-- ── Why photo consent is the one that matters ──────────────────────────────
+--
+-- `AGREEMENT_NOTE` in src/lib/gymDocs.ts already says of `photo_consent`:
+-- "Whether this person may be photographed or filmed in the building. Usually
+-- not required to join." It is the one kind on the list that is a PREFERENCE
+-- rather than a condition of entry, and the one a person most plausibly
+-- changes their mind about. A progress photograph is somebody's body, and "I
+-- agreed to this in March 2024" is not consent in perpetuity. A gym that goes
+-- on putting a member in its Instagram posts eighteen months after they asked
+-- it to stop is not defended by the signature it holds; it is embarrassed by
+-- it.
+--
+-- ── A revocation is a NEW ROW. Never an update, never a delete. ───────────
+--
+-- This is the shape of the table and it is stated first because getting it
+-- wrong is the failure that destroys a record rather than merely missing one.
+--
+-- Nothing in this part touches `gym_agreement_signatures`. No column is added
+-- to it, no row is updated, no row is deleted, no policy on it is widened. The
+-- signature stays exactly as it was written, because somebody DID agree, on
+-- that date, in those words, and a gym asked afterwards what it was operating
+-- on last week has to be able to say. Erasing it would not be respecting the
+-- withdrawal — it would be falsifying the record of the period before it.
+--
+-- Both facts stand and the schema holds both: they agreed then, and they
+-- withdrew later. Reading them together is what `inForce` in
+-- src/lib/gymSigning.ts does, and neither row is diminished by the other.
+--
+-- This is the rule part 700 applies to a mistyped cost and part 2820 to a
+-- chase that never happened: a correction is a second recorded fact, never an
+-- erasure. Here it is not a correction at all — nothing about the signature
+-- was wrong — which makes the argument for keeping it stronger, not weaker.
+--
+-- ── Scoped to a KIND, and why not to an agreement row ─────────────────────
+--
+-- `member_id` + `kind`, not `agreement_id`.
+--
+-- A member who withdraws photo consent has NOT withdrawn their liability
+-- waiver, and a schema that could not express that would be used wrongly on
+-- its first day: the only revocation anybody could write would be total, so
+-- either it would be offered for everything — which for a waiver is the
+-- uninsured-training failure below — or it would not be offered at all, which
+-- is where we started.
+--
+-- The reason it is not scoped to the agreement ROW is subtler and it is the
+-- one that would have bitten. Versions exist here: `nextVersion` in
+-- src/lib/gymDocs.ts publishes v2 of a gym's photo consent and `forMember`
+-- matches signatures on the agreement row, deliberately, so signing v1 does
+-- not cover v2. If a revocation were scoped the same way, a gym publishing a
+-- new version of its photo policy would silently clear every withdrawal ever
+-- made against the old one — the member is shown an unsigned document and
+-- nothing anywhere remembers that they said no. The withdrawal is about the
+-- SUBJECT, not about the wording, so it is scoped to the subject.
+--
+-- Kind-scoped also survives the member signing again. A member may withdraw,
+-- change their mind, and sign a fresh consent; that later signature is in
+-- force because it is later, and the earlier revocation stays on the record as
+-- the reason there is a gap in the middle. Which is why there is no unique
+-- constraint on (member, kind): the pair is a history, read newest-first, and
+-- not a flag.
+--
+-- ── Which kinds may be revoked, and why the other four may not ────────────
+--
+-- Getting this wrong in either direction is bad, and the two directions fail
+-- differently. A photo consent that cannot be withdrawn is the defect this
+-- part exists for. A waiver that CAN be withdrawn would let somebody go on
+-- training in a building whose insurer believes it holds a current one, which
+-- is worse than the thing being fixed. So the list is a CHECK constraint and
+-- not a convention.
+--
+--   photo_consent      REVOCABLE. A preference, not a condition of entry —
+--                      the gym's own note on the kind already says so. This is
+--                      the whole reason for the part.
+--
+--   guardian_consent   REVOCABLE, but never from the member's own account.
+--                      The adult who gave it may take it back; the minor it is
+--                      about may not, for exactly the reason `GUARDIAN_REFUSAL`
+--                      refuses the SIGNING from that account. A fifteen-year-
+--                      old revoking their own guardian consent is not a weaker
+--                      record, it is the wrong person's — and it would read as
+--                      the right one. The CHECK admits the kind; the member
+--                      insert policy in §3 does not, so it can only be
+--                      recorded at the desk by the gym.
+--
+--   waiver             NOT REVOCABLE. A condition of entry, not a preference.
+--                      Withdrawing it while the membership continues means
+--                      somebody is training in the building with no current
+--                      waiver and nothing stopping them at the door. The way
+--                      out of a waiver is to stop training there, which is a
+--                      membership decision and not a consent toggle.
+--
+--   terms, contract    NOT REVOCABLE, and for a reason that is not about
+--                      safety. Withdrawing agreement to the terms of a live
+--                      membership is not a preference being changed — it is
+--                      the membership being ended, which has notice periods,
+--                      a final invoice and a direct debit attached to it. A
+--                      button here that looked like it did that, and did not,
+--                      would be the worst control in the product: the member
+--                      believes they have cancelled and the standing order
+--                      goes on being collected. Cancelling lives in billing.
+--
+--   par_q              NOT REVOCABLE, and this one is a category error rather
+--                      than a risk. A health questionnaire is a declaration of
+--                      fact at a moment — what was true of somebody's heart in
+--                      March — and not a standing permission. There is nothing
+--                      to withdraw: an answer cannot be un-given, only
+--                      superseded by a newer questionnaire, which is a fresh
+--                      signature against a fresh version and already works. A
+--                      revocation here would leave a gym that had screened
+--                      somebody holding a record saying it had un-screened
+--                      them, which is a worse position than either.
+--
+-- src/lib/gymSigning.ts holds the same two lists — `REVOCABLE_KINDS` and
+-- `MEMBER_REVOCABLE_KINDS` — under the same names, and a kind added to one and
+-- not the other produces either a button that 23514s or a right nobody is
+-- offered. Same drift part 2820 named around `via`, same answer: say so here.
+--
+-- ── WHAT THIS DOES NOT DO TO DATA ALREADY COLLECTED ──────────────────────
+--
+-- Stated at length because a control that implied otherwise would be worse
+-- than no control at all, and because this is the question a member actually
+-- has when they tap it.
+--
+-- A row in this table is a statement about PERMISSION GOING FORWARD, and that
+-- is the whole of what it claims. From the moment it exists the gym no longer
+-- holds a current consent of that kind for that person, and everything the gym
+-- decides from here — whether to photograph them in a class, whether to use a
+-- picture in an advert, whether to put them on the wall — has to be decided
+-- against a consent that is not in force.
+--
+-- It does NOT delete anything, and nothing in this part is capable of
+-- deleting anything:
+--
+--   · Photographs already taken stay where they are. This part issues no
+--     DELETE against any table and touches no storage bucket. `gym-docs`,
+--     `coach-docs`, `progress-photos` and the rest are not mentioned.
+--   · Copies that have already left are beyond any schema's reach. A printed
+--     poster, a photograph in a magazine, a post somebody has already shared:
+--     nothing written in this database can retrieve those, and a product that
+--     implied it could would be lying to the person who most needed the truth.
+--   · The signature itself stays, as above. So does every record made while
+--     the consent WAS in force, which is the point of keeping it.
+--
+-- Erasing specific files is a different act with a different mechanism —
+-- `deleteDocument` in src/lib/gymDocs.ts removes the object and the row
+-- together, precisely because an earlier version removed the row and left the
+-- file — and it is a request a member makes of their gym, person to person. It
+-- is not this table, and this table does not trigger it. The member-facing
+-- copy in src/lib/gymSigning.ts says all of that in the member's own language
+-- before they tap anything.
+--
+-- ── Applying this ─────────────────────────────────────────────────────────
+--
+-- Additive. One new table, two indexes, its policies, its grants. Nothing
+-- existing is altered, no trigger is added or widened anywhere, and there is
+-- no backfill — a member who asked their gym to stop photographing them last
+-- year said it in an email, and a row invented here would be Repple asserting
+-- a date nobody stated.
+--
+-- The reading library tolerates this part NOT having been applied: 42P01 from
+-- `fetchMyRevocations` is read as "the feature is not deployed", which is a
+-- true statement about a database where no consent CAN have been withdrawn,
+-- and is kept strictly distinct from a read that failed on the wire. See
+-- `RevocationRead` in src/lib/gymSigning.ts.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. the withdrawal ───────────────────────────────────────────────────────
+
+create table if not exists public.gym_agreement_revocations (
+  id          uuid        primary key default gen_random_uuid(),
+  tenant_id   uuid        not null references public.tenants(id) on delete cascade,
+
+  -- `on delete set null`, exactly as `gym_agreement_signatures.member_id` is in
+  -- part 185, and for the same reason turned around: a gym asked what it was
+  -- operating on must be able to show BOTH the consent and its withdrawal, and
+  -- a withdrawal that vanished when the account was erased would leave the
+  -- signature standing alone — the record would then say the gym held a
+  -- current consent it had been told to stop relying on.
+  member_id   uuid        references public.profiles(id) on delete set null,
+
+  -- WHICH consent, and not which document. See the header: scoped to the kind
+  -- so that publishing a new version of the gym's photo policy cannot silently
+  -- clear a withdrawal, and so that withdrawing one thing is not withdrawing
+  -- everything.
+  --
+  -- The CHECK is the revocability rule and the only place it is enforced. The
+  -- four kinds absent from it — waiver, terms, contract, par_q — are absent
+  -- deliberately and each for its own reason, set out in the header. Adding
+  -- one here without reading that is how somebody ends up training in a
+  -- building whose insurer believes it holds a current waiver.
+  kind        text        not null
+              check (kind in ('photo_consent', 'guardian_consent')),
+
+  -- The moment the withdrawal was recorded. An instant and not a bare date,
+  -- unlike `gym_invoice_chases.chased_on` in part 2820, and the difference is
+  -- which question the column answers. A chase is an act somebody performed in
+  -- the world on a day they state afterwards. A withdrawal takes effect WHEN
+  -- IT IS WRITTEN — the ordering against `signed_at` is what decides whether
+  -- the consent is in force, so both sides of that comparison have to be the
+  -- same kind of thing, to the same precision. `signed_at` is a timestamptz,
+  -- so this is.
+  --
+  -- Defaulted rather than accepted from the caller. There is no backdating: an
+  -- app that could name the moment could name one before a signature and make
+  -- a live consent read as withdrawn, or one in the future and make a
+  -- withdrawal that has not happened yet.
+  revoked_at  timestamptz not null default now(),
+
+  -- The account whose session recorded it. Usually the member themselves;
+  -- the owner where it was taken at the desk, which for guardian_consent is
+  -- the only way it can be taken at all.
+  recorded_by uuid        references public.profiles(id) on delete set null,
+
+  -- Why, in their own words, where they chose to give one. Never required: a
+  -- member withdrawing consent to be photographed owes nobody an explanation,
+  -- and a box that must be filled to proceed is a toll on a right.
+  reason      text        check (reason is null or (btrim(reason) <> '' and length(reason) <= 1000))
+);
+
+comment on table public.gym_agreement_revocations is
+  'A member withdrawing one KIND of consent, as a new row. Nothing here updates or deletes a signature: the row in gym_agreement_signatures stays exactly as written, because somebody did agree on that date and erasing it would falsify the record of the period before the withdrawal. Both facts stand together. A row states that permission is withdrawn GOING FORWARD and claims nothing whatever about data already collected — it deletes no photograph, empties no bucket, and cannot reach a copy that has already left the building. Kind-scoped rather than agreement-scoped so that publishing a new version of a document cannot silently clear a withdrawal. See supabase/parts/3030.';
+
+comment on column public.gym_agreement_revocations.member_id is
+  'Whose consent was withdrawn. NULL means that account has since been erased — the withdrawal itself stands, and stands deliberately: a withdrawal that disappeared with the account would leave the signature alone on the record, saying the gym still held a consent it had been told to stop relying on. NULL does NOT mean the withdrawal was anonymous or that nobody made it.';
+
+comment on column public.gym_agreement_revocations.kind is
+  'Which consent: photo_consent | guardian_consent. These two and no others. waiver, terms and contract are conditions of a live membership rather than preferences — withdrawing a waiver would mean training in a building with no current one, and withdrawing terms is ending the membership, which belongs in billing with the notice period and the final invoice. par_q is a declaration of fact at a moment, not a standing permission: it is superseded by a newer questionnaire, never un-given. Mirrored by REVOCABLE_KINDS in src/lib/gymSigning.ts.';
+
+comment on column public.gym_agreement_revocations.revoked_at is
+  'When the withdrawal was recorded, and therefore when it took effect. Never NULL and never supplied by a caller — it defaults to now(), so nothing can backdate a withdrawal to before a signature or postdate one that has not happened. Compared against gym_agreement_signatures.signed_at to decide whether a consent is currently in force, which is why it is a timestamptz to the same precision and not a bare date.';
+
+comment on column public.gym_agreement_revocations.recorded_by is
+  'The account whose session wrote the row: the member themselves in the ordinary case, the gym owner where it was taken at the desk. NULL means that account has since been deleted — a receptionist who has left, an owner who has gone. It does NOT mean nobody recorded it, and the withdrawal is not weakened by it.';
+
+comment on column public.gym_agreement_revocations.reason is
+  'Why, in the member''s own words, where they chose to give one. NULL means no reason was given, which is the ordinary and expected case — a member withdrawing consent to be photographed owes nobody an explanation. NULL is NOT an unrecorded reason, a pending one, or grounds for a gym to treat the withdrawal as provisional.';
+
+-- The read the member's own screen makes: "has this person withdrawn anything,
+-- and when". Newest first, because only the newest matters against a signature
+-- — a member may withdraw, sign again and withdraw again, and the history is
+-- the point of keeping all three.
+create index if not exists gym_agreement_revocations_member_idx
+  on public.gym_agreement_revocations (member_id, kind, revoked_at desc, id desc);
+
+-- And the console's sweep: "who at this gym has withdrawn what". `id` gives
+-- the ordering a total order, without which a page boundary landing inside a
+-- tied `revoked_at` drops and repeats rows — here that is a withdrawal missing
+-- from the list a gym checks before it publishes a photograph.
+create index if not exists gym_agreement_revocations_tenant_idx
+  on public.gym_agreement_revocations (tenant_id, revoked_at desc, id desc);
+
+-- ── 2. nothing about the signature changes ──────────────────────────────────
+--
+-- Said as a comment rather than as code, because the correct implementation of
+-- "the signature is untouched" is the absence of every statement that would
+-- touch it. There is deliberately no ALTER on gym_agreement_signatures in this
+-- file, no `revoked_at` column added to it, no trigger that marks it, and no
+-- widening of the two policies part 185 withheld from the member. If a later
+-- part wants to show a withdrawal beside a signature it joins these two tables
+-- on (member_id, kind) — it does not write to the left-hand one.
+
+-- ── 3. who may read and write it ────────────────────────────────────────────
+
+alter table public.gym_agreement_revocations enable row level security;
+
+-- The owner sees every withdrawal in their own gym, and must: it is the list
+-- they check before a photograph goes anywhere, and the list that answers for
+-- them if somebody asks why one did.
+drop policy if exists gym_agreement_revocations_owner_read on public.gym_agreement_revocations;
+create policy gym_agreement_revocations_owner_read on public.gym_agreement_revocations
+  for select
+  to authenticated
+  using (is_owner_of(tenant_id));
+
+-- And may record one at the desk — a member who telephones, a member with no
+-- phone, and the guardian case, which can be recorded NOWHERE ELSE.
+drop policy if exists gym_agreement_revocations_owner_insert on public.gym_agreement_revocations;
+create policy gym_agreement_revocations_owner_insert on public.gym_agreement_revocations
+  for insert
+  to authenticated
+  with check (is_owner_of(tenant_id));
+
+-- The member reads their own withdrawals. They have to: a screen that offered
+-- a Withdraw button and could not then show that it had happened would leave
+-- somebody tapping it twice and believing neither.
+drop policy if exists gym_agreement_revocations_own_r on public.gym_agreement_revocations;
+create policy gym_agreement_revocations_own_r on public.gym_agreement_revocations
+  for select
+  to authenticated
+  using (member_id = (select auth.uid()));
+
+-- And may write one for themselves, for the kinds that are theirs to withdraw.
+--
+-- Three conditions, and the third is the one that is easy to leave out:
+--
+--   member_id = auth.uid()   nobody withdraws anybody else's consent. Same
+--                            shape as `gym_agreement_sig_own_i` in part 185,
+--                            and the same reason: the row is about a person,
+--                            so the session decides who that is.
+--   tenant_id = my_tenant()  a withdrawal is addressed to the gym that holds
+--                            the consent, and a member belongs to one.
+--   kind = 'photo_consent'   NOT the CHECK constraint's list. The CHECK says
+--                            what may be withdrawn at all; this says what may
+--                            be withdrawn FROM THIS ACCOUNT. guardian_consent
+--                            passes the CHECK and is refused here, because the
+--                            account belongs to the person the consent is
+--                            ABOUT and an adult's decision taken from the
+--                            minor's phone is the wrong signature — exactly
+--                            what `GUARDIAN_REFUSAL` refuses on the way in.
+--                            MEMBER_REVOCABLE_KINDS in src/lib/gymSigning.ts
+--                            is this list, and the screen shows a control only
+--                            for what is in it.
+drop policy if exists gym_agreement_revocations_own_i on public.gym_agreement_revocations;
+create policy gym_agreement_revocations_own_i on public.gym_agreement_revocations
+  for insert
+  to authenticated
+  with check (
+    member_id = (select auth.uid())
+    and tenant_id = my_tenant()
+    and kind = 'photo_consent'
+  );
+
+-- No UPDATE and no DELETE, for anybody, including the owner — and both are
+-- named and dropped rather than merely never written, so that a policy added
+-- by somebody who wanted an "undo" button does not survive a rebuild of this
+-- file.
+--
+-- This is part 185's rule applied to the other side of the same record, and it
+-- has to be, or the fix is hollow: a withdrawal that the gym holding the
+-- consent can delete is not a withdrawal, it is a suggestion. Changing one's
+-- mind back is a fresh signature against a current version of the document —
+-- which already works, is already dated, and already says who gave it — and
+-- the revocation stays underneath it as the reason there is a gap.
+drop policy if exists gym_agreement_revocations_owner_update on public.gym_agreement_revocations;
+drop policy if exists gym_agreement_revocations_owner_delete on public.gym_agreement_revocations;
+drop policy if exists gym_agreement_revocations_own_u on public.gym_agreement_revocations;
+drop policy if exists gym_agreement_revocations_own_d on public.gym_agreement_revocations;
+-- Staff are not admitted in any direction. `gym_agreement_signatures` admits
+-- no trainer policy either, and why a member stopped agreeing to be
+-- photographed is not something the schema publishes to the floor.
+drop policy if exists gym_agreement_revocations_staff_read on public.gym_agreement_revocations;
+
+-- RLS narrows a GRANT; it does not create one. UPDATE and DELETE are revoked
+-- as well as unpolicied, so that a policy added later cannot become live
+-- without somebody also granting the privilege back and noticing why it is
+-- missing.
+revoke all on public.gym_agreement_revocations from anon, authenticated, public;
+grant select, insert on public.gym_agreement_revocations to authenticated;
+revoke update, delete on public.gym_agreement_revocations from authenticated;
+grant all on public.gym_agreement_revocations to service_role;
+
+-- ── 4. what this part deliberately does NOT do ──────────────────────────────
+--
+--   · It deletes nothing and can delete nothing. No DELETE statement, no
+--     storage bucket, no trigger that reaches one. See the header: a
+--     revocation is about permission going forward, and the schema makes no
+--     claim about photographs already taken or copies that have already left.
+--   · It adds no column to `gym_agreement_signatures` and no trigger to it.
+--     The signature is untouched by construction, not by care.
+--   · It writes no notification. A member withdrawing photo consent is not a
+--     message this product sends on their behalf to their gym's owner — the
+--     owner reads the list — and part 2100 is the record of what an
+--     enthusiastic automatic nudge cost the last time.
+--   · It does not require that a signature exists first. The app gates its
+--     control on one, but a member telling their gym "I never agreed to that
+--     and I do not agree now" is a real statement, and a row with no signature
+--     behind it is not a corrupt row. A trigger that refused it would turn
+--     that sentence into an error message.
+--   · It adds no unique constraint on (member_id, kind). The pair is a
+--     history, not a flag: withdraw, sign again, withdraw again is a sequence
+--     a person is entitled to, and each step is its own dated fact.
+
+-- ▶ a-cancelled-class-booking-was-an-erased-one.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A cancelled class booking was an erased one, and a no-show was a silence.
+--
+-- APPLIED to the live database on 13 Sep 2026 as part_3060_class_cancellation_record.
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- `class_bookings` has carried the same two-value status since part 02:
+--
+--     status text not null default 'booked' check (status in ('booked','waitlist'))
+--
+-- and `cancel_class(p_class)` — part 02, re-scoped by part 38, gated by part
+-- 1830 — still begins:
+--
+--     delete from class_bookings where class_id = p_class and user_id = auth.uid()
+--
+-- So of the three facts a gym's class register is actually read for, this
+-- schema can record none of them:
+--
+--   · CANCELLED. The row is destroyed. Not marked, not moved, not archived —
+--     DELETEd, by the ordinary member-facing path, with no trace anywhere that
+--     a seat was ever held. The member who books every Tuesday and drops out of
+--     nine of them looks identical to the member who has never booked.
+--
+--   · LATE CANCELLED. Same delete, and the gym has already been given a place
+--     to state what one costs: part 2615 put `notice_hours`, `fee` and
+--     `currency` on the gym and `class_cancel_policy()` hands them to the app,
+--     which src/lib/classCancel.ts renders as "Cancelling now is inside your
+--     gym's 12-hour notice. Your gym charges GBP 8.00 for one." That sentence
+--     is true, the policy is real, and there has never been a row anywhere that
+--     says the late cancellation HAPPENED. A gym cannot charge a fee it has no
+--     record of, and this product tells the member it may be charged.
+--
+--   · NO SHOW. `set_class_attendance` (part 2330) writes
+--     `attended_at = case when p_present then now() else null end`, and nothing
+--     records that a register was taken at all. So `attended_at is null` means
+--     BOTH "this member did not turn up" and "no coach ever opened the
+--     register", and no read anywhere can separate them. That is the actual
+--     bug in the attendance half: not a missing value, an OVERLOADED one.
+--
+-- The waitlist promotion is recorded, and it is recorded as an overwrite:
+-- `update class_bookings set status = 'booked'` on the head of the queue. The
+-- member who sat sixth in a queue and got in at the last minute, and the member
+-- who booked the moment the class opened, are afterwards the same row.
+--
+-- This is the one house rule this schema contradicts outright. A correction is
+-- a second recorded fact, never an erasure. `gym_costs` (part 700) is the
+-- worked example on the money side; `gym_invoice_chases` (part 2820) is the
+-- same argument about an event nobody could evidence. Here the database
+-- enforces the opposite.
+--
+-- ── The vocabulary is BORROWED, not invented ───────────────────────────────
+--
+-- The one-to-one side already answers this exact question and has since part
+-- 33. `sessions.outcome` is
+--
+--     check (outcome is null or outcome in ('completed','no_show','cancelled','late_cancelled'))
+--
+-- and `pastVerdict` in src/lib/sessionHistory.ts is the single reader, mapping
+-- those onto `delivered | missed | cancelled | late_cancelled | unmarked`.
+--
+-- So the two words this part adds to `class_bookings.status` are 'cancelled'
+-- and 'late_cancelled', SPELLED EXACTLY as `sessions.outcome` spells them. Not
+-- 'canceled', not 'late-cancelled', not 'cancelled_late'. A second spelling of
+-- the same fact is its own defect: it means every report that wants "how many
+-- cancellations across this gym" has to know two vocabularies and a screen that
+-- learns one of them is wrong half the time.
+--
+-- ── Why 'no_show' is NOT a status value ────────────────────────────────────
+--
+-- It is the obvious fourth word and it would be wrong, and getting this wrong
+-- is exactly the failure the defect above already is: a column that means two
+-- things.
+--
+-- `status` is the standing of the BOOKING — what claim this member has on a
+-- seat. A no-show made no claim change. They booked, they did not cancel, they
+-- held the seat, the seat went unused: `status` stayed 'booked' and that is the
+-- true answer. A no-show is what the REGISTER says about a booking that stayed
+-- 'booked', and it is derived, unambiguously, from two facts that are each
+-- recorded once:
+--
+--     status = 'booked'  and  attended_at is null  and  the register WAS taken
+--
+-- Writing 'no_show' into `status` would also destroy the thing it claims to
+-- record. `class_counts()` counts `filter (where cb.status = 'booked')`, so the
+-- moment a coach marked a no-show the class would report a seat it never got
+-- back, and the gym's fill rate would improve every time somebody failed to
+-- turn up. The seat WAS taken. `status` must go on saying so.
+--
+-- ── The no-show marker: on the CLASS, not on the booking ───────────────────
+--
+-- Two candidates, and the choice matters more than it looks.
+--
+--   (a) a marker on the BOOKING — `no_show_at`, beside `attended_at`.
+--   (b) a marker on the CLASS — `register_taken_at`, saying the register was
+--       taken, which makes every un-ticked booking on it a no-show.
+--
+-- (b), for four reasons and the third is decisive:
+--
+--   1 · Taking a register is ONE event. One coach, one room, one moment. (a)
+--       stores that single fact N times, once per member, and a set of N rows
+--       that must agree is a set of N rows that can disagree.
+--
+--   2 · (a) admits a contradiction the database cannot refuse cheaply:
+--       `attended_at` and `no_show_at` both set. (b) has no such state.
+--
+--   3 · COACHES TICK ATTENDEES. They do not tick absentees. Under (a) the
+--       eight who came get `attended_at` and the four who did not get nothing —
+--       `no_show_at` stays null on exactly the four rows it was added for, and
+--       the ambiguity survives untouched under a new column name. That is the
+--       "third ambiguous column" failure, and (a) walks straight into it. Under
+--       (b) the coach's ordinary work — ticking the eight — is itself the
+--       evidence the register was taken, and the four resolve for free.
+--
+--   4 · It answers the question the coach actually has, which is about the
+--       class: "did anyone take this register?" A gym auditing last month wants
+--       the classes nobody registered, not a per-member scan for absent rows.
+--
+-- The cost of (b) is stated rather than hidden: a class where the register was
+-- taken and NOBODY attended produces no `attended_at` write, so the trigger
+-- below never fires and the class reads 'not taken'. That is why
+-- `mark_register_taken()` exists — an explicit "I took this register" a screen
+-- can call. Until a screen calls it, that class stays UNMARKED, which is the
+-- honest answer and not a guess in either direction.
+--
+-- ── Widening a CHECK on a table that has rows ──────────────────────────────
+--
+-- The column check from part 02 is unnamed in the source, so PostgreSQL named
+-- it `class_bookings_status_check`. Widening means DROP then ADD, and ADD
+-- re-validates every existing row.
+--
+-- RUN THIS FIRST, on the target database:
+--
+--     select status, count(*) from public.class_bookings group by status order by 2 desc;
+--
+-- Every row returned must have a status in
+-- ('booked','waitlist','cancelled','late_cancelled'). Since the OLD constraint
+-- was narrower than the new one, and was enforced, this should be exactly two
+-- rows — 'booked' and 'waitlist'. If it is not, the constraint was dropped by
+-- hand at some point and rows were written past it.
+--
+-- IF THE ADD FAILS it raises 23514 (check_violation) naming
+-- `class_bookings_status_check`. The DROP and the ADD are inside one DO block,
+-- which is one statement and therefore atomic: the failure rolls the DROP back
+-- with it, and the table is left with the constraint it started with rather
+-- than with none. Nothing is half-applied and nothing further in this file has
+-- run. The operator then resolves the offending rows — they are a fact somebody
+-- recorded and are not to be deleted — and re-runs this part.
+--
+-- Everything else here is `add column if not exists` / `create ... if not
+-- exists` / `create or replace`. Idempotent; safe to re-run.
+--
+-- ── WHAT MUST CHANGE IN cancel_class, AND WHAT IS NOT RECOVERABLE ──────────
+--
+-- THIS PART DOES NOT CHANGE `cancel_class`. Changing a destructive RPC is its
+-- own review. The change it needs is exactly this, and no more:
+--
+--   1 · `delete from class_bookings where class_id = p_class and user_id =
+--       auth.uid() returning status into v_was`
+--       becomes
+--       `update class_bookings set status = case when <inside the gym's notice
+--        window> then 'late_cancelled' else 'cancelled' end
+--         where class_id = p_class and user_id = auth.uid()
+--           and status in ('booked','waitlist')
+--        returning status into v_was`
+--       — and `v_was` must be captured from the OLD row, so the `returning`
+--       has to read the pre-update value or the promotion gate below breaks.
+--       `update ... returning` returns the NEW row, so the old status must be
+--       read into `v_was` by a `select ... for update` immediately before it.
+--       That single detail is why this is not a one-line change and why it is
+--       not being made here.
+--
+--   2 · The notice window comes from `class_cancel_policy()`'s own source
+--       (part 2615) joined to `gym_classes.starts_at`. A gym that has stated NO
+--       notice period gets 'cancelled': inventing a window to charge inside is
+--       the thing src/lib/classCancel.ts refuses to do in words, and the
+--       database must not do it in SQL.
+--
+--   3 · `cancelled_at` / `cancelled_by` need no code in `cancel_class` at all.
+--       `class_bookings_stamp_cancel()` below is a BEFORE UPDATE trigger and
+--       stamps them on the transition, the same way
+--       `sessions_stamp_outcome()` (part 33) stamps `outcome_at`.
+--
+--   4 · The waitlist promotion — `update class_bookings set status = 'booked'`
+--       — keeps its capacity test and its FIFO order unchanged. It gains
+--       nothing and loses nothing; `promoted_at` is stamped by the same
+--       trigger, so the overwrite stops being an erasure without the promotion
+--       statement being touched.
+--
+--   5 · `book_class` needs the matching change and it is NOT optional. Its
+--       `on conflict (class_id, user_id) do update set status = excluded.status`
+--       will, the moment cancelling stops deleting, silently overwrite a
+--       'late_cancelled' back to 'booked' when the member re-books — which is
+--       the identical erasure one level down. Re-booking after a cancellation
+--       must leave the cancellation standing, which means the cancellation
+--       belongs in its own row per occurrence, or `book_class` must refuse to
+--       overwrite a terminal status and write a fresh booking instead.
+--
+-- ROWS ALREADY DELETED ARE GONE. There is no recovery, partial or otherwise.
+-- `cancel_class` has been deleting since part 02; the rows were removed by an
+-- ordinary DELETE with no audit table, no trigger and no soft-delete column
+-- behind it, and `class_bookings` has never had one. Every class cancellation
+-- every member has ever made is unrecoverable, and no backfill in this file or
+-- any later one can reconstruct a single one of them. This part stops the
+-- erasure from here forward and makes no claim about anything before it. Any
+-- screen that counts cancellations must say what its window starts at.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1 · the status vocabulary ──────────────────────────────────────────────
+
+do $$
+begin
+  -- Drop and add together. One statement, therefore atomic: if the ADD raises
+  -- 23514 on a row the operator has not seen, the DROP goes back with it and
+  -- the table keeps the constraint it had. Two bare statements would leave a
+  -- window — and, on a failure, a table with NO check on its status at all.
+  alter table public.class_bookings
+    drop constraint if exists class_bookings_status_check;
+  alter table public.class_bookings
+    add constraint class_bookings_status_check
+    check (status in ('booked', 'waitlist', 'cancelled', 'late_cancelled'));
+end $$;
+
+comment on column public.class_bookings.status is
+  'booked | waitlist | cancelled | late_cancelled. The standing of the booking, '
+  'and the LAST TWO ARE WHY THIS COLUMN IS NOT A BOOLEAN: cancelling must stop '
+  'being the DELETE it has been since part 02, because a correction is a second '
+  'recorded fact and never an erasure. Spelled exactly as sessions.outcome '
+  'spells them (part 33) — a second spelling of the same fact is its own defect. '
+  'There is deliberately no ''no_show'': a no-show held their seat and their '
+  'status stays ''booked'', which is what keeps class_counts() from handing the '
+  'seat back. A no-show is derived — status ''booked'', attended_at null, and '
+  'gym_classes.register_taken_at not null.';
+
+-- ── 2 · when it happened, and who said so ──────────────────────────────────
+--
+-- Named as part 33 names them on `sessions`: `<verb>_at` and `<verb>_by`, with
+-- `by` pointing at auth.users and nulling on delete, so losing an account
+-- leaves the fact and loses only the attribution.
+
+alter table public.class_bookings
+  add column if not exists cancelled_at timestamptz;
+alter table public.class_bookings
+  add column if not exists cancelled_by uuid references auth.users(id) on delete set null;
+alter table public.class_bookings
+  add column if not exists promoted_at timestamptz;
+
+comment on column public.class_bookings.cancelled_at is
+  'When this booking was cancelled. NULL means THIS BOOKING HAS NOT BEEN '
+  'CANCELLED — it is not "unknown" and not "cancelled at an unrecorded time", '
+  'because the trigger that sets it fires on the same statement that sets the '
+  'status. A row with a cancelled status and a null cancelled_at is a row '
+  'written past the trigger and must be treated as a defect, not read as today.';
+comment on column public.class_bookings.cancelled_by is
+  'Who cancelled it: the member themselves, or a staff member acting for them. '
+  'NULL means either not cancelled, or cancelled by an account that has since '
+  'been deleted — cancelled_at is the column that separates those two, and is '
+  'the one to test. Never infer the canceller from user_id: that is who the '
+  'booking is FOR.';
+comment on column public.class_bookings.promoted_at is
+  'When this booking came off the waitlist into a seat. NULL means it was NEVER '
+  'ON THE WAITLIST — the seat was held from the moment it was booked. It does '
+  'not mean "still waiting": that is status = ''waitlist''. Recorded because the '
+  'promotion is an UPDATE over the top of ''waitlist'' and without this the fact '
+  'that the member queued is erased by the good news.';
+
+-- The stamper. Modelled on `sessions_stamp_outcome()` (part 33) and for the
+-- same reason: a disputed late-cancellation fee needs an author and a time, and
+-- neither can be left to whichever of the several callers remembers.
+--
+-- `coalesce` on both, so a caller that supplies its own values — a backfill, an
+-- import, an owner correcting a date — keeps them. The trigger fills a blank;
+-- it does not overrule a statement.
+create or replace function public.class_bookings_stamp_cancel()
+returns trigger
+language plpgsql
+security definer
+-- Pinned for the reason check:definer states: an unpinned definer body resolves
+-- every unqualified name against the CALLER's search_path.
+set search_path to 'public', 'pg_temp'
+as $$
+begin
+  if new.status is distinct from old.status
+     and new.status in ('cancelled', 'late_cancelled') then
+    new.cancelled_at := coalesce(new.cancelled_at, now());
+    new.cancelled_by := coalesce(new.cancelled_by, (select auth.uid()));
+  end if;
+
+  -- Un-cancelling clears both, so the pair can never outlive the fact. This is
+  -- the one place the row is allowed to lose a value, and it loses it only
+  -- because the status it described is no longer there to describe.
+  if new.status not in ('cancelled', 'late_cancelled') then
+    new.cancelled_at := null;
+    new.cancelled_by := null;
+  end if;
+
+  -- The promotion. `old.status = 'waitlist'` and not merely "new is booked",
+  -- because a booking that was always booked was never promoted and a stamp on
+  -- it would be a fact nobody has.
+  if old.status = 'waitlist' and new.status = 'booked' then
+    new.promoted_at := coalesce(new.promoted_at, now());
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists trg_class_bookings_stamp_cancel on public.class_bookings;
+create trigger trg_class_bookings_stamp_cancel
+  before update on public.class_bookings
+  for each row execute function public.class_bookings_stamp_cancel();
+
+-- A trigger function is called by the executor, not by a role, so EXECUTE on it
+-- is never checked when it fires. The grant PostgreSQL hands PUBLIC on a new
+-- function is therefore pure surface — and in a Supabase project PUBLIC
+-- includes `anon`, which is what part 2180 was written to clean up after.
+revoke all on function public.class_bookings_stamp_cancel() from public, anon;
+
+-- ── 3 · the register was taken ─────────────────────────────────────────────
+
+alter table public.gym_classes
+  add column if not exists register_taken_at timestamptz;
+alter table public.gym_classes
+  add column if not exists register_taken_by uuid references auth.users(id) on delete set null;
+
+comment on column public.gym_classes.register_taken_at is
+  'When somebody took the register for this class. NULL MEANS NOBODY TOOK IT — '
+  'it does not mean nobody attended. This is the column that stops '
+  'class_bookings.attended_at from meaning two things: until part 3060, '
+  '"attended_at is null" was both "did not turn up" and "no register was ever '
+  'taken", and no read could separate them. With this set, an un-ticked booked '
+  'member is a NO-SHOW; with it null, they are UNMARKED and a human has to '
+  'look. Meaningless on a class whose own status is ''cancelled'' (part 195): a '
+  'class that did not run has no register, and a stamp on one is a defect.';
+comment on column public.gym_classes.register_taken_by is
+  'Who took it. NULL means either it was not taken, or the account that took it '
+  'has been deleted — register_taken_at is the column that separates those, and '
+  'is the only one any read should test.';
+
+-- Who may say a register was taken. One definition, called from both writers
+-- below, because two spellings of an authorisation test is how the two drift.
+--
+-- Deliberately the same shape as the guard inside `set_class_attendance` (part
+-- 2330): tenant staff, OR the coach named on the class — the second disjunct is
+-- there because a coach whose tenant_id is not set would otherwise be locked
+-- out of their own class.
+create or replace function public.can_register_class(p_class uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select exists (
+    select 1 from gym_classes gc
+    where gc.id = p_class
+      and ( ( gc.tenant_id is not null
+              and gc.tenant_id = my_tenant()
+              and my_role() in ('trainer', 'owner') )
+            or gc.trainer_id = auth.uid() )
+  );
+$$;
+
+revoke all on function public.can_register_class(uuid) from public, anon;
+grant execute on function public.can_register_class(uuid) to authenticated;
+
+comment on function public.can_register_class(uuid) is
+  'Whether the caller may take the register for this class. Answers false — '
+  'never null and never an error — for a class that does not exist, so a caller '
+  'cannot use it to probe for class ids. Answers FALSE when there is no '
+  'auth.uid(): a service_role or psql write to attended_at will not stamp '
+  'register_taken_at, and that is deliberate — a backfill did not take a '
+  'register, and dating one from it would manufacture the evidence these '
+  'columns exist to start collecting. Such a write must call '
+  'mark_register_taken() or set the column itself.';
+
+-- Stamping the class from the ordinary act of ticking somebody in.
+--
+-- ── why this is guarded, and why that is not paranoia ──────────────────────
+--
+-- `class_bookings_self` is `for all using (user_id = auth.uid())`, so a MEMBER
+-- can UPDATE their own booking row, `attended_at` included — the whole row, as
+-- part 151's note on table-wide grants says. Without the guard below, any
+-- member could set their own attended_at, stamp register_taken_at on the class,
+-- and thereby convert every other member on that register into a recorded
+-- no-show. The gym could then charge fees off a fact a stranger asserted.
+--
+-- AFTER, not BEFORE: this writes a different table, and a BEFORE trigger that
+-- did so would be doing it before the change that justifies it has committed.
+--
+-- `when (register_taken_at is null)` in the UPDATE and not an IF: the first
+-- tick is the one that dates the register, and a second tick five minutes later
+-- must not move the timestamp forward — the register was taken when it was
+-- first taken.
+create or replace function public.gym_classes_stamp_register()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+begin
+  if not can_register_class(new.class_id) then
+    return null;
+  end if;
+
+  update gym_classes
+     set register_taken_at = now(),
+         register_taken_by = (select auth.uid())
+   where id = new.class_id
+     and register_taken_at is null;
+
+  return null;
+end $$;
+
+drop trigger if exists trg_gym_classes_stamp_register on public.class_bookings;
+create trigger trg_gym_classes_stamp_register
+  after update of attended_at on public.class_bookings
+  for each row
+  -- Only when the tick actually MOVED. An unrelated update that happens to
+  -- carry the same attended_at is not somebody working the register.
+  when (new.attended_at is distinct from old.attended_at)
+  execute function public.gym_classes_stamp_register();
+
+revoke all on function public.gym_classes_stamp_register() from public, anon;
+
+-- The explicit "I took this register", for the case the trigger above cannot
+-- reach: a class where the register WAS taken and nobody attended. There is no
+-- `attended_at` write on such a class, so nothing fires, and without this the
+-- one class that most needs recording — twelve booked, none present — is the
+-- one that stays unmarked.
+--
+-- Returns false rather than raising when the caller may not: the screen that
+-- calls this is drawing a register, and the honest outcome is "this was not
+-- recorded", which src/lib/classRegister.ts renders as unmarked. A raise here
+-- would take a screen down over a permission the coach can do nothing about.
+create or replace function public.mark_register_taken(p_class uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+begin
+  if not can_register_class(p_class) then
+    return false;
+  end if;
+
+  update gym_classes
+     set register_taken_at = coalesce(register_taken_at, now()),
+         register_taken_by = coalesce(register_taken_by, (select auth.uid()))
+   where id = p_class;
+
+  return found;
+end $$;
+
+revoke all on function public.mark_register_taken(uuid) from public, anon;
+grant execute on function public.mark_register_taken(uuid) to authenticated;
+
+comment on function public.mark_register_taken(uuid) is
+  'Record that the register for this class was taken, without ticking anybody '
+  'in. For the class where nobody attended, which is the one case the '
+  'attended_at trigger cannot see. Idempotent: a second call leaves the first '
+  'timestamp alone, because the register was taken when it was first taken. '
+  'Returns false when the caller is not staff for this class rather than '
+  'raising — a register screen must not fall over on a permission.';
+
+-- ── 4 · what this part deliberately does NOT do ────────────────────────────
+--
+--   · It does not touch `cancel_class`, `book_class` or `set_class_attendance`.
+--     The first is destructive and needs its own review; the header says
+--     exactly what it and `book_class` must become. `set_class_attendance`
+--     should be rewritten to call `can_register_class()` rather than carrying
+--     its own copy of the same EXISTS — but rewriting a function body in this
+--     part would silently revert whatever else is in flight against it, and a
+--     duplicated guard that agrees is a smaller problem than a clobbered one.
+--
+--   · It backfills nothing. Every existing booking gets `cancelled_at` null,
+--     which is true — it has not been cancelled — and `promoted_at` null, which
+--     is the honest reading of a row whose history was never recorded rather
+--     than a claim that it never queued. Every existing class gets
+--     `register_taken_at` null, so every past class reads UNMARKED. That is
+--     correct and it is not a regression: nothing anywhere ever knew whether
+--     those registers were taken, and dating them from the newest attended_at
+--     would be inventing the evidence this part exists to start collecting.
+--
+--   · It adds no 'no_show' status value. See the header; that would hand back a
+--     seat the member kept.
+--
+--   · It changes no policy and adds no grant on either table. Both columns sets
+--     land on tables whose `authenticated` grants are table-wide, so a new
+--     column is reachable by exactly the roles that could already reach the row
+--     — which is the case check:grants §2 exists to catch the absence of, and
+--     is why there is no column-level grant to extend here.
+--
+--   · It writes no notification and queues no message. Recording that somebody
+--     cancelled is not telling anybody they did. `class_cancelled_notify` and
+--     src/lib/classOff.ts are the CLASS-being-called-off path and are a
+--     different event with a different audience.
+
+-- ▶ two-rows-holding-pounds-compared-equal.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Two rows both holding "pounds" compared equal, and a member went on list price.
+--
+-- APPLIED to the live database on 13 Sep 2026 as part_3090_currency_is_iso.
+-- The pre-flight query below was run first and returned zero violating rows
+-- across all six tables, so the plain ADD CONSTRAINT could not fail and no row
+-- was left un-updatable by a constraint it already breaks.
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- Five money columns in this schema hold a currency and check NOTHING about its
+-- shape:
+--
+--     gym_passes.currency         text not null   (part 31, default dropped 150)
+--     gym_pass_types.currency     text not null   (part 31, default dropped 150)
+--     membership_plans.currency   text not null   (part 29, default dropped 150)
+--     gym_invoices.currency       text not null   (part 29, default dropped 150)
+--     gym_orders.currency         text not null   (part 281, never had a default)
+--
+-- `not null` is doing far less work here than it looks. The empty string
+-- satisfies it. So does `pounds`. So does `GB`, `£`, `gbp `, and a three-letter
+-- code for a money the gym has never taken a penny in. Nothing between the
+-- keyboard and the ledger reads the value: the writers write what they are
+-- handed, and a CSV import writes what the file said.
+--
+-- Meanwhile the tables beside them DO carry the check — `tenants` (part 99),
+-- `charges`, `client_purchases`, `client_subscription_payments`,
+-- `gym_month_closes`, `gym_trainer_pay`, `gym_equipment_log`, `sessions`,
+-- `trainers`, and `gym_orders.refunded_currency`, which is a column on ONE OF
+-- THE FIVE TABLES ABOVE. The refund half of an order is constrained and the
+-- sale half is not.
+--
+-- ── What it cost, twice, in one night ─────────────────────────────────────
+--
+-- `normaliseCurrency` in src/lib/gymRecord.ts was `trim().toUpperCase()` and
+-- nothing else, so it answered `'POUNDS'` for `'pounds'` — truthy, stable, and
+-- COMPARABLE. Two such rows therefore agreed with each other:
+--
+--   · src/lib/priceBook.ts compares a membership's currency against its plan's
+--     before it compares the amounts. Two rows both holding `pounds` passed
+--     that gate, were SUBTRACTED from one another, and placed a member on the
+--     list price — the exact fold that module exists to refuse, reached through
+--     the currency instead of through the amount.
+--   · `money(6000, 'pounds')` rendered **POUNDS 60.00** at every gym screen in
+--     the product, reading exactly as considered as `GBP 60.00` does.
+--
+-- Both halves of that are fixed in the library in the same change as this part:
+-- `normaliseCurrency` and `moneyIn` now both apply `^[A-Z]{3}$` and answer NULL
+-- for anything else, which is the same test `priceBook.ts`, `coachCosts.ts`,
+-- `coachInvoice.ts`, `costBudgets.ts`, `coachReceipts.ts` and `csvImport.ts`
+-- already applied and the same one `tenants_currency_is_iso` holds here.
+--
+-- This part is the other half: the library can refuse to READ a non-code, and
+-- only the database can refuse to STORE one.
+--
+-- ── A SIXTH TABLE ─────────────────────────────────────────────────────────
+--
+-- `gym_payments.currency` has the identical hole and is included below as
+-- section 6. It was not in the brief for this change, and it is here because it
+-- is the same defect on the register that `incomeOf` (src/lib/monthEnd.ts),
+-- `unstatedTakings` (src/lib/gymBanked.ts) and `strayCurrencies`
+-- (src/lib/strayCurrency.ts) all read — the last of which names the column in
+-- its own header as the reason it exists. The pre-flight query in section 1
+-- covers all six. To apply only the five, delete section 6 and its line from
+-- the query; nothing else depends on it.
+--
+-- ── WHAT HAPPENS IF A VIOLATING ROW EXISTS. READ THIS FIRST. ──────────────
+--
+-- **This part FAILS, LOUDLY, AND CHANGES NOTHING.**
+--
+-- `ALTER TABLE ... ADD CONSTRAINT` scans the table and raises 23514 on the
+-- first row that does not satisfy the check. The statement is atomic, so the
+-- constraint is not created; and because setup.sql is pasted and run as a
+-- single multi-statement query, Postgres wraps the whole bundle in one implicit
+-- transaction and rolls ALL of it back. A failure here leaves the database
+-- exactly as it was and applies no part after this one.
+--
+-- That is the intended behaviour and not a hazard to be engineered around. A
+-- row holding `pounds` is money whose unit nobody can name, sitting in a
+-- register that gets reconciled against a bank statement. It has to be looked
+-- at by a person who knows which gym it belongs to. There is no correct value
+-- for this migration to write in — `EUR` in a GBP gym is as likely to be a real
+-- euro walk-in as a slip, there is no rate in this product that could tell them
+-- apart, and a backfill that guessed would make a real second currency vanish.
+-- So: no backfill, no coercion, no `update ... set currency = ...` anywhere in
+-- this file. The part refuses to apply and the person decides.
+--
+-- ── Run this BEFORE applying. It is not optional. ─────────────────────────
+--
+-- Every row that would fail, across all six tables, with its tenant so somebody
+-- can go and ask. Read-only. Expect zero rows; anything else is work to do
+-- first.
+--
+--     select 'gym_passes' as tbl, id, tenant_id, currency
+--       from public.gym_passes        where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'gym_pass_types',  id, tenant_id, currency
+--       from public.gym_pass_types    where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'membership_plans', id, tenant_id, currency
+--       from public.membership_plans  where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'gym_invoices',    id, tenant_id, currency
+--       from public.gym_invoices      where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'gym_orders',      id, tenant_id, currency
+--       from public.gym_orders        where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'gym_payments',    id, tenant_id, currency
+--       from public.gym_payments      where currency !~ '^[A-Z]{3}$'
+--     order by 1, 4, 2;
+--
+-- `!~` is the negation of the same POSIX match the constraint uses, so the
+-- query and the check cannot disagree about what a violation is. All six
+-- columns are `not null`, so there is no third state to account for and no row
+-- can hide behind a NULL.
+--
+-- The commonest hits, and what each one means:
+--
+--     ''          the column was written blank. The amount is real; the unit
+--                 was never recorded. Someone has to say which money it was.
+--     'gbp'       right money, wrong case. The one class of violation with an
+--                 unambiguous fix: `update ... set currency = upper(currency)`
+--                 where `upper(currency) ~ '^[A-Z]{3}$'`, which changes no
+--                 row's meaning. Do it as its own deliberate statement, not
+--                 from inside this part.
+--     'pounds'    a person typed a word. Needs a human to say GBP.
+--     'AED'       not a violation at all — a leftover from the default dropped
+--                 in part 150. It passes and stays, correctly: it is what the
+--                 row says, and this part does not relitigate old data.
+--
+-- ── Why NOT VALID is the wrong tool here, in detail ───────────────────────
+--
+-- `ADD CONSTRAINT ... NOT VALID` skips the scan, takes a brief lock, and
+-- ALWAYS SUCCEEDS — then `VALIDATE CONSTRAINT` scans separately under a weaker
+-- lock. It is the right answer for a large, hot table where an ACCESS EXCLUSIVE
+-- scan is a real outage, and where legacy rows are knowingly tolerated.
+--
+-- Neither applies, and the second one is actively dangerous here:
+--
+--   1. NOT VALID DOES NOT MEAN "NOT ENFORCED". A NOT VALID check is enforced on
+--      every INSERT **and every UPDATE**, including an update to a row that was
+--      already violating. So a `gym_invoices` row holding `pounds` becomes a
+--      row nobody can edit AT ALL — not its status, not its due date, not its
+--      note — unless the same statement also corrects the currency. Several of
+--      the screens that write these tables do not put a currency field in front
+--      of the user, so the 23514 arrives with no way to resolve it from inside
+--      the product, on somebody's live invoice, weeks after this was applied
+--      and with nothing connecting the two.
+--
+--      That is precisely the "un-updatable row" hazard, and NOT VALID is what
+--      CREATES it. A plain ADD CONSTRAINT cannot: it either finds no violating
+--      row, or it does not get created.
+--
+--   2. The lock argument buys nothing. These are a gym's price book, invoices,
+--      passes and orders — thousands of rows at a busy site, not millions. The
+--      scan is milliseconds, and setup.sql is already a one-shot paste that is
+--      not run against a live database during opening hours.
+--
+--   3. A NOT VALID constraint that is never validated is indistinguishable, in
+--      `\d`, from one that was — except for one word — and the bad rows it was
+--      added around stay in the register indefinitely, now frozen. The point of
+--      this part is that those rows get FIXED. A mechanism whose success
+--      condition is "the bad rows are still there and now cannot be touched" is
+--      the opposite of the goal.
+--
+-- If an operator genuinely cannot correct the rows before applying — a
+-- situation this part does not anticipate and does not endorse — the two-step
+-- form is, per table:
+--
+--     alter table public.gym_invoices add constraint gym_invoices_currency_is_iso
+--       check (currency is null or currency ~ '^[A-Z]{3}$') not valid;
+--     -- …fix the rows…
+--     alter table public.gym_invoices validate constraint gym_invoices_currency_is_iso;
+--
+-- It is written out here, in prose, rather than committed commented-out in the
+-- executable half of this file, because taking it should require retyping it
+-- and meaning it. Read hazard 1 again before you do: between those two
+-- statements, every violating row is frozen.
+--
+-- ── `currency is null or …` on six NOT NULL columns ───────────────────────
+--
+-- Deliberate, and it is the house form — `tenants_currency_is_iso`,
+-- `charges_currency_is_iso`, `gym_month_closes_currency_is_iso`,
+-- `gym_trainer_pay_currency_is_iso` and `gym_equipment_log_currency_is_iso` are
+-- all written this way. All six columns here are NOT NULL today, so the first
+-- arm is unreachable and the check is effectively `~ '^[A-Z]{3}$'`.
+--
+-- It is written anyway for two reasons. NULLABILITY IS THE DIRECTION OF
+-- TRAVEL: part 150 dropped the `'AED'` default from these columns precisely
+-- because there is no default currency in this product, and "the gym has not
+-- said" is a fact these columns cannot yet express. The day one of them drops
+-- NOT NULL, a check spelled `currency ~ '^[A-Z]{3}$'` would reject the NULL and
+-- the drop would fail — and a constraint that has to be rewritten to allow a
+-- change is a constraint that gets dropped instead. And it states the rule as
+-- it is meant: a currency is three letters, or it is nothing. It is never a
+-- word.
+--
+-- ── Applying this ─────────────────────────────────────────────────────────
+--
+-- Idempotent: every constraint is dropped by name first, so re-running the
+-- bundle re-asserts rather than erroring on a duplicate. No table is created,
+-- no column is added or altered, no row is read or written, no policy, grant,
+-- trigger or function is touched. The only thing this part can do to a database
+-- is add six CHECK constraints — or refuse.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. the pre-flight ───────────────────────────────────────────────────────
+--
+-- The query lives in the header rather than here, because a statement in this
+-- file runs and this one is for a person to run and READ. Applying this part
+-- without having run it is the one mistake it is possible to make.
+
+-- ── 2. gym_passes ───────────────────────────────────────────────────────────
+--
+-- What was actually taken for a day pass or a class pack. `paid_cents` is
+-- nullable — nobody recorded a price, which is not the same as free — but the
+-- currency is NOT NULL beside it, so a pass with no price still states a money.
+-- `passRevenueCents` in src/lib/gymPasses.ts makes a priced pass stating no
+-- usable code its own member of the currency set, so GBP-plus-unspellable reads
+-- as a disagreement and withholds the sum rather than labelling it GBP.
+alter table public.gym_passes drop constraint if exists gym_passes_currency_is_iso;
+alter table public.gym_passes add constraint gym_passes_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 3. gym_pass_types ───────────────────────────────────────────────────────
+--
+-- The price book half: what a drop-in or a pack is listed at. `passTypeSales`
+-- in src/lib/passTypeSales.ts prints `listCurrency` straight onto the table an
+-- owner reads, which is where POUNDS appeared as a column heading.
+alter table public.gym_pass_types drop constraint if exists gym_pass_types_currency_is_iso;
+alter table public.gym_pass_types add constraint gym_pass_types_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 4. membership_plans ─────────────────────────────────────────────────────
+--
+-- One of the two columns behind the price-book fold in the header. `priceBook`
+-- compares this against `memberships`' own currency before it compares the
+-- amounts; with both holding `pounds` the comparison passed and the subtraction
+-- ran. `summarise` in src/lib/gymRecord.ts also asks `sharedCurrency` over the
+-- contributing plans to label the MRR tile, which is the first figure an owner
+-- reads on /revenue.
+alter table public.membership_plans drop constraint if exists membership_plans_currency_is_iso;
+alter table public.membership_plans add constraint membership_plans_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 5. gym_invoices ─────────────────────────────────────────────────────────
+--
+-- The other column behind the fold, and the one an accountant reads. Note what
+-- a bad row costs beyond the invoice itself: `invoicesOf` in
+-- src/lib/monthEnd.ts collects the currency of every non-draft invoice into one
+-- set, and a second entry in that set withholds settled, outstanding, overdue
+-- AND dropped for the whole month — and `arrears` reaches back over every
+-- invoice ever issued, so one bad row blanks "what is still owed" on every
+-- future close and `closeBlockers` refuses to sign the month off.
+alter table public.gym_invoices drop constraint if exists gym_invoices_currency_is_iso;
+alter table public.gym_invoices add constraint gym_invoices_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 6. gym_orders ───────────────────────────────────────────────────────────
+--
+-- What a member was charged online, written by the checkout function and moved
+-- by the Stripe webhook. This table already carries
+-- `gym_orders_refunded_currency_is_iso` on `refunded_currency` (part 800): the
+-- refund half of an order has been constrained since, and the sale half never
+-- was. This is that asymmetry closed.
+--
+-- `paidPots` in src/lib/gymOrders.ts groups paid orders by this column to draw
+-- one tile per currency. Before the library change beside this part it keyed on
+-- `trim()` alone — no upper-casing — so 'gbp' and 'GBP' drew two tiles for one
+-- money, each short of the truth, on the screen the front desk answers "did my
+-- payment go through" from.
+alter table public.gym_orders drop constraint if exists gym_orders_currency_is_iso;
+alter table public.gym_orders add constraint gym_orders_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 7. gym_payments ─────────────────────────────────────────────────────────
+--
+-- The sixth table. See the header: not named in the brief for this change,
+-- included because it is the same hole on the gym's own register — the one
+-- reconciled against a bank statement by `bankLines` in src/lib/gymBanked.ts,
+-- whose `unstatedTakings` exists solely to COUNT the rows here that state no
+-- usable money, and the one src/lib/strayCurrency.ts names in its first
+-- sentence. Delete this section to apply only the five.
+alter table public.gym_payments drop constraint if exists gym_payments_currency_is_iso;
+alter table public.gym_payments add constraint gym_payments_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 8. what this part deliberately does NOT do ──────────────────────────────
+--
+--   · It writes no row. No backfill, no `upper(currency)`, no mapping table, no
+--     "pounds → GBP" guess. Every one of those would be Repple deciding what
+--     money somebody was charged in, on a register reconciled against a bank
+--     statement, from evidence it does not have. See the header.
+--   · It does not touch `refunded_currency` on `gym_orders`, which part 800
+--     already constrains, and does not re-state that constraint — one rule, one
+--     place, and a second copy is how the two come to disagree.
+--   · It does not constrain the currency to one the gym actually uses. That is
+--     a judgement and not a fact: a London gym that took one genuine euro from
+--     a visitor has a correct EUR row, and a CHECK that refused it would make
+--     the honest record the illegal one. `strayCurrencies` in
+--     src/lib/strayCurrency.ts REPORTS that case to the owner, next to where
+--     they can correct it, and decides nothing.
+--   · It adds no NOT NULL and drops none. What these columns require is
+--     unchanged; only what they will accept is narrowed.
+
+-- ▶ a-day-of-eating-that-was-one-long-list.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A day of eating, recorded as one long list.
+--
+-- APPLIED to the live database on 13 Sep 2026 as part_3120_food_log_meal_slot.
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- `food_logs` has held a member's meals since part 01, and every one of them is
+-- a row with a name, four figures and an instant. "Logged Today" in
+-- app/(client)/foodlog.tsx draws them in the order they were eaten and puts one
+-- calorie total at the top, and that is the whole of it.
+--
+-- Every food app a member has used before this one groups the day. MyFitnessPal,
+-- Cronometer, MacroFactor, Lose It and Yazio all split it into Breakfast, Lunch,
+-- Dinner and Snacks and subtotal each. That is not decoration and it is not
+-- imitation: the question a member actually asks their food log is "where did
+-- today's calories GO", and a flat list of eleven rows cannot answer it. A
+-- member who is two hundred calories over at nine in the evening can see that
+-- they are over. They cannot see that four hundred of it was picking at things
+-- between lunch and dinner, which is the one fact that would change tomorrow.
+--
+-- A coach reading the same log through app/(trainer)/client.tsx has the same
+-- problem one step removed. "She eats enough protein but it is all at dinner" is
+-- a coaching observation that this schema currently makes nobody able to state.
+--
+-- ── Why a column, and why it is NULLABLE ──────────────────────────────────
+--
+-- NULL means NOBODY TOLD US. Not "other", not "snack", not "unsorted food" —
+-- an absence of an answer, which is a different thing from any answer.
+--
+-- Every row already in this table is one of those, and there are years of them
+-- on some accounts. The alternatives to leaving them null were both considered
+-- and both are worse:
+--
+--   · NOT NULL with a default. Whatever the default is, it is written onto
+--     every historical row as though the member had chosen it. A default of
+--     'snack' would tell a member that the dinner they logged last March was a
+--     snack, in a product whose whole argument is that it does not say more
+--     than it knows.
+--
+--   · A backfill from `logged_at`. Under 11:00 is breakfast, and so on. This is
+--     one UPDATE and it is the reason this part exists in the form it does, so
+--     it gets its own heading below.
+--
+-- The reading side is built for null already: src/lib/foodLogging.ts ·
+-- `groupMeals` puts those rows in a group headed "Not sorted", subtotals them
+-- in full, and orders that group last. And `grouped` comes back false when NOT
+-- ONE row in the day carries a slot, so a day made entirely of pre-existing
+-- rows keeps the flat list it already had rather than acquiring four headings
+-- and an empty Breakfast.
+--
+-- ── DERIVING A SLOT FROM THE CLOCK IS THE APP INVENTING A FACT ────────────
+--
+-- This is the decision this part is really about and it is stated at length
+-- because the cheap answer is one line of SQL and looks like a free win:
+--
+--     update public.food_logs set meal =
+--       case when extract(hour from logged_at) < 11 then 'breakfast' ... end;
+--
+-- It is wrong about a great many real people, and — this is the part that
+-- matters — it is wrong SILENTLY, under a heading that says the member told us.
+--
+--   · A night-shift nurse eats her main meal at four in the morning. That is
+--     dinner. The clock says breakfast.
+--   · A member doing 16:8 eats nothing until two and has breakfast at 14:00.
+--   · Half of Europe eats dinner at ten. Spain eats lunch at three.
+--   · A back-dated row — see the part of this work in src/lib/foodLogging.ts —
+--     is stamped at LOCAL NOON deliberately, as a marker meaning "this day,
+--     time not stated". Deriving from it would file every single back-dated
+--     meal in the table as lunch, on the strength of a placeholder.
+--
+-- And `logged_at` is a timestamptz, so any `extract(hour ...)` in the database
+-- reads it in the SERVER's zone, not the member's. The derivation would not
+-- even be consistently wrong; it would be wrong by a different number of hours
+-- per member, and right for whoever happened to be in UTC.
+--
+-- The same reasoning, in the same words, as `gym_invoice_chases.via` in part
+-- 2820: a row here is a claim by the member about the member. Repple did not
+-- watch anybody eat and does not get to say which meal it was.
+--
+-- So there is no backfill in this part. There is no trigger that fills the
+-- column in. There is no default. A slot arrives because somebody chose it, or
+-- it stays null forever, and both of those are honest.
+--
+-- ── Why a CHECK and not an enum ───────────────────────────────────────────
+--
+-- The same call `food_logs.via` made in part 01, and this table has the scar
+-- tissue to show it was the right one. `via` carries
+-- `check (via in ('search','barcode','photo','manual'))`, and that constraint
+-- has been VIOLATED TWICE by this application — an AI-described meal inserted
+-- as 'ai', refused with a 23514, and shown to the member as logged both times.
+-- src/ui/foodLog.tsx and app/(client)/foodlog.tsx each carry a written account
+-- of it.
+--
+-- A text column with a CHECK fails loudly at insert and can be widened with one
+-- ALTER. A Postgres enum would have failed identically and needed a type
+-- change, a migration and a PostgREST schema reload to widen. The failure mode
+-- is the same; the recovery is not.
+--
+-- What actually stops the third occurrence is that the four values now live in
+-- exactly one place on the client — `MEAL_SLOTS` in src/lib/foodLogging.ts,
+-- beside `readMealSlot`, which coerces anything it does not recognise to NULL
+-- rather than to a slot. A value spelled here and not there renders as its own
+-- raw code; a value spelled there and not here is a 23514. They are checked
+-- against each other by src/lib/foodLogging.test.ts, which asserts the four
+-- literals in order.
+--
+-- ── No index, and why that is not an oversight ────────────────────────────
+--
+-- Nothing filters or sorts on this column. The day is already fetched whole by
+-- `food_logs_client_id_logged_at_idx` (part 01) — one client, one day, a
+-- handful of rows — and the grouping happens on the phone, in `groupMeals`,
+-- over rows that are already in memory. An index on a four-value column of a
+-- table nobody queries by it is a write cost and a page of storage bought for
+-- nothing.
+--
+-- ── No RLS change, and no grant ───────────────────────────────────────────
+--
+-- Both deliberate, and both worth saying out loud rather than leaving to be
+-- inferred from an absence.
+--
+-- `food_owner` on `food_logs` is a FOR ALL policy keyed on `client_id`
+-- (part 01), so the member who owns the row may already read and write every
+-- column of it, including one that did not exist when the policy was written.
+-- `food_trainer_read` gives their coach SELECT on the same terms. A column adds
+-- no new subject and no new object; there is nothing for a policy to say.
+--
+-- `food_logs` carries no column-level grant anywhere in this ledger — its
+-- privileges are the table-wide ones Supabase's defaults give `authenticated`,
+-- so a new column is readable by the role that owns the row without a word from
+-- this part. Adding `grant select (meal) on public.food_logs` would be actively
+-- harmful rather than merely redundant: a column-level grant supersedes the
+-- table-level one for that role, and the table's other eight columns would then
+-- be in no grant at all. Part 131 recorded the same trap from the other side.
+--
+-- ── What this part does NOT do ────────────────────────────────────────────
+--
+-- Nothing writes to this column yet, and nothing reads it. Neither `.select()`
+-- in src/ui/foodLog.tsx names `meal` and neither `.insert()` sets it, because
+-- naming a column PostgREST does not know about is a 42703 — which
+-- `serverRows` correctly reads as a failed read and `classifyWrite` correctly
+-- reads as a refusal. Wiring the query before this part is applied would put
+-- the entire food log into 'error' for every member, and wiring the insert
+-- would report every meal as rejected. Trading the whole feature for a heading
+-- is not a trade.
+--
+-- So the reading side is written, tested and idle. The day this is applied, the
+-- change is `, meal` in the two select lists, `meal: e.meal ?? null` in the two
+-- inserts, and a control on the log sheet. `FoodEntry.meal` in src/ui/foodLog.tsx
+-- says the same thing at the other end.
+--
+-- ── Applying this ─────────────────────────────────────────────────────────
+--
+-- Re-runnable. `add column if not exists` is a no-op the second time, and the
+-- constraint is dropped by name and recreated rather than added blind, because
+-- `add column if not exists` skips its inline constraint entirely when the
+-- column is already there — which is how a column ends up in production with
+-- no CHECK on it at all and nobody able to see that from the part.
+--
+-- The rewrite of the CHECK takes an ACCESS EXCLUSIVE lock and validates every
+-- existing row. Every existing row is NULL and passes trivially, and `food_logs`
+-- is small, but it is still a lock on the table the client app writes to most
+-- often — apply it when nobody is mid-breakfast.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. which meal it was ────────────────────────────────────────────────────
+alter table public.food_logs
+  add column if not exists meal text;
+
+-- Dropped by name and recreated, so re-running this part on a table that
+-- already has the column still leaves the constraint in place and correct. The
+-- four values are the four in `MEAL_SLOTS` (src/lib/foodLogging.ts), spelled the
+-- same way and in the same order; a fifth added there and not here is a 23514 at
+-- insert time, which is the failure `via` has already produced twice.
+alter table public.food_logs
+  drop constraint if exists food_logs_meal_check;
+alter table public.food_logs
+  add constraint food_logs_meal_check
+  check (meal is null or meal in ('breakfast', 'lunch', 'dinner', 'snack'));
+
+comment on column public.food_logs.meal is
+  'Which meal of the day the member says this was: breakfast | lunch | dinner | snack. NULL means NOBODY TOLD US — not "other", not "snack", and not a slot worked out from logged_at. Every row written before this column existed is NULL and stays NULL; there is no backfill and no default, because deriving a slot from the clock would file a night-shift worker''s four-in-the-morning dinner as breakfast, a faster''s two-o''clock breakfast as lunch, and every back-dated row as lunch (those are stamped at local noon as a marker meaning "this day, time not stated"). logged_at is a timestamptz, so extract(hour ...) here would read the SERVER''s zone rather than the member''s and be wrong by a different amount for each of them. A NULL row renders under a "Not sorted" heading by src/lib/foodLogging.ts · groupMeals and is subtotalled in full — an unsorted meal is not a half-counted one.';
+
+-- ▶ a-coach-said-the-same-sentence-and-typed-it-forty-times.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A coach's cue for a movement had nowhere to live except inside one client's
+-- week, so it was retyped on every assignment and drifted between people.
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- `ProgramExercise.note` (src/lib/programs.ts) is the only place in Repple a
+-- coach can write anything against a movement, and its own header says what it
+-- is for: "machine by the window, seat on 4" — a fact about THIS client on
+-- THIS day, in THIS programme. It is stored inside the `exercises` JSONB of a
+-- single `assigned_programs` row.
+--
+-- But most of what a coach writes there is not about that client at all. It is
+-- the sentence they say to everybody about that lift — "brace before you
+-- unrack, chin tucked" — and the only way to get it in front of a second
+-- client was to type it again. Forty clients, forty copies, no link between
+-- them. Change your mind about how you cue a squat and there is no edit that
+-- reaches the thirty-nine weeks already assigned; fix it in three of them and
+-- the same coach's front squat now carries three different cues with nothing
+-- anywhere able to say which one they meant.
+--
+-- TrueCoach and Everfit both attach the cue to the EXERCISE, once, and it
+-- rides into every programme from there. Repple had no table it could go in.
+--
+-- ── A cue and a note are two different facts ──────────────────────────────
+--
+-- Stated first because collapsing them is the failure that destroys work
+-- rather than merely missing some.
+--
+--   the CUE     belongs to (coach, movement). It is the coach's default and it
+--               is the same for everybody they train. One row here.
+--   the NOTE    belongs to (programme, day, exercise). It is about one person
+--               on one day — "go easy, right shoulder still sore" — and it
+--               stays exactly where it is, in the programme JSONB, untouched
+--               by this part.
+--
+-- Nothing in this file reads, writes or references `assigned_programs`,
+-- `program_templates` or any note in either. The app fills an EMPTY note from
+-- the cue and NEVER a written one: `prefillNote` in src/lib/coachCues.ts is
+-- the single implementation of that rule and every call site goes through it.
+-- A cue arriving over a note somebody typed about a particular client would be
+-- an erasure performed silently, with no undo and no record that the note ever
+-- said anything else — and this codebase's standing rule, applied to a
+-- mistyped cost in part 700 and to a withdrawn consent in part 3030, is that a
+-- correction is a second recorded fact and never an erasure. A cue eating a
+-- note is not even a correction.
+--
+-- The same rule is why removing a cue leaves every note already prefilled from
+-- it exactly as it is. Those notes are in programmes; they are what the coach
+-- actually told those people; and a delete that reached into them would be
+-- rewriting coaching that has already happened.
+--
+-- ── The key, and why it is (coach_id, exercise_id) ───────────────────────
+--
+-- One cue per coach per movement, as the PRIMARY KEY rather than as a
+-- convention, because the alternative is a coach with four cues for the bench
+-- press and an app that has to pick one. Re-saving is an upsert: the coach
+-- changing their own default, which is theirs to change.
+--
+-- Deliberately NOT a history table, unlike `gym_agreement_revocations` in part
+-- 3030. The distinction is what the row is a record OF. A revocation is a
+-- dated act by a person and the sequence is the point. A cue is a current
+-- preference — the sentence you say today — and the record of what you told a
+-- particular client on a particular day already exists, in that client's
+-- programme, written at the moment it was said. The history is in the notes.
+--
+-- `exercise_id` is `text` and references `public.exercises(id)`, verified
+-- against the live schema rather than assumed: `exercises.id` is `text primary
+-- key` and holds the slug `exerciseSlug()` produces ('back-squat', 'push-up').
+-- `cueKey()` in src/lib/coachCues.ts is that same rule and its test asserts the
+-- two agree character for character. `on delete cascade` because a cue for a
+-- movement that no longer exists is not a cue.
+--
+-- `coach_id` references `public.profiles(id)`, which is also what
+-- `public.trainers(id)` references, so a trainer's profile id IS their
+-- auth.uid() — the same identity `is_my_client()` compares against.
+--
+-- ── Who may read it, and the half that is easy to get wrong ──────────────
+--
+-- The coach, obviously. And the CLIENT, or the feature does not exist: the
+-- whole point is that the cue reaches the person standing at the machine, on
+-- app/(client)/exercise.tsx.
+--
+-- The client policy is an EXISTS against `public.clients`, and `clients` is
+-- the right table and `coach_clients` is not. Two tables in this schema carry
+-- something called a coach link:
+--
+--   public.clients         `id` references profiles(id) — an app account — and
+--                          `trainer_id` references trainers(id). This is the
+--                          link `is_my_client()` (part 361 of setup.sql) tests,
+--                          and the only one where the client has an auth.uid()
+--                          to be matched against.
+--   public.coach_clients   `trainer_id` references auth.users, and `id` is a
+--                          fresh gen_random_uuid() naming NOBODY. It is the
+--                          coach's own private roster of people typed in by
+--                          hand, most of whom have never installed the app.
+--                          There is no account behind those rows, so there is
+--                          no session for a policy to match — a lane found on
+--                          13 September 2026 that 2 of 4 production
+--                          `coach_clients` rows have no `clients` row at all.
+--
+-- A policy written against `coach_clients` would therefore admit nobody and
+-- the cue would silently never appear on any client's screen. This one is
+-- written against `clients`, which is the table that knows about accounts.
+--
+-- ── Applying this ─────────────────────────────────────────────────────────
+--
+-- Additive. One new table, its policies, its grants, one index. Nothing
+-- existing is altered, no trigger is added or widened anywhere, no programme
+-- or note is touched, and there is no backfill: mining the notes already
+-- written for sentences that look repeated and promoting them to cues would be
+-- Repple deciding which of a coach's words were meant generally.
+--
+-- The reading library tolerates this part NOT having been applied, and this is
+-- load-bearing because it is not applied anywhere as it ships. Measured
+-- against this project's live REST endpoint on 13 September 2026, PostgREST
+-- answers a select naming a table absent from its schema cache with PGRST205
+-- and never reaches Postgres at all, so the 42P01 an undefined relation would
+-- raise is never produced. `isMissingCueTable` in src/lib/coachCues.ts accepts
+-- BOTH — PGRST205 for the ordinary case, 42P01 for a warm cache over a dropped
+-- table — and turns them into a 'read' status of 'absent', which is kept
+-- strictly distinct from a read that failed on the wire. Every other error
+-- throws. See `CueRead` in that file.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. the cue ──────────────────────────────────────────────────────────────
+
+create table if not exists public.coach_exercise_cues (
+  -- The coach whose cue this is. Defaulted to auth.uid() and never sent by the
+  -- app, for the same reason part 3030 defaults `revoked_at`: a caller able to
+  -- name the owner is a caller able to write into somebody else's book. The
+  -- WITH CHECK below refuses it anyway; the default means there is no field to
+  -- get wrong.
+  coach_id    uuid        not null default auth.uid()
+              references public.profiles(id) on delete cascade,
+
+  -- The movement, as the catalogue ids it. Not the display name: 'Back Squat'
+  -- and 'back squat' are one movement and must be one cue, which is what the
+  -- slug rule is for.
+  exercise_id text        not null
+              references public.exercises(id) on delete cascade,
+
+  -- What the coach says, every time, to everybody.
+  --
+  -- The length bound is mirrored by CUE_MAX in src/lib/coachCues.ts, so a coach
+  -- who types past it is refused by a sentence in the app rather than by a
+  -- 23514 from the database. The non-blank check is the same discipline as
+  -- `gym_agreement_revocations.reason`: a row storing '' would prefill nothing
+  -- and would make every reader answer with a string meaning "no cue".
+  -- Clearing a cue is a DELETE, which is a different act with a different
+  -- button.
+  cue         text        not null
+              check (btrim(cue) <> '' and length(cue) <= 500),
+
+  -- When it was last written. Not a history — see the header — but a coach
+  -- looking at a cue they wrote eighteen months ago is entitled to know that.
+  updated_at  timestamptz not null default now(),
+
+  primary key (coach_id, exercise_id)
+);
+
+comment on table public.coach_exercise_cues is
+  'A coach''s own standing cue for one movement: the sentence they say to everybody they train, written once and carried into every programme. One row per (coach, movement) by primary key. This is NOT the per-exercise note inside a programme day — that note is about one client on one day, lives in assigned_programs.exercises, and is never touched by anything here. The app PREFILLS an empty note from a cue and never overwrites a written one (prefillNote in src/lib/coachCues.ts is the only implementation of that rule), and deleting a cue leaves every note already written exactly as it is. See supabase/parts/3150.';
+
+comment on column public.coach_exercise_cues.coach_id is
+  'Whose cue. Defaults to auth.uid() and is never sent by the app: a caller able to name the owner is a caller able to write into another coach''s book. References profiles(id), which is the same identity trainers(id) references and the same one is_my_client() compares against.';
+
+comment on column public.coach_exercise_cues.exercise_id is
+  'The movement, as exercises.id spells it — the slug from exerciseSlug()/cueKey(), e.g. back-squat. Never a display name: "Back Squat" and "back squat" are one movement and must be one cue. Cascades, because a cue for a movement that no longer exists is not a cue.';
+
+comment on column public.coach_exercise_cues.cue is
+  'The coach''s words. Never NULL and never blank — a row storing an empty string would prefill nothing while making every reader answer with a string that means "no cue", so clearing a cue is a DELETE and not an empty save. Bounded at 500 characters, mirrored by CUE_MAX in src/lib/coachCues.ts so the refusal is a sentence in the app rather than a 23514.';
+
+comment on column public.coach_exercise_cues.updated_at is
+  'When this cue was last written. Defaulted, and set again by the upsert. It is NOT a history: what a coach told a particular client on a particular day is recorded in that client''s programme note, written at the moment it was said, and nothing here supersedes it.';
+
+-- The client's read: "what does MY coach say about this movement". Filtered on
+-- the movement, scoped to a coach by the policy. `coach_id` leads because the
+-- primary key index does too and this one exists for the other direction —
+-- a client's screen knows the exercise and not the coach.
+create index if not exists coach_exercise_cues_exercise_idx
+  on public.coach_exercise_cues (exercise_id, coach_id);
+
+-- ── 2. nothing about a programme changes ────────────────────────────────────
+--
+-- Said as a comment rather than as code, because the correct implementation of
+-- "no note is touched" is the absence of every statement that would touch one.
+-- There is deliberately no reference in this file to assigned_programs or
+-- program_templates, no trigger that writes into either, no column added to
+-- either, and no backfill that reads a note and promotes it to a cue. A cue is
+-- a default a coach sets; a note is something they wrote about a person.
+
+-- ── 3. who may read and write it ────────────────────────────────────────────
+
+alter table public.coach_exercise_cues enable row level security;
+
+-- The coach owns their own book outright: read, write, replace, delete.
+--
+-- `(select auth.uid())` and not a bare `auth.uid()`, which is the form every
+-- policy in this schema uses after the provider-value sweep: the scalar
+-- sub-select is evaluated once per statement instead of once per row.
+drop policy if exists coach_exercise_cues_own on public.coach_exercise_cues;
+create policy coach_exercise_cues_own on public.coach_exercise_cues
+  for all
+  to authenticated
+  using (coach_id = (select auth.uid()))
+  with check (coach_id = (select auth.uid()));
+
+-- And the CLIENT reads their own coach's cues, which is the whole point: the
+-- cue has to reach the person standing at the machine.
+--
+-- SELECT only, and scoped through `public.clients` — the table that knows
+-- about app accounts. `coach_clients` would admit nobody: its `id` is a fresh
+-- uuid naming no account at all, so no session could ever match it, and the
+-- cue would silently never appear on anybody's screen. See the header.
+--
+-- Reading their coach's whole cue book is deliberate and is not a widening:
+-- a cue is a sentence about a movement, written to be read by exactly these
+-- people, and the app asks for one movement at a time anyway.
+drop policy if exists coach_exercise_cues_client_read on public.coach_exercise_cues;
+create policy coach_exercise_cues_client_read on public.coach_exercise_cues
+  for select
+  to authenticated
+  using (exists (
+    select 1 from public.clients c
+    where c.trainer_id = public.coach_exercise_cues.coach_id
+      and c.id = (select auth.uid())
+  ));
+
+-- No client INSERT, UPDATE or DELETE in any direction, and they are named and
+-- dropped rather than merely never written, so a policy added by somebody
+-- wanting a "clients can suggest a cue" feature does not survive a rebuild of
+-- this file. A client editing their coach's standing cue would be changing
+-- what forty other people are told.
+drop policy if exists coach_exercise_cues_client_write on public.coach_exercise_cues;
+drop policy if exists coach_exercise_cues_client_i on public.coach_exercise_cues;
+drop policy if exists coach_exercise_cues_client_u on public.coach_exercise_cues;
+drop policy if exists coach_exercise_cues_client_d on public.coach_exercise_cues;
+
+-- ── 4. grants ───────────────────────────────────────────────────────────────
+--
+-- RLS narrows a GRANT; it does not create one. And the revoke names `anon` BY
+-- NAME as well as `public`: Postgres's default privileges in a Supabase
+-- project grant on a new object to roles that `revoke ... from public` does
+-- not reach, which is the exact mechanism part 2180 exists to undo after
+-- get_advisors found eighteen objects answering strangers. A cue is a coach's
+-- own writing and belongs to nobody who is not signed in.
+revoke all on public.coach_exercise_cues from anon, authenticated, public;
+grant select, insert, update, delete on public.coach_exercise_cues to authenticated;
+grant all on public.coach_exercise_cues to service_role;
+
+-- ── 5. what this part deliberately does NOT do ──────────────────────────────
+--
+--   · It writes into no programme and no note. Not one row of
+--     assigned_programs or program_templates is read or altered, and there is
+--     no trigger anywhere that reaches one. The prefill is an app-side
+--     default applied to an EMPTY note; a written note is never touched.
+--   · It backfills nothing. Reading the notes coaches have already written,
+--     finding the repeated ones and promoting them to cues would be Repple
+--     deciding which of somebody's words were meant generally, and would put
+--     a sentence written about one client's shoulder in front of forty more.
+--   · It keeps no history. A cue is a current preference. The dated record of
+--     what a coach told a particular person is that person's programme note,
+--     and it already exists.
+--   · It adds no unique constraint beyond the primary key, and needs none:
+--     (coach_id, exercise_id) IS the key, so a second cue for the same
+--     movement is an upsert of the first rather than a duplicate.
+--   · It sends no notification. A coach editing their own default is not an
+--     event forty clients are told about; they see the cue when they next
+--     open the movement.

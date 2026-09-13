@@ -45,7 +45,11 @@ import { progressOf, projectionOf, startPoint, isMeasured, isOverdue as goalIsOv
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
-import { exerciseSlug, sameExercise, findExercise, videoForExercise, type ExerciseRef, isAcademyClip } from './exerciseId';
+import { exerciseSlug, sameExercise, findExercise, videoForExercise, type ExerciseRef } from './exerciseId';
+// Whose a clip is, asked the one way this repo answers it. `isAcademyClip` used
+// to be imported here as a second way to ask it; it is gone, and the note where
+// it lived in exerciseId.ts says why.
+import { clipOwner } from './clipOwner';
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
 import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, SIGNED_URL_TTL_S, type ProgressPhoto } from './progressPhotos';
 import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
@@ -1215,10 +1219,18 @@ ok(findExercise('Kettlebell Windmill', cat) === null,
    'a movement the coach invented is absent, which is an answer rather than a failure');
 
 // Picking the clip. The substring rule is gone: a near-miss is the wrong lift.
+//
+// The 'db' prefixes are not decoration. `videoForExercise` classifies a clip
+// through `clipOwner`, which reads the ID, because the trainer column alone
+// cannot tell an Academy row from a clip stranded in a handset's AsyncStorage
+// after a refused insert — both carry `trainerId: null`. These three are all
+// rows in `exercise_videos` filmed by a coach, so they are all 'db…'. They had
+// no ids at all until the prefix started mattering, which left them exercising
+// a fallback rather than the rule.
 const vids = [
-  { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 't1' },
-  { exerciseId: null, name: 'Front Squat', trainerId: 't1' },
-  { exerciseId: 'back-squat', name: 'Coach Marcus — squat cues', trainerId: 't2' },
+  { id: 'db-t1-back', exerciseId: 'back-squat', name: 'Back Squat', trainerId: 't1' },
+  { id: 'db-t1-front', exerciseId: null, name: 'Front Squat', trainerId: 't1' },
+  { id: 'db-t2-cues', exerciseId: 'back-squat', name: 'Coach Marcus — squat cues', trainerId: 't2' },
 ];
 ok(videoForExercise('Back Squat', vids)?.name === 'Back Squat', 'the clip linked by id wins');
 ok(videoForExercise('Front Squat', vids)?.name === 'Front Squat',
@@ -2032,11 +2044,20 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
        'and says so plainly when there is nothing left to film');
   }
 
-  // Which demo clip a client sees: their coach, then the Academy, then none.
+  // Which demo clip a client sees: their coach, then the Academy, then a clip
+  // held on this handset, then none.
   {
-    const mine    = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-me' };
-    const academy = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: null };
-    const other   = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-someone-else' };
+    // These fixtures had no ids, and that was not a tidiness problem. `academy`
+    // — `trainerId: null`, no id — is character for character the shape of a
+    // clip stranded in a handset's AsyncStorage after a refused insert, and the
+    // assertion below asserted it WAS the Academy's. That is the defect's own
+    // conclusion drawn from the defect's own input, so the test agreed with the
+    // bug. The ids say which is which: 'db…' is a row in `exercise_videos`,
+    // 'vx…' is this phone and nowhere else.
+    const mine    = { id: 'db-coach-me', exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-me' };
+    const academy = { id: 'db-academy', exerciseId: 'back-squat', name: 'Back Squat', trainerId: null };
+    const other   = { id: 'db-someone-else', exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-someone-else' };
+    const handset = { id: 'vx7f3a9', exerciseId: 'back-squat', name: 'Back Squat', trainerId: null };
 
     ok(videoForExercise('Back Squat', [academy, other, mine], 'coach-me') === mine,
        'a member sees their OWN coach demonstrating, ahead of anything else');
@@ -2049,8 +2070,21 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(videoForExercise('Front Squat', [mine, academy], 'coach-me') === null,
        'and a different movement matches nothing — no fuzzy fallback, ever');
 
-    ok(isAcademyClip(academy) && !isAcademyClip(mine) && !isAcademyClip(other),
-       'an Academy clip is the one belonging to no coach');
+    // The two clips the trainer column cannot tell apart. If the id stopped
+    // being read, every line in this group flips.
+    ok(academy.trainerId === handset.trainerId,
+       'the Academy row and the handset entry are identical in the column the old test read');
+    ok(clipOwner(academy, 'coach-me') === 'platform',
+       'an Academy clip is the one belonging to no coach, and having a row');
+    ok(clipOwner(handset, 'coach-me') === 'local',
+       'and a clip stranded on one handset is NOT the Academy’s — no row, and no client can reach it');
+    ok(clipOwner(mine, 'coach-me') === 'mine' && clipOwner(other, 'coach-me') === 'other',
+       'a clip with a coach against it is theirs or a stranger’s, never the platform’s');
+
+    ok(videoForExercise('Back Squat', [handset, academy], 'coach-me') === academy,
+       'the Academy row is what the client is served, so it outranks a clip no client can reach');
+    ok(videoForExercise('Back Squat', [other, handset], 'coach-me') === handset,
+       'and the handset clip still plays over a stranger’s, because it is real and it is here');
   }
 
   // An average over no trainers is undefined, not zero.

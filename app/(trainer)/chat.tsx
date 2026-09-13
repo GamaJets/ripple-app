@@ -63,6 +63,8 @@ import {
   blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
   reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
 } from '../../src/lib/threadSafety';
+import { useRoster } from '../../src/ui/roster';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { BACK_ICON } from '../../src/ui/direction';
 
 /** The clip itself, in its own component so the player hook receives a settled
@@ -184,8 +186,39 @@ export default function CoachChat() {
    */
   const safety = useThreadSafety(clientId, 'coach');
   const OTHER = 'this client';
+  /**
+   * Whether there is anybody at the other end of this thread.
+   *
+   * ── The hole this closes ────────────────────────────────────────────────
+   *
+   * A client the coach typed into Add Client is a `coach_clients` row with no
+   * account behind it. `messages.client_id` references `clients(id)`, so such a
+   * person has no thread, cannot have one, and cannot receive anything written
+   * into one — but the read for them is not refused, it is answered with zero
+   * rows and no error, because `coach_clients.id` is `uuid DEFAULT
+   * gen_random_uuid()` and passes every shape test an id can be put to.
+   *
+   * This screen then drew the empty thread as a conversation nobody had started
+   * yet — "No messages yet — say hi to Priya" — over a live composer. A coach
+   * taking that invitation types a message to somebody who has never had the
+   * app, and finds out only when the insert is refused, by which time they have
+   * said it.
+   *
+   * `handAdded` comes off the roster, which is the only thing that knows which
+   * of its two tables each row came from, and `undefined` there is "the roster
+   * has not said yet" — which goes on asking rather than closing a real
+   * client's thread on a value nobody has supplied. See src/lib/clientRecord.ts.
+   * The read itself is left alone: `useThread` is shared with the member's own
+   * screen, the rows it returns for this id are genuinely none, and what was
+   * wrong was the sentence printed over them and the composer under it.
+   */
+  const rosterRow = useRoster().roster.find((c) => c.id === clientId) ?? null;
+  const hasAccount = clientIsQueryable(clientId, rosterRow?.handAdded);
   const blockNote = blockedComposerNote(safety.state, OTHER);
-  const canSend = canSendInto(safety.state);
+  // Two different reasons a message cannot go, and they are not folded into
+  // one: `safety` is a conversation that was closed, and `hasAccount` is a
+  // conversation that has never existed. Each says its own sentence below.
+  const canSend = canSendInto(safety.state) && hasAccount;
   const [reportFor, setReportFor] = useState<{ open: true; messageId: string | null } | null>(null);
   const [reportNote, setReportNote] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
@@ -441,15 +474,23 @@ export default function CoachChat() {
             </View>
           ) : null}
           {/* A thread that failed to load has not been read, so it cannot be
-              reported as one nobody has written in. */}
+              reported as one nobody has written in.
+
+              And a thread that cannot exist is neither of those. "No account"
+              goes FIRST, above the error branch, because a hand-added client
+              produces an empty thread whichever way the read went — the reason
+              is the person having no account, not the connection, and a coach
+              told to try again would be trying for ever. */}
           {msgs.length === 0 && status !== 'loading' ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center' }}>
-                {status === 'error'
-                  ? 'We could not load this conversation, so we cannot say whether there are messages in it.'
-                  : clientId
-                    ? `No messages yet — say hi${firstName ? ' to ' + firstName : ''}.`
-                    : 'This screen was opened without a client, so there is no thread to show.'}
+                {!clientId
+                  ? 'This screen was opened without a client, so there is no thread to show.'
+                  : !hasAccount
+                    ? `${firstName || 'This client'} was added to your book by hand and has no Repple account, so there is no thread here and nothing you write would reach them. This is not an unanswered conversation. Invite them from your client list and this opens properly from the day they join.`
+                    : status === 'error'
+                      ? 'We could not load this conversation, so we cannot say whether there are messages in it.'
+                      : `No messages yet — say hi${firstName ? ' to ' + firstName : ''}.`}
               </Text>
             </View>
           ) : null}
@@ -538,8 +579,12 @@ export default function CoachChat() {
             // The placeholder is the only thing naming this box, and a placeholder
             // is drawn only while it is EMPTY — so from the first keystroke it was
             // an unnamed field, and a closed conversation said nothing at all.
-            accessibilityLabel={canSend ? (firstName ? 'Message ' + firstName : 'Message your client') : 'This conversation is closed'}
-            placeholder={canSend ? (firstName ? 'Message ' + firstName + '…' : 'Message your client…') : 'This conversation is closed'}
+            // Two ways to be un-sendable, and they are different sentences. A
+            // hand-added client's thread was never opened and never closed —
+            // "This conversation is closed" would be a fourth wrong thing to
+            // tell a coach about somebody who has never had the app.
+            accessibilityLabel={canSend ? (firstName ? 'Message ' + firstName : 'Message your client') : !hasAccount ? 'There is no account to message yet' : 'This conversation is closed'}
+            placeholder={canSend ? (firstName ? 'Message ' + firstName + '…' : 'Message your client…') : !hasAccount ? 'No account to message yet' : 'This conversation is closed'}
             placeholderTextColor={t.ink3}
             style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, opacity: canSend ? 1 : 0.6 }} />
           {/* Disabled while a send is in flight: tapping twice would put the
@@ -552,7 +597,11 @@ export default function CoachChat() {
         {/* The state, in words, under the box. `blockedComposerNote` returns
             null for an unread state rather than guessing: a coach who has not
             blocked anybody must not be told they have. */}
-        {blockNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingBottom: sp.md }}>{blockNote}</Flag> : null}
+        {!hasAccount && clientId ? (
+          <Flag tone={t.ink3} style={{ paddingHorizontal: G, paddingBottom: sp.md }}>
+            {`${firstName || 'This client'} has no Repple account yet, so there is nowhere for a message to go. Invite them from your client list and the composer starts working from the day they join.`}
+          </Flag>
+        ) : blockNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingBottom: sp.md }}>{blockNote}</Flag> : null}
       </View>
 
       {/* ── the saved messages ───────────────────────────────────────────

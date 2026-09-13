@@ -25,12 +25,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   overlaps, insideNoticeWindow, noticeHoursOf, lateCancelFee, cancelWarningLine,
-  feeRecordedLine, waitlistLine, type CancellationPolicy,
+  feeRecordedLine, type CancellationPolicy,
 } from '../lib/booking';
+// NOT src/lib/booking.ts's `waitlistLine` any more. See the re-export below.
+import { waitlistLine } from '../lib/sessionWaitlist';
 import { VARIANT } from '../lib/variant';
 import type { TrainingSession } from '../lib/types';
 import type { DisputeKind } from '../lib/sessionDispute';
-import { NOT_MOVED, COACH_NOT_MOVED, type RescheduleRefusal, type RescheduleReport, type CoachMoveRefusal, type CoachMoveReport } from '../lib/reschedule';
+import { NOT_MOVED, COACH_NOT_MOVED, queueLength, type RescheduleRefusal, type RescheduleReport, type CoachMoveRefusal, type CoachMoveReport } from '../lib/reschedule';
 // Named explicitly. Without the import `reportError` resolves to the DOM global
 // of the same name, which takes ONE argument and swallows the context string —
 // so every report from this file would have arrived unattributable.
@@ -209,13 +211,32 @@ export interface ServerCancel {
   /** The client the slot went to off its waitlist, or null when nobody was
    *  waiting. An opaque id, exactly as `reofferSlot` already returns. */
   promotedClient: string | null;
-  /** How many are still waiting on that slot after the promotion. */
-  waiting: number;
+  /**
+   * How many are still waiting on that slot after the promotion, and NULL when
+   * nobody counted them.
+   *
+   * The same widening as `RescheduleReport.waiting` and `CoachMoveReport.waiting`
+   * in src/lib/reschedule.ts, against the same defect: this was read as
+   * `toNum(d?.waiting) ?? 0`, which turned an absent key, a null, an empty
+   * string and a NaN alike into a COUNTED zero. A count nobody took is not an
+   * empty queue, and it travels as null so that nothing built from it can say
+   * the queue was empty.
+   *
+   * Nothing renders this field today — `ptCancelLines` words the freed slot off
+   * `promoted` and `offerPushed` and never looks at the count. So this one is
+   * latent at both ends: the server always sends the key (see below) and no
+   * sentence reads it. It is widened anyway, because it is an exported field on
+   * a report two screens already pass around, and the first caller to word it
+   * would inherit the fabricated zero.
+   */
+  waiting: number | null;
 }
 
 const NOT_FREED: ServerCancel = {
   freed: false, late: false, noticeHours: null, policyApplies: false,
-  fee: null, currency: null, charged: false, promotedClient: null, waiting: 0,
+  // Null and not 0: a cancellation that was refused, or never reached the
+  // server, counted nobody. It did not count nobody waiting.
+  fee: null, currency: null, charged: false, promotedClient: null, waiting: null,
 };
 
 const toNum = (v: unknown): number | null => {
@@ -236,7 +257,11 @@ const toServerCancel = (d: any): ServerCancel => ({
   currency: typeof d?.currency === 'string' ? d.currency : null,
   charged: !!d?.charged,
   promotedClient: typeof d?.promoted === 'string' ? d.promoted : null,
-  waiting: toNum(d?.waiting) ?? 0,
+  // `queueLength` and not `toNum(…) ?? 0`. Imported from src/lib/reschedule.ts
+  // rather than written a third time: src/ui/coachMoveAt.ts holds the original
+  // private copy and reschedule.ts the exported one, and the note on the
+  // exported copy asks the next lane in this file to reach for it.
+  waiting: queueLength(d?.waiting),
 });
 
 // `outcome` and `outcome_at` have been on every one of these rows since
@@ -700,8 +725,19 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         fee: toNum(r.fee),
         currency: typeof r.currency === 'string' ? r.currency : null,
         promoted: !!r.promoted,
-        waiting: Number(r.waiting) || 0,
+        // `Number(r.waiting) || 0` until tonight, which read an absent key, a
+        // null, an empty string and a NaN alike as a counted zero — and 0 is
+        // what `rescheduleLines` says "nobody was waiting for it" about. A
+        // count nobody took is not an empty queue, so it travels as null.
+        waiting: queueLength(r.waiting),
       };
+      // A move that happened with no count of who is still in line for the hour
+      // it freed. The member's sentence now admits it rather than inventing an
+      // empty queue, and it is recorded here as well, because the report is the
+      // only place the shape of the server's answer can be seen from.
+      if (report.moved && report.waiting == null) {
+        reportError('sessions.reschedule', new Error('reschedule_my_session reported a move with no waiting count'), { session: fromId });
+      }
       // The calendar this device holds is now wrong in two places at once, and
       // both of them are the point of the screen. Re-read rather than patched:
       // the freed slot may already belong to whoever was first in line for it.
@@ -730,8 +766,20 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         reason: (r.reason ?? null) as CoachMoveRefusal | null,
         clientId: typeof r.client === 'string' ? r.client : null,
         promoted: !!r.promoted,
-        waiting: Number(r.waiting) || 0,
+        // The other half of the same defect, on the path the third arm of
+        // `coachMovedLine` was built for and could not be reached from: this
+        // line settled every unknown to 0, so the arm that says "no waitlist
+        // count came back" had no way of ever being taken from `doMove`. Same
+        // reading as `queueLength` in src/ui/coachMoveAt.ts, which is the other
+        // caller of the same server report.
+        waiting: queueLength(r.waiting),
       };
+      // Named rather than left to a support call: a move whose freed hour has
+      // no queue length beside it is the condition under which a coach would
+      // otherwise be told something nobody knows.
+      if (report.moved && report.waiting == null) {
+        reportError('sessions.rescheduleClient', new Error('reschedule_client_session reported a move with no waiting count'), { session: fromId });
+      }
       // Two rows on this device are now wrong at once and both are the point of
       // the screen. Re-read rather than patched: the freed hour may already
       // belong to whoever was first in line for it.
@@ -954,8 +1002,10 @@ export interface PtCancelOutcome {
   noticeHours: number | null;
   /** Whether the freed slot went straight to somebody on its waitlist. */
   promoted: boolean;
-  /** How many are still waiting on that slot afterwards. */
-  waiting: number;
+  /** How many are still waiting on that slot afterwards, and NULL when nobody
+   *  counted them. Carried straight from `ServerCancel.waiting` — see the note
+   *  there, including the part about nothing wording it yet. */
+  waiting: number | null;
   /** Whether the person who was promoted was told. Null when nobody was. */
   promotedTold: boolean | null;
   /** A credit was actually put back on a pack. False also covers "there was no
@@ -1037,7 +1087,9 @@ export async function cancelBookedSession(
   if (!res.freed) {
     return {
       freed: false, late: false, lateWhenAsked, charged: false, policyApplies: false, fee: null, currency: null,
-      noticeHours: null, promoted: false, waiting: 0, promotedTold: null,
+      // Null, for the reason on `NOT_FREED`: the server refused, so nobody was
+      // counted.
+      noticeHours: null, promoted: false, waiting: null, promotedTold: null,
       refunded: false, offeredTo: null, offerPushed: null, coachTold: false, packLeft: null,
     };
   }
@@ -1405,8 +1457,26 @@ export interface TakenSlot {
   sessionId: string;
   startsAt: string;
   durationMin: number;
-  waiting: number;
-  /** 1-based. 0 means this member is not on that queue. */
+  /**
+   * How many are in the queue for it, and NULL when nobody counted them.
+   *
+   * `toNum(r.waiting) ?? 0` until tonight, and 0 is the value `waitlistLine`
+   * says "Nobody is waiting for this slot yet." about — a claim about other
+   * people, made from an unknown, to a member deciding whether it is worth
+   * waiting. The widened `waitlistLine` in src/lib/sessionWaitlist.ts has the
+   * third sentence; this is the value that reaches it.
+   */
+  waiting: number | null;
+  /**
+   * 1-based. 0 means this member is not on that queue.
+   *
+   * Deliberately NOT widened alongside `waiting`, and it has the same defect:
+   * `toNum(r.my_position) ?? 0` reads an unread position as "you are not on this
+   * queue". app/(client)/calendar.tsx tests `k.myPosition > 0` to decide whether
+   * to draw the member as queued, and a `number | null` there is a type error in
+   * a file this lane does not own. The one-line change and the arm that goes
+   * with it are reported rather than made.
+   */
   myPosition: number;
 }
 export interface MyWaitlistRow {
@@ -1415,7 +1485,10 @@ export interface MyWaitlistRow {
   durationMin: number;
   trainerId: string;
   position: number;
-  waiting: number;
+  /** The queue length, and NULL when nobody counted it. Same widening and same
+   *  reason as `TakenSlot.waiting` above; app/(client)/bookings.tsx renders it
+   *  through the same sentence. */
+  waiting: number | null;
   /** Whether the slot is still somebody else's. False means it freed and did
    *  not come to this member — the queue moved past them, or the session was
    *  opened up rather than promoted. */
@@ -1450,7 +1523,9 @@ export function useSlotWaitlist(daysAhead: number = 60): {
   mine: MyWaitlistRow[];
   status: LoadStatus;
   reload: () => Promise<void>;
-  join: (sessionId: string) => Promise<{ ok: boolean; position?: number; waiting?: number; error?: string }>;
+  /** `waiting` is present on every `ok` answer and is null when the server sent
+   *  no count — never absent-meaning-unknown and never a fabricated 0. */
+  join: (sessionId: string) => Promise<{ ok: boolean; position?: number; waiting?: number | null; error?: string }>;
   leave: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
 } {
   const authRev = useAuthRevision();
@@ -1486,7 +1561,12 @@ export function useSlotWaitlist(daysAhead: number = 60): {
         sessionId: String(r.session_id),
         startsAt: r.starts_at,
         durationMin: toNum(r.duration_min) ?? 60,
-        waiting: toNum(r.waiting) ?? 0,
+        // `queueLength`, not `toNum(…) ?? 0`. See `TakenSlot.waiting`: a 0 here
+        // is the sentence "Nobody is waiting for this slot yet."
+        waiting: queueLength(r.waiting),
+        // Still settled to 0, and still wrong for the same reason. The caller
+        // that would have to change with it is another lane's file tonight, so
+        // this one is reported rather than widened — see the field's note.
         myPosition: toNum(r.my_position) ?? 0,
       })));
       setMine(((queue.data as any[]) ?? []).map((r) => ({
@@ -1495,7 +1575,7 @@ export function useSlotWaitlist(daysAhead: number = 60): {
         durationMin: toNum(r.duration_min) ?? 60,
         trainerId: String(r.trainer_id),
         position: toNum(r.queue_position) ?? 0,
-        waiting: toNum(r.waiting) ?? 0,
+        waiting: queueLength(r.waiting),
         stillTaken: !!r.still_taken,
       })));
       // The slots read has a ceiling of its own, below PostgREST's, and it had
@@ -1520,7 +1600,12 @@ export function useSlotWaitlist(daysAhead: number = 60): {
       if (error) return { ok: false, error: error.message };
       await load();
       const d = data as any;
-      return { ok: true, position: toNum(d?.position) ?? undefined, waiting: toNum(d?.waiting) ?? undefined };
+      // Null and not undefined when the count did not come back, so the unknown
+      // is a value the caller can branch on rather than an absent key.
+      // (app/(client)/calendar.tsx still writes `res.waiting ?? 1` at the one
+      // call site that alerts off this, inventing a queue of one out of the
+      // unknown. That file belongs to another lane tonight; it is reported.)
+      return { ok: true, position: toNum(d?.position) ?? undefined, waiting: queueLength(d?.waiting) };
     } catch (e: any) { return { ok: false, error: e?.message || 'Could not reach the server.' }; }
   }, [load]);
 
@@ -1556,7 +1641,12 @@ export function cancelWarningFor(
 
 /** A member's place in a queue, in words. Re-exported through this module so a
  *  screen importing the waitlist hook does not also have to reach into
- *  src/lib/booking.ts for the sentence that goes with it. */
+ *  src/lib/booking.ts for the sentence that goes with it.
+ *
+ *  It is now the WIDENED one in src/lib/sessionWaitlist.ts, which takes the
+ *  queue length as `number | null` and has a third sentence for the null; the
+ *  two counted arms are still src/lib/booking.ts's, delegated to. Both screens
+ *  that draw this import it from here, so neither had to change. */
 export { waitlistLine };
 
 /* ── The coach's side of both ──────────────────────────────────────────────

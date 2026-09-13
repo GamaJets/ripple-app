@@ -42,6 +42,10 @@
 import type { LoadStatus } from '../ui/loadStatus';
 import { readCappedByIds } from './cappedByIds';
 import { capLimit } from './rowCap';
+// The two counted arms of the sentence below, and the ordinal that goes in one
+// of them. Delegated to rather than restated: see the header above
+// `waitlistLine`.
+import { ordinal, waitlistLine as countedWaitlistLine } from './booking';
 
 type Queryable = { from: (table: string) => any };
 
@@ -156,4 +160,55 @@ export function waitlistWhoLine(
   const listed = shown.join(', then ');
   if (rest <= 0) return `First in line: ${listed}.`;
   return `First in line: ${listed}, and ${rest} more.`;
+}
+
+/* ── the queue length, when nobody counted it ───────────────────────────────
+ *
+ * `waitlistLine` in src/lib/booking.ts takes a queue length as a plain number
+ * and has two arms for it: some number of people are waiting, or "Nobody is
+ * waiting for this slot yet." There is a third state and there always was —
+ * nobody counted — and every reader of `waitlistable_slots`, `my_waitlist` and
+ * `join_session_waitlist` in src/ui/sessions.tsx settled it to 0 on the way in
+ * with `toNum(r.waiting) ?? 0`, so the "nobody" sentence was printed over an
+ * unknown.
+ *
+ * The count is widened where it is read; this is the sentence that goes with
+ * the widening. It lives here rather than in src/lib/booking.ts so that the
+ * module that owns the waitlist owns the words for it, and it delegates the two
+ * counted arms to the original rather than restating them — there is still one
+ * place that decides how a counted queue is worded.
+ *
+ * `position` is deliberately NOT widened with it. An unread position has the
+ * same defect (`toNum(r.my_position) ?? 0` reads as "you are not on this
+ * queue"), but app/(client)/calendar.tsx tests `k.myPosition > 0` to decide
+ * whether the member is on the list at all, and that file belongs to another
+ * lane tonight. See the note on `TakenSlot.myPosition` in src/ui/sessions.tsx.
+ */
+
+/**
+ * A member's place in a queue, in words, with the queue length allowed to be
+ * unknown.
+ *
+ * The null is tested FIRST, before either arm that compares the count against a
+ * number. `null > 0` and `null > 1` are both false in JavaScript, so a null
+ * reaching those tests falls silently into "Nobody is waiting for this slot
+ * yet." — which is the one sentence here that is a claim about other people,
+ * and the claim a member reads before deciding whether it is worth waiting.
+ * The same trap, and the same ordering, as `rescheduleLines` and
+ * `coachMovedLine` in src/lib/reschedule.ts.
+ */
+export function waitlistLine(position: number, waiting: number | null): string {
+  if (waiting == null) {
+    if (position <= 0) {
+      return 'No waitlist count came back for this slot, so we cannot say whether anybody is already in line for it. '
+        + 'Joining still puts you in the queue in the order you joined — open this screen again if you want the count first.';
+    }
+    if (position === 1) {
+      return 'You’re next in line — if it frees up it’s yours. No waitlist count came back with that, so we cannot say how many '
+        + 'are behind you, which changes nothing about your own place. Open this screen again if you want the count.';
+    }
+    return `You’re ${ordinal(position)} in line, and the slot goes to whoever is in front of you. No waitlist count came back `
+      + 'with that, so we cannot say how long the queue is, only where in it you are. Open this screen again if you want the count.';
+  }
+  return countedWaitlistLine(position, waiting);
 }

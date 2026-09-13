@@ -1824,11 +1824,29 @@ function BudgetForm({ category: initial, existing, w, today, ccy, tenantId, me, 
 }) {
   const [category, setCategory] = useState<GymCostCategory>(initial);
   const [amountText, setAmountText] = useState('');
-  // Defaults to the first day of the month ON SCREEN and not to today. An owner
-  // looking at August who types a budget means it to apply to August; seeding
-  // this with the gym's own today would silently start it in September for
-  // anybody reviewing a month that has ended, which is most of them.
-  const [startsOn, setStartsOn] = useState(w.firstDay);
+  /**
+   * The first day of the month ON SCREEN and not today. An owner looking at
+   * August who types a budget means it to apply to August; seeding this with
+   * the gym's own today would silently start it in September for anybody
+   * reviewing a month that has ended, which is most of them.
+   *
+   * Null meaning "nobody has chosen", and the month on screen read live, for
+   * the reason spelled out on `startPicked` in the arrangement form above.
+   * `useState(w.firstDay)` ran its initialiser once, at mount, and the month on
+   * screen is `picked ?? monthNow` where `monthNow` is the GYM's month and
+   * falls back to the reader's until the zone read lands. This form is not
+   * conditionally rendered and its `key` is the open-counter and the category,
+   * not the month, so it neither remounts when the zone arrives nor when the
+   * owner changes month: on the days either side of a month boundary a budget
+   * was started in a month the gym is not in — and part 2760 REFUSES an UPDATE
+   * to a budget's start, so that cannot be corrected, only superseded.
+   *
+   * The empty string is still a choice — `'' ?? x` is `''` — so clearing the
+   * box goes on working, and `budgetBlockers` is what refuses an empty start.
+   */
+  const [startPicked, setStartPicked] = useState<string | null>(null);
+  const startsOn = startPicked ?? w.firstDay;
+  const setStartsOn = setStartPicked;
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

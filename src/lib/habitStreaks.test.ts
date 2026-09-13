@@ -18,7 +18,7 @@
 // Compile with tsc, then run under plain node.
 import {
   habitStreaks, streakFor, previousDay, nextDay, daysBefore, habitStreakFigure,
-  habitStreakNote, habitStreakCaveat, STREAK_WINDOW_DAYS,
+  habitStreakNote, habitStreakCaveat, tickReadCoverage, STREAK_WINDOW_DAYS,
   type HabitTickRow, type HabitStreak,
 } from './habitStreaks';
 
@@ -486,7 +486,135 @@ eq(streakFor([], 'water'), null, 'and nothing to look up in an empty list');
   eq(r.from, days[399], 'and it opens where the walk says it does');
 }
 
-/* ── 9. the safety guard is a floor, not a quiet stop ─────────────────────── */
+/* ── 9. splitting one read into two claims ───────────────────────────────── */
+//
+// The provider makes ONE query and rests TWO claims on it, and they fail
+// independently. A truncated read leaves today's ticks whole — they sort first
+// — and the history behind them short. Rolling those into one status is how a
+// member whose record is long reads "Some of today's list is missing" over a
+// complete list, every day, for ever.
+
+const WINDOW_FROM = daysBefore(TODAY, STREAK_WINDOW_DAYS - 1)!;
+
+// A whole read. What it can speak for is the window it ASKED for — including
+// days with no rows in them, because a day with no rows in a complete read is a
+// day that genuinely has none.
+{
+  const c = tickReadCoverage(ticks('water', ['2026-09-13', '2026-09-12']), TODAY, WINDOW_FROM, false);
+  eq(c.coverFrom, WINDOW_FROM, 'a whole read speaks for the whole window');
+  eq(c.todayWhole, true, 'and today is whole');
+  eq(c.todayHabits.join(','), 'water', 'with today’s ticks picked out of the window');
+}
+
+// A whole read with nothing in it at all. Still speaks for the whole window:
+// an empty complete read is a genuinely empty window, which is the one case a
+// screen may say something about.
+{
+  const c = tickReadCoverage([], TODAY, WINDOW_FROM, false);
+  eq(c.coverFrom, WINDOW_FROM, 'an empty whole read still speaks for its window');
+  eq(c.todayWhole, true, 'and today is whole — there was simply nothing in it');
+  eq(c.todayHabits.length, 0, 'no ticks today');
+}
+
+// THE OFF-BY-ONE. On a truncated read the oldest day PRESENT is a partial day:
+// the thousand-row ceiling fell somewhere inside it, so some of its rows are
+// here and some are not. The oldest day that can be spoken for is the one
+// ABOVE it. Taking the oldest day present would state a run as a fact off a day
+// that was only half read.
+{
+  const rows = ticks('water', ['2026-09-13', '2026-09-12', '2026-07-04']);
+  const c = tickReadCoverage(rows, TODAY, WINDOW_FROM, true);
+  eq(c.coverFrom, '2026-07-05', 'a truncated read speaks for the day ABOVE its oldest, not for it');
+  eq(c.todayWhole, true, 'today survives, because the rows are ordered newest first');
+}
+
+// And the consequence, end to end.
+//
+// PRESENCE IS A FACT. Every one of these three days has a row in hand, so all
+// three count — including the oldest, which sits below the line. A truncated
+// read does not make the rows it returned less true; it makes the ones it did
+// not return unknown. The first version of the walk tested the boundary before
+// the row and so refused to count a day it was holding, reporting two where the
+// rows proved three.
+{
+  const days = ['2026-09-13', '2026-09-12', '2026-09-11'];
+  const cut = tickReadCoverage(ticks('water', days), TODAY, WINDOW_FROM, true);
+  const r = streakFor(habitStreaks(ticks('water', days), TODAY, { coverFrom: cut.coverFrom }), 'water')!;
+  eq(r.days, 3, 'every day with a row counts, boundary or no boundary');
+  eq(r.bounded, true, 'and the run is a floor, because the day below it cannot be seen');
+}
+
+// ABSENCE IS WHAT THE BOUNDARY COSTS. The same three ticked days, and a fourth
+// day below them on which the member ticked something ELSE. That row is in hand
+// too, so it is proof they were in the app and left this line — a real miss, and
+// the figure above it is a FACT even though the read was truncated.
+{
+  const rows = [
+    ...ticks('water', ['2026-09-13', '2026-09-12', '2026-09-11']),
+    ...ticks('steps', ['2026-09-10']),
+  ];
+  const cut = tickReadCoverage(rows, TODAY, WINDOW_FROM, true);
+  const r = streakFor(habitStreaks(rows, TODAY, { coverFrom: cut.coverFrom }), 'water')!;
+  eq(r.days, 3, 'three days');
+  eq(r.bounded, false, 'a miss proved by a row in hand ends the run as a fact, truncated or not');
+  eq(habitStreakCaveat(r), null, 'so there is nothing to qualify');
+}
+
+// The truncation reaching TODAY itself: a thousand rows all stamped today.
+// It should be impossible — the checklist is a dozen lines and the unique
+// constraint allows one row each — and "should be impossible" is the entire
+// reason src/lib/rowCap.ts exists, so it is checked rather than assumed.
+{
+  const c = tickReadCoverage(ticks('water', [TODAY]), TODAY, WINDOW_FROM, true);
+  eq(c.todayWhole, false, 'a cut that reaches today means today is a prefix of itself');
+  eq(c.coverFrom, nextDay(TODAY), 'and the read can speak for nothing at or below today');
+}
+
+// A truncated read with no usable row in it at all can vouch for nothing below
+// today. Not for the window it asked for — it never got there.
+{
+  const c = tickReadCoverage([], TODAY, WINDOW_FROM, true);
+  eq(c.todayWhole, false, 'nothing came back, so nothing is whole');
+  eq(c.coverFrom, TODAY, 'and the floor is today itself');
+}
+
+// The boundary must not depend on the caller's ORDER BY. The oldest day is
+// taken as a minimum over the rows rather than read off the end of the array,
+// so a provider that changes its ordering cannot silently move the line.
+{
+  const rows = ticks('water', ['2026-07-04', '2026-09-13', '2026-08-20']);
+  const asc = tickReadCoverage(rows, TODAY, WINDOW_FROM, true);
+  const desc = tickReadCoverage([...rows].reverse(), TODAY, WINDOW_FROM, true);
+  eq(asc.coverFrom, '2026-07-05', 'the oldest day is a minimum, not the last element');
+  eq(asc.coverFrom, desc.coverFrom, 'so the boundary does not move with the ordering');
+}
+
+// Unreadable rows do not move the boundary either — they are not days.
+{
+  const rows: HabitTickRow[] = [
+    ...ticks('water', ['2026-09-13', '2026-08-20']),
+    { habit: 'water', done_on: 'rubbish' },
+    { habit: '', done_on: '2026-01-01' },
+  ];
+  const c = tickReadCoverage(rows, TODAY, WINDOW_FROM, true);
+  eq(c.coverFrom, '2026-08-21', 'an unreadable row is not the oldest day read');
+  eq(c.todayHabits.join(','), 'water', 'and a nameless habit is not a tick');
+}
+
+// Today's ticks are deduped and ordered, and only today's. The read spans a
+// quarter and every row in it is a habit ticked on SOME day — feeding the lot
+// into the tick set would light up the checklist with anything ever kept.
+{
+  const rows = [
+    ...ticks('water', ['2026-09-13', '2026-09-13', '2026-06-20']),
+    ...ticks('steps', ['2026-09-13']),
+    ...ticks('sleep', ['2026-09-12']),
+  ];
+  const c = tickReadCoverage(rows, TODAY, WINDOW_FROM, false);
+  eq(c.todayHabits.join(','), 'steps,water', 'today only, deduped, in a stable order');
+}
+
+/* ── 10. the safety guard is a floor, not a quiet stop ────────────────────── */
 //
 // Every bound the walk has comes from data. A malformed one — a row dated in
 // the year 200, a window computed off a NaN — would otherwise walk a day at a

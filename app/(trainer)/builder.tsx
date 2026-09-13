@@ -64,6 +64,16 @@ import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
+// The coach's own standing cue for a movement, written once and carried into
+// every programme. A cue PREFILLS an empty note and NEVER touches a written
+// one — src/lib/coachCues.ts holds that rule and is the only place it is
+// implemented, so no call site on this screen can get it subtly wrong.
+import {
+  cueFor, cueRowFor, prefillNote, prefillDays, wouldPrefill, cueRefusal,
+  fetchMyCues, saveCue, deleteCue,
+  CUE_MAX, CUES_UNAVAILABLE_NOTE, NO_CUE_YET_NOTE, CUE_NEVER_OVERWRITES, USE_CUE_HINT,
+  type CueRead,
+} from '../../src/lib/coachCues';
 import { buildProgram, type Program, type ProgramDay } from '../../src/lib/programs';
 // A programme can now be more than one week. `programWeeks` is the ONE reader
 // that resolves the block, `withWeeks` the ONE writer that keeps `days` — which
@@ -929,6 +939,109 @@ export default function Builder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.templateId, templates.length]);
 
+  /* ── the coach's saved cues ───────────────────────────────────────────────
+   *
+   * Three states and they are three different facts, so they are three
+   * different values rather than one nullable list:
+   *
+   *   null            not read yet. Nothing is prefilled and no cue control is
+   *                   drawn, because "this movement has no cue" is not
+   *                   something we know yet.
+   *   {status:'read'} the table answered. An empty `cues` here really does mean
+   *                   this coach has written none.
+   *   {status:'absent'} supabase/parts/3150 has not been applied. See below.
+   *
+   * And `cueFailed` is the fourth, kept apart from all three: a read that fell
+   * over is not a coach with no cues, and the section says so rather than
+   * quietly offering nothing.
+   *
+   * ── WHY THIS READ CANNOT TAKE THE SCREEN DOWN ───────────────────────────
+   *
+   * Part 3150 is not applied to any database as this ships. PostgREST answers
+   * a select naming a table it has never heard of with PGRST205 — measured
+   * against this project's own REST endpoint, not assumed — and a screen that
+   * let that through would leave a coach unable to write a programme because
+   * of a feature they have never used. `fetchMyCues` converts exactly that
+   * code (and 42P01, its Postgres form) into 'absent' and throws everything
+   * else, so the builder degrades to precisely what it was before this
+   * feature existed: notes typed by hand, nothing prefilled, no control
+   * offered, and one sentence saying why.
+   */
+  const [cues, setCues] = useState<CueRead | null>(null);
+  const [cueFailed, setCueFailed] = useState(false);
+  const cuesLive = useRef(true);
+  useEffect(() => () => { cuesLive.current = false; }, []);
+  const loadCues = useCallback(async () => {
+    // With no server there are no saved cues and nothing to look up. 'absent'
+    // is the honest pair: the feature genuinely does not apply here, rather
+    // than having failed to be read.
+    if (!USE_SUPABASE) { setCues({ status: 'absent' }); setCueFailed(false); return; }
+    try {
+      const r = await fetchMyCues(supabase);
+      if (cuesLive.current) { setCues(r); setCueFailed(false); }
+    } catch (e) {
+      // Reported and SAID, never swallowed into an empty list. A coach whose
+      // cues did not come back must not be told they have none.
+      reportError('builder.cues', e);
+      if (cuesLive.current) { setCues(null); setCueFailed(true); }
+    }
+  }, []);
+  useEffect(() => { void loadCues(); }, [loadCues]);
+  /** The cue for a movement, or null — including while the read is still out,
+   *  which is why every caller of this is a prefill or a caption and never a
+   *  sentence claiming the coach wrote none. */
+  const cueFo = useCallback((name: string) => (cues ? cueFor(cues, name) : null), [cues]);
+
+  /** Which exercise's cue editor is open, and what is in the box. */
+  const [cueEditFor, setCueEditFor] = useState<{ name: string } | null>(null);
+  const [cueDraft, setCueDraft] = useState('');
+  const [cueBusy, setCueBusy] = useState(false);
+  const [cueSaid, setCueSaid] = useState<string | null>(null);
+  /** How many empty notes the last "fill from my cues" tap filled. Null until
+   *  it is tapped — a count of 0 is a real answer and is said out loud. */
+  const [cuesFilled, setCuesFilled] = useState<number | null>(null);
+
+  /**
+   * Save (or replace) this coach's cue for a movement.
+   *
+   * Replacing a cue is the coach changing their own default and is not the
+   * erasure this feature is careful about: not one note in not one client's
+   * programme is touched by it. Notes already prefilled from the old cue were
+   * written into their own rows the moment they were prefilled, and they stay
+   * exactly as they are — which is right, because those are what the coach
+   * actually told those people.
+   */
+  const commitCue = async (name: string) => {
+    if (cueBusy) return;
+    const refusal = cueRefusal(cueDraft, name);
+    if (refusal) { setCueSaid(refusal); return; }
+    setCueBusy(true); setCueSaid(null);
+    const r = await saveCue(supabase, name, cueDraft);
+    setCueBusy(false);
+    // Counted, not inferred. `saveCue` returns the row the server wrote back,
+    // and a write that came back with no row is a write that did not happen.
+    if (!r.ok) { setCueSaid(r.said); return; }
+    setCues((prev) => {
+      const base = prev && prev.status === 'read' ? prev.cues : [];
+      const rest = base.filter((c) => c.exerciseId !== r.cue.exerciseId);
+      return { status: 'read', cues: [...rest, r.cue] };
+    });
+    setCueEditFor(null); setCueDraft('');
+  };
+  /** Remove the cue. Nothing already written into a programme moves. */
+  const dropCue = async (name: string) => {
+    if (cueBusy) return;
+    setCueBusy(true); setCueSaid(null);
+    const r = await deleteCue(supabase, name);
+    setCueBusy(false);
+    if (!r.ok) { setCueSaid(r.said); return; }
+    const key = exerciseSlug(name);
+    setCues((prev) => (prev && prev.status === 'read'
+      ? { status: 'read', cues: prev.cues.filter((c) => c.exerciseId !== key) }
+      : prev));
+    setCueEditFor(null); setCueDraft('');
+  };
+
   const setDayFocus = (di: number, focus: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, focus } : d)));
   /**
@@ -946,8 +1059,52 @@ export default function Builder() {
    */
   const setDayCardio = (di: number, cardio: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, cardio: cardio.trim() ? cardio : undefined } : d)));
+  /**
+   * Add a movement to a day, carrying this coach's saved cue into its note.
+   *
+   * This is the moment the cue is FOR: a movement that has just this instant
+   * been added has no note by construction, so `prefillNote` fills it and
+   * there is nothing it could be overwriting. It still goes through
+   * `prefillNote` rather than assigning `cue` straight to `note`, because a
+   * second path that writes a note without asking that function is exactly how
+   * the never-overwrite rule stops being true.
+   *
+   * `undefined` and never '' when there is no cue — an empty string stored as
+   * a note draws an empty bubble under the movement in the client's app.
+   */
   const addExercise = (di: number, name: string, group: string) =>
-    setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: [...d.exercises, { key: nextKey(), name, group, sets: 3, reps: '10-12' }] } : d)));
+    setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: [...d.exercises, {
+      key: nextKey(), name, group, sets: 3, reps: '10-12',
+      note: prefillNote(undefined, cueFo(name)),
+    }] } : d)));
+  /**
+   * Fill every EMPTY note in this week from the saved cues, and say how many.
+   *
+   * Offered as a tap rather than run on load, for two reasons and the second
+   * is the one that matters. The first is timing: a programme can be loaded
+   * into the builder before the cue read comes back, so an automatic pass
+   * would fire for some coaches and not others with nothing on screen to say
+   * which. The second is that a coach opening a client's existing week should
+   * see exactly what that client is on — nothing should change under them
+   * without a tap and without a count.
+   *
+   * `prefillDays` is the same `prefillNote` applied across the week: a note
+   * with anything in it is returned by identity and is not considered, so this
+   * button cannot lose a word of what the coach wrote for this client. The
+   * count is of notes that were EMPTY and now are not, and it is reported even
+   * when it is zero — a silent no-op reads as a broken button.
+   */
+  const fillFromCues = () => {
+    if (!cues || cues.status !== 'read') return;
+    const before = days;
+    const after = prefillDays(before, cues);
+    let filled = 0;
+    after.forEach((d, di) => d.exercises.forEach((e, ei) => {
+      if (e !== before[di].exercises[ei]) filled += 1;
+    }));
+    if (filled) setDays(() => after);
+    setCuesFilled(filled);
+  };
   const removeExercise = (di: number, key: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.filter((e) => e.key !== key) } : d)));
 
@@ -2453,6 +2610,56 @@ export default function Builder() {
             </Text>
           ) : null}
 
+          {/* ── saved cues, said once ──────────────────────────────────────
+              Three different facts and three different sentences. A read that
+              FAILED is not a coach with no cues, and a database that has never
+              had supabase/parts/3150 applied is not either — so neither is
+              allowed to render as silence, and neither claims anything about
+              what this coach has written. */}
+          {cueFailed ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Flag tone={t.crit}>
+                Your saved cues could not be read, so nothing has been prefilled and no cue is shown below. This is not
+                a record that you have none. Every note here is exactly as you left it.
+              </Flag>
+              <Pressable onPress={() => { setCueFailed(false); void loadCues(); }}
+                accessibilityRole="button" accessibilityLabel="Try reading your saved cues again"
+                hitSlop={hitSlopFor(MIN_TARGET)}
+                style={{ minHeight: MIN_TARGET, alignSelf: 'flex-start', justifyContent: 'center',
+                         paddingHorizontal: sp.lg, marginTop: sp.sm,
+                         borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                <Text style={{ ...ty.caption, color: t.ink }}>Try Again</Text>
+              </Pressable>
+            </View>
+          ) : cues && cues.status === 'absent' ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Flag tone={t.ink3}>{CUES_UNAVAILABLE_NOTE}</Flag>
+            </View>
+          ) : cues && cues.status === 'read' && cues.cues.length && days.length ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{CUE_NEVER_OVERWRITES}</Text>
+              <Pressable onPress={fillFromCues}
+                accessibilityRole="button"
+                accessibilityLabel="Fill the empty notes in this week from your saved cues"
+                accessibilityHint="Notes you have already written are not changed."
+                hitSlop={hitSlopFor(MIN_TARGET)}
+                style={{ minHeight: MIN_TARGET, alignSelf: 'flex-start', justifyContent: 'center',
+                         paddingHorizontal: sp.lg, marginTop: sp.sm,
+                         borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                <Text style={{ ...ty.caption, color: t.ink }}>Fill Empty Notes From My Cues</Text>
+              </Pressable>
+              {/* Said even when it is zero. A button that appears to do nothing
+                  is a button a coach taps four more times. */}
+              {cuesFilled !== null ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                  {cuesFilled === 0
+                    ? 'Nothing to fill — every note in this week already has something in it, and none of them were changed.'
+                    : `${num(cuesFilled)} empty note${s(cuesFilled)} filled from your cues. Nothing you had already written was touched.`}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {/* Said once, at the top, and only when the coach has actually
               written one of the three. This line used to be an apology —
               `CLIENT_CANNOT_SEE_INTENSITY`, saying the client's Train tab drew
@@ -3173,6 +3380,124 @@ export default function Builder() {
                       accessibilityLabel={`Your notes on ${movement(e.name)}`}
                       multiline
                       style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
+                    {/* ── the coach's saved cue for this movement ────────────
+                        The note above is about THIS client on THIS day. The
+                        cue below is about the movement, is the same for
+                        everyone the coach trains, and is what fills the box
+                        above the next time they add this exercise to anybody.
+
+                        Nothing is drawn while the read is still out, and
+                        nothing is drawn on a database the part has not reached
+                        — the one sentence explaining that is said ONCE, in the
+                        Program section head, rather than forty times down a
+                        twelve-week block. `wouldPrefill` is what decides
+                        whether the Use control exists at all, so a note with
+                        anything in it never gets a button whose meaning is
+                        "replace what you wrote". */}
+                    {cues && cues.status === 'read' ? (() => {
+                      const saved = cueRowFor(cues, e.name);
+                      const editing = cueEditFor?.name === e.name;
+                      return (
+                        <View style={{ marginTop: sp.sm }}>
+                          {saved ? (
+                            <Text style={{ ...ty.caption, color: t.ink3 }}
+                              accessibilityLabel={`Your saved cue for ${movement(e.name)}: ${saved.cue}`}>
+                              Your cue · {saved.cue}
+                            </Text>
+                          ) : (
+                            <Text style={{ ...ty.micro, color: t.ink3 }}>{NO_CUE_YET_NOTE}</Text>
+                          )}
+                          {editing ? (
+                            <View style={{ marginTop: sp.sm }}>
+                              <TextInput
+                                value={cueDraft}
+                                onChangeText={setCueDraft}
+                                placeholder={`What you say about ${movement(e.name)} every time…`}
+                                placeholderTextColor={t.ink3}
+                                accessibilityLabel={`Your saved cue for ${movement(e.name)}`}
+                                maxLength={CUE_MAX}
+                                multiline
+                                style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
+                              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>{CUE_NEVER_OVERWRITES}</Text>
+                              {/* The refusal is a MARK plus ink, never red
+                                  words: a status colour is tuned to the 3:1 a
+                                  mark needs and not the 4.5:1 a sentence does,
+                                  and the sentence has to be readable by the
+                                  person whose cue was not saved. */}
+                              {cueSaid ? (
+                                <View style={{ marginTop: sp.xs }}>
+                                  <Flag tone={t.crit}>{cueSaid}</Flag>
+                                </View>
+                              ) : null}
+                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+                                <Pressable onPress={() => void commitCue(e.name)} disabled={cueBusy}
+                                  accessibilityRole="button" accessibilityState={{ disabled: cueBusy }}
+                                  accessibilityLabel={`Save your cue for ${movement(e.name)}`}
+                                  hitSlop={hitSlopFor(MIN_TARGET)}
+                                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg,
+                                           borderRadius: radius.pill, backgroundColor: t.surface2, opacity: cueBusy ? 0.5 : 1 }}>
+                                  <Text style={{ ...ty.caption, color: t.ink }}>{cueBusy ? 'Saving…' : 'Save Cue'}</Text>
+                                </Pressable>
+                                {saved ? (
+                                  <Pressable onPress={() => void dropCue(e.name)} disabled={cueBusy}
+                                    accessibilityRole="button" accessibilityState={{ disabled: cueBusy }}
+                                    accessibilityLabel={`Remove your saved cue for ${movement(e.name)}. Notes already written into programmes are not changed.`}
+                                    hitSlop={hitSlopFor(MIN_TARGET)}
+                                    style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg,
+                                             borderRadius: radius.pill, backgroundColor: t.surface2, opacity: cueBusy ? 0.5 : 1 }}>
+                                    <Text style={{ ...ty.caption, color: t.ink }}>Remove</Text>
+                                  </Pressable>
+                                ) : null}
+                                <Pressable onPress={() => { setCueEditFor(null); setCueSaid(null); }}
+                                  accessibilityRole="button" accessibilityLabel="Stop editing this cue"
+                                  hitSlop={hitSlopFor(MIN_TARGET)}
+                                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg }}>
+                                  <Text style={{ ...ty.caption, color: t.ink3 }}>Cancel</Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          ) : (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xs }}>
+                              {/* Offered ONLY over an empty note. This is the
+                                  never-overwrite rule expressed as a control
+                                  that does not exist rather than as one that
+                                  refuses. */}
+                              {wouldPrefill(e.note, saved?.cue) ? (
+                                <Pressable onPress={() => patchEx(di, e.key, { note: prefillNote(e.note, saved?.cue) })}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Use your saved cue as the note on ${movement(e.name)}`}
+                                  accessibilityHint={USE_CUE_HINT}
+                                  hitSlop={hitSlopFor(MIN_TARGET)}
+                                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg,
+                                           borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                                  <Text style={{ ...ty.caption, color: t.ink }}>Use My Cue</Text>
+                                </Pressable>
+                              ) : null}
+                              <Pressable
+                                onPress={() => {
+                                  setCueSaid(null);
+                                  // The box opens on the SAVED cue, or on what
+                                  // is in the note when there is none — which
+                                  // is the ordinary way a coach discovers this
+                                  // exists: they have just typed the sentence
+                                  // they always type.
+                                  setCueDraft(saved ? saved.cue : (e.note ?? '').trim());
+                                  setCueEditFor({ name: e.name });
+                                }}
+                                accessibilityRole="button"
+                                accessibilityLabel={saved
+                                  ? `Edit your saved cue for ${movement(e.name)}`
+                                  : `Save a cue for ${movement(e.name)}, used on every client from now on`}
+                                hitSlop={hitSlopFor(MIN_TARGET)}
+                                style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg,
+                                         borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                                <Text style={{ ...ty.caption, color: t.ink }}>{saved ? 'Edit Cue' : 'Save As My Cue'}</Text>
+                              </Pressable>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })() : null}
                   </View>
                 </Animated.View>
                 );

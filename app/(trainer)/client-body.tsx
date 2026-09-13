@@ -740,7 +740,36 @@ export default function ClientBody() {
               )}
             </Section>
 
-            {picked ? (
+            {picked && !askable ? (
+              /* ── the third answer ──────────────────────────────────────────
+                 It takes the WHOLE body rather than one section of it. Every
+                 panel below — the scan cadence, the scans, their profile, the
+                 tape, the sleep and water they share — is the same absent
+                 record said six ways, and each has its own sentence about the
+                 person. A notice on top of six of those is still six of those,
+                 and the cadence panel in particular is drawn under EVERY status
+                 by design, so it would have gone on saying how often somebody
+                 with no account is being scanned.
+
+                 The Unreadable notice below used to hedge at this case — "If
+                 they were added to your book by hand they have no account for
+                 scans to belong to, which reads the same way from here." It
+                 does not read the same way from here: `askable` knows, because
+                 the roster knows which of its two tables the row came from. So
+                 the guess is gone from that notice, where it was shown to every
+                 coach whose connection had merely dropped, and the case it was
+                 guessing at is this branch.
+
+                 The same distinction `wellnessPanel`'s `not-asked` kind keeps
+                 apart from `unreadable` in src/lib/coachWellness.ts. */
+              <View>
+                <Rule />
+                <Section>
+                  <Notice kicker="No account" title={`${fullName || 'This client'} has no Repple account`}
+                    note={`You added ${who} to your book by hand, so there is no account for a scan, a weigh-in, a tape measurement or a night's sleep to belong to. Nothing of theirs was asked for and nothing was refused — this is not an empty body-composition record and it is not a failed read. Invite them from your client list and this screen fills in from the day they accept.`} />
+                </Section>
+              </View>
+            ) : picked ? (
               <View>
                 <Rule />
 
@@ -767,7 +796,7 @@ export default function ClientBody() {
                 ) : board.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their scans could not be read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${voice.they} ${voice.have} never been scanned — that is a different fact and a different conversation. If they were added to your book by hand they have no account for scans to belong to, which reads the same way from here.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${voice.they} ${voice.have} never been scanned — that is a different fact and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>

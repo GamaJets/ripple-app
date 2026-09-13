@@ -703,7 +703,39 @@ export default function LogSession() {
    * similarity once told coaches that people with no account had disclosed no
    * injuries and not filled in their intake.
    */
-  const historyAskable = USE_SUPABASE && clientIsQueryable(picked, pickedRow?.handAdded);
+  /**
+   * Whether a session may be WRITTEN against this client at all.
+   *
+   * The same fact `historyAskable` is built on, held one step apart from it
+   * because the two questions differ by one term and that term matters in
+   * opposite directions. `USE_SUPABASE` belongs in the READ — a build with no
+   * backend has nothing to ask — but it must not reach the WRITE, where its
+   * only effect would be to disable Finish for every client in a no-backend
+   * build, including the ones this screen has always been able to log.
+   *
+   * ── what the write does without this ──────────────────────────────────────
+   *
+   * `workouts.user_id references profiles(id)` and the insert policy resolves
+   * `is_my_client()`, an EXISTS over `clients`. A hand-added client has neither
+   * — they are a `coach_clients` row and nothing else — so every entry on the
+   * sheet is refused, by the foreign key or by RLS, and `classifyWrite` reads
+   * both for what they are: a server that answered and declined. Offering the
+   * same bytes again gets the same answer for as long as that person has no
+   * account.
+   *
+   * The refusal ARRIVES honestly (src/ui/floorQueue.ts does not queue one, and
+   * this screen keeps the sheet on a refusal), but it arrives after twenty
+   * minutes of typing, against a name the picker is showing, with a sentence
+   * about the roster that is not the reason. And offline it is worse than a bad
+   * sentence: nobody answers, the act is QUEUED, the coach is told it is on the
+   * phone and going up, the sheet is cleared, and the next flush with signal
+   * meets the refusal and drops it — an hour of somebody's training gone with
+   * no screen left to say so. Neither ending is reachable if the write is
+   * refused here, before anything is sent and while the sheet is still on
+   * screen.
+   */
+  const clientLoggable = clientIsQueryable(picked, pickedRow?.handAdded);
+  const historyAskable = USE_SUPABASE && clientLoggable;
 
   useEffect(() => {
     const id = picked;
@@ -930,7 +962,13 @@ export default function LogSession() {
   // listed for. The check existed — at save, after the hour was typed. Held
   // here it costs a coach one tap at the top of the screen instead of the whole
   // session.
-  const ready = picked != null && hasSets && loadProblem() == null && whenProblem == null;
+  //
+  // And withheld for a client there is no record to write into, which is the
+  // second half of the same argument. `clientLoggable` is the whole of that
+  // decision and its docstring is the reason; held HERE it costs the coach the
+  // banner above the button instead of the session, which is what it cost when
+  // the check happened at the insert.
+  const ready = picked != null && clientLoggable && hasSets && loadProblem() == null && whenProblem == null;
 
   const save = async () => {
     // Synchronous, before the first await — see `saving`. This is the whole of
@@ -963,6 +1001,16 @@ export default function LogSession() {
       // `ready` already prevents. Kept as the second half of the belt: this is
       // a write into somebody's history and there is no undo on the other side.
       setFailure('Nobody is chosen yet, so there is nobody to log this against. Pick a client at the top of this screen.');
+      return;
+    }
+    if (!clientLoggable) {
+      // The same belt as the line above, for the same reason and with more at
+      // stake: `ready` already withholds the button, and this is what stands
+      // between a press that beat it and a write nothing on the other side can
+      // accept. Before `setBusy`, before the queue, before anything is sent —
+      // so the sheet is untouched and the coach is told so in the same breath.
+      setFailure(`${pickedName || 'That person'} has no Repple account, so there is no record for this session to go into and nothing has been sent. `
+        + 'What you have typed is still here. Send them your coaching code from their own screen, and this can be saved once they are on the app.');
       return;
     }
     const coachId = auth.user?.id;
@@ -1197,12 +1245,20 @@ export default function LogSession() {
                 set of guards — `ready` is the same predicate, so the two cannot
                 disagree about whether this session may be filed. */}
             <Cta label={busy ? 'Saving…' : 'Finish'} disabled={!ready || busy} onPress={save}
-              a11yLabel={picked ? `Finish and log this session to ${first}'s record` : 'Finish — pick a client first'} />
+              a11yLabel={!picked ? 'Finish — pick a client first'
+                : !clientLoggable ? `Finish — ${first} has no Repple account for this to be logged to`
+                : `Finish and log this session to ${first}'s record`} />
           </View>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-            {picked
-              ? `Goes into ${first}’s own record, marked as logged by you.`
-              : 'Pick who this was with, then add what they did. It goes into their own record, marked as logged by you.'}
+            {/* Not a promise this screen can keep for everybody on the book. A
+                hand-added client has no record for a session to go into, and
+                saying it does under a disabled button is the screen describing
+                somebody else's client. */}
+            {!picked
+              ? 'Pick who this was with, then add what they did. It goes into their own record, marked as logged by you.'
+              : clientLoggable
+                ? `Goes into ${first}’s own record, marked as logged by you.`
+                : `${first} has no Repple account yet, so there is no record for this to go into.`}
           </Text>
 
           {/* ── what is on the sheet, as it is typed ──────────────────────────
@@ -1246,6 +1302,29 @@ export default function LogSession() {
           })() : null}
 
           <Rule />
+
+          {/* ── the client this session cannot be filed against ──────────────
+              Said as soon as they are chosen and kept on screen while they
+              are, because the cost of saying it late is the whole sheet: a
+              hand-added client's insert is refused by the foreign key and by
+              RLS, and offline it is queued, reported as kept and dropped on the
+              next flush. `clientLoggable` carries the argument in full.
+
+              It says what happens to the typing as well as what does not
+              happen to the record. Nothing on this sheet is cleared or sent for
+              somebody with no account, and a coach standing in a gym needs to
+              know that before they decide whether to write the hour down on
+              paper. */}
+          {picked && !clientLoggable ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Flag tone={t.warn}>
+                {pickedName || 'This client'} was added by hand and has no Repple account, so there is no record
+                for a session to go into and Finish is withheld. Nothing you type here is lost — it stays on this
+                sheet. Send them your coaching code from their own screen, and this can be saved once they are on
+                the app.
+              </Flag>
+            </View>
+          ) : null}
 
           {failure ? (
             <View style={{ marginBottom: sp.lg }}>

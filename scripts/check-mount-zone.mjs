@@ -83,6 +83,17 @@
 //               carrying a day, so `function History({ today })` … `useState(today)`
 //               is seen. That is how the equipment page's defect was shaped and
 //               a gate that could not follow one prop would have missed it.
+//   through a memo
+//               `const w = useMemo(() => monthWindow(key), [key])` is the value
+//               `monthWindow(key)`, so `w` carries whatever `key` does. Without
+//               this the chain breaks in exactly one place and it is not a rare
+//               one: /accounting's window is built with `cutAtGym` and is seen
+//               on its face, and /costs' is built inside a memo and would not be.
+//   into an object literal
+//               `useState({ on: today })` holds a day as surely as
+//               `useState(today)`. The property NAMES are not values, which is
+//               what keeps `useState<Loaded>({ key: '', … })` on /costs quiet —
+//               `key` IS a day in that file and `{ key: '' }` is an empty string.
 //
 // Names are tracked per FILE, not per scope. Two different locals called
 // `today` in one file are treated as the same value. That is an
@@ -331,9 +342,66 @@ function helperCarries(operand, names) {
   return operands(m[2]).some((a) => isName(a, names) || DAY_SOURCE.test(a));
 }
 
+/**
+ * The value inside a wrapper that hands its callback's answer straight back:
+ * `useMemo(() => monthWindow(key), [key])` IS `monthWindow(key)`.
+ *
+ * Without this the chain breaks at exactly one place in this tree and it is not
+ * a rare one — studio-web/app/costs/page.tsx builds its month window as
+ * `useMemo(() => monthWindow(key), [key])`, and a gate that could not see
+ * through the memo would report the /accounting form seeded from a window and
+ * stay silent on the /costs one two files away.
+ */
+function unwrap(operand) {
+  const memo = /^use(?:Memo|Callback)\s*\((.*)\)$/s.exec(operand.trim());
+  if (memo) return operands(memo[1])[0] ?? null;
+  const arrow = /^\(?\s*\)?\s*=>\s*(.*)$/s.exec(operand.trim());
+  if (arrow) return arrow[1];
+  return null;
+}
+
+/** The VALUES of an object literal — `useState({ on: today })` holds a day as
+ *  surely as `useState(today)` does, and the property NAMES are not values:
+ *  `{ key: '' }` on /costs seeds an empty string and must stay quiet. */
+function objectValues(operand) {
+  const t = operand.trim();
+  if (!t.startsWith('{') || !t.endsWith('}')) return null;
+  const inner = t.slice(1, -1);
+  const props = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) { props.push(inner.slice(start, i)); start = i + 1; }
+  }
+  props.push(inner.slice(start));
+  // The name before the first top-level colon is a KEY and is not a value. This
+  // is the difference between reading `{ key: '', costs: reading() }` on /costs
+  // as the empty string it is and reading it as the month `key` — which is a
+  // day name in that file, and which the first draft of this function flagged.
+  const values = props.map((p) => {
+    let d = 0;
+    for (let i = 0; i < p.length; i++) {
+      const c = p[i];
+      if (c === '(' || c === '[' || c === '{') d++;
+      else if (c === ')' || c === ']' || c === '}') d--;
+      else if (c === ':' && d === 0) return p.slice(i + 1);
+    }
+    return p;                       // `{ today }` — shorthand, so the name IS the value
+  });
+  return values.join(' , ');
+}
+
 /** Does this expression hand on a day it was given? */
-const carries = (text, names) =>
-  operands(text).some((op) => isName(op, names) || helperCarries(op, names));
+function carries(text, names, depth = 0) {
+  return operands(text).some((op) => {
+    if (isName(op, names) || helperCarries(op, names)) return true;
+    if (depth >= 2) return false;
+    const inner = unwrap(op) ?? objectValues(op);
+    return inner != null && (DAY_SOURCE.test(inner) || carries(inner, names, depth + 1));
+  });
+}
 
 /**
  * Every identifier in this file that carries a day, a month or an instant
@@ -411,13 +479,25 @@ function walk(dir, out = []) {
  *              author quietly annotating other people's code is how a rule gets
  *              weakened by the person least placed to judge it.
  *
- * Nine entries on the first run, in six files. Five of them are real and unfixed
- * — this gate was written the night the five sites named in the header above
- * were repaired by hand, and it found four MORE of the same shape that the hand
- * sweep had not reached, plus the retention log's wall-clock box.
+ * Ten entries on the first run, in seven files: six [fix] and four [annotate].
+ *
+ * This gate was written the night the five sites named in the header above were
+ * repaired by hand, so none of those is here — and it found six MORE of the same
+ * shape that the hand sweep had not reached: the tax filing form and the chase
+ * log on /accounting, the budget form on /costs, and the retention log's wall
+ * clock. A gate written after a sweep and finding six the sweep missed is the
+ * argument for writing it.
+ *
+ * Five of those six are now repaired and their entries are gone from the list
+ * below — the four in `Filed` and `Chasing` on /accounting, and `BudgetForm`'s
+ * `startsOn` on /costs. All five hold `useState<string | null>(null)` and
+ * render `picked ?? <the live default>`, the shape named above; the two places
+ * that re-seeded a box on opening a form now set null rather than the value,
+ * because a re-seed is the same latch taken at the click instead of at mount.
+ * The count came down with the work, which is the only way this list stays
+ * worth reading.
  */
 const KNOWN = new Map([
-  ['studio-web/app/accounting/page.tsx', { count: 4, fix: '[fix] all four are in `Filed` and `Chasing`. `filedOn` and `chasedOn` take `today` — the same `gymDay(Date.now(), zone) ?? isoDate(new Date())` line `Register` twenty lines up has already been repaired for — and `filedOn` is the record of whether a tax deadline was met, which `filingBlockers` then judges against. `periodFrom`/`periodTo` take `w.firstDay`/`w.lastDay`: those day strings do not move with the zone, but the MONTH they come from does — `key` is `gymRecentMonths(2, zone, …).keys[1]`, and with no zone that is the READER\'s month — so on the days either side of a month boundary the period boxes hold a month the gym is not in. Same repair as `Register`: hold `useState<string | null>(null)` and render `picked ?? today`.' }],
   ['studio-web/app/retention/page.tsx', { count: 1, fix: '[fix] `LogForm`\'s `when` is `gymWallValue(Date.now(), zone) ?? localNow()` latched at mount, and the comment above it says in as many words that the reader\'s local parts in this field are the defect it was written to remove. At mount `zone` is null, `gymWallValue` returns null and `localNow()` — the browser\'s wall clock — is what goes in the box, which is then read back by the rest of the console as the gym\'s. Hold null for "nobody has chosen" and render `picked ?? gymWallValue(Date.now(), zone) ?? localNow()`.' }],
   ['studio-web/app/money/page.tsx', { count: 1, fix: '[annotate] `startedOn` is seeded at mount AND corrected by an effect on `[zone]` that only overwrites a value the component itself seeded — `seeded`, a ref sentinel, so a date somebody typed is never clobbered by a late tenant read. That is the second honest answer to this bug and it is already correct. What is missing is the marker: `mount-zone-ok:` saying the effect below corrects it and the sentinel is what makes that safe.' }],
   ['studio-web/app/analytics/page.tsx', { count: 1, fix: '[annotate] `const [now] = useState(() => Date.now())` freezes an INSTANT on purpose, so the month counted as "running" cannot change underneath a table somebody is reading. scripts/check-frozen-day.mjs names this exact line as a deliberate and correct freeze. Mark it `mount-zone-ok:` saying it is a reporting instant and not a day anybody files against.' }],
@@ -469,8 +549,24 @@ for (const f of files) {
     // mentions a day-shaped name cannot be mistaken for an initialiser.
     const open = src.indexOf('(', i + 8);
     if (open < 0) continue;
+    // Between `useState` and its `(` there may be a type argument and nothing
+    // else. It has to be allowed to be an arbitrary type — `useState<{ key:
+    // string; books: Books }>(…)` is written here — so the test is that the
+    // angle brackets BALANCE rather than that the text looks simple. An earlier
+    // draft whitelisted the characters and silently skipped every state whose
+    // type was an object literal, which is not a hole a gate should have.
     const between = src.slice(i + 8, open);
-    if (/[^\s<>|&,[\]{}()A-Za-z0-9_$.'"]/.test(between.replace(/\s/g, ''))) continue;
+    if (!/^\s*$/.test(between)) {
+      const t = between.trim().replace(/=>/g, '');
+      if (!t.startsWith('<') || !t.endsWith('>')) continue;
+      let depth = 0, ok = true;
+      for (const c of t) {
+        if (c === '<') depth++;
+        else if (c === '>') { depth--; if (depth < 0) { ok = false; break; } }
+        else if (depth === 0) { ok = false; break; }
+      }
+      if (!ok || depth !== 0) continue;
+    }
     const text = callText(src, open);
     if (!text) continue;
     const arg = text.slice(1, -1);

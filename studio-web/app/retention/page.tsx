@@ -73,6 +73,8 @@ import { fetchClasses } from '@lib/gymSchedule';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { gymLink, noGymNote } from '@lib/gymLink';
 import { parseGymZone, gymWallValue, instantAtGym } from '@lib/gymZone';
+import { gymTodayWindow } from '@lib/gymToday';
+import { calendarDateText } from '@lib/gymWhen';
 import { readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
 import { fetchSessions } from '@lib/gymSessions';
@@ -82,6 +84,7 @@ import { Banner } from '@/components/Banner';
 import { num as groupNum } from '@/lib/num';
 import {
   buildGymRetention, headline, suppressionNote, activityFor,
+  termHeadline, termLine, compareByTermEnd,
   type RetentionRecord, type RetentionRow, type Cohort, type GymRetention,
 } from '@lib/gymRetention';
 import {
@@ -262,7 +265,7 @@ export default function RetentionPage() {
   // helper, so the cohort spine, the drift windows, every cooldown and every
   // follow-up window cannot land either side of a month boundary — or either
   // side of midnight — and disagree with each other on the same screen.
-  const view = useMemo(() => buildView(wide, contacts), [wide, contacts]);
+  const view = useMemo(() => buildView(wide, contacts, zone), [wide, contacts, zone]);
   const { rec, g, surfaced, followUps, tally } = view;
 
   // Four states, not two: still reading, nobody signed in, a question this
@@ -411,6 +414,11 @@ export default function RetentionPage() {
       ) : null}
 
       <Bands g={g} loading={loading} />
+      {/* Immediately under the bands and deliberately NOT inside them. The
+          bands are what attendance suggests; this is what the record states,
+          and the two are never added together — see the section header in
+          src/lib/gymRetention.ts above ENDING_SOON_DAYS. */}
+      <Ending g={g} rec={rec} loading={loading} />
       <Cohorts g={g} loading={loading} />
       <Loop
         g={g}
@@ -442,9 +450,21 @@ interface View {
   tally: FollowUpTally | null;
 }
 
-function buildView(wide: RetentionRecord, contacts: Slice<Contact>): View {
+function buildView(wide: RetentionRecord, contacts: Slice<Contact>, zone: string | null): View {
   const now = Date.now();
   const cut = now - WINDOW_DAYS * DAY;
+
+  // The console's "today" is the GYM's day, and this is the one place it comes
+  // from. `tenants.timezone` set and usable gives `basis: 'gym'`; unset, in
+  // flight, or a zone this browser's IANA database cannot resolve all give the
+  // READER's day with `NO_ZONE_NOTE` attached — which the section below prints,
+  // because a contract-end band drawn on a bookkeeper's laptop in Lisbon for a
+  // gym in Dubai is a day out for four hours of every day and nothing on the
+  // screen would otherwise say so.
+  //
+  // Taken from the same `now` as everything else on this page, so the fortnight
+  // and the drift windows cannot land either side of midnight and disagree.
+  const today = gymTodayWindow(zone, now);
 
   // Narrow the wide reads back to the retention window. A row whose timestamp
   // will not parse is KEPT, exactly as it was before this filter existed — the
@@ -457,7 +477,7 @@ function buildView(wide: RetentionRecord, contacts: Slice<Contact>): View {
     sessions: narrow(wide.sessions, (s) => !(Date.parse(s.startsAt) < cut)),
   };
 
-  const g = buildGymRetention(rec, { now });
+  const g = buildGymRetention(rec, { now, today });
 
   // Activity for the follow-up windows, from the WIDE reads — the point of
   // reading 150 days. `buildDossiers` and `activityFor` are the same two
@@ -735,6 +755,173 @@ function Bands({ g, loading }: { g: GymRetention; loading: boolean }) {
           ) : null}
         </div>
       ) : null}
+    </Section>
+  );
+}
+
+/* ── memberships that end ──────────────────────────────────────────────────── */
+
+/**
+ * The other evidence stream, in its own section, on purpose.
+ *
+ * This page ranked departure risk purely on behavioural drift and never read
+ * `memberships.ends_on` at all, though `Membership` has always carried it and
+ * /members has always shown it as a column. A membership ending in twelve days
+ * is the most certain departure a gym has, and the screen built to predict
+ * departures could not see it.
+ *
+ * ── Why it is not a column in the band table and not a term in the score ────
+ *
+ * Because they are different kinds of claim. A member who trains four times a
+ * week and whose contract ends on Friday is not "medium risk"; she is a
+ * near-certain departure with good attendance, and a blended figure would rank
+ * her below somebody who has merely gone a bit quiet — the one of the two the
+ * gym does not need to ring this week. So the two stand side by side: the
+ * pattern column in the roster below shows her band, this section shows her
+ * date, and the person reading does the combining. Nothing on this page
+ * averages them.
+ *
+ * Expired is its own group inside the section rather than the top of the
+ * ending list, because an end date that has already passed while the status
+ * still says Active is not a forecast at all — it is the state
+ * `datesNotes` warns an owner about in so many words, a member training on a
+ * contract the record says has run out, and it is acted on by a different
+ * person on a different day.
+ */
+function Ending({ g, rec, loading }: {
+  g: GymRetention; rec: RetentionRecord; loading: boolean;
+}) {
+  const t = g.term;
+  // Null only when no day was supplied, which cannot happen from this page —
+  // `gymTodayWindow` always returns one. Rendered rather than crashed on, so a
+  // future caller that drops the option gets a sentence instead of a blank.
+  if (!t) {
+    return (
+      <Section title="Memberships that end" sub="What the record states, not what attendance suggests.">
+        <p style={{ margin: 0, padding: '22px 16px', color: 'var(--ink2)', fontSize: 13.5 }}>
+          No day was supplied to measure end dates against, so none are judged.
+          This is not a gym with nothing ending; it is a question nobody asked.
+        </p>
+      </Section>
+    );
+  }
+
+  const rows = g.rows == null
+    ? null
+    : [...g.rows].filter((r) => r.term?.state === 'ending' || r.term?.state === 'expired')
+      .sort(compareByTermEnd);
+
+  const cols: Column<RetentionRow>[] = [
+    {
+      key: 'name', header: 'Member', value: (r) => r.name ?? '￿',
+      render: (r) => (
+        <a href={`/members?member=${encodeURIComponent(r.memberId)}`}>
+          {r.name ?? <span className="dash">unnamed account</span>}
+        </a>
+      ),
+    },
+    {
+      key: 'ends', header: 'Ends', value: (r) => r.term?.endsOn ?? null,
+      // `calendarDateText`: a calendar day in the reader's locale and NO zone,
+      // because `ends_on` is already a day and asking which day it falls on is
+      // a question with no content. The gym's zone belongs to the "today" this
+      // was compared against, and that is disclosed once at the foot.
+      render: (r) => <span>{calendarDateText(r.term?.endsOn) ?? <span className="dash">—</span>}</span>,
+    },
+    {
+      key: 'when', header: 'How far off', value: (r) => r.term?.days ?? null, numeric: true,
+      render: (r) => (
+        <span style={{
+          whiteSpace: 'normal',
+          color: r.term?.state === 'expired' ? 'var(--crit)' : 'var(--ink2)',
+        }}>{termLine(r.term)}</span>
+      ),
+    },
+    {
+      // The column that proves the two are not averaged: her band is printed
+      // beside her date, unchanged, and neither has moved the other.
+      key: 'band', header: 'Pattern', value: (r) => r.drift ? -bandOrder(r.drift) : null,
+      render: (r) => r.drift
+        ? <span style={{ color: driftColour(r.drift) }}>{DRIFT_LABEL[r.drift.status]}</span>
+        : <span className="dash">not judged</span>,
+    },
+    {
+      key: 'status', header: 'Membership', value: (r) => r.status,
+      render: (r) => r.status
+        ? <span style={{ textTransform: 'capitalize' }}>{r.status}</span>
+        : <span className="dash">—</span>,
+    },
+  ];
+
+  const line = termHeadline(g);
+
+  return (
+    <Section
+      title="Memberships that end"
+      sub="What the record states rather than what attendance suggests — so a member can be training four times a week and still be certain to leave. These two kinds of evidence are never added together."
+    >
+      {loading ? <Loading /> : null}
+      {!loading && rec.memberships.state === 'failed' ? (
+        <Failed reason={(rec.memberships as { reason: string }).reason} what="the membership list" />
+      ) : null}
+      {/* A list over a prefix of the gym is not the gym's list. Every count is
+          withheld and the reason is on the screen rather than in the module. */}
+      {!loading && !t.whole && rec.memberships.state !== 'failed' ? (
+        <Banner tone="crit">
+          The roster did not come back whole, so nothing here is counted. A figure such as
+          &ldquo;six memberships end this fortnight&rdquo; over part of the gym reads as complete and is
+          a fraction — and the members past the ceiling are exactly the ones nobody would think to
+          look for.
+        </Banner>
+      ) : null}
+
+      {!loading && t.whole ? (
+        <div style={{ padding: '16px 16px 0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+            <Legend colour="var(--crit)" n={t.ending ?? 0} title={`Ends within ${t.soonDays} days`}
+                    note="The most certain departure a gym has. Ring about the renewal, whatever their attendance says." />
+            <Legend colour="var(--warn)" n={t.expired ?? 0} title="Already ran out"
+                    note="The end date has passed and the status still says live. An end date does not close a membership by itself — this is a row to fix, not a forecast." />
+            <Legend colour="var(--good)" n={t.openEnded ?? 0} title="Open-ended"
+                    note="No end date recorded, which is a fact and not a gap: nothing is due to run out. It says nothing about whether they are still training." />
+            <Legend colour="var(--ink3)" n={t.unreadable ?? 0} title="End date unreadable"
+                    note="A date is recorded and this build cannot read it, which is not the same as no date. Nobody can say when their access runs out." />
+          </div>
+          {line ? (
+            <p style={{ margin: '16px 0 0', fontSize: 13, color: 'var(--ink2)', maxWidth: '72ch' }}>{line}</p>
+          ) : null}
+          {/* Never optional. A gym on rolling monthly plans will see most of its
+              roster stand in this list across a month, and without this sentence
+              that reads as a crisis. */}
+          <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '72ch' }}>{t.rollingNote}</p>
+        </div>
+      ) : null}
+
+      {rows && rows.length ? (
+        <div style={{ marginTop: 14 }}>
+          <DataTable noun="memberships"
+            rows={rows} columns={cols} rowKey={(r) => r.memberId}
+            empty="Nothing ends in this window."
+          />
+        </div>
+      ) : null}
+      {!loading && rows && rows.length === 0 && t.whole ? (
+        <p style={{ margin: 0, padding: '16px', color: 'var(--ink3)', fontSize: 13 }}>
+          Nothing ends in the next {t.soonDays} days and nothing has already run out. That is a
+          statement about contracts only — the bands above are where a member who has quietly
+          stopped coming shows up.
+        </p>
+      ) : null}
+
+      {/* Whose Friday this was. Printed here, once, under the figures it
+          describes, because a gym with no timezone set is drawing this on the
+          reader's laptop and two colleagues in two countries would otherwise
+          disagree about which memberships have run out. */}
+      <p style={{ margin: 0, padding: '12px 16px 16px', fontSize: 12, color: 'var(--ink3)' }}>
+        {t.basis === 'gym'
+          ? <>Measured against {calendarDateText(t.today)}, the gym&rsquo;s own day.</>
+          : <>Measured against {calendarDateText(t.today)} — {t.note}</>}
+      </p>
     </Section>
   );
 }
@@ -1398,6 +1585,34 @@ function Roster({ g, rec, contacts, surfaced }: {
         : s.row.lastSeenDays === 0 ? 'today' : `${s.row.lastSeenDays}d ago`,
     },
     { key: 'joined', header: 'Joined', value: (s) => s.row.joinedOn },
+    {
+      // SHOWN here, never ranked on. The surfacing order above is drift, and
+      // the coach's client book uses the same rule — folding a contract date
+      // into it would move members in both lists for a reason the coach's book
+      // knows nothing about. So the date appears beside the band and the
+      // reader combines them; the list that IS ordered by date is its own
+      // section, above.
+      //
+      // `value` is still the date, so a reader who clicks this header gets a
+      // second view of the same rows rather than a second opinion about them.
+      key: 'ends', header: 'Contract ends', value: (s) => s.row.term?.endsOn ?? null,
+      render: (s) => {
+        const t = s.row.term;
+        if (!t) return <span className="dash">not judged</span>;
+        // Each of the three absences gets its own words. A shared dash here is
+        // exactly what let "open-ended" and "we could not read the date" look
+        // like the same empty cell.
+        if (t.state === 'open-ended') return <span className="dash">open-ended</span>;
+        if (t.state === 'unreadable') return <span style={{ color: 'var(--warn)' }}>unreadable</span>;
+        if (t.state === 'not-on-books') return <span className="dash">none live</span>;
+        return (
+          <span
+            style={{ color: t.state === 'expired' ? 'var(--crit)' : t.state === 'ending' ? 'var(--warn)' : 'var(--ink2)' }}
+            title={termLine(t) ?? undefined}
+          >{calendarDateText(t.endsOn)}</span>
+        );
+      },
+    },
     {
       key: 'status', header: 'Membership', value: (s) => s.row.status,
       render: (s) => s.row.status

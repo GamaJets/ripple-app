@@ -68,6 +68,12 @@ import { MEMBER_CONSENT_NOTE, clipRefusal, clipRefusalLine } from '../../src/lib
 import { useSettings } from '../../src/ui/settings';
 import { exerciseIndex } from '../../src/lib/exerciseHistory';
 import { exerciseSlug } from '../../src/lib/exerciseId';
+// What this member's own coach says about this movement, every time, to
+// everybody they train. Separate from the note on a particular programme day,
+// which is about this member on that day and arrives with the programme.
+import { fetchCoachCue, cueFor, type CueRead } from '../../src/lib/coachCues';
+import { reportError } from '../../src/lib/reportError';
+import { USE_SUPABASE } from '../../src/lib/config';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -135,11 +141,53 @@ export default function ExerciseScreen() {
   const clipWorkoutId = clipFor
     ? (log.find((e) => e.t === clipFor.t && e.exercise === clipFor.exercise)?.id ?? null)
     : null;
-  // Three reads: the movement itself, the coach's clips for it, and this
-  // member's own history of the lift underneath.
+  /* ── this member's coach's cue for this movement ─────────────────────────
+   *
+   * No coach id is sent, and that is the security property rather than a
+   * convenience: the select policy in supabase/parts/3150 admits exactly the
+   * rows whose `coach_id` is the trainer of the signed-in client, so there is
+   * no argument this screen could carry that would widen it to a stranger's
+   * cues. (`cd.trainerId` is read a hundred lines above for the clip and does
+   * not exist on `useClientData` — it is cast through `any` and is always
+   * null. Nothing here depends on it.)
+   *
+   * ── This read must not be able to take the screen down ─────────────────
+   *
+   * supabase/parts/3150 is not applied to any database as this ships, and
+   * PostgREST answers a select naming a table absent from its schema cache
+   * with PGRST205 — measured against this project's own REST endpoint. So the
+   * read is not attempted at all without a server, and where it is attempted
+   * `fetchCoachCue` turns that code (and 42P01) into 'absent' and throws
+   * everything else. 'absent' draws NOTHING: there is no cue to show and no
+   * sentence is owed to a member about a feature their coach has not been
+   * given yet. A read that genuinely failed is held as `cueFailed` and says so
+   * rather than being rendered as a coach who wrote nothing — because "your
+   * coach left no cue" is a claim about their coach.
+   */
+  const [cue, setCue] = useState<CueRead | null>(null);
+  const [cueFailed, setCueFailed] = useState(false);
+  const reloadCue = useCallback(async () => {
+    if (!USE_SUPABASE || !name) { setCue(null); setCueFailed(false); return; }
+    setCueFailed(false);
+    try {
+      setCue(await fetchCoachCue(supabase, name));
+    } catch (e) {
+      reportError('clientExercise.cue', e);
+      // Null and not an empty read. An empty read would render as "your coach
+      // has written nothing", which is a statement about their coach made from
+      // a request that never came back.
+      setCue(null); setCueFailed(true);
+    }
+  }, [name]);
+  useEffect(() => { setCue(null); void reloadCue(); }, [reloadCue]);
+  const coachCue = cue ? cueFor(cue, name) : null;
+
+  // Four reads: the movement itself, the coach's clips for it, the coach's own
+  // cue, and this member's own history of the lift underneath. The cue is in
+  // here because the sentence shown when it fails tells them to pull down.
   const pull = usePullToRefresh(useCallback(() => {
-    void reloadDetail(); void reloadVideos(); reloadLog();
-  }, [reloadDetail, reloadVideos, reloadLog]));
+    void reloadDetail(); void reloadVideos(); reloadLog(); void reloadCue();
+  }, [reloadDetail, reloadVideos, reloadLog, reloadCue]));
   const wu = useSettings().weightUnit;
   // The member's weight over time, so a set of pull-ups is priced at the body
   // that did them rather than left out of every figure on the panel below. An
@@ -160,6 +208,7 @@ export default function ExerciseScreen() {
     [log, weightSeries, slug, logStatus],
   );
   const [saving, setSaving] = useState(false);
+
 
   const G = layout.gutter;
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
@@ -195,6 +244,29 @@ export default function ExerciseScreen() {
         </View>
         {display?.note ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>
+        ) : null}
+
+        {/* ── what your coach says about this one ────────────────────────
+            Drawn only when there IS a cue. Absence is silent on purpose:
+            a member whose coach has written none, and a member whose gym has
+            not had this switched on, are owed no sentence about a feature
+            that is not theirs to use — and any sentence here would be a claim
+            about their coach made from an empty answer. A read that FAILED is
+            different and does say so, because the alternative is a member
+            standing at the machine who is not shown the one thing their coach
+            wanted them to remember and has no way to know. */}
+        {coachCue ? (
+          <View style={{ marginBottom: sp.lg, padding: sp.lg, borderRadius: radius.md, backgroundColor: t.surface2 }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>From your coach</Text>
+            <Text style={{ ...ty.body, color: t.ink }} accessibilityLabel={`From your coach: ${coachCue}`}>{coachCue}</Text>
+          </View>
+        ) : cueFailed ? (
+          <View style={{ marginBottom: sp.lg }}>
+            <Flag tone={t.ink3}>
+              Your coach’s note for this movement could not be read just now. That is not a record that they have not
+              written one — pull down to try again.
+            </Flag>
+          </View>
         ) : null}
 
         {/* ── the demonstration ─────────────────────────────────────────── */}

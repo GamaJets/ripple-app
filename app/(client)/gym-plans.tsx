@@ -23,7 +23,19 @@
 //                                          so in as many words.
 //   the price                              printed only in the currency the row
 //                                          itself carries. Never the gym's
-//                                          current setting, never a default.
+//                                          current setting, never a default —
+//                                          and never a figure at all when the
+//                                          row cannot be priced. A price that
+//                                          could not be read is UNKNOWN: it is
+//                                          not zero and it is not free, so the
+//                                          row keeps its place in the list, the
+//                                          amount is a dash with a sentence
+//                                          under it, and the Buy button is
+//                                          withheld. Nothing here sends a price
+//                                          to Stripe — the server quotes it —
+//                                          so a button on an unpriced row would
+//                                          put a member in front of a figure
+//                                          this screen never showed them.
 //
 // ── What buying does, and what it deliberately does not ───────────────────
 //
@@ -61,19 +73,33 @@ import {
 import { useToday } from '../../src/ui/today';
 import {
   fetchGymPaymentFacts, fetchGymPlans, fetchGymPassOffers, fetchMyGymOrders, startGymCheckout, MY_ORDERS_CAP,
-  gymCanSell, offerFor, passNote, offerMoney, orderNote, orderIsLive, dayLabel,
+  gymCanSell, offerFor, passNote, offerMoney, priceIsQuotable, orderNote, orderIsLive, dayLabel,
   type GymAccountFacts, type GymPlan, type GymPassOffer, type GymOrder,
 } from '../../src/lib/memberBuy';
 import { BACK_ICON } from '../../src/ui/direction';
 
 /** How a plan's price reads, with its own interval beside it. The interval is a
  *  word about the PLAN, not a promise that anything recurs: nothing bought here
- *  charges again on its own. */
+ *  charges again on its own.
+ *
+ *  The dash is `fig(null)` and not "AED 0.00", which is what stood here until
+ *  `GymPlan.priceCents` stopped being coerced with `Number()`. "a month" is
+ *  deliberately NOT appended to the dash: "— a month" reads as a price with the
+ *  figure clipped off, and there is no figure. */
 function planPrice(p: GymPlan): string {
   const m = offerMoney(p.priceCents, p.currency);
   if (!m) return fig(null);
   return p.interval === 'once' ? m : p.interval === 'year' ? `${m} a year` : `${m} a month`;
 }
+
+/** Said under a plan or a pass whose price this screen cannot put a figure on.
+ *
+ *  The row is still drawn. A gym that mis-typed a price must see the plan it
+ *  mis-typed — hiding it would tell the member the gym sells one fewer thing
+ *  than it does, which is the same class of lie as quoting zero, and it would
+ *  hide it from the only person in a position to mention it at the desk. */
+const NO_PRICE =
+  'Your gym has not recorded a price we can read for this, so there is no amount to show you and nothing to buy here yet. Reception can tell you what it costs.';
 
 export default function GymPlans() {
   const t = useTheme();
@@ -292,6 +318,13 @@ export default function GymPlans() {
             // them it could not compute. Ten lines up it says so out loud.
             const offer = offerFor(p, membershipKnown ? primary : null, membershipKnown ? standing : null, today);
             const key = `plan:${p.id}`;
+            // Whether there is an amount to put in front of somebody before
+            // they press a button that opens Stripe. `startGymCheckout` sends
+            // no price — the server reads the plan and quotes it — so a buy
+            // from a row this screen could not price is a member meeting the
+            // figure for the first time on a payment page. That is the one
+            // thing this screen's own header promises it will not do.
+            const priced = priceIsQuotable(p);
             return (
               <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
@@ -313,17 +346,28 @@ export default function GymPlans() {
                     : mStatus === 'loading' ? 'Reading your membership before a term can be worked out.'
                     : 'We could not read your membership, so there is no term to state for this plan. A start date worked out without it would be a guess about a membership that may still be running.'}
                 </Text>
+                {/* And no transaction on an unknown PRICE, for the same reason
+                    one line further back: a member is entitled to the amount
+                    before the button, and this row has none to give. Said
+                    whether or not the gym can take a card and whether or not
+                    the membership read landed, because it is true either way —
+                    and said instead of the membership sentence below, which
+                    would be a second paragraph about a button that is already
+                    withheld for a plainer reason. */}
+                {priced ? null : (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{NO_PRICE}</Text>
+                )}
                 {/* No transaction on an unknown membership. Everywhere else in
                     this file an unread fact withholds the CLAIM; this was the
                     one place it was allowed to start a payment. */}
-                {offer.label && canSell && !membershipKnown ? (
+                {priced && offer.label && canSell && !membershipKnown ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                     {mStatus === 'loading'
                       ? 'Reading your membership before this can be offered.'
                       : 'Buying is not offered until your membership can be read — starting a second term over one that is still running is not something this screen can undo. Pull down to try again.'}
                   </Text>
                 ) : null}
-                {offer.label && canSell && membershipKnown ? (
+                {priced && offer.label && canSell && membershipKnown ? (
                   <View style={{ marginTop: sp.md }}>
                     <Cta label={busy === key ? 'Opening…' : offer.label} wide disabled={busy === key}
                       onPress={() => buy(key, {
@@ -372,6 +416,11 @@ export default function GymPlans() {
 
           {(passStatus === 'error' ? [] : passes).map((p, i) => {
             const key = `pass:${p.id}`;
+            // Same gate as the plans above, and a pass needs it at least as
+            // much: there is no membership to reason about here, so the price
+            // was the only figure on the row and "Buy This Pass" sat directly
+            // under it unconditionally.
+            const priced = priceIsQuotable(p);
             return (
               <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
@@ -379,7 +428,14 @@ export default function GymPlans() {
                   <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(offerMoney(p.priceCents, p.currency))}</Text>
                 </View>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{passNote(p, today)}</Text>
-                {canSell ? (
+                {/* `passNote` still runs and still says what the pass buys —
+                    ten visits, valid until a date — because those are facts
+                    about the pass and the price not reading does not unmake
+                    them. What is withheld is the amount and the button. */}
+                {priced ? null : (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{NO_PRICE}</Text>
+                )}
+                {priced && canSell ? (
                   <View style={{ marginTop: sp.md }}>
                     <Cta label={busy === key ? 'Opening…' : 'Buy This Pass'} wide disabled={busy === key}
                       onPress={() => buy(key, {

@@ -81,10 +81,61 @@ export const THREE_DECIMAL = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
  * therefore no default number of decimal places either — a "£12.50" box in
  * front of a yen sale is the same class of error as a dollar sign in front of a
  * dirham figure, and both read as considered.
+ *
+ * ── AND NULL WHEN THE "CURRENCY" IS NOT A CODE ────────────────────────────
+ *
+ * The paragraph above was the whole rule and, exactly as in `moneyIn` below, it
+ * only caught the EMPTY string. Everything else non-empty fell through to the
+ * two-place return, so `currencyDecimals('pounds')` was 2, and so were '£',
+ * 'GB' and 'Japanese yen'.
+ *
+ * That is not a formatting nicety, because this function is not only a
+ * formatter. `majorFromMinor`, `wholeFromMinor`, `minorFromWhole`,
+ * `minorFromDecimal`, `readMinorAmount` and `parseMoneyCents` all SCALE by
+ * `10 ** dp` and round the result, so a wrong `dp` is a wrong AMOUNT, not a
+ * wrong number of zeros: 5000 minor units read back as "50.00" whatever the
+ * money was, which is right for GBP, a hundredfold understatement in JPY and
+ * ten times the figure in KWD. Going the other way, a coach typing 82.505 into
+ * a box whose currency column says 'pounds' had it silently read as 8250 —
+ * a different amount, filed as a fact.
+ *
+ * It is reachable from a real row. `moneyIn` below lists the five money columns
+ * in this schema that carry no format check at all, so 'pounds', 'GB' and '£'
+ * all satisfy `not null` and arrive here intact.
+ *
+ * `/^[a-z]{3}$/` — the same three-letter test `normaliseCurrency` in
+ * ./gymRecord.ts and `moneyIn` below both apply, deliberately the same rule and
+ * not a stricter one. See the next paragraph for why it is not an allowlist.
+ *
+ * ── WHY A STATED-BUT-UNRECOGNISED CODE IS STILL 2, AND IS NOT A FALLBACK ──
+ *
+ * `currencyDecimals('zzz')` is 2, and that is an ANSWER rather than the silent
+ * default this change removes. Two places is correct for every ISO 4217
+ * currency outside the two lists above, and those two lists are Stripe's own
+ * and complete. So the only codes reaching that return are real currencies this
+ * build has not been told about by name — 'aed', 'chf', 'sek' — every one of
+ * which has two places. An allowlist would answer null for those and break a
+ * gym on a perfectly good currency, which is the opposite failure and a worse
+ * one: it drops real money rather than mis-spelling it.
+ *
+ * The silence that matters is the one where nobody stated a currency AT ALL, or
+ * stated something that is not one. That is what is now null, and null is never
+ * a zero and never a two.
+ *
+ * `adCurrencyDecimals` in ./adMatch.ts is a deliberate second copy (adMatch is
+ * loaded by three edge functions and Deno cannot resolve an extensionless
+ * relative specifier) and adMatch.test.ts asserts the two agree. It has NOT had
+ * this three-letter test applied — that file belongs to another lane — so the
+ * two now genuinely differ on a non-code, and the parity assertion does not see
+ * it because its list holds no non-code. Same fix, one line, stated here so it
+ * is written down rather than discovered.
  */
 export function currencyDecimals(currency: string | null | undefined): number | null {
   const cur = (currency || '').trim().toLowerCase();
-  if (!cur) return null;
+  // Empty and non-code answer alike, because they are the same answer: nobody
+  // has said how many places this money has. A `!cur` branch on its own is the
+  // half-rule this replaced.
+  if (!/^[a-z]{3}$/.test(cur)) return null;
   if (ZERO_DECIMAL.has(cur)) return 0;
   if (THREE_DECIMAL.has(cur)) return 3;
   return 2;
@@ -127,9 +178,20 @@ export function currencyDecimals(currency: string | null | undefined): number | 
  * renders the dash beside a count rather than dropping the row — which is the
  * rule, because an amount nobody can spell is still an amount somebody paid.
  *
- * Note the check happens BEFORE `currencyDecimals`, whose `?? 2` fallback is
- * now unreachable from here: a code that gets past the regex is three letters,
- * and `currencyDecimals` answers null only for an empty one.
+ * The regex is kept here rather than left to `currencyDecimals` because this
+ * function needs the upper-cased CODE to print beside the figure, so it has to
+ * hold the string anyway. The two now apply the same rule, and `currencyDecimals`
+ * is the one that decides it.
+ *
+ * ── AND THE `?? 2` IS GONE ────────────────────────────────────────────────
+ *
+ * What stood here was `currencyDecimals(cur) ?? 2`, with a note that the
+ * fallback was unreachable because the regex above had already run. The note
+ * was true and the line was still wrong: a null coalesced into a 2 is the exact
+ * shape of the bug this whole family exists to prevent, sitting one relaxed
+ * regex away from being live again, and the comment saying it could not fire is
+ * what would keep anybody from looking at it. A refusal cannot be reintroduced
+ * by accident; an `?? 2` can.
  */
 export function moneyIn(amount: number | null | undefined, currency: string | null | undefined, minor: boolean): string | null {
   if (amount == null || !Number.isFinite(amount)) return null;
@@ -139,7 +201,10 @@ export function moneyIn(amount: number | null | undefined, currency: string | nu
   // How many decimal places this money has — asked, never assumed. Two is the
   // answer for most of the world and it is the answer for none of Japan, Korea,
   // Vietnam or Kuwait.
-  const dp = currencyDecimals(cur) ?? 2;
+  const dp = currencyDecimals(cur);
+  // Not `?? 2`. There is no amount to print in a money nobody named, and the
+  // dash a missing currency gets is the same dash this gets.
+  if (dp == null) return null;
   const whole = minor ? amount / Math.pow(10, dp) : amount;
   return `${code} ${whole.toLocaleString(appLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
 }
@@ -355,8 +420,19 @@ export function minorFromDecimal(raw: string | number | null | undefined, curren
 export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined, chargeable = true): TypedAmount {
   const cur = (currency || '').trim().toUpperCase();
   const dp = currencyDecimals(currency);
-  if (!cur || dp == null) {
+  if (!cur) {
     return { ok: false, reason: 'No currency is recorded here, so an amount typed in would not be an amount of any money. Nothing can be worked out from it.' };
+  }
+  // A SECOND refusal, not a second wording of the first one. `currencyDecimals`
+  // now answers null for a stated-but-unreadable currency as well as an absent
+  // one, and the two are different situations for the person in front of the
+  // box: one has an empty field to fill in, the other has a field holding
+  // 'pounds' that reads as filled in and has to be found before anything else
+  // works. Telling the second person "no currency is recorded" sends them to a
+  // setting that already has a value in it.
+  if (dp == null) {
+    const shown = cur.length > 24 ? cur.slice(0, 24) + '…' : cur;
+    return { ok: false, reason: `The currency recorded here is “${shown}”, which is not a currency code, so there is no way to tell how many places an amount in it has. Set it to a three-letter code — GBP, JPY, KWD — and this will take an amount.` };
   }
   const raw = String(typed ?? '').trim().replace(/\s/g, '');
   if (!raw) return { ok: false, reason: 'Type an amount.' };

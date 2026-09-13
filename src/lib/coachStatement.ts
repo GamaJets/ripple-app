@@ -516,6 +516,14 @@ export function splitByDay<T>(rows: readonly T[], on: (row: T) => string | null 
  *
  * Null — not "0.00" — when either half is missing, so the CSV cell is empty and
  * nobody reads a hole as a sale for nothing.
+ *
+ * "Missing" now includes a currency that is present and is not a code.
+ * `currencyDecimals` used to answer 2 for 'pounds' and this wrote "123.40" into
+ * an accountant's spreadsheet off a row nobody could name the money of — the
+ * same failure as the KWD one three paragraphs up, arriving by a different
+ * door. A statement is a document a coach hands to somebody who will add it up
+ * and cannot ask, so the cell is empty and the `currency` column beside it
+ * still carries whatever the row said.
  */
 export function minorToPlain(minorUnits: number | null | undefined, currency: string | null | undefined): string | null {
   if (minorUnits == null || !Number.isFinite(minorUnits) || !Number.isInteger(minorUnits)) return null;

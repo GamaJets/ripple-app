@@ -1,6 +1,8 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- A client's card failed, and this database kept no record that it ever had.
 --
+-- APPLIED to the live database on 13 Sep 2026 as part_3000_subscription_failures.
+--
 -- ── The defect ─────────────────────────────────────────────────────────────
 --
 -- Part 132 added `client_subscription_payments` and closed the larger hole: a

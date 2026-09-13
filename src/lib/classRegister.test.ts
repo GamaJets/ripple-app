@@ -5,7 +5,10 @@
 // pushed the two numbers level while two people who paid were still missing —
 // and the hero said "Everyone booked is here." over a room that was not
 // complete. The ring beside it could pass a full circle.
-import { countRegister, registerArc, registerLine, type RegisterRow } from './classRegister';
+import {
+  countRegister, registerArc, registerLine, bookingVerdict, registerCaveat,
+  type RegisterRow, type RegisterTaken,
+} from './classRegister';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -75,12 +78,111 @@ ok(registerLine(one, true).includes('1 still to arrive'), 'one outstanding reads
 ok(registerLine(one, true).includes('1 person'), 'and so does one walk-in');
 ok(!/undefined|NaN/.test(registerLine(one, true)), 'and nothing renders as a word');
 
-// Any status that is not 'booked' is a queue row. The column is free text with
-// a check constraint, and a value nobody anticipated must not silently join the
-// denominator a coach is paid against.
+// A status that is neither 'booked' nor one of part 3060's two cancelled words
+// is a queue row. The column is free text with a check constraint, and a value
+// nobody anticipated must not silently join the denominator a coach is paid
+// against — nor be dropped from the register entirely, because somebody ticked
+// in did turn up whatever word sits against their row.
 const odd = countRegister([row('booked', true), row('standby', true)]);
 eq(odd.booked, 1, 'an unexpected status is not counted as a place held');
 eq(odd.walkIns, 1, 'it is counted as somebody who turned up');
+eq(odd.unknownStanding, 1, 'and reported as a standing this build cannot name');
+
+/* ══ part 3060 ══ cancelling stops being a delete, so status gains two words ══
+ *
+ * Every assertion below fails against the old `waiting = status !== 'booked'`.
+ * That line was right for a two-value column and wrong the instant there is a
+ * third, and the failure is the expensive direction: a class everybody dropped
+ * out of would report a full waiting list. */
+
+const dropped = [
+  row('booked', true), row('booked', false),
+  row('waitlist', false),
+  row('cancelled', false), row('cancelled', false),
+  row('late_cancelled', false),
+];
+const d = countRegister(dropped);
+eq(d.booked, 2, 'a cancelled booking does not hold a place');
+eq(d.waiting, 1, 'and it is NOT somebody standing in the queue either');
+eq(d.cancelled, 2, 'the ordinary cancellations are counted');
+eq(d.lateCancelled, 1, 'and the late one is counted apart, because it may be billed');
+eq(d.unknownStanding, 0, 'both new words are words this build knows');
+eq(d.booked + d.waiting + d.cancelled + d.lateCancelled, dropped.length,
+  'and the four buckets partition the register exactly');
+
+/* ── null is not zero and is not false: the register nobody took ─────────── */
+
+const half = [row('booked', true), row('booked', false), row('booked', false)];
+
+// The default. A build talking to a database without part 3060 cannot know, and
+// must not manufacture a no-show — it is a thing gyms charge for.
+const unknown = countRegister(half);
+eq(unknown.missing, 2, 'two booked members are not ticked');
+eq(unknown.noShow, 0, 'and NOT ONE of them is a recorded no-show');
+eq(unknown.unmarked, 2, 'they are unmarked, which is the state that asks a human');
+ok(registerLine(unknown, true).includes('2 still to arrive'),
+  'and the sentence stays the one this function has always given');
+ok(!/did not turn up/.test(registerLine(unknown, true)),
+  'never claiming an absence off a register nobody took');
+
+// The column read back false. Same counts, different sentence — the two are a
+// different FACT even though they are the same arithmetic.
+const notTaken = countRegister(half, false);
+eq(notTaken.noShow, 0, 'an untaken register records no absence');
+eq(notTaken.unmarked, 2, 'everybody un-ticked is unmarked');
+ok((registerCaveat(false, 2) ?? '').includes('Nobody has taken this register'),
+  'and the screen is told why');
+ok((registerCaveat(null, 2) ?? '').includes('cannot tell'),
+  'which is a different sentence from not knowing whether it was taken');
+ok(registerCaveat(true, 2) == null, 'a taken register needs no caveat');
+ok(registerCaveat(null, 0) == null, 'and neither does a register with nobody missing');
+
+// Taken. NOW the absence is a fact, and this is the one case in this file where
+// the product may say somebody did not turn up.
+const taken = countRegister(half, true);
+eq(taken.noShow, 2, 'a taken register turns an un-ticked booking into a no-show');
+eq(taken.unmarked, 0, 'and leaves nothing unmarked');
+eq(taken.missing, 2, 'while `missing` stays exactly what it always was');
+eq(taken.noShow + taken.unmarked, taken.missing,
+  'the two halves of `missing` always add back up to it');
+ok(registerLine(taken, true, true).includes('2 did not turn up'),
+  'and the sentence says so');
+eq(registerArc(taken), 1 / 3, 'the ring is unaffected by any of this');
+
+/* ── the verdict, in the words the one-to-one side already uses ──────────── */
+
+eq(bookingVerdict(row('booked', true)), 'delivered', 'a tick is delivered');
+eq(bookingVerdict(row('waitlist', true)), 'delivered',
+  'a walk-in who trained, trained — whatever the show rate does with them');
+eq(bookingVerdict(row('cancelled', false)), 'cancelled', 'cancelled reads cancelled');
+eq(bookingVerdict(row('late_cancelled', false)), 'late_cancelled',
+  'and a late cancellation is NOT folded into it — it is the billable one');
+eq(bookingVerdict(row('booked', false), true), 'missed',
+  'booked, not ticked, register taken: missed, which is what the PT side calls a no-show');
+eq(bookingVerdict(row('booked', false), false), 'unmarked',
+  'register not taken: unmarked, never missed');
+eq(bookingVerdict(row('booked', false)), 'unmarked',
+  'and an unknown register is read the same way as an untaken one');
+eq(bookingVerdict(row('waitlist', false), true), 'unmarked',
+  'a waitlister who never got a seat missed nothing');
+eq(bookingVerdict(row('standby', false), true), 'unmarked',
+  'a status this build has never heard of is unmarked, never delivered');
+eq(bookingVerdict(row('standby', true), true), 'delivered',
+  'though a tick against it is still a recorded attendance');
+eq(bookingVerdict(row('cancelled', true), true), 'unmarked',
+  'a cancelled booking that is also ticked is two facts that disagree, and this module picks neither');
+
+/* ── the tri-state is a tri-state, and nothing coerces it ────────────────── */
+
+// The failure this guards is a truthiness test — `registerTaken ? ... : ...`
+// reads null as false, which happens to be right here, while `!= null` or a
+// cast would read it as taken and invent an absence. Checked over all three.
+const states: RegisterTaken[] = [true, false, null];
+for (const st of states) {
+  const c3 = countRegister(half, st);
+  eq(c3.noShow + c3.unmarked, c3.missing, `the split is total for ${String(st)}`);
+  ok(c3.noShow === 0 || st === true, `only a taken register yields a no-show (${String(st)})`);
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('classRegister: ok');

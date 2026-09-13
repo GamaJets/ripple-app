@@ -54,7 +54,12 @@ import { AGREEMENT_LABEL } from '../../src/lib/gymDocs';
 import {
   forMember, outstanding, agreementSummary, signingBlocker, signAsMember,
   fetchGymAgreements, fetchMySignatures,
-  SIGNING_RULE, NOT_REPPLE, type MemberAgreement,
+  fetchMyRevocations, withdrawConsent, mayWithdraw, withdrawBlocker,
+  withdrawnLine, withdrawTitle, memberMayRevoke,
+  WITHDRAW_LABEL, WITHDRAW_A11Y_HINT, WITHDRAW_WHAT_IT_DOES,
+  WITHDRAW_WHAT_IT_DOES_NOT, WITHDRAW_CANNOT_BE_UNDONE, WITHDRAW_UNAVAILABLE_NOTE,
+  NO_REVOCATION_TABLE,
+  SIGNING_RULE, NOT_REPPLE, type MemberAgreement, type RevocationRead,
 } from '../../src/lib/gymSigning';
 import { BACK_ICON } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
@@ -86,6 +91,20 @@ export default function ClientGymAgreementsScreen() {
    */
   const [noGym, setNoGym] = useState(false);
 
+  /**
+   * What this member has withdrawn, and NOT an array.
+   *
+   * Held as the read itself because an empty list and a table that is not there
+   * are different facts and only one of them may draw a Withdraw button.
+   *
+   * The default is the absent one, and it stays the default even now that
+   * supabase/parts/3030 is applied to this project's database: it is what every
+   * deployment without the part answers, and it is what this screen holds in
+   * the moments before the read lands. Nothing here may offer a control whose
+   * tap would come back "no such table" under the member's thumb.
+   */
+  const [revocations, setRevocations] = useState<RevocationRead>(NO_REVOCATION_TABLE);
+
   /** Which agreement is expanded. Expanding IS reading, and signing is gated on
    *  it — see the header. */
   const [open, setOpen] = useState<string | null>(null);
@@ -93,6 +112,9 @@ export default function ClientGymAgreementsScreen() {
   const [agreed, setAgreed] = useState(false);
   const [typedName, setTypedName] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** Kept apart from `busyId`: a signed document can be withdrawn and an
+   *  unsigned one signed, and one flag for both would grey the wrong control. */
+  const [withdrawId, setWithdrawId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
@@ -116,15 +138,26 @@ export default function ClientGymAgreementsScreen() {
       if (!tid) { setNoGym(true); setRows([]); setStatus('ready'); return; }
       setNoGym(false);
 
-      // Both reads or neither. A list of what the gym asks for, joined to a
-      // FAILED read of what this person has signed, renders every signed
-      // document as outstanding — and asks somebody to sign a waiver twice,
-      // which the unique index then refuses with a message about a constraint.
-      const [agreements, signatures] = await Promise.all([
+      // Both reads or neither, and now all three. A list of what the gym asks
+      // for, joined to a FAILED read of what this person has signed, renders
+      // every signed document as outstanding — and asks somebody to sign a
+      // waiver twice, which the unique index then refuses with a message about
+      // a constraint.
+      //
+      // The third read is the one with the sharper edge. `fetchMyRevocations`
+      // answers 'absent' for 42P01 alone and THROWS for everything else, so a
+      // revocation read that failed on the wire lands in the catch below and
+      // takes the whole screen to its error state. That is the point: a failed
+      // read is not a member who has withdrawn nothing, and the difference
+      // between those two is whether this screen tells somebody their consent
+      // still stands while their gym has already been told it does not.
+      const [agreements, signatures, revoked] = await Promise.all([
         fetchGymAgreements(supabase, tid),
         fetchMySignatures(supabase),
+        fetchMyRevocations(supabase),
       ]);
-      setRows(forMember(agreements, signatures));
+      setRevocations(revoked);
+      setRows(forMember(agreements, signatures, revoked));
       setStatus('ready');
     } catch (e) { reportError('gymAgreements.load', e); setStatus('error'); }
   }, []);
@@ -201,6 +234,59 @@ export default function ClientGymAgreementsScreen() {
               // Either way the list on screen has been shown to be out of date.
               await load();
             } finally { setBusyId(null); }
+          },
+        },
+      ],
+    );
+  }
+
+  /**
+   * Withdraw a consent, having said out loud what that does and what it does
+   * not do.
+   *
+   * The three paragraphs are the module's own, verbatim, and the middle one is
+   * the reason this is a confirm and not a one-tap switch: a control that let
+   * somebody believe the photographs were gone would be worse than no control,
+   * and they would find out otherwise from a shop window. The dialog is where
+   * the sentence has to be, because it is the last thing before the write.
+   *
+   * `mayWithdraw` is asked again here rather than trusted from the render. The
+   * list on screen is as old as the last read, and a member holding this screen
+   * open while the desk records a withdrawal for them is the ordinary way it
+   * goes stale.
+   */
+  function withdraw(a: MemberAgreement) {
+    const blocker = withdrawBlocker(a, revocations);
+    if (blocker) { Alert.alert('Not yet', blocker); return; }
+    if (!tenantId) { Alert.alert('Not yet', 'Your gym could not be identified, so there is nothing to record this against.'); return; }
+    Alert.alert(
+      withdrawTitle(a.title),
+      `${WITHDRAW_WHAT_IT_DOES}\n\n${WITHDRAW_WHAT_IT_DOES_NOT}\n\n${WITHDRAW_CANNOT_BE_UNDONE}`,
+      [
+        { text: 'Keep it as it is', style: 'cancel' },
+        {
+          text: WITHDRAW_LABEL,
+          style: 'destructive',
+          onPress: async () => {
+            setWithdrawId(a.id);
+            try {
+              await withdrawConsent(supabase, tenantId, { kind: a.kind });
+              await load();
+            } catch (e: any) {
+              reportError('gymAgreements.withdraw', e, { id: a.id, kind: a.kind });
+              // 42P01 here is the table going missing between the read that
+              // drew the button and the tap on it. The member is told what is
+              // true of their gym rather than shown a Postgres string about a
+              // relation, and the re-read below then takes the button away.
+              const gone = e?.code === '42P01';
+              Alert.alert(
+                gone ? 'Not switched on' : 'Not withdrawn',
+                gone
+                  ? WITHDRAW_UNAVAILABLE_NOTE
+                  : `${e?.message ?? 'That could not be recorded.'}`,
+              );
+              await load();
+            } finally { setWithdrawId(null); }
           },
         },
       ],
@@ -348,6 +434,43 @@ export default function ClientGymAgreementsScreen() {
                               </View>
                             </>
                           )}
+
+                          {/* ── withdrawing it, where that is a thing this member can do ──
+                              Three states and they are not two. A consent already
+                              withdrawn says so and offers nothing; one that can be
+                              withdrawn draws the control; and one that cannot draws
+                              the blocker's own sentence rather than a greyed button
+                              with no explanation beside it.
+
+                              The last of those is what a gym without part 3030 sees:
+                              `fetchMyRevocations` answers 'absent' and `mayWithdraw`
+                              is false for every photo consent there. The member reads
+                              that their gym has not switched this on and that asking
+                              at the desk works — which is true — instead of tapping a
+                              button the database has nothing to answer.
+
+                              `mayWithdraw` and `withdrawBlocker` are the same
+                              question asked once: the first IS the second returning
+                              null, so the button and the refusal cannot drift apart
+                              into a live-looking control whose tap is refused. */}
+                          {a.revokedAt ? (
+                            <Flag tone={t.ink3} style={{ marginTop: sp.md }}>{withdrawnLine(a.revokedAt)}</Flag>
+                          ) : a.signedAt && memberMayRevoke(a.kind) ? (
+                            mayWithdraw(a, revocations) ? (
+                              <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
+                                <Ghost
+                                  label={withdrawId === a.id ? 'Withdrawing…' : WITHDRAW_LABEL}
+                                  disabled={withdrawId === a.id}
+                                  a11yLabel={`${WITHDRAW_LABEL} for ${a.title}. ${WITHDRAW_A11Y_HINT}`}
+                                  onPress={() => withdraw(a)}
+                                />
+                              </View>
+                            ) : (
+                              <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
+                                {withdrawBlocker(a, revocations)}
+                              </Flag>
+                            )
+                          ) : null}
                         </View>
                       ) : null}
                     </View>
@@ -387,6 +510,17 @@ export default function ClientGymAgreementsScreen() {
  * this is where the person it is about gets to see it.
  */
 function statusLine(a: MemberAgreement): string {
+  // Withdrawn FIRST, and the sentence does not say who did it. A photo consent
+  // the member withdrew from this screen and a guardian consent the responsible
+  // adult withdrew at the desk are both true here, and the row is the wrong
+  // place to guess between them. Said before anything else because a line
+  // reading "signed by you on 3 Apr 2026", with nothing after it, is this
+  // screen's only way to tell a gym's live consent and a withdrawn one apart —
+  // and it was telling them apart wrongly.
+  if (a.revokedAt) {
+    const off = day(a.revokedAt);
+    return `withdrawn${off ? ` on ${off}` : ''}`;
+  }
   // The refusal is a property of the KIND, so it is still set once a guardian
   // consent has actually been given at the desk. Read in that order this told a
   // member a document already on file "has to be given at the gym".

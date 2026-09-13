@@ -35,7 +35,8 @@
 import {
   gymCanSell, asConnectRow, termEnd, termFrom, addDays, renewStart, supersedeRow,
   offerFor, switchLabel, passNote, orderNote, orderIsLive, isBuyablePass, renewalIsContiguous,
-  offerMoney, fetchMyGymOrders, MY_ORDERS_CAP, type GymAccountFacts, type GymPlan,
+  offerMoney, priceIsQuotable, fetchMyGymOrders, fetchGymPlans, fetchGymPassOffers,
+  MY_ORDERS_CAP, type GymAccountFacts, type GymPlan,
 } from './memberBuy';
 import { canTakeDirectCharges } from './directCharges';
 import { standingOf, type MemberMembership } from './memberRecord';
@@ -283,6 +284,55 @@ eq(switchLabel({ priceCents: null, currency: 'AED' }, plan({ id: 'p2', priceCent
   'a held plan with no price recorded cannot be compared, so nothing is called an upgrade');
 eq(switchLabel({ priceCents: null, currency: 'AED' }, plan({ id: 'p2', priceCents: 0 })), 'Switch to This Plan',
   'and a free plan beside an unknown one is still not a comparison');
+// The OTHER side of it, reachable as of this pass: `GymPlan.priceCents` is
+// nullable too, so the plan being offered can be the one nobody priced.
+//
+// Said plainly, because the mutation record below should not be read as more
+// than it is: deleting `next.priceCents != null` from `switchLabel` does NOT
+// fail these two lines. `null > 20000` is false, so the answer stays right —
+// by arithmetic on a value that is not a number. What refuses the deletion is
+// the COMPILER: `GymPlan.priceCents` is `number | null` and `strict` rejects
+// the comparison outright (TS18047). These two lines pin the behaviour, and
+// they also refuse a narrowing of `GymPlan.priceCents` back to `number` —
+// `plan({ priceCents: null })` would stop compiling. The guard itself is held
+// by the type, which is the stronger of the two and is why it is stated rather
+// than left for a runtime assertion that cannot reach it.
+eq(switchLabel({ priceCents: 20000, currency: 'AED' }, plan({ id: 'p2', priceCents: null })), 'Switch to This Plan',
+  'a plan whose own price could not be read is not an upgrade on anything');
+eq(switchLabel({ priceCents: null, currency: 'AED' }, plan({ id: 'p2', priceCents: null })), 'Switch to This Plan',
+  'and two unknown prices are not equal, or unequal, or anything');
+// Zero-decimal and three-decimal currencies compare on minor units like every
+// other, and the comparison is only allowed when both codes match — so a yen
+// plan beside a yen plan still resolves, and a dinar beside a yen never does.
+eq(switchLabel({ priceCents: 5000, currency: 'JPY' }, plan({ id: 'p2', priceCents: 8000, currency: 'JPY' })), 'Upgrade to This Plan',
+  'a dearer yen plan is an upgrade, and nothing was divided by a hundred to decide it');
+eq(switchLabel({ priceCents: 20000, currency: 'KWD' }, plan({ id: 'p2', priceCents: 35000, currency: 'KWD' })), 'Upgrade to This Plan',
+  'a dearer three-decimal plan likewise');
+eq(switchLabel({ priceCents: 5000, currency: 'JPY' }, plan({ id: 'p2', priceCents: 8000, currency: 'KWD' })), 'Switch to This Plan',
+  'and 8000 fils against 5000 yen is not a comparison, however the digits fall');
+
+/* ── whether there is an amount to show at all ─────────────────────────────
+   The gate app/(client)/gym-plans.tsx puts in front of every Buy button.
+   `startGymCheckout` sends no price — the server reads the row and quotes it —
+   so a button on a row this screen could not price means a member meets the
+   figure for the first time on Stripe's own page. */
+
+ok(priceIsQuotable(plan()), 'an ordinary priced plan can be quoted');
+ok(priceIsQuotable(plan({ priceCents: 0, currency: 'AED' })), 'and so can a genuinely free one: zero is a price a gym can choose');
+ok(!priceIsQuotable(plan({ priceCents: null })), 'a plan whose price did not read cannot be quoted');
+ok(!priceIsQuotable(plan({ currency: null })), 'nor one with no currency recorded');
+// The live half. `membership_plans.currency` and `gym_pass_types.currency` are
+// `text not null` with NO format check, so this row satisfies the database
+// today. `moneyIn` refuses to print POUNDS 200.00 and returns null; before this
+// pass the screen drew the dash for it and offered the button underneath.
+ok(!priceIsQuotable(plan({ currency: 'pounds' })), 'and not one whose currency is not a currency code');
+ok(!priceIsQuotable(plan({ currency: '£' })), 'a symbol is not a code either');
+ok(priceIsQuotable({ priceCents: 5000, currency: 'JPY' }), 'a zero-decimal currency is a currency');
+ok(priceIsQuotable({ priceCents: 5000, currency: 'KWD' }), 'so is a three-decimal one');
+// The same predicate takes a pass, because the two rows differ in everything
+// except the two fields that decide this.
+ok(priceIsQuotable({ priceCents: 5000, currency: 'GBP' }), 'a priced pass can be quoted');
+ok(!priceIsQuotable({ priceCents: null, currency: 'GBP' }), 'and an unpriced one cannot');
 
 /* ═══════════════════════════════════════════════════════════════════════════
    6. Passes, orders and money
@@ -324,6 +374,16 @@ eq(offerMoney(5000, 'JPY'), 'JPY 5,000', 'a yen amount is not divided at all');
 eq(offerMoney(20000, null), null, 'an amount with no currency is withheld, not guessed');
 eq(offerMoney(20000, ''), null, 'and an empty currency is the same fact as a null one');
 eq(offerMoney(null, 'AED'), null, 'an amount nobody established is withheld too');
+// The three the currency rule actually turns on: two places, none, and three.
+// A hardcoded hundred gets GBP right and is wrong for both of the others.
+eq(offerMoney(20000, 'GBP'), 'GBP 200.00', 'two places for sterling');
+eq(offerMoney(20000, 'KWD'), 'KWD 20.000', 'three for a Kuwaiti dinar — 20000 fils is twenty, not two hundred');
+eq(offerMoney(0, 'JPY'), 'JPY 0', 'a price of zero IS a price, and it prints: a gym may sell a free induction');
+eq(offerMoney(0, 'KWD'), 'KWD 0.000', 'and zero in a three-decimal currency keeps its three places');
+// The whole reason this lane exists, in one line. These two are the same
+// characters on screen if an absence is coerced, and they are not the same fact.
+eq(offerMoney(0, 'AED'), 'AED 0.00', 'a recorded zero is stated');
+eq(offerMoney(null, 'AED'), null, 'an unrecorded price is not stated as zero');
 
 /* ═══════════════════════════════════════════════════════════════════════════
    The wrong versions must fail here
@@ -422,6 +482,59 @@ eq(offerMoney(null, 'AED'), null, 'an amount nobody established is withheld too'
 
     const out = await fetchMyGymOrders(sbWith(3).sb, '');
     eq(out.ok, false, 'nobody signed in is a refusal, not an empty list');
+
+    /* ── what the two price-book readers do with a price that is not one ────
+       `Number(r.price_cents)` stood at both of these call sites. `Number(null)`
+       is 0 and 0 is a price a gym could have set, so a plan whose price did not
+       come back reached the screen as "AED 0.00" with a Buy button under it.
+       These four assertions are the ones that fail if the coercion comes back,
+       and the fifth is the one that fails if somebody "simplifies" the reader
+       into `?? 0`. */
+    const sbRows = (rows: any[]) => {
+      const chain: any = { select: () => chain, eq: () => chain, order: () => Promise.resolve({ data: rows, error: null }) };
+      return { from: () => chain, rpc: () => Promise.resolve({ data: null, error: null }), functions: { invoke: async () => ({ data: null, error: null }) } } as any;
+    };
+
+    const p = await fetchGymPlans(sbRows([
+      { id: 'a', name: 'Full Access', price_cents: 20000, currency: 'AED', interval: 'month' },
+      // PostgREST hands a bigint back as a string often enough that the
+      // coercion itself has to stay. What it may not coerce is an absence.
+      { id: 'b', name: 'Off Peak', price_cents: '15000', currency: 'AED', interval: 'month' },
+      { id: 'c', name: 'Mis-Entered', price_cents: null, currency: 'AED', interval: 'month' },
+      { id: 'd', name: 'Not A Number', price_cents: 'free', currency: 'AED', interval: 'month' },
+      { id: 'e', name: 'Free Induction', price_cents: 0, currency: 'AED', interval: 'once' },
+    ]));
+    ok(p.ok, 'the plans read landed');
+    if (p.ok) {
+      eq(p.value.length, 5, 'a row whose price did not read is still a plan the gym sells, and is not dropped');
+      eq(p.value[0].priceCents, 20000, 'a number is a number');
+      eq(p.value[1].priceCents, 15000, 'and a numeric string is still read');
+      eq(p.value[2].priceCents, null, 'a null price stays null — it is not zero');
+      // `ok` rather than `eq` for this one alone: the wrong answer here is NaN,
+      // and `JSON.stringify(NaN)` is the string "null", so an `eq` failure
+      // would print "got null, wanted null" and read like a passing line.
+      ok(p.value[3].priceCents === null, 'and neither is a string that is not a number: NaN is not a price either');
+      eq(p.value[4].priceCents, 0, 'while a recorded zero survives as zero, because a gym may sell something free');
+      ok(!priceIsQuotable(p.value[2]), 'the unpriced plan cannot be quoted, so the screen shows no figure and no button');
+      ok(priceIsQuotable(p.value[4]), 'and the free one can: it has a price and the price is nothing');
+      eq(offerMoney(p.value[2].priceCents, p.value[2].currency), null, 'an unread price formats to nothing, never to AED 0.00');
+    }
+
+    const x = await fetchGymPassOffers(sbRows([
+      { id: 'a', name: 'Day Pass', kind: 'drop_in', price_cents: 5000, currency: 'GBP', uses: 1, valid_days: null },
+      { id: 'b', name: 'Ten Classes', kind: 'pack', price_cents: null, currency: 'JPY', uses: 10, valid_days: 90 },
+      { id: 'c', name: 'Guest', kind: 'guest', price_cents: 5000, currency: 'GBP', uses: 1, valid_days: null },
+    ]));
+    ok(x.ok, 'the passes read landed');
+    if (x.ok) {
+      // The guest pass is filtered by kind and that is unrelated to price: an
+      // unpriced pass is withheld from BUYING, not from the list.
+      eq(x.value.length, 2, 'the guest pass is filtered and the unpriced pack is not');
+      eq(x.value[0].priceCents, 5000, 'a priced pass reads');
+      eq(x.value[1].priceCents, null, 'and an unpriced one is null rather than free');
+      eq(offerMoney(x.value[1].priceCents, x.value[1].currency), null, 'which formats to nothing, not to JPY 0');
+      ok(!priceIsQuotable(x.value[1]), 'so it carries no figure and no Buy button');
+    }
 
     // The one exit point. Everything above this file is synchronous and has
     // already run; this block is the last thing, so the whole file's result is

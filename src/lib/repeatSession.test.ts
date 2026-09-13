@@ -6,7 +6,7 @@
 // or a movement quietly missing from the list because the catalogue no longer
 // knows its name. Every one of those looks completely normal on screen.
 import {
-  pastSessions, repeatSession, sessionSummary,
+  loggedSessions, repeatSession, sessionSummary,
   type PastSession, type RepeatConversion,
 } from './repeatSession';
 import { prescribedSeconds, isTimedPrescription } from './timedSets';
@@ -227,7 +227,7 @@ const one = (e: WorkoutEntry, known: ExerciseRef[] | null = CAT): RepeatConversi
     // Cardio only: nothing the barbell runner can be handed.
     { t: '2026-09-05T07:00:00.000Z', exercise: 'Run', cardio: { mins: 30, dist: 5, unit: 'km' } },
   ];
-  const ss = pastSessions(log);
+  const ss = loggedSessions(log);
   eq(ss.length, 3, 'three sessions have something to repeat; the bike ride does not');
   eq(ss[0].t, '2026-09-03T19:00:00.000Z', 'newest first');
   eq(ss[1].t, '2026-09-03T07:00:00.000Z', 'and two sessions on one day stay two, in the order they happened');
@@ -241,7 +241,7 @@ const one = (e: WorkoutEntry, known: ExerciseRef[] | null = CAT): RepeatConversi
 // The day is the LOCAL one. A 21:00 session in a gym east of Greenwich is not
 // tomorrow, and a bare date is never parsed.
 {
-  const ss = pastSessions([{ t: '2026-09-08T18:30:00.000Z', exercise: 'Back Squat', sets: [[5, 100]] }]);
+  const ss = loggedSessions([{ t: '2026-09-08T18:30:00.000Z', exercise: 'Back Squat', sets: [[5, 100]] }]);
   const d = ss[0].day;
   ok(d != null && /^\d{4}-\d{2}-\d{2}$/.test(d), 'the day is a plain calendar key');
   eq(d, new Date('2026-09-08T18:30:00.000Z').getFullYear()
@@ -251,9 +251,9 @@ const one = (e: WorkoutEntry, known: ExerciseRef[] | null = CAT): RepeatConversi
 }
 
 {
-  eq(pastSessions(null).length, 0, 'an unread log is handled — and the CALLER must not read it as an empty one');
-  eq(pastSessions([]).length, 0, 'an empty log is empty');
-  const odd = pastSessions([
+  eq(loggedSessions(null).length, 0, 'an unread log is handled — and the CALLER must not read it as an empty one');
+  eq(loggedSessions([]).length, 0, 'an empty log is empty');
+  const odd = loggedSessions([
     { exercise: 'Back Squat', sets: [[5, 100]] } as unknown as WorkoutEntry,
     { t: '', exercise: 'Bench Press', sets: [[5, 60]] },
   ]);
@@ -266,7 +266,7 @@ const one = (e: WorkoutEntry, known: ExerciseRef[] | null = CAT): RepeatConversi
   // Everything the runner asks of an exercise, asked of a converted one. A
   // field that comes back undefined where the runner indexes into it is how the
   // empty-list crash in src/lib/startGate.ts happened.
-  const s: PastSession = pastSessions([
+  const s: PastSession = loggedSessions([
     { t: T, exercise: 'Back Squat', sets: [[5, 100], [5, 102.5]] },
     { t: T, exercise: 'Plank', sets: [[45, 0]], timed: [true] },
   ])[0];

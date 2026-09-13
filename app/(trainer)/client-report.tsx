@@ -506,6 +506,33 @@ export default function ClientReport() {
               <EmptyRoster lacks="there is no report to write" />
             ) : null}
           </Section>
+        ) : !askable ? (
+          /* ── the third answer ────────────────────────────────────────────
+             Not "part of this could not be read" and not "there is nothing on
+             record". This person is a name the coach typed into their own book:
+             a `coach_clients` row with no account behind it, so there is no
+             record to put on a page — and nothing was refused, because nothing
+             was ever entitled to be asked.
+
+             `load` sets all five sections to 'error', which is right for the
+             reads and wrong for this screen: it drew six rows of "not read"
+             with a crit dot beside each and left Send It live, so a coach could
+             produce and hand somebody a document whose every section says their
+             own record could not be opened. There is no document to write, so
+             there is no Send here.
+
+             The same distinction `wellnessPanel`'s `not-asked` kind keeps apart
+             from `unreadable` in src/lib/coachWellness.ts. */
+          <>
+            <Rule />
+            <Section>
+              <Notice kicker="No account" title={`${fullName || 'This client'} has no Repple account`}
+                note={`You added ${who} to your book by hand, so there is no account for sessions, training, scans or measurements to belong to — and so there is nothing to put on a page. That is not a record that could not be read, and a document saying it could not be read would be wrong on every line. Invite them from your client list and this becomes a real report from the day they join.`} />
+            </Section>
+            <View style={{ marginTop: layout.section }}>
+              <Cta label="Someone Else" tone={t.surface2} wide onPress={() => { setPicked(null); setNote(''); }} />
+            </View>
+          </>
         ) : (
           <>
             <Rule />

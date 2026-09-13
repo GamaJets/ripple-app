@@ -46,6 +46,40 @@
 // stated here rather than in the caller so that the next device-local
 // preference has a place to be considered.
 //
+// ── Which of the two fixes a key gets ─────────────────────────────────────
+//
+// A key with no account in it that holds something belonging to a PERSON has
+// two possible answers, and they are not interchangeable. A sweep of every
+// AsyncStorage key in the tree found both kinds, so the rule is written here
+// rather than re-derived each time:
+//
+//   · CLEAR IT HERE when losing it costs the person nothing they cannot get
+//     back by being asked again: a preference, a consent, an armed OS
+//     notification. `repple.coachShare` and the two `repple.photoAI` keys are
+//     consents and joined the list for exactly that reason.
+//   · KEY IT BY ACCOUNT when it holds their WORK or their RECORD — a member's
+//     plan edits, a coach's clips that never reached the server, body-scan
+//     metrics, a draft. Clearing those at sign-out would destroy the data of
+//     the person who is leaving, which is the outbox argument above; an account
+//     in the key makes them unreadable to the next person without destroying
+//     anything. src/lib/mealSwaps.ts and src/lib/handsetClips.ts are the two
+//     worked examples.
+//
+// Getting this backwards is a real cost either way round: a consent left on the
+// handset is answered by the wrong person, and a record cleared on sign-out is
+// gone for the right one.
+//
+// ── One that is NOT here, on purpose ──────────────────────────────────────
+//
+// `repple.motivation.armed` (src/ui/motivationNudges.tsx) holds the OS
+// notification IDS of nudges scheduled on this phone, and it has the same shape
+// as `repple.reminders` — including the ordering hazard: the ids are the only
+// handle anything has on those notifications, so clearing the key before
+// cancelling them leaves a stranger's evening nudge firing on the next member's
+// phone with nothing left in the app that can stop it. Adding it to this list
+// alone would CAUSE that. It belongs here only together with a cancel in
+// src/ui/signOutState.ts, beside the one the reminders already get.
+//
 // Pure: strings and a rule, no storage. src/ui/signOutState.ts does the work.
 
 /**
@@ -87,6 +121,29 @@ export const PERSONAL_DEVICE_KEYS: readonly string[] = [
   // a Spotify-side action and belongs to the member, not to a handset they are
   // walking away from.
   'repple.spotify.token',
+  // src/lib/coachShare.ts — whether this person agreed that their coach may see
+  // their health data. Its own key rather than a field in `repple.settings`,
+  // and that file says why: a settings migration must not be able to silently
+  // clear an answer about somebody's medical data. The same argument reaches
+  // here — an answer about somebody's medical data must not be INHERITED
+  // either. Nothing removed it before this, so the next member to sign in on a
+  // shared handset arrived with a stranger's 'yes' already recorded, and the
+  // screen that asks does not ask twice.
+  //
+  // Clearing it returns the next person to 'unasked', which is the true state:
+  // they have not been asked. That is the whole cost, and it is the cost of
+  // asking a question rather than assuming its answer.
+  'repple.coachShare',
+  // src/lib/photoAI.ts — the two answers to "may we send this photograph to an
+  // AI service": one for a machine on the gym floor, one for a meal. Two keys
+  // because they are two questions (that file refuses to let one answer the
+  // other), and both were unqualified and cleared by nothing.
+  //
+  // An inherited 'yes' here does not merely show somebody the wrong screen: it
+  // sends the next member's photograph of their own dinner table to a third
+  // party on the strength of a stranger's consent, without asking.
+  'repple.photoAI',
+  'repple.photoAI.meal',
 ];
 
 /**

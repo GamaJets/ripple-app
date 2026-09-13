@@ -215,6 +215,15 @@ export function minorToDecimal(cents: number | null | undefined, currency?: stri
   // How many places this money has, asked rather than assumed. Null — not 2 —
   // when nobody said which money it is, and an unstateable figure is an empty
   // cell beside the stored integer rather than a number in no currency at all.
+  //
+  // Null now also covers a currency that is stated and is not a code, and an
+  // EXPORT is the consumer with the least room to guess: the cell is going into
+  // a file that leaves this product, gets added up by an accountant, and comes
+  // back through `parseMoneyCents` on the next import. A "50.00" written from a
+  // row labelled 'pounds' would re-import as 5000 minor units of something, so
+  // the guess would not merely be printed, it would be written back in.
+  // Empty is the honest cell; the stored integer and the raw currency string
+  // are both still in the bundle in their own columns.
   const dp = currencyDecimals(currency);
   if (dp == null) return '';
   if (dp === 0) return String(cents);

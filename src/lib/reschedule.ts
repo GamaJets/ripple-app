@@ -70,16 +70,49 @@ export interface RescheduleReport {
   currency: string | null;
   /** Somebody was waiting for the slot that was freed, and now has it. */
   promoted: boolean;
-  /** How many are still in line for it afterwards. */
-  waiting: number;
+  /**
+   * How many are still in line for it afterwards, and NULL when nobody counted
+   * them.
+   *
+   * The member-side twin of `CoachMoveReport.waiting` below and of
+   * `MoveAtReport.waiting` in src/lib/moveTimes.ts, widened for the same reason
+   * and against the same defect: the reading at both ends of
+   * `rescheduleMyBooking` was `Number(r.waiting) || 0`, which turned an absent
+   * key, a null, an empty string and a NaN alike into the number 0, and 0 is
+   * the value `rescheduleLines` reads as "nobody was waiting for it". A count
+   * nobody took is not an empty queue. Callers pass the unknown through with
+   * `queueLength`; they do not settle it.
+   */
+  waiting: number | null;
 }
 
 /** Nothing happened, and we could not find out why. The shape a caller returns
  *  when the RPC did not answer at all. */
 export const NOT_MOVED: RescheduleReport = {
+  // Null and not 0: a move that never reached the server counted nobody. It did
+  // not count nobody waiting.
   moved: false, reason: 'unreachable', noticeHours: null, fee: null,
-  currency: null, promoted: false, waiting: 0,
+  currency: null, promoted: false, waiting: null,
 };
+
+/**
+ * A count of people, or null when the answer did not contain one.
+ *
+ * The same reading, rule for rule, as `queueLength` in src/ui/coachMoveAt.ts,
+ * and exported here so the two providers' report-building in
+ * src/ui/sessions.tsx has one spelling to reach for rather than a private
+ * fourth: a number must be finite, whole and not negative to be a queue length,
+ * and a string is read only when it is a string of digits. `Number('')` is 0
+ * and `Number(null)` is 0, and neither of those is somebody having counted an
+ * empty queue. (src/ui/coachMoveAt.ts still holds its own private copy of the
+ * same four lines; the two are identical, and that one should become an import
+ * of this the next time that file is open.)
+ */
+export function queueLength(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isInteger(v) && v >= 0 ? v : null;
+  if (typeof v === 'string' && /^\d+$/.test(v.trim())) return Number(v.trim());
+  return null;
+}
 
 /**
  * Whether to offer Move at all, from what this device knows.
@@ -163,9 +196,27 @@ export function rescheduleRefusalLine(r: RescheduleReport, at: string | null): s
 export function rescheduleLines(r: RescheduleReport, from: string, to: string): string[] {
   const lines = [`Moved from ${from} to ${to}.`];
   lines.push('Nothing was charged and no session was taken off your pack. It is the same session at a different time.');
-  lines.push(r.promoted
-    ? 'Somebody was waiting for your old slot and it has gone straight to them.'
-    : 'Your old time is back on your coach’s calendar.');
+  // The freed slot has THREE states and not two, exactly as it does on the
+  // coach's side in `coachMovedLine` below: it went to somebody; it is open and
+  // a counted number of people are or are not still in line for it; or nobody
+  // counted at all. `r.waiting == null` is tested FIRST of the two count
+  // branches, because `null > 0` is false in JavaScript and a null placed after
+  // that test falls silently into "nobody was waiting for it" — the one
+  // sentence here that is a claim about other people rather than about this
+  // member's own booking.
+  if (r.promoted) {
+    lines.push('Somebody was waiting for your old slot and it has gone straight to them.');
+  } else if (r.waiting == null) {
+    // Neither of the other two. Says where the slot went, which is known, and
+    // nothing about the queue, which is not.
+    lines.push('Your old time is back on your coach’s calendar. No waiting list count came back with the move, so we cannot say whether anybody else is in line for it.');
+  } else if (r.waiting > 0) {
+    lines.push(r.waiting === 1
+      ? 'Your old time is back on your coach’s calendar, and one other person is waiting for it.'
+      : `Your old time is back on your coach’s calendar, and ${r.waiting} other people are waiting for it.`);
+  } else {
+    lines.push('Your old time is back on your coach’s calendar and nobody was waiting for it.');
+  }
   return lines;
 }
 

@@ -2240,7 +2240,19 @@ export default function TrainerSchedule() {
       // calendar and is offered to nobody — said in the alert instead, with
       // Offer It Round as the coach's deliberate next step.
     } else if (mayOffer && rosterWhole) {
-      const openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
+      // Everybody on the book who could actually take the hour, and the second
+      // clause is not decoration. A client the coach typed into Add Client is a
+      // `coach_clients` row with no account behind it — no app, no device to
+      // push to, and `sessions.client_id` references `clients(id)`, so they
+      // could not book the slot even if they somehow heard about it. Counting
+      // them in `asked` tells a coach the hour went to nine people when it went
+      // to seven. `handAdded` is the roster's own record of which of its two
+      // tables each row came from (src/ui/roster.tsx); `!== true` rather than
+      // `=== false`, because an unset value is "the roster has not said" and
+      // must not silently drop a real client from an offer.
+      const openTo = roster
+        .filter((c) => c.id !== s.clientId && c.handAdded !== true)
+        .map((c) => c.id);
       if (openTo.length) {
         // What the SERVER did with it, not the size of the list handed over.
         // `sendPushChecked` returns `recorded` — the row count `notify_users`
@@ -2710,12 +2722,33 @@ export default function TrainerSchedule() {
       );
       return;
     }
-    const ids = roster.map((c) => c.id);
+    // ── and "all N of your clients" is a claim about who can TAKE it ────────
+    //
+    // The same exclusion `openTo` above carries, and for the same reason. A
+    // client the coach typed into Add Client has no account, no device to push
+    // to, and `sessions.client_id` references `clients(id)` — so they cannot
+    // book the hour and were never going to hear about it. Counting them made
+    // "Push all 9 of your clients" and "Notify 9" into numbers about the size of
+    // the roster rather than about who would be told, which is the same mistake
+    // `rosterStatus` is guarded against directly above: a figure over a set that
+    // is not the set the sentence names. `handAdded !== true` rather than
+    // `=== false`, because an unset value is "the roster has not said" and must
+    // never quietly drop a real client from an offer.
+    const ids = roster.filter((c) => c.handAdded !== true).map((c) => c.id);
+    const handAdded = roster.length - ids.length;
     if (!ids.length) {
-      Alert.alert('Nobody to offer it to', `${timeLabel(s.startsAt)} stays open on your calendar, but you have no clients on your roster to tell about it. Add one from the Clients tab.`, [{ text: 'OK' }]);
+      Alert.alert('Nobody to offer it to',
+        handAdded > 0
+          ? `${timeLabel(s.startsAt)} stays open on your calendar. Everybody on your book was added by hand, so none of them has the app this offer goes to and none of them could book the hour. Invite them from the Clients tab and they can take slots like this one.`
+          : `${timeLabel(s.startsAt)} stays open on your calendar, but you have no clients on your roster to tell about it. Add one from the Clients tab.`,
+        [{ text: 'OK' }]);
       return;
     }
-    Alert.alert('Offer this slot round?', `Push all ${ids.length} of your clients that ${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is open to book.`, [
+    Alert.alert('Offer this slot round?',
+      `Push all ${ids.length} of your clients that ${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is open to book.`
+      + (handAdded > 0
+        ? `\n\n${handAdded} ${handAdded === 1 ? 'client is' : 'clients are'} not in that: you added them by hand, so they have no app to be told in and could not book the hour.`
+        : ''), [
       { text: 'Cancel', style: 'cancel' },
       { text: `Notify ${ids.length}`, onPress: () => { void doReoffer(s, ids); } },
     ]);

@@ -74,6 +74,20 @@ export const QR_EC_LEVEL = 'M' as const;
  */
 export const MAX_MODULES = 57;
 
+/**
+ * The light margin around the symbol, in modules.
+ *
+ * Four is what the specification requires, and it is not decoration: a scanner
+ * finds the symbol by locating three finder patterns against a quiet
+ * background, so a QR butted up against a coloured card or a dark screen edge
+ * is one a camera hunts for and often never locks onto. It is the commonest
+ * reason a QR that "looks fine" does not scan.
+ *
+ * Expressed in modules rather than pixels so it is exact at every rendered
+ * size: the caller puts it in the viewBox, not in the padding.
+ */
+export const QR_QUIET_ZONE = 4;
+
 /** A finished symbol, in the only form a renderer needs. */
 export type QrMatrix = {
   /** Modules per side, excluding the quiet zone. */

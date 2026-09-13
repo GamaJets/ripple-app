@@ -55,8 +55,8 @@ import { gymDateTimeText, whoseClockNote } from '@lib/gymWhen';
 import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 import { money } from '@lib/gymRecord';
 import {
-  fetchGymOrders, orderLine, orderTrouble, paidPots, countByStatus,
-  ORDER_STATUS_LABEL, PENDING_STALE_MS, type GymOrderRow,
+  fetchGymOrders, orderLine, orderTrouble, paidPots, countByStatus, unspellablePaid,
+  ORDER_STATUS_LABEL, PENDING_STALE_MS, type GymOrderRow, type UnspellablePaid,
 } from '@lib/gymOrders';
 
 /**
@@ -76,6 +76,56 @@ const SPANS: Array<{ id: string; label: string; days: number | null }> = [
 ];
 
 const DAY_MS = 86400000;
+
+/**
+ * The paid orders no pot could hold, said as three facts with three fixes.
+ *
+ * `unspellablePaid` in src/lib/gymOrders.ts splits the exclusion by fault
+ * precisely so a screen does not flatten it back into one number, and this is
+ * the sentence that keeps it split. An order with no currency recorded, one
+ * whose currency is not a code this app can name, and one whose amount cannot
+ * be read are three different things that went wrong in three different places,
+ * and an owner told only "4 excluded" has been handed a number and no next
+ * step.
+ *
+ * Each arm carries where the value came from, which is what makes it a fix
+ * rather than a complaint:
+ *
+ *   · unstated — supabase/functions/gym-checkout refuses the sale outright when
+ *     the plan or pass type states no currency ("This is priced in a currency
+ *     your gym has not set"), and the Stripe webhook never writes the column,
+ *     only reads it. So an EMPTY currency cannot have come from a checkout this
+ *     product ran. It was imported or written by hand through the service role.
+ *   · notACode — gym-checkout copies `membership_plans.currency` /
+ *     `gym_pass_types.currency` onto the order at the moment the session is
+ *     created, and neither column has a format check (supabase/parts/281 states
+ *     the same of `gym_orders.currency`). `'pounds'` in the price book is
+ *     `'POUNDS'` on every order sold from it, so the price book is where it
+ *     stops happening — and rewriting the order would be rewriting the quote.
+ *   · notAnAmount — the amount is ours and unreadable; Stripe's own record of
+ *     the charge is the one that still says what was taken.
+ *
+ * The counts are COUNTS. Nothing here adds them to anything, including to each
+ * other's money: four orders in an unnameable currency are four orders, and the
+ * one number that is true of them is how many there are.
+ */
+function unspellableReasons(u: UnspellablePaid): string {
+  const parts: string[] = [];
+  if (u.unstated > 0) {
+    parts.push(`${u.unstated} ${u.unstated === 1 ? 'records' : 'record'} no currency at all, which no checkout `
+      + `this product runs can produce — those were imported or entered by hand`);
+  }
+  if (u.notACode > 0) {
+    parts.push(`${u.notACode} ${u.notACode === 1 ? 'names' : 'name'} something that is not a three-letter `
+      + `currency code, such as “pounds” — that spelling is copied from the plan or pass type at checkout, `
+      + `so it is the price book that fixes it`);
+  }
+  if (u.notAnAmount > 0) {
+    parts.push(`${u.notAnAmount} ${u.notAnAmount === 1 ? 'carries' : 'carry'} an amount that cannot be read `
+      + `as a number, so Stripe’s record of the charge is the only one that still states it`);
+  }
+  return parts.join('; ');
+}
 
 /** A timestamp as a day. Never the string "null", never today by accident. */
 const day = (iso: string | null | undefined): string => {
@@ -218,6 +268,7 @@ export default function Orders() {
   // reviewer can see it rather than in a default two files away.
   const trouble = useMemo(() => orderTrouble(rows ?? [], nowMs), [rows, nowMs]);
   const pots = useMemo(() => paidPots(rows ?? []), [rows]);
+  const unspellable = useMemo(() => unspellablePaid(rows ?? []), [rows]);
   const statuses = useMemo(() => countByStatus(rows ?? []), [rows]);
 
   /**
@@ -478,6 +529,49 @@ export default function Orders() {
           A session expires after 24 hours and the webhook should have moved these to abandoned
           {' '}{Math.round(PENDING_STALE_MS / 3600000)} hours ago. Nobody has necessarily been
           charged — this is a question about whether the webhook is arriving, not a debt.
+        </Banner>
+      ) : null}
+
+      {/* ── the paid orders the tiles above could not hold ────────────────────
+          The tiles narrate `paidPots`' exclusion only in the branch where there
+          are NO pots at all. A gym with one good GBP pot and four rows written
+          'pounds' saw one tile, a figure that looked like the whole quarter, and
+          no mention of the four anywhere on the screen — a withheld total
+          presented as a complete one, which is the same defect the empty-pots
+          note was written against, one case further along. This is that case.
+
+          It fires on `unspellable.orders > 0` and not on that case alone, so
+          there is ONE sentence about one fact rather than two that have to be
+          kept in step. The empty-pots tile still says there is no figure to
+          write — a note under a tile, where the tile is — and this says which
+          rows and what to do about them. app/(owner)/orders.tsx renders the
+          same sentence from the same counter, because a console that disagrees
+          with the phone about one gym is worse than either alone.
+
+          `warn` and not `crit`. Nobody is owed anything here: a paid order is
+          one the webhook confirmed — supabase/parts/281 defines 'paid' as
+          "checkout.session.completed arrived and the entitlement below was
+          written" — so the money arrived AND the member got what they bought.
+          `crit` on this screen means a member who paid and got nothing, and
+          spending it on a bookkeeping gap is how it stops being read.
+
+          It is never netted off the tiles and never called missing money. The
+          only thing wrong is that the row does not spell what money it was in,
+          and the only honest figure over rows in moneys that cannot be named is
+          how many there are. */}
+      {rows && unspellable.orders > 0 ? (
+        <Banner tone="warn">
+          <strong style={{ color: 'var(--ink)' }}>
+            {unspellable.orders} paid {unspellable.orders === 1 ? 'order is' : 'orders are'} not in
+            any figure on this screen.
+          </strong>{' '}
+          The money arrived and the {unspellable.orders === 1 ? 'member has' : 'members have'} what
+          they bought — what cannot be done is add {unspellable.orders === 1 ? 'it' : 'them'} up:{' '}
+          {unspellableReasons(unspellable)}. So this is a count and never a total: an amount in a
+          money this app cannot name cannot be added to another one, or to a figure that names its
+          own. {unspellable.orders === 1 ? 'It is' : 'All of them are'} still in the order book,
+          marked Paid. Nothing on this screen rewrites an order — every write to the order book is
+          made by the checkout and webhook functions.
         </Banner>
       ) : null}
 

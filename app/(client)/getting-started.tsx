@@ -49,7 +49,7 @@ import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
-import { checklist, checklistDone, checklistLeft, nextTodo, type ChecklistRow } from '../../src/lib/firstRun';
+import { checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, type ChecklistRow } from '../../src/lib/firstRun';
 import { ONBOARD_KEY } from './onboarding';
 import { GUIDE_SEEN_KEY } from '../guide';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
@@ -100,11 +100,16 @@ export default function GettingStarted() {
     // could not be read, which is not the same as not being linked.
     coach: c.coachLinked,
     workout: isWhole(logStatus) ? log.length > 0 : (log.length > 0 ? true : null),
-    // Only today's log is loaded, so a `true` is trustworthy and a `false` is
-    // only "not today". Both are read the same way: something logged is proof,
-    // nothing logged on a settled read is a genuine no, and an unsettled one is
-    // unknown.
-    meal: isWhole(food.status) ? food.entries.length > 0 : (food.entries.length > 0 ? true : null),
+    // "Have you EVER logged a meal", which is a fact about this member's
+    // history and not about today. It used to be read off `food.entries`,
+    // which src/ui/foodLog.tsx loads for today only — so the row un-ticked
+    // itself every midnight, the list could never reach zero, and the home
+    // screen kept the onboarding row for a member who had logged every meal
+    // for six months. `everLogged` is the read with no date floor on it, and
+    // it is null until it lands: see everLoggedMeal, which is where the rule
+    // that a null stays a dash lives. `food.status` is not consulted at all
+    // now — a settled empty TODAY says nothing about ever.
+    meal: everLoggedMeal({ loggedToday: food.entries.length, unsentEarlier: food.owed.length, everLogged: food.everLogged }),
     device: deviceKnown ? Object.values(states).some((s) => s === 'connected') : null,
     solo,
   });

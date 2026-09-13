@@ -60,8 +60,8 @@ import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { readState, hasRows, staleNote, failedNote } from '../../src/lib/staleRead';
 import {
-  fetchGymOrders, orderLine, orderTrouble, paidPots,
-  ORDER_STATUS_LABEL, type GymOrderRow,
+  fetchGymOrders, orderLine, orderTrouble, paidPots, unspellablePaid,
+  ORDER_STATUS_LABEL, type GymOrderRow, type UnspellablePaid,
 } from '../../src/lib/gymOrders';
 import { BACK_ICON } from '../../src/ui/direction';
 
@@ -70,6 +70,57 @@ import { BACK_ICON } from '../../src/ui/direction';
  *  to be asked about, and a bound rather than a cap: `fetchGymOrders` PAGES,
  *  so a busy quarter is finished rather than refused. */
 const WINDOW_DAYS = 90;
+
+/**
+ * The paid orders no pot could hold, said as three facts with three fixes.
+ *
+ * Word for word the same builder as studio-web/app/orders/page.tsx. It is a
+ * deliberate copy and not a shared export, because src/lib/gymOrders.ts is the
+ * pure counter and this is one screen's wording — but the two screens are one
+ * fact about one gym, so the two copies say the same thing in the same order
+ * and change together.
+ *
+ * `unspellablePaid` splits the exclusion by fault precisely so a screen does
+ * not flatten it back into one number, and this is the sentence that keeps it
+ * split. An order with no currency recorded, one whose currency is not a code
+ * this app can name, and one whose amount cannot be read are three different
+ * things that went wrong in three different places, and an owner told only
+ * "4 excluded" has been handed a number and no next step.
+ *
+ * Each arm carries where the value came from, which is what makes it a fix:
+ *
+ *   · unstated — supabase/functions/gym-checkout refuses the sale outright when
+ *     the plan or pass type states no currency, and the Stripe webhook never
+ *     writes the column, only reads it. So an EMPTY currency cannot have come
+ *     from a checkout this product ran; it was imported or entered by hand.
+ *   · notACode — gym-checkout copies `membership_plans.currency` /
+ *     `gym_pass_types.currency` onto the order when the session is created, and
+ *     neither column has a format check. `'pounds'` in the price book is
+ *     `'POUNDS'` on every order sold from it, so the price book is where it
+ *     stops — and rewriting the order would be rewriting the quote.
+ *   · notAnAmount — the amount is ours and unreadable; Stripe's own record of
+ *     the charge is the one that still says what was taken.
+ *
+ * The counts are COUNTS. Nothing here adds them to anything, including to each
+ * other's money.
+ */
+function unspellableReasons(u: UnspellablePaid): string {
+  const parts: string[] = [];
+  if (u.unstated > 0) {
+    parts.push(`${u.unstated} ${u.unstated === 1 ? 'records' : 'record'} no currency at all, which no checkout `
+      + `this product runs can produce — those were imported or entered by hand`);
+  }
+  if (u.notACode > 0) {
+    parts.push(`${u.notACode} ${u.notACode === 1 ? 'names' : 'name'} something that is not a three-letter `
+      + `currency code, such as “pounds” — that spelling is copied from the plan or pass type at checkout, `
+      + `so it is the price book that fixes it`);
+  }
+  if (u.notAnAmount > 0) {
+    parts.push(`${u.notAnAmount} ${u.notAnAmount === 1 ? 'carries' : 'carry'} an amount that cannot be read `
+      + `as a number, so Stripe’s record of the charge is the only one that still states it`);
+  }
+  return parts.join('; ');
+}
 
 export default function OwnerOrders() {
   const t = useTheme();
@@ -143,6 +194,9 @@ export default function OwnerOrders() {
   const trouble = orderTrouble(list);
   const needsAPerson = trouble.failed.length + trouble.paidWithNothing.length;
   const pots = paidPots(list);
+  // The paid orders `paidPots` could not put in any pot. A COUNT, split by
+  // fault — never a sum, and never subtracted from a pot.
+  const unspellable = unspellablePaid(list);
 
   const shown = (() => {
     const needle = q.trim().toLowerCase();
@@ -226,6 +280,42 @@ export default function OwnerOrders() {
           </Flag>
         ) : null}
 
+        {/* ── the paid orders Taken Online could not hold ───────────────────
+            Word for word what studio-web/app/orders/page.tsx says, from the
+            same counter, in the same place in the same stack. One gym, one
+            fact; a console that disagrees with the phone is worse than either.
+
+            Before this, neither screen said anything at all in the case that
+            matters most: `paidPots` drops a paid order whose currency is not a
+            code and whose amount is not a number, and a gym with one good GBP
+            pot and four rows written 'pounds' read one line under Taken Online
+            and no mention of the four. A withheld total presented as a complete
+            one.
+
+            `warn` and not `crit`. Nobody is owed anything: supabase/parts/281
+            defines 'paid' as "checkout.session.completed arrived and the
+            entitlement below was written", so the money arrived AND the member
+            got what they bought. `crit` on this screen means a member who paid
+            and got nothing — the opposite fact — and spending it on a
+            bookkeeping gap is how it stops being read.
+
+            Never netted off the lines below, never called missing money. The
+            only honest figure over rows in moneys that cannot be named is how
+            many there are. */}
+        {loaded && unspellable.orders > 0 ? (
+          <Flag tone={t.warn}>
+            {unspellable.orders} paid {unspellable.orders === 1 ? 'order is' : 'orders are'} not in
+            any figure on this screen. The money arrived and the{' '}
+            {unspellable.orders === 1 ? 'member has' : 'members have'} what they bought — what
+            cannot be done is add {unspellable.orders === 1 ? 'it' : 'them'} up:{' '}
+            {unspellableReasons(unspellable)}. So this is a count and never a total: an amount in a
+            money this app cannot name cannot be added to another one, or to a figure that names its
+            own. {unspellable.orders === 1 ? 'It is' : 'All of them are'} still in the order book,
+            marked Paid. Nothing on this screen rewrites an order — every write to the order book is
+            made by the checkout and webhook functions.
+          </Flag>
+        ) : null}
+
         <Rule />
 
         {/* ── what was taken ─────────────────────────────────────────────── */}
@@ -238,9 +328,31 @@ export default function OwnerOrders() {
                 : 'Reading…'}
             </Text>
           ) : pots.length === 0 ? (
+            // ── an empty set of pots is three different facts ──────────────
+            // This was one sentence — "Nothing has been paid for online in this
+            // window" — and `paidPots` has an exit it did not describe: it
+            // drops a paid order whose currency is not a code this app can
+            // name, and one whose amount is not a finite number, because
+            // neither can be added to money. `gym_orders.currency` is
+            // `not null` with no format check of any kind (supabase/parts/281),
+            // so an imported or hand-written row satisfies the column and still
+            // says nothing an amount can be spelled in.
+            //
+            // So a gym whose online takings were ALL filed without a usable
+            // currency read "nothing has been paid for online" over a book of
+            // paid orders. That is the defect this screen exists against
+            // wearing a figure's clothes: a withheld total presented as a nil.
+            // studio-web/app/orders/page.tsx says the same three arms under its
+            // own empty tile; the flag above carries the detail on both.
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing has been paid for online in this window. That is not the same as no income —
-              payments taken at the desk are on Members.
+              {list.length === 0
+                ? `No online orders at all in the last ${WINDOW_DAYS} days.`
+                : unspellable.orders === 0
+                ? 'Nothing has been paid for online in this window.'
+                : `${unspellable.orders} paid order${unspellable.orders === 1 ? '' : 's'} in this window, and not `
+                  + `one states both an amount and the currency it was taken in — so there is no figure to `
+                  + 'write here. They are counted above, never guessed at.'}
+              {' '}That is not the same as no income — payments taken at the desk are on Members.
             </Text>
           ) : pots.map((p) => (
             // One line per currency. They are never added: a gym that changed

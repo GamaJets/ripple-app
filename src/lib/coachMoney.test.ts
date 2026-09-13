@@ -121,6 +121,74 @@ eq(currencyDecimals('kwd'), 3, 'and a dinar has three — a thousand fils in it,
 eq(currencyDecimals(null), null, 'and a currency nobody stated has no answer at all, which is not two');
 eq(currencyDecimals('  '), null, 'a blank currency is no currency here either');
 
+/* ── and a currency that is STATED and is not a currency ──────────────────
+ *
+ * `moneyIn` above had the three-letter rule and this function did not, so the
+ * two disagreed about what a currency is and the WHOLE FAMILY took the looser
+ * answer. `currencyDecimals('pounds')` was 2, which is not a formatting
+ * opinion: every function below scales by `10 ** dp` and rounds the result, so
+ * a wrong `dp` is a wrong AMOUNT. The figures beside each case are what this
+ * repo actually produced before the rule was applied here.
+ */
+eq(currencyDecimals('pounds'), null, 'a word is not a code, however much it names a currency — this was 2');
+eq(currencyDecimals('£'), null, 'nor is a symbol — this was 2');
+eq(currencyDecimals('GB'), null, 'two letters is not a code — this was 2');
+eq(currencyDecimals('GBPX'), null, 'and four letters is not one either — this was 2');
+eq(currencyDecimals('gb p'), null, 'nor is a code with a space in the middle of it');
+
+// The other half of the rule, and it is deliberate rather than an oversight: a
+// three-letter code this build has not been told about by name is a REAL
+// currency with two places, because the two exception lists above are Stripe's
+// own and complete. An allowlist here would answer null for the dirham and
+// break a gym on a currency that works perfectly well.
+eq(currencyDecimals('ZZZ'), 2, 'a stated but unrecognised code is two places, which is an answer and not a default');
+eq(currencyDecimals('aed'), 2, 'and a real currency outside both lists is two — this must not become null');
+eq(currencyDecimals('CHF'), 2, 'the case of the code is not the question');
+eq(currencyDecimals('  gbp  '), 2, 'surrounding space is still trimmed off a good code');
+
+// What the null actually prevented, function by function. Each left-hand side
+// is the value this repo returned for 'pounds' before the rule reached here.
+eq(majorFromMinor(5000, 'pounds'), '', 'the price a coach is shown to edit — this was "50.00"');
+eq(minorFromWhole(50, 'pounds'), null, 'the rate written to a payroll snapshot — this was 5000');
+eq(minorFromDecimal('50.00', 'pounds'), null, 'an outside system’s ad spend — this was 5000');
+eq(moneyIn(5000, 'pounds', true), null, 'and the formatter itself, which already refused, still does');
+
+// The one that changes a figure a person typed rather than one they read.
+{
+  const r = readMinorAmount('12.340', 'pounds', false);
+  eq(r.ok, false, 'a typed amount against a non-currency is refused, not read at two places as 1234');
+  ok(!r.ok && /not a currency code/.test(r.reason),
+    'and the refusal says the currency is unreadable rather than that the figure has too many places');
+  ok(!r.ok && /POUNDS/.test(r.reason),
+    'naming the value that is actually in the column, because that is the thing to go and fix');
+  ok(!r.ok && !/No currency is recorded/.test(r.reason),
+    'never "no currency is recorded" — that sends somebody to a setting that already has a value in it');
+}
+{
+  // The absent case keeps its own sentence. Two situations, two fixes.
+  const r = readMinorAmount('12.50', '', false);
+  ok(!r.ok && /No currency is recorded/.test(r.reason), 'an ABSENT currency still gets the sentence written for it');
+}
+
+/* ── the two rules are ONE rule ───────────────────────────────────────────
+ *
+ * `moneyIn` keeps its own `/^[A-Z]{3}$/` because it needs the upper-cased code
+ * to print beside the figure, so it holds the string anyway. Two copies of a
+ * rule is two things to relax separately, and that is exactly how this defect
+ * lived: `moneyIn` had the three-letter test, `currencyDecimals` did not, the
+ * two disagreed about what a currency is, and every other consumer took the
+ * looser answer.
+ *
+ * So the agreement is asserted rather than assumed. This is the assertion that
+ * fails if somebody relaxes the regex above while a `?? 2` is anywhere near it
+ * — which is the shape the old code was one edit away from.
+ */
+for (const c of ['GBP', 'gbp', '  GBP  ', 'JPY', 'KWD', 'AED', 'ZZZ', 'pounds', '£', 'GB', 'GBPX', 'gb p', '', '   ']) {
+  eq(moneyIn(5000, c, true) == null, currencyDecimals(c) == null,
+    `moneyIn and currencyDecimals must agree about whether ${JSON.stringify(c)} is a currency`);
+}
+eq(moneyIn(5000, null, true) == null, currencyDecimals(null) == null, 'including about null');
+
 // The figure a hundred times out. Stripe stores a KWD amount in fils, so 12340
 // of them is KWD 12.340 — printed at two places it read as KWD 123.40.
 eq(minorMoney(12340, 'kwd'), 'KWD 12.340', 'a three-decimal currency divides by a thousand');

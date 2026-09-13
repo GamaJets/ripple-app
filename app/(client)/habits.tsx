@@ -336,10 +336,18 @@ export default function Habits() {
             // A run of nought is not printed as "0 days". There is no run, and
             // a zero beside a habit reads as a score.
             const runText = runFig && run && run.days > 0 ? `${runFig.figure} ${runFig.unit}` : null;
-            // Only when the number cannot stand on its own: a run with silence
-            // in it, or one that reaches the bottom of what we read.
+            // The sentence under the line. Two cases earn one, and no others —
+            // a note under every row is a note nobody reads:
+            //   · the figure cannot stand on its own (silence in the run, or a
+            //     run that reaches the bottom of what we read);
+            //   · there is NO current run but the record knows when the habit
+            //     was last kept. That is the half of their own history this
+            //     screen could never show, and it is the half worth saying:
+            //     "no run going just now, last ticked on the 2nd" rather than a
+            //     blank, which reads as nothing ever happened.
             const caveat = run ? habitStreakCaveat(run) : null;
-            const runNote = run && caveat ? habitStreakNote(run) : null;
+            const ended = !!run && run.days === 0 && run.lastTicked !== null;
+            const runNote = run && (caveat || ended) ? habitStreakNote(run) : null;
             // The label on a Pressable REPLACES its children for a screen
             // reader, so anything drawn inside it that is not in here is silent.
             // The run is the new thing on this row and it would have been the

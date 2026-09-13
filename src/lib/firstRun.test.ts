@@ -19,8 +19,8 @@
 import {
   SETUP_QUESTIONS, EMPTY_DRAFT, questionsToAsk, readDraft, resumeAt, isSetupStep,
   showBody, showFuel, showWeek, homeSectionsShown,
-  CHECKLIST, checklist, checklistDone, checklistLeft, nextTodo, showChecklist,
-  type SetupStep, type HomeFacts, type ChecklistFacts, type ChecklistItemId,
+  CHECKLIST, checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, showChecklist,
+  type SetupStep, type HomeFacts, type ChecklistFacts, type ChecklistItemId, type MealEverFacts,
 } from './firstRun';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -282,6 +282,112 @@ eq(nextTodo(checklist(SKIP))?.id, 'coach', 'the next thing to do is the first on
 // screen from the "next" line.
 same(checklist(FRESH).map((r) => r.item.id as ChecklistItemId),
   ['setup', 'guide', 'coach', 'workout', 'meal', 'device'], 'the rows keep the list order');
+
+/* ── "Log Something You Ate": ever, not today ───────────────────────────── */
+
+// The defect: both screens computed this item from `useFoodLog().entries`,
+// which is TODAY ONLY. So it ticked the evening somebody logged dinner and
+// un-ticked itself at midnight; `checklistLeft` never reached zero and the
+// onboarding row never left the home screen of ANY member, however long they
+// had been logging. These are the assertions that stop it coming back.
+
+/** Nothing on this phone, and the history read has not answered. */
+const MEAL_SILENT: MealEverFacts = { loggedToday: 0, unsentEarlier: 0, everLogged: null };
+
+// THE ONE THAT MATTERS. 00:05, they have not eaten yet, and they have logged
+// every meal for six months. Today is empty and the item is still DONE.
+eq(everLoggedMeal({ loggedToday: 0, unsentEarlier: 0, everLogged: true }), true,
+  'an empty today does not un-tick a member who has logged before');
+
+// And it is not a streak. There is no window in this, so "nothing today,
+// nothing this week, nothing this month" is the same answer as "nothing since
+// breakfast": the question was never about recency.
+eq(everLoggedMeal({ loggedToday: 0, unsentEarlier: 0, everLogged: true }),
+  everLoggedMeal({ loggedToday: 4, unsentEarlier: 0, everLogged: true }),
+  'logging today adds nothing to having logged ever');
+
+// A genuinely new member. The history read answered, and it answered no.
+eq(everLoggedMeal({ loggedToday: 0, unsentEarlier: 0, everLogged: false }), false,
+  'a member who has never logged one still has it to do');
+
+// Their first meal, the moment it is on screen. It counts before any read
+// confirms it — the row in front of them was logged by somebody.
+eq(everLoggedMeal({ loggedToday: 1, unsentEarlier: 0, everLogged: false }), true,
+  "today's meal is proof on its own");
+eq(everLoggedMeal({ loggedToday: 1, unsentEarlier: 0, everLogged: null }), true,
+  'and it does not wait for the history read to land');
+
+// The offline case, which is the one that would be easiest to drop. A meal
+// logged in a basement for yesterday is not in `entries` — it is held in the
+// owed queue — and it is still a meal this member logged.
+eq(everLoggedMeal({ loggedToday: 0, unsentEarlier: 1, everLogged: false }), true,
+  'a meal this phone is still holding for an earlier day counts');
+eq(everLoggedMeal({ loggedToday: 0, unsentEarlier: 2, everLogged: null }), true,
+  'even when nothing has been able to confirm it');
+
+// The null, which is the whole reason this is a function. A read that has not
+// landed is not a no AND it is not a yes.
+eq(everLoggedMeal(MEAL_SILENT), null, 'an unanswered history read says nothing');
+ok(everLoggedMeal(MEAL_SILENT) !== false, 'it never reads as "you have never logged a meal"');
+ok(everLoggedMeal(MEAL_SILENT) !== true, 'and never draws a tick it has not earned');
+
+/* ── the same three facts, through the list the screens draw ─────────────── */
+
+const mealRow = (f: MealEverFacts): ChecklistFacts => ({ ...FINISHED, meal: everLoggedMeal(f) });
+const mealState = (f: MealEverFacts) => checklist(mealRow(f)).find((r) => r.item.id === 'meal')!.state;
+
+// The reproduction, end to end: six months of meals, nothing logged yet today.
+// Before this fix the row read 'todo', the count read 5 of 6, and the home row
+// stayed. It is the finished list it should always have been.
+eq(mealState({ loggedToday: 0, unsentEarlier: 0, everLogged: true }), 'done',
+  'the six-month member has logged something they ate');
+eq(checklistLeft(checklist(mealRow({ loggedToday: 0, unsentEarlier: 0, everLogged: true }))), 0,
+  'and has nothing left over from midnight');
+ok(!showChecklist(checklist(mealRow({ loggedToday: 0, unsentEarlier: 0, everLogged: true }))),
+  'so the onboarding row finally leaves their home screen');
+
+// In flight: a dash, and the row stays. Not a tick — the list must not
+// congratulate anybody off a read that has not happened — and not an empty
+// circle either.
+eq(mealState(MEAL_SILENT), 'unknown', 'an unread history draws a dash');
+eq(checklistDone(checklist(mealRow(MEAL_SILENT))), 5, 'an unknown meal row is not counted done');
+eq(checklistLeft(checklist(mealRow(MEAL_SILENT))), 0, 'nor counted as outstanding');
+ok(showChecklist(checklist(mealRow(MEAL_SILENT))), 'and the list stays until it knows');
+eq(nextTodo(checklist(mealRow(MEAL_SILENT))), null,
+  'nobody is sent to the Food Log to do a thing they may already have done');
+
+// The new member, who really does still have it to do.
+eq(mealState({ loggedToday: 0, unsentEarlier: 0, everLogged: false }), 'todo',
+  'a brand-new member is told to log something');
+eq(nextTodo(checklist(mealRow({ loggedToday: 0, unsentEarlier: 0, everLogged: false })))?.id, 'meal',
+  'and pointed at the right row');
+
+/* ── every other row on the list, checked for the same shape ─────────────── */
+//
+// The question asked of each: does the fact behind it come from a read with a
+// DAY in it, so that the item could un-tick itself while the member's history
+// stays exactly as it was?
+//
+//   setup   AsyncStorage ONBOARD_KEY — a device mark, set once, never cleared.
+//   guide   AsyncStorage GUIDE_SEEN_KEY — the same. Both are per-DEVICE rather
+//           than per-account, so a reinstall loses them; that is a different
+//           complaint (it costs taps, not a day) and firstRun.ts argues it
+//           deliberately where SetupDraft is defined.
+//   coach   clientData.coachLinked — a state of the link, not a window.
+//   workout useWorkoutLog().log — src/ui/workoutLog.tsx selects the member's
+//           workouts with NO date floor, so `log.length > 0` really is "ever".
+//           This is the one that proves the shape is available: the training
+//           half of the same pair was already right, and only the food half
+//           was reading a day.
+//   meal    was the defect. Fixed above.
+//   device  the live state of a connected watch, which is a present-tense
+//           question by construction — "Connect a Watch" is undone again if
+//           they disconnect it, and that is the honest answer.
+//
+// So: one row had it, and it is this one. Nothing below is a day-shaped fact
+// wearing an ever-shaped title.
+same(CHECKLIST.map((c) => c.id), ['setup', 'guide', 'coach', 'workout', 'meal', 'device'],
+  'the six rows are still the six rows this was checked against');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('firstRun.test.ts — ok');

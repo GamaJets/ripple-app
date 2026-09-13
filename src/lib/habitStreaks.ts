@@ -176,13 +176,18 @@ export interface HabitStreak {
 
 export interface HabitStreakOptions {
   /**
-   * The oldest calendar day the read can SPEAK FOR, as `YYYY-MM-DD`, or null
-   * when there is no floor to worry about.
+   * The oldest calendar day whose ABSENCE of rows can be trusted, as
+   * `YYYY-MM-DD`, or null when there is no floor to worry about.
    *
-   * Not "the oldest day that came back". On a truncated read the oldest day
-   * present is itself a partial day — the cap fell somewhere inside it — so the
-   * oldest day that can be spoken for is the one ABOVE it. The provider works
-   * that out; this file only needs the line.
+   * Precisely that, and not "the oldest day that came back", because the two
+   * things a read gives you are not equally reliable. A row that came back is a
+   * fact: the walk counts a ticked day wherever it sits. An EMPTY day is only
+   * informative inside the part of the window that was read whole — below that
+   * line an empty day may be silence or may be a row the thousand-row ceiling
+   * cut, and there is no telling which.
+   *
+   * On a truncated read the oldest day present is itself a partial day, so the
+   * line is the day ABOVE it. `tickReadCoverage` works that out from the read.
    */
   coverFrom?: string | null;
 }
@@ -356,6 +361,99 @@ function fold(rows: readonly HabitTickRow[], today: string) {
   return { byHabit, anyTickDays };
 }
 
+/** What one `habit_logs` read supports: today's ticks, and how far back it can
+ *  be trusted. See `tickReadCoverage`. */
+export interface TickReadCoverage {
+  /**
+   * The oldest calendar day this read can SPEAK FOR, for `habitStreaks`'
+   * `coverFrom`. Null only when there is no usable day at all.
+   */
+  coverFrom: string | null;
+  /**
+   * True when every one of today's rows is in the read.
+   *
+   * The thing a provider must NOT infer from `truncated` alone, in either
+   * direction.
+   */
+  todayWhole: boolean;
+  /** The habits ticked today, deduped. The tick set the checklist draws. */
+  todayHabits: string[];
+}
+
+/**
+ * Split one windowed `habit_logs` read into the two claims over it.
+ *
+ * ── Why this is a function and not four lines in the provider ─────────────
+ *
+ * Because it is the part of this feature with teeth, and it is arithmetic
+ * rather than plumbing — so it belongs where it can be asserted rather than
+ * reasoned about in an async effect nobody can run.
+ *
+ * One read comes back. Two different claims rest on it and they fail
+ * independently:
+ *
+ *   · TODAY's ticks drive every checkbox on the screen and every figure
+ *     `status` gates. The provider orders `done_on` DESCENDING, so today's rows
+ *     are at the top of the page and survive a truncation that eats the oldest
+ *     days. They are complete unless the ceiling reached today ITSELF, which
+ *     needs a thousand rows all stamped today — a thing that should be
+ *     impossible and is therefore checked, because "should be impossible" is
+ *     the whole reason src/lib/rowCap.ts exists.
+ *   · THE HISTORY behind them is complete only if nothing fell off the bottom,
+ *     and a member with a long record truncates it routinely.
+ *
+ * Folding those into one status is the defect this split prevents: a member
+ * whose history is long would read "Some of today's list is missing" over a
+ * complete list, every day, for ever.
+ *
+ * ── the off-by-one that matters ──────────────────────────────────────────
+ *
+ * On a truncated read the oldest day PRESENT is a partial day — the ceiling
+ * fell somewhere inside it, so some of its rows are here and some are not. The
+ * oldest day the read can speak for is therefore the one ABOVE it. Taking the
+ * oldest day present would state a run as a fact off a day that was half read.
+ *
+ * `windowFrom` is the lower bound the query ASKED for; on a whole read that is
+ * exactly what it can speak for, whether or not any row came back from down
+ * there — a day with no rows in a complete read is a day that genuinely has
+ * none.
+ *
+ * Nothing here trusts the caller's ordering: the oldest day is taken as a
+ * minimum over the rows rather than read off the end of the array, so a
+ * provider that changes its `.order()` cannot silently move the boundary.
+ */
+export function tickReadCoverage(
+  rows: readonly HabitTickRow[],
+  today: string,
+  windowFrom: string | null,
+  truncated: boolean,
+): TickReadCoverage {
+  const day = String(today ?? '').trim();
+  const validToday = DAY_RE.test(day) ? day : null;
+  const from = windowFrom && DAY_RE.test(String(windowFrom).trim()) ? String(windowFrom).trim() : null;
+  let oldest: string | null = null;
+  const todaySet = new Set<string>();
+  for (const r of rows ?? []) {
+    const habit = String(r?.habit ?? '');
+    const d = String(r?.done_on ?? '').slice(0, 10);
+    if (!habit || !DAY_RE.test(d)) continue;
+    if (oldest === null || d < oldest) oldest = d;
+    if (validToday && d === validToday) todaySet.add(habit);
+  }
+  if (!validToday) return { coverFrom: from, todayWhole: !truncated, todayHabits: [...todaySet].sort() };
+  return {
+    // A truncated read with no usable row in it can speak for nothing: the
+    // ceiling was reached before a single readable day arrived, so every day
+    // including today is in doubt. `validToday` is the narrowest honest floor
+    // — it says "we can vouch for today and nothing below it".
+    coverFrom: truncated ? (oldest ? nextDay(oldest) : validToday) : from,
+    // Strictly less than: if the oldest day that came back IS today, the cut
+    // landed inside today and today is a prefix of itself.
+    todayWhole: !truncated || (oldest !== null && oldest < validToday),
+    todayHabits: [...todaySet].sort(),
+  };
+}
+
 /**
  * The current run for one habit.
  *
@@ -397,18 +495,26 @@ function runFor(
   let from: string | null = null;
   let bounded = false;
 
+  // ── PRESENCE IS A FACT; ABSENCE IS WHAT TRUNCATION PUTS IN DOUBT ─────────
+  //
+  // The order of the tests below is the whole of it, and the first version had
+  // it wrong in a way that quietly SHORTENED runs.
+  //
+  // A row we are holding is a row. A truncated read does not make the ticks it
+  // returned less true — it makes the ticks it did NOT return unknown. So a day
+  // with a row for this habit counts wherever it sits, above or below the read
+  // boundary; and a day with a row for some OTHER habit is still proof the
+  // member was in the app, so it is still a real miss and still ends the run as
+  // a fact. What the boundary costs us is only the third case: a day we can see
+  // nothing on. Above the line that is genuine silence; below it, it may be
+  // silence or it may be a row that fell off the end, and there is no telling.
+  //
+  // The first version tested the boundary first and so refused to count a
+  // ticked day it had in its hand, reporting a run of two where the rows it was
+  // given proved three. Under-claiming is not the safe direction — this file's
+  // own header says so.
   for (let step = 0; cursor; step++) {
     if (step >= MAX_WALK_DAYS) { if (days > 0) bounded = true; break; }
-    // Below what the read can speak for. The run may continue down there and
-    // this is the one thing we know we cannot see, so it is a floor rather than
-    // an end. Tested BEFORE the oldest-tick guard: on a truncated read the
-    // oldest tick we hold can itself be below the line we can speak for.
-    if (coverFrom && cursor < coverFrom) { if (days > 0) bounded = true; break; }
-    // Nothing older to reach. `currentStreakFrozen` in src/lib/streaks.ts stops
-    // in the same place and for the same reason — stepping over silence towards
-    // a day that has no tick under it in any case is walking for nothing, and
-    // it would count silent days into a run that does not continue.
-    if (cursor < oldestTicked) break;
     if (ticked.has(cursor)) {
       // The first ticked day closes the silence ABOVE the run; every one after
       // it closes a hole INSIDE it. Adding both into one number is what made a
@@ -421,9 +527,20 @@ function runFor(
       continue;
     }
     // A day they were demonstrably in the app and left this line. The only
-    // thing in this table that ends a run, and the figure above it is a fact.
+    // thing in this table that ends a run, and the figure above it is a fact —
+    // the other habit's row is one we are holding, so the truncation has no
+    // bearing on it.
     if (anyTickDays.has(cursor)) break;
-    // Silent. Stepped over, counted nowhere yet.
+    // Nothing at all on this day in what came back. Below the line that is not
+    // evidence of silence, it is the absence of evidence, so the run is a floor
+    // rather than a thing that ended here.
+    if (coverFrom && cursor < coverFrom) { if (days > 0) bounded = true; break; }
+    // Nothing older to reach. `currentStreakFrozen` in src/lib/streaks.ts stops
+    // in the same place and for the same reason — stepping over silence towards
+    // a day that has no tick under it in any case is walking for nothing, and
+    // it would count silent days into a run that does not continue.
+    if (cursor < oldestTicked) break;
+    // Genuinely silent: inside what we can speak for, and nobody recorded it.
     pending += 1;
     cursor = previousDay(cursor);
   }

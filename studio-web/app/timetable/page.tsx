@@ -20,6 +20,7 @@ import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib
 // calendar days the week strip is built from. Both were the reader's clock,
 // which is how a 06:00 class on a Dubai timetable read 02:00 — and, for a
 // reader far enough west, under the previous day's heading.
+import { useHourTick, hourStart } from '@/lib/hourTick';
 import { gymDateTimeText, gymTimeText, calendarDateText } from '@lib/gymWhen';
 // Escape, focus and the tab trap these dialogs never had.
 import { useDialog, dialogPanel } from '@/lib/dialog';
@@ -1157,7 +1158,11 @@ function FloorCover({ board, days, zone }: {
    * paging to next Tuesday has no "now" in it, and the evening is the hour an
    * owner planning cover is looking for.
    */
-  const gymNow = useMemo(() => rotaCell(Date.now(), zone), [zone]);
+  // Keyed on the hour, not on the zone alone. The zone does not change when
+  // time does, so reading the clock in a memo keyed on it fixed this value at
+  // the moment the tab was opened — and a desk leaves this board up all day.
+  const hourTick = useHourTick();
+  const gymNow = useMemo(() => rotaCell(hourStart(hourTick), zone), [hourTick, zone]);
   const todayIdx = useMemo(() => {
     // Matched as a calendar DATE rather than counted as a span of days: both
     // sides are `YYYY-MM-DD` on the same calendar, so this is a string compare
@@ -1166,7 +1171,12 @@ function FloorCover({ board, days, zone }: {
     if (!today) return 0;
     const i = days.indexOf(today);
     return i >= 0 ? i : 0;
-  }, [days, zone, gymNow]);
+    // `hourTick` is in the deps for the fallback arm, not for `gymNow`. When
+    // the gym has no zone, `gymNow` is null and `rotaToday(zone)` reads the
+    // clock itself — so without the tick this memo would settle the reader's
+    // day once, at mount, for exactly the gyms that have set no zone. The tick
+    // is the only dependency here that moves when time does.
+  }, [days, zone, gymNow, hourTick]);
   /** The gym's current hour, clamped into the strip the panel draws. Null when
    *  the shown week does not contain the gym's today, or when the clock could
    *  not be read at all — and 18:00 is what the panel falls back to, which is

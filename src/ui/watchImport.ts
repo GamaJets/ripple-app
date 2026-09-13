@@ -170,8 +170,16 @@ export interface RecentRead {
   /** Workouts from providers that ANSWERED, newest first. Never padded out
    *  with an empty list standing in for a failure. */
   samples: WorkoutSample[];
-  /** One entry per provider in the catalogue that got as far as being
-   *  considered — in `PROVIDERS` order, so the sentence below is stable. */
+  /**
+   * One entry per provider in the catalogue, in `PROVIDERS` order — so a
+   * screen's sentence about them is stable, and so a device the member owns is
+   * never simply absent from the answer.
+   *
+   * This includes the rows nobody can connect (Garmin, Fitbit) as
+   * `not-asked: 'no-reader' | 'unavailable'`. A screen listing them should
+   * filter to the ones the member has connected; `failed` and the `'token-dead'`
+   * entries in `notAsked` are the two that always deserve a sentence.
+   */
   reads: ProviderRead[];
   answered: ProviderRead[];
   failed: ProviderRead[];
@@ -273,24 +281,18 @@ export function readNote(r: RecentRead, windowLabel: string, sourceLabel: string
   return null;
 }
 
-/**
- * The old shape, kept only so the two screens that call it keep compiling.
+/*
+ * `fetchRecent` stood here and is gone.
  *
- * @deprecated It CANNOT express a failed provider — that is the defect, not an
- * omission — so a caller on this function is still capable of printing "no
- * workouts found" over a WHOOP that refused. Both call sites
- * (app/(client)/devices.tsx and app/(client)/workouts.tsx) are owned by other
- * lanes tonight and are to move to `readRecent` + `readNote`; this wrapper
- * exists for the hours in between and should go with the second of them.
+ * It was the old shape — a plain `WorkoutSample[]` — kept alive only while the
+ * two screens that called it were moved across, and its own note said it
+ * "should go with the second of them". Both have gone: app/(client)/devices.tsx
+ * and app/(client)/workouts.tsx now call `readRecent` and render `readNote`.
  *
- * Until then it does the one thing it can do honestly: when every provider that
- * was asked FAILED, there is no data to lose, so it throws rather than hand
- * back an empty array that a screen will read as an answer.
+ * It is recorded rather than silently deleted because the reason it could not
+ * stay is the whole point of this module: an array cannot express a provider
+ * that FAILED, so every caller on it was one line from printing "no workouts
+ * found in the last 14 days from your devices" over a WHOOP that refused. The
+ * replacement's 'failed' variant carries no `samples` field AT ALL, so that
+ * sentence is now a type error rather than a judgement call.
  */
-export async function fetchRecent(states: Record<string, string>, sinceDays: number): Promise<WorkoutSample[]> {
-  const r = await readRecent(states, sinceDays);
-  if (r.reach === 'none' && r.failed.length) {
-    throw new Error(readNote(r, `${sinceDays} days`, 'your devices') ?? 'Your workouts could not be read.');
-  }
-  return r.samples;
-}

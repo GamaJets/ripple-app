@@ -276,6 +276,14 @@ export interface ReviewInput {
    * coach typed in by hand who has no account to have logged anything under.
    * The volume check stands down for it, where an empty array would run it and
    * report nothing, which reads as a check that ran and passed.
+   *
+   * Those two are not the same sentence to the coach reading the skipped list,
+   * and `injuries` above is what separates them: it is null when and only when
+   * no client is attached, so a null log beside a non-null injuries list is a
+   * CLIENT with no log rather than a draft with no client. That is a contract
+   * on the caller, not an observation about today's two of them — a caller that
+   * passed `injuries: null` for an attached client would have this module call
+   * them an empty draft.
    */
   log: readonly WorkoutEntry[] | null;
   logStatus: LoadStatus;
@@ -539,12 +547,51 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
   }
 
   /* ── volume-jump ──────────────────────────────────────────────────────── */
-  if (input.log == null) {
+  /* ── who the null belongs to ────────────────────────────────────────────
+   *
+   * `log: null` has always meant two different things — no client on the
+   * screen at all, and a client who is on it and has no account to have logged
+   * anything under — and this branch said the first about both. For a coach
+   * looking at a hand-added client's NAME in the picker, "There is no client
+   * attached to this draft" is the screen contradicting itself, and the coach
+   * reads it as the picker being broken rather than as the check standing
+   * down. The behaviour was right; only the sentence was wrong.
+   *
+   * `injuries` is what tells the two apart, and it can, because both callers
+   * write it the same way: `clientId ? theirDisclosures : null`. A null log
+   * under a non-null injuries list is a client who is attached — see the
+   * field's own docstring, which now says so as a contract rather than as an
+   * accident.
+   *
+   * The sentence stops short of saying WHY they have no account. This module
+   * is handed a null; it is not told whether the person was typed in by hand,
+   * and inventing a reason about somebody is the failure src/lib/clientRecord.ts
+   * exists for. What it must not say is that they have not trained: an absent
+   * account is not an empty training history, and "nothing on record for them"
+   * would be an accusation made out of a read nobody was entitled to make.
+   */
+  const clientAttached = input.injuries != null;
+  if (input.log == null && !clientAttached) {
     skipped.push({
       id: 'volume-jump', kind: 'absent',
       why: 'There is no client attached to this draft, so nothing here has been compared with a training history.',
     });
-  } else if (input.logStatus !== 'ready') {
+  } else if (input.log == null && input.logStatus === 'ready') {
+    // 'absent' and not 'unread': nothing failed and no later read will change
+    // it, so the review is whole — the same reasoning the arm above it keeps.
+    skipped.push({
+      id: 'volume-jump', kind: 'absent',
+      why: 'This client has no account on the app to have logged a training history under, so nothing here has been compared with one.',
+    });
+  } else if (input.log == null || input.logStatus !== 'ready') {
+    /* A null log under a status that is NOT 'ready' now lands here rather than
+     * in the 'absent' arm above, and that is a fix rather than a side effect.
+     * app/(trainer)/client-training.tsx passes `log: status === 'error' ? null
+     * : log`, so its failed read arrived as a null — and was reported as an
+     * absent client, on a screen with that client's name at the top, with the
+     * review's own status left at 'ready'. A failed read is not an absent fact;
+     * it is the thing `kind: 'unread'` and the 'partial' status exist to say.
+     */
     skipped.push({
       id: 'volume-jump', kind: 'unread',
       why: input.logStatus === 'loading'

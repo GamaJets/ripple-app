@@ -82,6 +82,19 @@ eq(sessionFeeFieldValue(82.505, 'KWD'), '82.505', 'all three of them, for a curr
 eq(sessionFeeFieldValue(6000, 'JPY'), '6000', 'and none for a currency that has none');
 eq(sessionFeeFieldValue(null, GBP), '', 'a gym that has not set one is offered an empty field, never a 0');
 
+// A currency that is stated and is not a code — the same third-place truncation
+// as above, arriving by a different door. `currencyDecimals('pounds')` was 2,
+// so a gym whose currency column held a word was offered 82.505 back as
+// "82.51" and would have saved the rounded figure by accepting the field.
+eq(parseSessionFee('82.505', 'pounds').kind, 'bad',
+  'a fee cannot be SAVED against a currency that is not one — this stored 82.51');
+eq(sessionFeeFieldValue(82.505, 'pounds'), '82.505',
+  'and the field offers the stored figure back exactly as held, claiming no number of places for it — this was "82.51"');
+eq(sessionFeeFieldValue(82.505, '£'), '82.505', 'a symbol is not a code either');
+eq(sessionFeeFieldValue(75, 'pounds'), '75', 'a whole fee is still whole');
+ok(sessionFeeFieldValue(82.505, 'pounds') !== '',
+  'and the box is not blanked — hiding a fee the owner set would have them type it again');
+
 /* ── the column's own ceiling ───────────────────────────────────────────── */
 
 // MAX_SESSION_FEE is six digits before the point, which is why part 2400 chose

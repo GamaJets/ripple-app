@@ -131,6 +131,7 @@ import {
 } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
 import { useRoster } from '../../src/ui/roster';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { useMyCoachLogo } from '../../src/ui/coachLogo';
 import { fetchPhotosSharedWithMe, type SharedPhoto } from '../../src/lib/photoShare';
 import { photoDataUri, usePublishGrantsFrom } from '../../src/ui/photoPublish';
@@ -251,8 +252,25 @@ export default function ShareKit() {
   /** What that client has SENT this coach. Null is unknown, never "none". */
   const [sent, setSent] = useState<SharedPhoto[] | null>(null);
   const [sentStatus, setSentStatus] = useState<LoadStatus>('loading');
-  /** What they have separately agreed may be PUBLISHED. */
-  const grants = usePublishGrantsFrom(subject);
+  /**
+   * Whether the server may be asked about the chosen client at all.
+   *
+   * A client the coach typed into Add Client is a `coach_clients` row with no
+   * account behind it, so there is nothing of theirs on the server and nothing
+   * they could ever have agreed to. The reads ran for them anyway and answered
+   * with zero rows and no error, which this screen drew as a client who had
+   * refused. `handAdded` is the roster's own record of which of its two tables
+   * each row came from; `undefined` is "the roster has not said" and goes on
+   * asking. See src/lib/clientRecord.ts.
+   */
+  const subjectAskable = clientIsQueryable(
+    subject,
+    roster.find((c) => c.id === subject)?.handAdded,
+  );
+  /** What they have separately agreed may be PUBLISHED. Null, not `subject`,
+   *  when there is nobody to ask about: a read that cannot be answered must not
+   *  be made, and its emptiness must not reach the render as an answer. */
+  const grants = usePublishGrantsFrom(subjectAskable ? subject : null);
   const [pickedId, setPickedId] = useState<string | null>(null);
   /** The chosen photo as bytes. Fetched rather than linked, because the export
    *  rasterises the SVG and a remote href is a race it loses silently. */
@@ -267,6 +285,13 @@ export default function ShareKit() {
   // have.
   const loadSentPhotos = useCallback(async () => {
     if (!subject) { setSent(null); setSentStatus('loading'); return; }
+    // Nothing is asked about a client the coach typed in by hand. Null and
+    // 'loading', exactly as for no subject at all — deliberately NOT 'ready',
+    // because 'ready' with an empty list is this codebase's way of saying "the
+    // read came back and they have sent none", and nothing came back because
+    // nothing was asked. The render says which answer this is; see
+    // `subjectAskable` above.
+    if (!subjectAskable) { setSent(null); setSentStatus('loading'); return; }
     setSent(null);
     setSentStatus('loading');
     try {
@@ -278,7 +303,7 @@ export default function ShareKit() {
       // nothing, which is a claim about them.
       setSent(null); setSentStatus('error');
     }
-  }, [subject]);
+  }, [subject, subjectAskable]);
 
   useEffect(() => {
     setPickedId(null);
@@ -842,6 +867,32 @@ export default function ShareKit() {
 
                   {!subject ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{PICK_A_CLIENT_FIRST}</Text>
+                  ) : !subjectAskable ? (
+                    /* ── the third answer ───────────────────────────────────
+                       Not "they have agreed to none" and not "we could not read
+                       what they agreed to". A client the coach typed into Add
+                       Client has a `coach_clients` row and no account, so there
+                       is no Progress screen for them to agree on and no photo
+                       for them to have sent. Both reads came back empty with no
+                       error — `coach_clients.id` is `uuid DEFAULT
+                       gen_random_uuid()`, so the id passes every shape test —
+                       and `publishConsentNote('absent')` then printed "Your
+                       client has not agreed to this photo being used in
+                       anything you publish", which is a statement about
+                       somebody's consent invented out of the absence of an
+                       account, on the screen that decides what goes out in
+                       public under the coach's name. It went on to send them to
+                       a Progress screen they do not have.
+
+                       The same distinction `wellnessPanel`'s `not-asked` kind
+                       keeps apart from `unreadable` in
+                       src/lib/coachWellness.ts. */
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      You added this client to your book by hand, so they have no Repple account, no
+                      Progress screen and no photos here. This is not a client who has refused and it
+                      is not a read that failed — there is nothing yet to agree to. The card is made
+                      without a photo.
+                    </Text>
                   ) : sentStatus === 'error' ? (
                     <Notice kicker="Could not read their photos" title="No photos offered"
                       note="What this client has sent you could not be read, so nothing is offered. Nothing has been posted and this is not a client who sent none." />

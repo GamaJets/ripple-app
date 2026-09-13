@@ -170,13 +170,42 @@ export default function ClientWeek() {
   // name of the person tapped second — one client's plans shown as another's.
   const wanted = useRef<string | null>(null);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setStatus('loading');
     setDays(null); setSkipped(0);
     const today = isoToday(new Date());
     const w = planWindow(today);
     if (!w) { setStatus('error'); return; } // unreachable; isoToday cannot fail to parse
+    /* A client the coach typed in by hand has a `coach_clients` row and no user
+     * account, so nothing server-backed is asked for them.
+     *
+     * `askable` was already on this screen and this read was the one it did not
+     * reach: it was passed to `loadLog` below and not to this, and the docstring
+     * beside it reasons only about `workouts`. `planned_days_coach_read` is
+     * `using (public.is_my_client(client_id))`, and `is_my_client` is an EXISTS
+     * over `clients` — false for a `coach_clients` row. `coach_clients.id` is
+     * `uuid DEFAULT gen_random_uuid()`, so the id passed every shape test, the
+     * read ran, RLS answered it with zero rows and NO error, and this screen
+     * printed:
+     *
+     *     "The read came back and {who} has marked no days between … That is
+     *      about them rather than about the connection — most clients never
+     *      open the planner, so an empty fortnight is the ordinary answer and
+     *      not a problem to solve."
+     *
+     * A sentence about somebody's own intentions, and it goes out of its way to
+     * tell the coach the connection is fine, for a person who has never had the
+     * app the planner is in.
+     *
+     * 'error' so that nothing downstream — `weekBoard`, `planConflict` — can
+     * compute over an empty list it would otherwise call whole. The render does
+     * NOT draw that as a failed read: `!askable` has its own branch, because
+     * "they have no account" is a THIRD answer and collapsing it into "the read
+     * failed" is the same flattening src/lib/coachWellness.ts keeps a
+     * `not-asked` kind apart from `unreadable` for.
+     */
+    if (!askable) { setDays(null); setSkipped(0); setStatus('error'); return; }
     const read = await fetchClientPlannedDays(id, w.fromISO, w.toISO);
     if (wanted.current !== id) return;
     setTodayISO(today);
@@ -184,18 +213,6 @@ export default function ClientWeek() {
     setSkipped(read.skipped);
     setStatus(read.days == null ? 'error' : read.truncated ? 'partial' : 'ready');
   }, []);
-
-  useEffect(() => {
-    if (!USE_SUPABASE) return;
-    if (!picked) {
-      // Deselecting has to disown the read in flight too, or it lands on a
-      // screen that is no longer showing anybody.
-      wanted.current = null;
-      setDays(null); setSkipped(0); setStatus('ready');
-      return;
-    }
-    void load(picked);
-  }, [picked, load]);
 
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const who = client?.name.split(' ')[0] ?? 'They';
@@ -209,8 +226,27 @@ export default function ClientWeek() {
    * thing that knows which table the row came from; see
    * src/lib/clientRecord.ts. `handAdded` undefined is "the roster has not
    * said", which goes on asking — only an explicit true withholds.
+   *
+   * It travels with BOTH reads on this screen. It used to travel with the log
+   * alone, and `planned_days_coach_read` is `is_my_client(client_id)` exactly
+   * as the workouts policy is — so the planner half went on asking and went on
+   * answering, in a sentence about what the client had intended. It is computed
+   * above the effects rather than below them so that neither read can be
+   * started without it.
    */
   const askable = clientIsQueryable(picked, client?.handAdded);
+
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    if (!picked) {
+      // Deselecting has to disown the read in flight too, or it lands on a
+      // screen that is no longer showing anybody.
+      wanted.current = null;
+      setDays(null); setSkipped(0); setStatus('ready');
+      return;
+    }
+    void load(picked, askable);
+  }, [picked, askable, load]);
 
   /* ── what they actually logged ─────────────────────────────────────────
    *
@@ -272,7 +308,7 @@ export default function ClientWeek() {
   // the training log the last section compares that same week against.
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     r.refresh(), Promise.resolve(ap.reload()),
-    ...(picked ? [load(picked), loadLog(picked, askable)] : []),
+    ...(picked ? [load(picked, askable), loadLog(picked, askable)] : []),
   ]), [r, ap, picked, load, loadLog, askable]));
 
   // The programme this coach has assigned them, or null. Null covers three
@@ -466,12 +502,34 @@ export default function ClientWeek() {
               )}
             </Section>
 
-            {picked ? (
+            {picked && !askable ? (
+              /* ── the third answer ──────────────────────────────────────────
+                 It takes the WHOLE body rather than one section of it, because
+                 every section below — the planner, the conflicts, the plan
+                 against the record — is the same absent record said a different
+                 way, and each of them has its own sentence about the person.
+                 A notice on top of four of those is still four of those.
+
+                 This is not "they marked nothing" and it is not "the read
+                 failed". There is no app for them to have opened a planner in:
+                 nothing was refused, because nothing was ever entitled to be
+                 asked. The same distinction `wellnessPanel`'s `not-asked` kind
+                 keeps apart from `unreadable` in src/lib/coachWellness.ts. */
+              <View>
+                <Rule />
+                <Section>
+                  <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                    note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no app for them to plan a week in and no training of theirs to compare a plan against. That is not an empty fortnight and not a failed read. Invite them from your client list and this screen fills in from the day they accept.`} />
+                </Section>
+              </View>
+            ) : picked ? (
               <View>
                 <Rule />
 
                 {/* The three states, kept apart. Each is a different fact about
-                    this person and each starts a different conversation. */}
+                    this person and each starts a different conversation. The
+                    fourth — no account at all — is the branch above, and does
+                    not reach here. */}
                 {status === 'loading' ? (
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their planned days&hellip;</Text></Section>
                 ) : board.state === 'unreadable' ? (

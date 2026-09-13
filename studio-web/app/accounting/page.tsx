@@ -1669,9 +1669,39 @@ function Filed({ read, rows, w, zone, tenantId, me, onChange }: {
 
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<FilingKind>('sales_tax');
-  const [periodFrom, setPeriodFrom] = useState(w.firstDay);
-  const [periodTo, setPeriodTo] = useState(w.lastDay);
-  const [filedOn, setFiledOn] = useState(today);
+  /**
+   * The three dates on the form — null meaning "nobody has chosen", so each box
+   * FOLLOWS the gym's calendar instead of being frozen at the reader's.
+   *
+   * All three ran their initialiser once, at mount, and this component mounts
+   * before the zone is known: the effect on this page does `setMe(who)`, then
+   * awaits `readTenant`, and only then `fetchGymZone`, so React has already
+   * painted with `zone === null`. `filedOn` took `today`, which is then
+   * `isoDate(new Date())` — the READER's own calendar — and the repair on the
+   * line above it therefore changed nothing that reached the box, for every gym
+   * that has actually set a zone. This is the record of whether a deadline was
+   * MET, and `filingBlockers` judges a future-dated filing against it.
+   *
+   * `periodFrom`/`periodTo` took `w.firstDay`/`w.lastDay`. Those day strings do
+   * not move with the zone, but the MONTH they are cut from does: `key` is
+   * `gymRecentMonths(2, zone, …).keys[1]`, which with no zone is the reader's
+   * month — so on the days either side of a month boundary the period boxes
+   * held a month the gym is not in, latched, while the heading above them said
+   * the gym's.
+   *
+   * Same shape as `picked` above and `issuedOn` in the invoice form: a chosen
+   * value wins, including the EMPTY string somebody typed by clearing the box,
+   * because `'' ?? x` is `''` and clearing is a choice.
+   */
+  const [periodFromPicked, setPeriodFromPicked] = useState<string | null>(null);
+  const periodFrom = periodFromPicked ?? w.firstDay;
+  const setPeriodFrom = setPeriodFromPicked;
+  const [periodToPicked, setPeriodToPicked] = useState<string | null>(null);
+  const periodTo = periodToPicked ?? w.lastDay;
+  const setPeriodTo = setPeriodToPicked;
+  const [filedPicked, setFiledPicked] = useState<string | null>(null);
+  const filedOn = filedPicked ?? today;
+  const setFiledOn = setFiledPicked;
   const [reference, setReference] = useState('');
   const [filedBy, setFiledBy] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1909,11 +1939,15 @@ function Filed({ read, rows, w, zone, tenantId, me, onChange }: {
         <p className="no-print" style={{ margin: 0, padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '92ch' }}>
           <button type="button" style={linkBtn} onClick={() => {
             setOpen(true); setSaved(null);
-            // Seeded with the month on screen and the gym's today — a
-            // SUGGESTION, and the commonest case. An owner recording a quarter
-            // widens the dates; one recording last week's submission moves the
-            // filing day back.
-            setPeriodFrom(w.firstDay); setPeriodTo(w.lastDay); setFiledOn(today);
+            // Back to "nobody has chosen", which is how the boxes come to show
+            // the month on screen and the gym's today — a SUGGESTION, and the
+            // commonest case. An owner recording a quarter widens the dates;
+            // one recording last week's submission moves the filing day back.
+            //
+            // Null rather than the three values: re-seeding them here would
+            // latch again, at the moment of the click rather than at mount, and
+            // this button is reachable before the zone read has landed.
+            setPeriodFrom(null); setPeriodTo(null); setFiledOn(null);
           }}>
             Record something filed
           </button>
@@ -2883,7 +2917,24 @@ function Chasing({ read, invoices, rows, asAt, zone, tenantId, me, onChange }: {
   const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
 
   const [openFor, setOpenFor] = useState<Invoice | null>(null);
-  const [chasedOn, setChasedOn] = useState(today);
+  /**
+   * The day the chase was made — null meaning "nobody has chosen", so the box
+   * FOLLOWS the gym's day rather than being frozen at the reader's.
+   *
+   * `useState(today)` ran once, at mount, and this component mounts before the
+   * zone is known: the page's effect does `setMe(who)`, then awaits
+   * `readTenant`, and only then `fetchGymZone`, so the first paint has
+   * `zone === null` — where `gymDay` returns null and `today` is the reader's
+   * own calendar. The comment above is right about which day this should be;
+   * the line took it before that day was knowable.
+   *
+   * Same shape as `issuedOn` in the invoice form: a chosen value wins,
+   * including the EMPTY string from clearing the box, because `'' ?? x` is `''`
+   * and clearing is a choice.
+   */
+  const [chasedPicked, setChasedPicked] = useState<string | null>(null);
+  const chasedOn = chasedPicked ?? today;
+  const setChasedOn = setChasedPicked;
   const [via, setVia] = useState<ChaseVia>('email');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -2927,7 +2978,10 @@ function Chasing({ read, invoices, rows, asAt, zone, tenantId, me, onChange }: {
   }, [index, overdue, today]);
 
   const openChase = (inv: Invoice) => {
-    setOpenFor(inv); setChasedOn(today); setVia('email'); setNote('');
+    // Null, not `today`: back to "nobody has chosen" so the box shows the gym's
+    // day live. Re-seeding it here would latch at the click instead of at
+    // mount, and this opens before the zone read need have landed.
+    setOpenFor(inv); setChasedOn(null); setVia('email'); setNote('');
     setErr(null); setSaved(null);
   };
 

@@ -183,7 +183,7 @@ export interface PastSession {
  * "you have never trained" off it: an unread log is not an empty one. The Train
  * screen gates the control on `workoutLogStatus` for that reason.
  */
-export function pastSessions(log: readonly WorkoutEntry[] | null): PastSession[] {
+export function loggedSessions(log: readonly WorkoutEntry[] | null): PastSession[] {
   if (!Array.isArray(log)) return [];
   const by = new Map<string, PastSession>();
   for (const e of log) {

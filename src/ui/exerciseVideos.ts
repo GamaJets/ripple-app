@@ -28,12 +28,24 @@
 // And the read now reports its own failure. `videos: []` used to mean both "your
 // coach has not uploaded anything" and "we could not reach the server", and the
 // client library asserted the former in both cases.
+//
+// ── And the clips kept on the phone belong to somebody ────────────────────
+//
+// The entries this hook keeps locally — the ones whose row was refused — lived
+// under `repple.exerciseVideos`, a key with no account in it that nothing ever
+// cleared, so the next coach to sign in on a shared gym handset inherited them.
+// They are keyed by account now; src/lib/handsetClips.ts holds the key, the
+// validator and the argument for not migrating the old one.
 import { useEffect, useState, useCallback } from 'react';
 import { useAuthRevision } from './authRevision';
+import { useAuth } from './auth';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { ExVideo } from '../lib/trainerMock';
+import {
+  handsetClipsKey, readHandsetClips, writeHandsetClips, LEGACY_HANDSET_CLIPS_KEY,
+  type ClipVisibility, type StoredClip,
+} from '../lib/handsetClips';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { exerciseSlug } from '../lib/exerciseId';
@@ -46,20 +58,21 @@ import {
 
 /** Who the trainer decided may watch a clip. Mirrors the CHECK constraint on
  *  exercise_videos.visibility; 'private' still reaches anyone named in
- *  exercise_video_grants. */
-export type Visibility = 'private' | 'clients' | 'gym' | 'public';
+ *  exercise_video_grants.
+ *
+ *  Declared in src/lib/handsetClips.ts now and aliased here, so the union the
+ *  screens import and the union the stored-clip validator narrows to are one
+ *  declaration rather than two that agree today. */
+export type Visibility = ClipVisibility;
 
-export interface VideoItem extends ExVideo {
-  url?: string;
-  /** Catalogue id of the movement this demonstrates, or null for a local-only
-   *  entry that never reached the server. */
-  exerciseId: string | null;
-  /** Whose clip it is. Null means a platform clip belonging to no gym. */
-  trainerId: string | null;
-  visibility: Visibility;
-  /** Path inside the private bucket, when we host the file ourselves. */
-  path?: string;
-}
+/** One clip, from either end: a row in `exercise_videos` or an entry this
+ *  handset is holding because its row was refused.
+ *
+ *  The shape lives in src/lib/handsetClips.ts beside the function that reads it
+ *  back off the device. It was `extends ExVideo` plus four fields; every field
+ *  is the same field, and it moved so that what is written to storage and what
+ *  is validated coming out of it cannot drift apart. */
+export type VideoItem = StoredClip;
 
 /** Whether the library could be read. `[]` with status 'error' is not the same
  *  claim as `[]` with status 'ready', and the screens must not conflate them.
@@ -70,7 +83,6 @@ export interface VideoItem extends ExVideo {
  *  library renders its figure as a dash without that screen being touched. */
 export type LibraryStatus = LoadStatus;
 
-const KEY = 'repple.exerciseVideos';
 const SIGNED_TTL = 60 * 60; // an hour is longer than any set, shorter than a share
 let SEQ = 1;
 
@@ -220,9 +232,54 @@ export function useExerciseVideos() {
   const [added, setAdded] = useState<VideoItem[]>([]);
   const [remote, setRemote] = useState<VideoItem[]>([]);
   const [status, setStatus] = useState<LibraryStatus>('loading');
+  // ── whose clips ────────────────────────────────────────────────────────
+  //
+  // The handset entries were read and written under one unqualified key with
+  // no account in it and no entry in src/lib/signOutState.ts, so the next
+  // person to sign in on a coach's handset opened Videos and read the previous
+  // coach's clips. See src/lib/handsetClips.ts, which makes the same argument
+  // src/lib/mealSwaps.ts makes about a member's meal swaps.
+  //
+  // `user?.id` rather than a `getUser()` inside `load`, because the KEY has to
+  // be a render value: the effect below is keyed on it, which is what makes an
+  // account switch a re-read rather than a list left standing from the last
+  // session.
+  const { user } = useAuth();
+  const uid = user?.id ?? null;
+  const clipsKey = handsetClipsKey(uid);
+  // False until a read of THIS key has come back. It arms the write in
+  // `persist`, and it is reset before every read — see the effect.
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    // Cleared BEFORE the read, not left at whatever the last key's read set it
+    // to. `hydrated` is the arming flag for the write, and a flag that survived
+    // the key changing would let an account switch whose read then failed write
+    // this coach's empty list straight over the other one's stored clips —
+    // which is the one way to LOSE a clip rather than merely show the wrong
+    // one. Lane 4 caught this in its own fix; it is the same trap here.
+    setHydrated(false);
+    // No account is no store. The clips still work for this session; they are
+    // simply not kept, which is what `handsetClipsKey` returning null means.
+    if (!clipsKey) { setAdded([]); return; }
+    let live = true;
+    AsyncStorage.getItem(clipsKey)
+      .then((r) => { if (live) { setAdded(readHandsetClips(r)); setHydrated(true); } })
+      // An unreadable store is no clips on screen, and `hydrated` stays false,
+      // so nothing is persisted over whatever is actually on the device. A clip
+      // added in this session still shows; it is not kept, and the next launch
+      // reads the real bytes again.
+      .catch(() => { if (live) setAdded([]); });
+    return () => { live = false; };
+  }, [clipsKey]);
+
+  // The unqualified key this replaces, removed rather than migrated: nothing
+  // distinguishes a single-owner handset's own old clips from the previous
+  // coach's on a shared one, and reading it would be the defect performed once
+  // deliberately. See the header of src/lib/handsetClips.ts.
+  useEffect(() => { AsyncStorage.removeItem(LEGACY_HANDSET_CLIPS_KEY).catch(() => {}); }, []);
 
   const load = useCallback(async () => {
-    try { const raw = await AsyncStorage.getItem(KEY); if (raw) setAdded(JSON.parse(raw)); } catch { /* ignore */ }
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
       // No trainer filter: exvid_read decides what this person may see, and it
@@ -249,9 +306,26 @@ export function useExerciseVideos() {
   }, [authRev]);
   useEffect(() => { load(); }, [load]);
 
+  /**
+   * Show the new list, and keep it if this device is allowed to.
+   *
+   * Two guards, and neither is an "ignore":
+   *
+   *   · no key — nobody is signed in, so there is no account to keep it under
+   *     and a shared key is the defect this file was changed to end.
+   *   · not hydrated — the read of this key has not come back, or came back
+   *     refused. Writing now would put this session's list on top of bytes we
+   *     never managed to read.
+   *
+   * In both cases the clip is on screen for this session and is not kept. The
+   * `try` this replaces could not catch anything at all: `setItem` returns a
+   * promise, so a storage rejection was an unhandled rejection rather than the
+   * ignored one the comment claimed.
+   */
   const persist = (next: VideoItem[]) => {
     setAdded(next);
-    try { AsyncStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    if (!clipsKey || !hydrated) return;
+    AsyncStorage.setItem(clipsKey, writeHandsetClips(next)).catch(() => { /* on screen this session either way */ });
   };
 
   /**

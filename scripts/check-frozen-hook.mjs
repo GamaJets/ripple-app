@@ -329,7 +329,14 @@ for (const f of files) {
   for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]*)/g)) {
     const init = m[2];
     if (/\buse(?:State|Ref)\s*\(/.test(init)) continue;
-    if (/\buse(?:Today|Now)\s*\(/.test(init) || READS_CLOCK.test(init)) clockIds.add(m[1]);
+    // `useToday`/`useNow` are the phone app's two clock hooks (src/ui/today.ts).
+    // `useMonthTick`/`useHourTick` are the console's (studio-web/lib/), which
+    // hold a MONTH or an HOUR rather than an instant so that a tab sitting open
+    // re-renders once at the boundary and never otherwise. All four are values
+    // this file derives from a clock, which is what the header says unfreezes a
+    // memo — a console memo keyed on one of them was previously reported as
+    // frozen, because the gate had only heard of the phone's two.
+    if (/\buse(?:Today|Now|MonthTick|HourTick)\s*\(/.test(init) || READS_CLOCK.test(init)) clockIds.add(m[1]);
   }
 
   const HOOK = /\buseMemo\s*(<[^;{}()]*>)?\s*\(/g;

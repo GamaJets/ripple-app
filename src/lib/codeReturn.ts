@@ -419,11 +419,22 @@ export function parseSpend(input: string | null | undefined, currency?: string |
   const raw = String(input ?? '').trim().replace(/\s/g, '');
   if (!raw) return { kind: 'clear' };
   const cur = (currency || '').trim().toUpperCase();
-  if (!cur || currencyDecimals(cur) == null) {
+  if (!cur) {
     return {
       kind: 'bad',
       reason: 'Repple does not know what money you are in yet, so a figure typed here would not be an amount of anything. Price a package, or set your currency, and this will take what the code cost you.',
     };
+  }
+  // `currencyDecimals` now answers null for a currency that is STATED and is
+  // not a code, as well as for an absent one, and the two are different things
+  // to tell a coach: the sentence above says "price a package or set your
+  // currency", which is no help at all to somebody whose currency is already
+  // set to 'pounds'. The words for that case belong to `readMinorAmount` — it
+  // is the house reader and it names the value that is actually in the field —
+  // so this asks it rather than keeping a second sentence here that would drift.
+  if (currencyDecimals(cur) == null) {
+    const why = readMinorAmount(raw, cur, false);
+    if (!why.ok) return { kind: 'bad', reason: why.reason };
   }
   // Currency symbols are what a person types when asked for an amount of
   // money, and refusing them teaches nothing.

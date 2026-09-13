@@ -1,0 +1,182 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A day of eating, recorded as one long list.
+--
+-- APPLIED to the live database on 13 Sep 2026 as part_3120_food_log_meal_slot.
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- `food_logs` has held a member's meals since part 01, and every one of them is
+-- a row with a name, four figures and an instant. "Logged Today" in
+-- app/(client)/foodlog.tsx draws them in the order they were eaten and puts one
+-- calorie total at the top, and that is the whole of it.
+--
+-- Every food app a member has used before this one groups the day. MyFitnessPal,
+-- Cronometer, MacroFactor, Lose It and Yazio all split it into Breakfast, Lunch,
+-- Dinner and Snacks and subtotal each. That is not decoration and it is not
+-- imitation: the question a member actually asks their food log is "where did
+-- today's calories GO", and a flat list of eleven rows cannot answer it. A
+-- member who is two hundred calories over at nine in the evening can see that
+-- they are over. They cannot see that four hundred of it was picking at things
+-- between lunch and dinner, which is the one fact that would change tomorrow.
+--
+-- A coach reading the same log through app/(trainer)/client.tsx has the same
+-- problem one step removed. "She eats enough protein but it is all at dinner" is
+-- a coaching observation that this schema currently makes nobody able to state.
+--
+-- ── Why a column, and why it is NULLABLE ──────────────────────────────────
+--
+-- NULL means NOBODY TOLD US. Not "other", not "snack", not "unsorted food" —
+-- an absence of an answer, which is a different thing from any answer.
+--
+-- Every row already in this table is one of those, and there are years of them
+-- on some accounts. The alternatives to leaving them null were both considered
+-- and both are worse:
+--
+--   · NOT NULL with a default. Whatever the default is, it is written onto
+--     every historical row as though the member had chosen it. A default of
+--     'snack' would tell a member that the dinner they logged last March was a
+--     snack, in a product whose whole argument is that it does not say more
+--     than it knows.
+--
+--   · A backfill from `logged_at`. Under 11:00 is breakfast, and so on. This is
+--     one UPDATE and it is the reason this part exists in the form it does, so
+--     it gets its own heading below.
+--
+-- The reading side is built for null already: src/lib/foodLogging.ts ·
+-- `groupMeals` puts those rows in a group headed "Not sorted", subtotals them
+-- in full, and orders that group last. And `grouped` comes back false when NOT
+-- ONE row in the day carries a slot, so a day made entirely of pre-existing
+-- rows keeps the flat list it already had rather than acquiring four headings
+-- and an empty Breakfast.
+--
+-- ── DERIVING A SLOT FROM THE CLOCK IS THE APP INVENTING A FACT ────────────
+--
+-- This is the decision this part is really about and it is stated at length
+-- because the cheap answer is one line of SQL and looks like a free win:
+--
+--     update public.food_logs set meal =
+--       case when extract(hour from logged_at) < 11 then 'breakfast' ... end;
+--
+-- It is wrong about a great many real people, and — this is the part that
+-- matters — it is wrong SILENTLY, under a heading that says the member told us.
+--
+--   · A night-shift nurse eats her main meal at four in the morning. That is
+--     dinner. The clock says breakfast.
+--   · A member doing 16:8 eats nothing until two and has breakfast at 14:00.
+--   · Half of Europe eats dinner at ten. Spain eats lunch at three.
+--   · A back-dated row — see the part of this work in src/lib/foodLogging.ts —
+--     is stamped at LOCAL NOON deliberately, as a marker meaning "this day,
+--     time not stated". Deriving from it would file every single back-dated
+--     meal in the table as lunch, on the strength of a placeholder.
+--
+-- And `logged_at` is a timestamptz, so any `extract(hour ...)` in the database
+-- reads it in the SERVER's zone, not the member's. The derivation would not
+-- even be consistently wrong; it would be wrong by a different number of hours
+-- per member, and right for whoever happened to be in UTC.
+--
+-- The same reasoning, in the same words, as `gym_invoice_chases.via` in part
+-- 2820: a row here is a claim by the member about the member. Repple did not
+-- watch anybody eat and does not get to say which meal it was.
+--
+-- So there is no backfill in this part. There is no trigger that fills the
+-- column in. There is no default. A slot arrives because somebody chose it, or
+-- it stays null forever, and both of those are honest.
+--
+-- ── Why a CHECK and not an enum ───────────────────────────────────────────
+--
+-- The same call `food_logs.via` made in part 01, and this table has the scar
+-- tissue to show it was the right one. `via` carries
+-- `check (via in ('search','barcode','photo','manual'))`, and that constraint
+-- has been VIOLATED TWICE by this application — an AI-described meal inserted
+-- as 'ai', refused with a 23514, and shown to the member as logged both times.
+-- src/ui/foodLog.tsx and app/(client)/foodlog.tsx each carry a written account
+-- of it.
+--
+-- A text column with a CHECK fails loudly at insert and can be widened with one
+-- ALTER. A Postgres enum would have failed identically and needed a type
+-- change, a migration and a PostgREST schema reload to widen. The failure mode
+-- is the same; the recovery is not.
+--
+-- What actually stops the third occurrence is that the four values now live in
+-- exactly one place on the client — `MEAL_SLOTS` in src/lib/foodLogging.ts,
+-- beside `readMealSlot`, which coerces anything it does not recognise to NULL
+-- rather than to a slot. A value spelled here and not there renders as its own
+-- raw code; a value spelled there and not here is a 23514. They are checked
+-- against each other by src/lib/foodLogging.test.ts, which asserts the four
+-- literals in order.
+--
+-- ── No index, and why that is not an oversight ────────────────────────────
+--
+-- Nothing filters or sorts on this column. The day is already fetched whole by
+-- `food_logs_client_id_logged_at_idx` (part 01) — one client, one day, a
+-- handful of rows — and the grouping happens on the phone, in `groupMeals`,
+-- over rows that are already in memory. An index on a four-value column of a
+-- table nobody queries by it is a write cost and a page of storage bought for
+-- nothing.
+--
+-- ── No RLS change, and no grant ───────────────────────────────────────────
+--
+-- Both deliberate, and both worth saying out loud rather than leaving to be
+-- inferred from an absence.
+--
+-- `food_owner` on `food_logs` is a FOR ALL policy keyed on `client_id`
+-- (part 01), so the member who owns the row may already read and write every
+-- column of it, including one that did not exist when the policy was written.
+-- `food_trainer_read` gives their coach SELECT on the same terms. A column adds
+-- no new subject and no new object; there is nothing for a policy to say.
+--
+-- `food_logs` carries no column-level grant anywhere in this ledger — its
+-- privileges are the table-wide ones Supabase's defaults give `authenticated`,
+-- so a new column is readable by the role that owns the row without a word from
+-- this part. Adding `grant select (meal) on public.food_logs` would be actively
+-- harmful rather than merely redundant: a column-level grant supersedes the
+-- table-level one for that role, and the table's other eight columns would then
+-- be in no grant at all. Part 131 recorded the same trap from the other side.
+--
+-- ── What this part does NOT do ────────────────────────────────────────────
+--
+-- Nothing writes to this column yet, and nothing reads it. Neither `.select()`
+-- in src/ui/foodLog.tsx names `meal` and neither `.insert()` sets it, because
+-- naming a column PostgREST does not know about is a 42703 — which
+-- `serverRows` correctly reads as a failed read and `classifyWrite` correctly
+-- reads as a refusal. Wiring the query before this part is applied would put
+-- the entire food log into 'error' for every member, and wiring the insert
+-- would report every meal as rejected. Trading the whole feature for a heading
+-- is not a trade.
+--
+-- So the reading side is written, tested and idle. The day this is applied, the
+-- change is `, meal` in the two select lists, `meal: e.meal ?? null` in the two
+-- inserts, and a control on the log sheet. `FoodEntry.meal` in src/ui/foodLog.tsx
+-- says the same thing at the other end.
+--
+-- ── Applying this ─────────────────────────────────────────────────────────
+--
+-- Re-runnable. `add column if not exists` is a no-op the second time, and the
+-- constraint is dropped by name and recreated rather than added blind, because
+-- `add column if not exists` skips its inline constraint entirely when the
+-- column is already there — which is how a column ends up in production with
+-- no CHECK on it at all and nobody able to see that from the part.
+--
+-- The rewrite of the CHECK takes an ACCESS EXCLUSIVE lock and validates every
+-- existing row. Every existing row is NULL and passes trivially, and `food_logs`
+-- is small, but it is still a lock on the table the client app writes to most
+-- often — apply it when nobody is mid-breakfast.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. which meal it was ────────────────────────────────────────────────────
+alter table public.food_logs
+  add column if not exists meal text;
+
+-- Dropped by name and recreated, so re-running this part on a table that
+-- already has the column still leaves the constraint in place and correct. The
+-- four values are the four in `MEAL_SLOTS` (src/lib/foodLogging.ts), spelled the
+-- same way and in the same order; a fifth added there and not here is a 23514 at
+-- insert time, which is the failure `via` has already produced twice.
+alter table public.food_logs
+  drop constraint if exists food_logs_meal_check;
+alter table public.food_logs
+  add constraint food_logs_meal_check
+  check (meal is null or meal in ('breakfast', 'lunch', 'dinner', 'snack'));
+
+comment on column public.food_logs.meal is
+  'Which meal of the day the member says this was: breakfast | lunch | dinner | snack. NULL means NOBODY TOLD US — not "other", not "snack", and not a slot worked out from logged_at. Every row written before this column existed is NULL and stays NULL; there is no backfill and no default, because deriving a slot from the clock would file a night-shift worker''s four-in-the-morning dinner as breakfast, a faster''s two-o''clock breakfast as lunch, and every back-dated row as lunch (those are stamped at local noon as a marker meaning "this day, time not stated"). logged_at is a timestamptz, so extract(hour ...) here would read the SERVER''s zone rather than the member''s and be wrong by a different amount for each of them. A NULL row renders under a "Not sorted" heading by src/lib/foodLogging.ts · groupMeals and is subtotalled in full — an unsorted meal is not a half-counted one.';

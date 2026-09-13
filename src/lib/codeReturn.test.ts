@@ -260,6 +260,27 @@ eq(parseSpend('250', null).kind, 'bad', 'a figure typed with no currency establi
 eq(parseSpend('250', '').kind, 'bad', 'and an empty currency is the same silence');
 eq(parseSpend('250', 'ZZZ').kind, 'amount', 'an unknown three-letter code still has two places — it is a currency, just not one of Stripe’s special ones');
 
+// And a currency that is STATED and is not a code. This was read at two places
+// and filed: `parseSpend('12.340', 'pounds')` refused the figure for having a
+// third place — which named the wrong thing entirely, because the problem was
+// never the figure — while `parseSpend('250', 'pounds')` sailed through as
+// 25000 minor units of nothing, sent to `set_code_spend` as `p_currency`
+// 'pounds'.
+eq(parseSpend('250', 'pounds').kind, 'bad', 'a word is not a currency — this recorded 25000');
+eq(parseSpend('250', '£').kind, 'bad', 'nor is a symbol');
+{
+  const r = parseSpend('12.340', 'pounds');
+  ok(r.kind === 'bad' && /not a currency code/.test(r.reason),
+    'and the refusal names the currency as the problem rather than the figure');
+  ok(r.kind === 'bad' && !/Price a package/.test(r.reason),
+    'never "price a package, or set your currency" — that is the sentence for a coach who has set NOTHING, and this one has');
+}
+{
+  const r = parseSpend('250', null);
+  ok(r.kind === 'bad' && /Price a package/.test(r.reason),
+    'while a coach with no currency at all still gets the sentence that tells them where to set one');
+}
+
 // Where the currency comes from on the screen.
 eq(spendCurrency(row({ spend: { cents: 1, currency: 'KWD' }, revenue: { cents: 9, currency: 'GBP' } })), 'KWD',
   'the unit already recorded against the spend wins — it is what the figure in the box is in');

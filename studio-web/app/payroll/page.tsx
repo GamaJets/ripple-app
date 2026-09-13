@@ -35,10 +35,13 @@ import { settledLanded } from '@lib/readLanded';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
-import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+// `currencyNote` is gone from this import on purpose. It answers "is the GYM's
+// currency missing", which stopped being the question the moment the run total
+// took its label from the rates it is a sum of — see `totalCurrencyNote` below.
+import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
   fetchSessions, fetchSettlements, recordSettlement, fetchAwaitingOutcome,
-  isDelivered, isAwaitingOutcome, isPayable,
+  isDelivered, isAwaitingOutcome, isPayable, payableRate,
   payrollByTrainer, payrollTotal, settlementBlocker,
   settleableSessions, settlementAmount, settleBlocker, sessionProfileIds,
   PAY_DELIVERED_ONLY, SETTLEMENT_METHODS, SETTLEMENT_METHOD_LABEL,
@@ -50,8 +53,9 @@ import { fetchGymTrainers, payroll30For, payrollBlocker, type GymTrainer } from 
 // minor units. The factor is not a hundred — see the note on each call below.
 import { minorFromWhole, majorFromMinor } from '@lib/coachMoney';
 // What the sessions in a run say they were priced in, against what the
-// settlement row is about to be stamped with.
-import { settleCurrencyBlocker } from '@lib/gymRateCurrency';
+// settlement row is about to be stamped with — and, for the headline figure,
+// the sentence that goes where a total with no single honest label would go.
+import { settleCurrencyBlocker, totalNote } from '@lib/gymRateCurrency';
 // The question asked before a run is recorded as paid. One step, carrying the
 // figure and the name — see the header of that module for why this screen had
 // none while the Reverse control beside it demanded a typed sentence.
@@ -673,8 +677,59 @@ export default function Payroll() {
    * somebody pays it and marks the month closed. When payable sessions carry no
    * rate it is a partial sum for the opposite reason. Either way the honest
    * answer is that this period does not have a total yet, and the note says why.
+   *
+   * ── and `total.currency`, never `ccy` ───────────────────────────────────
+   *
+   * This line read `amount(total.cents, ccy)`. `ccy` is `tenants.currency` —
+   * what this gym charges in TODAY — and the figure beside it is a sum of rates
+   * snapshotted whenever each session was marked. The screen had the right
+   * answer in hand the whole time: `payrollTotal` returns `currency`, derived
+   * from the very lines the figure adds up, and this printed a different one.
+   *
+   * Two cases reached a reader with `blocker === null`, so the wrong code was
+   * actually shown:
+   *
+   *   · rates predating supabase/parts/1010 carry no unit, so `total.currency`
+   *     is null — and those got stamped with the gym's current code, which is
+   *     exactly the "guess about the past" `totalNote` refuses to make;
+   *   · a gym that has changed `tenants.currency` printed a GBP total labelled
+   *     AED, three inches above a Settle button that `settleCurrencyBlocker`
+   *     refuses to press for that very reason.
+   *
+   * `money()` and not `amount()`: `amount()` is for figures that inherit the
+   * GYM's currency, and this one carries its own. Same call /close makes —
+   * `payrollMoney` there is `money(c.payroll.total.cents, c.payroll.currency)`.
+   *
+   * A null `total.currency` therefore renders NO FIGURE, not a bare number and
+   * not the gym's code: `money()` returns null and the note below says which of
+   * the two silences it is. The alternative — printing "170.00" with nothing
+   * beside it — is the one studio-web/lib/currency.ts already rejected in as
+   * many words, because an unlabelled figure is read in whatever money the
+   * reader is thinking in. A sum whose currency nobody recorded is not an
+   * amount, and this screen pays people.
    */
-  const totalText = sessions === null || blocker !== null ? null : amount(total.cents, ccy);
+  const totalText = sessions === null || blocker !== null
+    ? null
+    : money(total.cents, total.currency);
+
+  /*
+   * The rates that figure is a sum of, and the sentence that goes where it
+   * cannot be printed.
+   *
+   * `payableRate` over the resolved rows, which is `payrollOf`'s recipe in
+   * src/lib/monthEnd.ts verbatim — the same set `payrollByTrainer` actually
+   * added up, and the same set /close asks. One recipe, so the three screens
+   * cannot word one run three ways.
+   *
+   * It replaces `currencyNote(total.cents, ccy)`, which named the wrong fact
+   * once the figure stopped being denominated in `ccy`: "this gym has not set
+   * its currency" is not why a pre-part-1010 total has no label, and the gym's
+   * setting no longer decides whether this figure can be printed at all.
+   */
+  const runRates = (priced ?? [])
+    .map((s) => payableRate(s, policy, null))
+    .filter((r): r is { rateCents: number; rateCurrency: string | null } => r != null);
+  const totalCurrencyNote = totalNote(runRates);
 
   // Sessions in this period that nobody has marked. The reason payroll refuses,
   // listed rather than merely counted, because the fix is a person opening
@@ -1162,10 +1217,14 @@ export default function Payroll() {
           // No note at all when the sessions are unknown: "ready to settle" on a
           // period nobody could read is the worst sentence available here. A run
           // that is otherwise ready but has no currency to state it in is its own
-          // reason, and it names the setting rather than the sessions.
+          // reason — and that reason is a fact about the RATES, not about
+          // `tenants.currency`, which is why `totalCurrencyNote` stands where
+          // `currencyNote(total.cents, ccy)` used to. It is `totalNote` from
+          // src/lib/gymRateCurrency.ts, the same sentence /close prints under
+          // the same withheld figure.
           note={sessions === null
             ? undefined
-            : (blocker ?? currencyNote(total.cents, ccy) ?? 'ready to settle')}
+            : (blocker ?? totalCurrencyNote ?? 'ready to settle')}
         />
         <Kpi
           label="Delivered"
@@ -1285,7 +1344,7 @@ export default function Payroll() {
         tenantId={tenantId} me={me} period={period} onChange={refresh}
       />
 
-      <Blocking sessions={awaiting} unread={sessionsUnread} ccy={ccy} zone={zone} />
+      <Blocking sessions={awaiting} unread={sessionsUnread} zone={zone} />
 
       <Run
         rows={rows}
@@ -1301,7 +1360,7 @@ export default function Payroll() {
         ccy={ccy}
       />
 
-      <LineItems sessions={marked} unread={sessionsUnread} policy={policy} ccy={ccy} zone={zone} />
+      <LineItems sessions={marked} unread={sessionsUnread} policy={policy} zone={zone} />
 
       <CrossCheck
         trainers={trainers}
@@ -1345,8 +1404,11 @@ interface RunRow {
 
 /* ── what is holding the run up ────────────────────────────────────────────── */
 
-function Blocking({ sessions, unread, ccy, zone }: {
-  sessions: PtSession[] | null; unread: Unread; ccy: TenantCurrency;
+// No `ccy` prop. Every figure in this table is a rate the row itself carries a
+// unit for, so the gym's own currency has nothing to say here — and having it
+// in scope is how it came to be printed over them.
+function Blocking({ sessions, unread, zone }: {
+  sessions: PtSession[] | null; unread: Unread;
   /** `tenants.timezone` — the hour a session ran is the gym's hour. */
   zone: string | null;
 }) {
@@ -1362,10 +1424,18 @@ function Blocking({ sessions, unread, ccy, zone }: {
     { key: 'mins', header: 'Mins', value: (s) => s.durationMin, numeric: true },
     // Not "0.00" and not the gym's standard fee: until somebody says what
     // happened, this session has no price, only a rate it might be worth.
+    //
+    // The row's OWN unit. `sessions.rate_currency` (supabase/parts/1010) is
+    // snapshotted beside `rate_cents` for the reason part 33 gave for
+    // snapshotting the rate at all — so that changing the gym's fee, or its
+    // currency, does not silently rewrite what last month cost. This cell used
+    // `ccy`, the gym's code today, which is the one thing a snapshotted rate is
+    // guaranteed not to be in once a gym has changed it. Same call and same
+    // sentence as the rates table on /close.
     { key: 'worth', header: 'If delivered', value: (s) => s.rateCents ?? -1, numeric: true,
       render: (s) => s.rateCents == null
         ? <span className="dash">not rated</span>
-        : <span className="dash">{amount(s.rateCents, ccy) ?? NO_CURRENCY_NOTE}</span> },
+        : <span className="dash">{money(s.rateCents, s.rateCurrency) ?? 'no currency recorded'}</span> },
   ];
   return (
     <Section
@@ -2078,8 +2148,10 @@ const OUTCOME_LABEL: Record<string, string> = {
  * rate, and whether the pay policy let it count. Without this the only way to
  * answer "why is my August short" is to trust the total.
  */
-function LineItems({ sessions, unread, policy, ccy, zone }: {
-  sessions: PtSession[] | null; unread: Unread; policy: PayPolicy; ccy: TenantCurrency;
+// `ccy` is gone from here too, for the reason given on `Blocking`: these are
+// the rows the totals above are made of, each priced in its own money.
+function LineItems({ sessions, unread, policy, zone }: {
+  sessions: PtSession[] | null; unread: Unread; policy: PayPolicy;
   /** `tenants.timezone` — which day a paid session falls on decides the month
    *  it is paid in, and that is the gym's day. */
   zone: string | null;
@@ -2106,9 +2178,14 @@ function LineItems({ sessions, unread, policy, ccy, zone }: {
         : <span className="dash">no</span> },
     { key: 'rate', header: 'Rate', value: (s) => s.rateCents ?? null, numeric: true,
       // Null is a session nobody priced, which is not a session worth nothing.
+      //
+      // And the unit is the row's, not the gym's — see the identical cell in
+      // "Holding up the run" above. These are the rows the totals are made of,
+      // so a rate printed here in a currency the session was not priced in is
+      // the audit trail disagreeing with itself.
       render: (s) => s.rateCents == null
         ? <span className="dash">not rated</span>
-        : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+        : (money(s.rateCents, s.rateCurrency) ?? <span className="dash">no currency recorded</span>) },
     { key: 'paid', header: 'Settled', value: (s) => s.settlementId ?? '',
       render: (s) => s.settlementId
         ? <span style={{ color: 'var(--ink2)' }}>paid</span>

@@ -8,9 +8,9 @@ import { appLink } from './deepLink';
 import { supabase } from './supabase';
 // `currencyDecimals` is the one place that answers "how many minor units make a
 // whole one", and it answers **null** rather than 2 when nobody said which
-// money it is. This file used to import the zero-decimal LIST and branch on it
-// by hand, which is how it stayed wrong for the five three-decimal currencies
-// while looking swept.
+// money it is — or said something that is not a currency code. This file used
+// to import the zero-decimal LIST and branch on it by hand, which is how it
+// stayed wrong for the five three-decimal currencies while looking swept.
 import { currencyDecimals } from './coachMoney';
 import { capLimit, capped } from './rowCap';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -170,10 +170,27 @@ export const money = (cents: number | null, cur: string | null = null): string =
   // the rule is what made it invisible: the import on line 13 said this file
   // had been through the currency sweep.
   const places = currencyDecimals(c);
-  // Unreachable — currencyDecimals only answers null for an empty code, which
-  // the line above already returned on. Written as a branch rather than a `!`
-  // so that if it ever does answer null this prints the integer it was given
-  // instead of scaling by NaN and rendering every figure as a dash.
+  // REACHABLE, and the comment that used to stand here said it was not.
+  //
+  // It said: "Unreachable — currencyDecimals only answers null for an empty
+  // code, which the line above already returned on." That was true of
+  // `currencyDecimals` as it was, and the sentence after it — that the branch
+  // was written out in full "so that if it ever does answer null this prints
+  // the integer it was given" — is why nothing here had to change when it
+  // started doing exactly that. `currencyDecimals` now answers null for a
+  // stated-but-unreadable currency too, so a row whose `currency` is 'pounds'
+  // lands here rather than printing "POUNDS 60.00".
+  //
+  // The branch is kept LENIENT in the sense that matters — the amount is not
+  // dropped. The integer Stripe sent is printed undivided, beside a sentence
+  // saying the currency was not read, because the row still records money
+  // somebody was charged and the whole argument of this file is that an honest
+  // unformatted figure beats a confident wrong one. What is NOT done here is
+  // the other kind of leniency: there is no `?? 2`, and no exception carved out
+  // for this module. Stripe always sends a valid lower-case ISO code, so a
+  // non-code in `invoices.currency` means the row is corrupt rather than that
+  // this screen needs a looser rule, and "POUNDS 60.00" on a billing screen is
+  // precisely the made-up unit the header of this function is about.
   if (places == null) return `${cents.toLocaleString(undefined)} (currency not read)`;
   const v = places === 0 ? cents : cents / 10 ** places;
   const amount = v.toLocaleString(undefined, {

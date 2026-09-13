@@ -34,6 +34,21 @@
 // figure. A caller that turns that null into a 0 has reintroduced the bug in a
 // louder form: a zero is a claim, and this one would be a claim about somebody's
 // revenue.
+//
+// "No currency" now means an unreadable one as well as an absent one:
+// `currencyDecimals` answers null for 'pounds', 'GB' and '£' and not only for
+// ''. This function needed no change for that — the `dp == null` guard below
+// was already the whole rule — but the set of rows that reach it is larger, and
+// app/(owner)/financials.tsx is the caller to check, because null there means
+// `derivedMrr` is withheld and the "your figures and your records disagree"
+// notice does not fire. Withheld is right. It was previously firing off an MRR
+// scaled by an assumed hundred.
+//
+// A code that is STATED and unrecognised — 'ZZZ' — is still two places and
+// still yields a figure. That is `currencyDecimals`'s standing rule and the
+// reasoning is on the function itself: the two lists it holds are Stripe's own
+// and complete, so an unlisted three-letter code is a real currency with two
+// places rather than an unknown.
 import { currencyDecimals } from './coachMoney';
 
 /**

@@ -1,0 +1,305 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Two rows both holding "pounds" compared equal, and a member went on list price.
+--
+-- APPLIED to the live database on 13 Sep 2026 as part_3090_currency_is_iso.
+-- The pre-flight query below was run first and returned zero violating rows
+-- across all six tables, so the plain ADD CONSTRAINT could not fail and no row
+-- was left un-updatable by a constraint it already breaks.
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- Five money columns in this schema hold a currency and check NOTHING about its
+-- shape:
+--
+--     gym_passes.currency         text not null   (part 31, default dropped 150)
+--     gym_pass_types.currency     text not null   (part 31, default dropped 150)
+--     membership_plans.currency   text not null   (part 29, default dropped 150)
+--     gym_invoices.currency       text not null   (part 29, default dropped 150)
+--     gym_orders.currency         text not null   (part 281, never had a default)
+--
+-- `not null` is doing far less work here than it looks. The empty string
+-- satisfies it. So does `pounds`. So does `GB`, `£`, `gbp `, and a three-letter
+-- code for a money the gym has never taken a penny in. Nothing between the
+-- keyboard and the ledger reads the value: the writers write what they are
+-- handed, and a CSV import writes what the file said.
+--
+-- Meanwhile the tables beside them DO carry the check — `tenants` (part 99),
+-- `charges`, `client_purchases`, `client_subscription_payments`,
+-- `gym_month_closes`, `gym_trainer_pay`, `gym_equipment_log`, `sessions`,
+-- `trainers`, and `gym_orders.refunded_currency`, which is a column on ONE OF
+-- THE FIVE TABLES ABOVE. The refund half of an order is constrained and the
+-- sale half is not.
+--
+-- ── What it cost, twice, in one night ─────────────────────────────────────
+--
+-- `normaliseCurrency` in src/lib/gymRecord.ts was `trim().toUpperCase()` and
+-- nothing else, so it answered `'POUNDS'` for `'pounds'` — truthy, stable, and
+-- COMPARABLE. Two such rows therefore agreed with each other:
+--
+--   · src/lib/priceBook.ts compares a membership's currency against its plan's
+--     before it compares the amounts. Two rows both holding `pounds` passed
+--     that gate, were SUBTRACTED from one another, and placed a member on the
+--     list price — the exact fold that module exists to refuse, reached through
+--     the currency instead of through the amount.
+--   · `money(6000, 'pounds')` rendered **POUNDS 60.00** at every gym screen in
+--     the product, reading exactly as considered as `GBP 60.00` does.
+--
+-- Both halves of that are fixed in the library in the same change as this part:
+-- `normaliseCurrency` and `moneyIn` now both apply `^[A-Z]{3}$` and answer NULL
+-- for anything else, which is the same test `priceBook.ts`, `coachCosts.ts`,
+-- `coachInvoice.ts`, `costBudgets.ts`, `coachReceipts.ts` and `csvImport.ts`
+-- already applied and the same one `tenants_currency_is_iso` holds here.
+--
+-- This part is the other half: the library can refuse to READ a non-code, and
+-- only the database can refuse to STORE one.
+--
+-- ── A SIXTH TABLE ─────────────────────────────────────────────────────────
+--
+-- `gym_payments.currency` has the identical hole and is included below as
+-- section 6. It was not in the brief for this change, and it is here because it
+-- is the same defect on the register that `incomeOf` (src/lib/monthEnd.ts),
+-- `unstatedTakings` (src/lib/gymBanked.ts) and `strayCurrencies`
+-- (src/lib/strayCurrency.ts) all read — the last of which names the column in
+-- its own header as the reason it exists. The pre-flight query in section 1
+-- covers all six. To apply only the five, delete section 6 and its line from
+-- the query; nothing else depends on it.
+--
+-- ── WHAT HAPPENS IF A VIOLATING ROW EXISTS. READ THIS FIRST. ──────────────
+--
+-- **This part FAILS, LOUDLY, AND CHANGES NOTHING.**
+--
+-- `ALTER TABLE ... ADD CONSTRAINT` scans the table and raises 23514 on the
+-- first row that does not satisfy the check. The statement is atomic, so the
+-- constraint is not created; and because setup.sql is pasted and run as a
+-- single multi-statement query, Postgres wraps the whole bundle in one implicit
+-- transaction and rolls ALL of it back. A failure here leaves the database
+-- exactly as it was and applies no part after this one.
+--
+-- That is the intended behaviour and not a hazard to be engineered around. A
+-- row holding `pounds` is money whose unit nobody can name, sitting in a
+-- register that gets reconciled against a bank statement. It has to be looked
+-- at by a person who knows which gym it belongs to. There is no correct value
+-- for this migration to write in — `EUR` in a GBP gym is as likely to be a real
+-- euro walk-in as a slip, there is no rate in this product that could tell them
+-- apart, and a backfill that guessed would make a real second currency vanish.
+-- So: no backfill, no coercion, no `update ... set currency = ...` anywhere in
+-- this file. The part refuses to apply and the person decides.
+--
+-- ── Run this BEFORE applying. It is not optional. ─────────────────────────
+--
+-- Every row that would fail, across all six tables, with its tenant so somebody
+-- can go and ask. Read-only. Expect zero rows; anything else is work to do
+-- first.
+--
+--     select 'gym_passes' as tbl, id, tenant_id, currency
+--       from public.gym_passes        where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'gym_pass_types',  id, tenant_id, currency
+--       from public.gym_pass_types    where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'membership_plans', id, tenant_id, currency
+--       from public.membership_plans  where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'gym_invoices',    id, tenant_id, currency
+--       from public.gym_invoices      where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'gym_orders',      id, tenant_id, currency
+--       from public.gym_orders        where currency !~ '^[A-Z]{3}$'
+--     union all
+--     select 'gym_payments',    id, tenant_id, currency
+--       from public.gym_payments      where currency !~ '^[A-Z]{3}$'
+--     order by 1, 4, 2;
+--
+-- `!~` is the negation of the same POSIX match the constraint uses, so the
+-- query and the check cannot disagree about what a violation is. All six
+-- columns are `not null`, so there is no third state to account for and no row
+-- can hide behind a NULL.
+--
+-- The commonest hits, and what each one means:
+--
+--     ''          the column was written blank. The amount is real; the unit
+--                 was never recorded. Someone has to say which money it was.
+--     'gbp'       right money, wrong case. The one class of violation with an
+--                 unambiguous fix: `update ... set currency = upper(currency)`
+--                 where `upper(currency) ~ '^[A-Z]{3}$'`, which changes no
+--                 row's meaning. Do it as its own deliberate statement, not
+--                 from inside this part.
+--     'pounds'    a person typed a word. Needs a human to say GBP.
+--     'AED'       not a violation at all — a leftover from the default dropped
+--                 in part 150. It passes and stays, correctly: it is what the
+--                 row says, and this part does not relitigate old data.
+--
+-- ── Why NOT VALID is the wrong tool here, in detail ───────────────────────
+--
+-- `ADD CONSTRAINT ... NOT VALID` skips the scan, takes a brief lock, and
+-- ALWAYS SUCCEEDS — then `VALIDATE CONSTRAINT` scans separately under a weaker
+-- lock. It is the right answer for a large, hot table where an ACCESS EXCLUSIVE
+-- scan is a real outage, and where legacy rows are knowingly tolerated.
+--
+-- Neither applies, and the second one is actively dangerous here:
+--
+--   1. NOT VALID DOES NOT MEAN "NOT ENFORCED". A NOT VALID check is enforced on
+--      every INSERT **and every UPDATE**, including an update to a row that was
+--      already violating. So a `gym_invoices` row holding `pounds` becomes a
+--      row nobody can edit AT ALL — not its status, not its due date, not its
+--      note — unless the same statement also corrects the currency. Several of
+--      the screens that write these tables do not put a currency field in front
+--      of the user, so the 23514 arrives with no way to resolve it from inside
+--      the product, on somebody's live invoice, weeks after this was applied
+--      and with nothing connecting the two.
+--
+--      That is precisely the "un-updatable row" hazard, and NOT VALID is what
+--      CREATES it. A plain ADD CONSTRAINT cannot: it either finds no violating
+--      row, or it does not get created.
+--
+--   2. The lock argument buys nothing. These are a gym's price book, invoices,
+--      passes and orders — thousands of rows at a busy site, not millions. The
+--      scan is milliseconds, and setup.sql is already a one-shot paste that is
+--      not run against a live database during opening hours.
+--
+--   3. A NOT VALID constraint that is never validated is indistinguishable, in
+--      `\d`, from one that was — except for one word — and the bad rows it was
+--      added around stay in the register indefinitely, now frozen. The point of
+--      this part is that those rows get FIXED. A mechanism whose success
+--      condition is "the bad rows are still there and now cannot be touched" is
+--      the opposite of the goal.
+--
+-- If an operator genuinely cannot correct the rows before applying — a
+-- situation this part does not anticipate and does not endorse — the two-step
+-- form is, per table:
+--
+--     alter table public.gym_invoices add constraint gym_invoices_currency_is_iso
+--       check (currency is null or currency ~ '^[A-Z]{3}$') not valid;
+--     -- …fix the rows…
+--     alter table public.gym_invoices validate constraint gym_invoices_currency_is_iso;
+--
+-- It is written out here, in prose, rather than committed commented-out in the
+-- executable half of this file, because taking it should require retyping it
+-- and meaning it. Read hazard 1 again before you do: between those two
+-- statements, every violating row is frozen.
+--
+-- ── `currency is null or …` on six NOT NULL columns ───────────────────────
+--
+-- Deliberate, and it is the house form — `tenants_currency_is_iso`,
+-- `charges_currency_is_iso`, `gym_month_closes_currency_is_iso`,
+-- `gym_trainer_pay_currency_is_iso` and `gym_equipment_log_currency_is_iso` are
+-- all written this way. All six columns here are NOT NULL today, so the first
+-- arm is unreachable and the check is effectively `~ '^[A-Z]{3}$'`.
+--
+-- It is written anyway for two reasons. NULLABILITY IS THE DIRECTION OF
+-- TRAVEL: part 150 dropped the `'AED'` default from these columns precisely
+-- because there is no default currency in this product, and "the gym has not
+-- said" is a fact these columns cannot yet express. The day one of them drops
+-- NOT NULL, a check spelled `currency ~ '^[A-Z]{3}$'` would reject the NULL and
+-- the drop would fail — and a constraint that has to be rewritten to allow a
+-- change is a constraint that gets dropped instead. And it states the rule as
+-- it is meant: a currency is three letters, or it is nothing. It is never a
+-- word.
+--
+-- ── Applying this ─────────────────────────────────────────────────────────
+--
+-- Idempotent: every constraint is dropped by name first, so re-running the
+-- bundle re-asserts rather than erroring on a duplicate. No table is created,
+-- no column is added or altered, no row is read or written, no policy, grant,
+-- trigger or function is touched. The only thing this part can do to a database
+-- is add six CHECK constraints — or refuse.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. the pre-flight ───────────────────────────────────────────────────────
+--
+-- The query lives in the header rather than here, because a statement in this
+-- file runs and this one is for a person to run and READ. Applying this part
+-- without having run it is the one mistake it is possible to make.
+
+-- ── 2. gym_passes ───────────────────────────────────────────────────────────
+--
+-- What was actually taken for a day pass or a class pack. `paid_cents` is
+-- nullable — nobody recorded a price, which is not the same as free — but the
+-- currency is NOT NULL beside it, so a pass with no price still states a money.
+-- `passRevenueCents` in src/lib/gymPasses.ts makes a priced pass stating no
+-- usable code its own member of the currency set, so GBP-plus-unspellable reads
+-- as a disagreement and withholds the sum rather than labelling it GBP.
+alter table public.gym_passes drop constraint if exists gym_passes_currency_is_iso;
+alter table public.gym_passes add constraint gym_passes_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 3. gym_pass_types ───────────────────────────────────────────────────────
+--
+-- The price book half: what a drop-in or a pack is listed at. `passTypeSales`
+-- in src/lib/passTypeSales.ts prints `listCurrency` straight onto the table an
+-- owner reads, which is where POUNDS appeared as a column heading.
+alter table public.gym_pass_types drop constraint if exists gym_pass_types_currency_is_iso;
+alter table public.gym_pass_types add constraint gym_pass_types_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 4. membership_plans ─────────────────────────────────────────────────────
+--
+-- One of the two columns behind the price-book fold in the header. `priceBook`
+-- compares this against `memberships`' own currency before it compares the
+-- amounts; with both holding `pounds` the comparison passed and the subtraction
+-- ran. `summarise` in src/lib/gymRecord.ts also asks `sharedCurrency` over the
+-- contributing plans to label the MRR tile, which is the first figure an owner
+-- reads on /revenue.
+alter table public.membership_plans drop constraint if exists membership_plans_currency_is_iso;
+alter table public.membership_plans add constraint membership_plans_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 5. gym_invoices ─────────────────────────────────────────────────────────
+--
+-- The other column behind the fold, and the one an accountant reads. Note what
+-- a bad row costs beyond the invoice itself: `invoicesOf` in
+-- src/lib/monthEnd.ts collects the currency of every non-draft invoice into one
+-- set, and a second entry in that set withholds settled, outstanding, overdue
+-- AND dropped for the whole month — and `arrears` reaches back over every
+-- invoice ever issued, so one bad row blanks "what is still owed" on every
+-- future close and `closeBlockers` refuses to sign the month off.
+alter table public.gym_invoices drop constraint if exists gym_invoices_currency_is_iso;
+alter table public.gym_invoices add constraint gym_invoices_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 6. gym_orders ───────────────────────────────────────────────────────────
+--
+-- What a member was charged online, written by the checkout function and moved
+-- by the Stripe webhook. This table already carries
+-- `gym_orders_refunded_currency_is_iso` on `refunded_currency` (part 800): the
+-- refund half of an order has been constrained since, and the sale half never
+-- was. This is that asymmetry closed.
+--
+-- `paidPots` in src/lib/gymOrders.ts groups paid orders by this column to draw
+-- one tile per currency. Before the library change beside this part it keyed on
+-- `trim()` alone — no upper-casing — so 'gbp' and 'GBP' drew two tiles for one
+-- money, each short of the truth, on the screen the front desk answers "did my
+-- payment go through" from.
+alter table public.gym_orders drop constraint if exists gym_orders_currency_is_iso;
+alter table public.gym_orders add constraint gym_orders_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 7. gym_payments ─────────────────────────────────────────────────────────
+--
+-- The sixth table. See the header: not named in the brief for this change,
+-- included because it is the same hole on the gym's own register — the one
+-- reconciled against a bank statement by `bankLines` in src/lib/gymBanked.ts,
+-- whose `unstatedTakings` exists solely to COUNT the rows here that state no
+-- usable money, and the one src/lib/strayCurrency.ts names in its first
+-- sentence. Delete this section to apply only the five.
+alter table public.gym_payments drop constraint if exists gym_payments_currency_is_iso;
+alter table public.gym_payments add constraint gym_payments_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- ── 8. what this part deliberately does NOT do ──────────────────────────────
+--
+--   · It writes no row. No backfill, no `upper(currency)`, no mapping table, no
+--     "pounds → GBP" guess. Every one of those would be Repple deciding what
+--     money somebody was charged in, on a register reconciled against a bank
+--     statement, from evidence it does not have. See the header.
+--   · It does not touch `refunded_currency` on `gym_orders`, which part 800
+--     already constrains, and does not re-state that constraint — one rule, one
+--     place, and a second copy is how the two come to disagree.
+--   · It does not constrain the currency to one the gym actually uses. That is
+--     a judgement and not a fact: a London gym that took one genuine euro from
+--     a visitor has a correct EUR row, and a CHECK that refused it would make
+--     the honest record the illegal one. `strayCurrencies` in
+--     src/lib/strayCurrency.ts REPORTS that case to the owner, next to where
+--     they can correct it, and decides nothing.
+--   · It adds no NOT NULL and drops none. What these columns require is
+--     unchanged; only what they will accept is narrowed.

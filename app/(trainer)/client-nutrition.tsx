@@ -518,7 +518,36 @@ export default function ClientNutrition() {
               )}
             </Section>
 
-            {picked ? (
+            {picked && !askable ? (
+              /* ── the third answer ──────────────────────────────────────────
+                 It takes the WHOLE body, and here that is a refusal to WRITE as
+                 much as a refusal to claim. `coach_nutrition.client_id`
+                 references `profiles(id)`, so a plan written for a client the
+                 coach typed in by hand cannot land — the upsert fails on the
+                 foreign key — and the four reads behind the targets all resolve
+                 `is_my_client()`, an EXISTS over `clients`, so they came back
+                 empty with no error and this screen drew somebody's allergens,
+                 their goal and their scan history as things they had not
+                 supplied.
+
+                 The Unreadable notice below used to hedge at it — "If they were
+                 added to your book by hand they have no account to carry a diet
+                 or an allergen list, which reads the same way from this screen."
+                 It does not read the same way: `askable` knows, because the
+                 roster knows which of its two tables the row came from. The
+                 guess is gone from that notice, where it was shown to every
+                 coach whose connection had merely dropped.
+
+                 The same distinction `wellnessPanel`'s `not-asked` kind keeps
+                 apart from `unreadable` in src/lib/coachWellness.ts. */
+              <View>
+                <Rule />
+                <Section>
+                  <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                    note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to carry a diet, an allergen list or a calorie target — and nowhere for a plan you write here to be delivered to. Nothing of theirs was asked for and nothing was refused. Invite them from your client list and this screen works properly from the day they accept.`} />
+                </Section>
+              </View>
+            ) : picked ? (
               <View>
                 <Rule />
 
@@ -532,7 +561,7 @@ export default function ClientNutrition() {
                 ) : profileStatus === 'error' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their profile could not be read"
-                      note={`What ${who} avoids is unknown rather than nothing, so no meal can be picked for them from here. If they were added to your book by hand they have no account to carry a diet or an allergen list, which reads the same way from this screen.`} />
+                      note={`What ${who} avoids is unknown rather than nothing, so no meal can be picked for them from here.`} />
                   </Section>
                 ) : profile ? (
                   <Section>

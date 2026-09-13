@@ -366,6 +366,75 @@ export interface ChecklistRow {
   state: ItemState;
 }
 
+// ── "Log Something You Ate", and the difference between ever and today ──────
+//
+// The one item on this list whose fact is not lying around already, and the one
+// that got it wrong. Both screens that draw the checklist computed it as
+//
+//     meal: isWhole(food.status) ? food.entries.length > 0 : …
+//
+// and `useFoodLog().entries` is TODAY ONLY — src/ui/foodLog.tsx reads one day,
+// deliberately, because everything else it holds feeds "calories remaining".
+// So the row ticked the evening somebody logged dinner and un-ticked itself at
+// midnight. `checklistLeft` never reached zero, `showChecklist` never went
+// false, and a member who had logged every meal for six months still had the
+// onboarding row pinned to their home screen with one thing left to do.
+//
+// The item asks "have you ever logged a meal". That is a fact about a person's
+// history: answered once, and true from then on. It is NOT a streak — there is
+// no window in it, no "recently", and nothing here may acquire one. A member
+// who logged for six months and stopped for three weeks has still logged a
+// meal, and the item they finished in March does not come back in April.
+//
+// The read that answers it is `useFoodLog().everLogged`, which has no date
+// floor on it at all. Its header says what it costs.
+
+/** The three things the app can know about whether a meal has ever been logged. */
+export interface MealEverFacts {
+  /**
+   * Meals this device holds for TODAY. Proof when there are any — a row on
+   * screen was logged by somebody — and proof of nothing when there are none,
+   * which is the half the old expression got backwards.
+   */
+  loggedToday: number;
+  /**
+   * Meals this device holds for EARLIER days that the server has not taken yet:
+   * yesterday's dinner logged in a basement, anything back-dated offline. They
+   * count for exactly the same reason today's do. Leaving them out would tell a
+   * member who has just logged their first meal, on a phone with no signal, that
+   * they have not — and it is the offline member who most needs the tick to mean
+   * something.
+   */
+  unsentEarlier: number;
+  /**
+   * Whether the account has a meal on record, ever. `null` is the read saying
+   * NOTHING — still in flight, or refused. Not "no".
+   */
+  everLogged: boolean | null;
+}
+
+/**
+ * Whether "Log Something You Ate" is done, or `null` when nobody can say.
+ *
+ * The null is the point, and it is why this is a function rather than a `??`
+ * at each call site. While the history read is in flight the item is UNKNOWN:
+ * it draws a dash, is counted neither as done nor as outstanding, and keeps the
+ * list from calling itself finished. It must not flip to done — a tick drawn
+ * off a read that has not happened is the thing the top of
+ * app/(client)/getting-started.tsx is about — and it must not flip to not-done
+ * either, because "you have never logged a meal" is not a sentence to build out
+ * of our own silence.
+ */
+export function everLoggedMeal(f: MealEverFacts): boolean | null {
+  // Anything on this device is proof, whatever the reads did. This is first so
+  // that a failed or unfinished history read cannot un-tick a member who is
+  // looking at their own breakfast.
+  if (f.loggedToday > 0 || f.unsentEarlier > 0) return true;
+  // Otherwise the history answers — including when its answer is "we do not
+  // know", which is passed straight through rather than flattened to false.
+  return f.everLogged;
+}
+
 const stateOf = (v: boolean | null): ItemState => (v == null ? 'unknown' : v ? 'done' : 'todo');
 
 /** The rows this client actually has, each with where it stands. */

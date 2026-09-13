@@ -1002,7 +1002,7 @@ export default function FoodLog() {
      can still open and check. */}
  <ScrollView horizontal showsHorizontalScrollIndicator={false}
   accessibilityLabel="Which day to log to"
-  contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm, paddingRight: sp.md }}>
+  contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm, paddingEnd: sp.md }}>
  {dayChoices.map((d) => {
   const on = d === logDay;
   return (

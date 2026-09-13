@@ -363,13 +363,50 @@ ok((only(tied.findings, 'volume-jump')[0].volume!.bestDay ?? '') > '2026-08-15',
 // No client attached is a THIRD answer, and not a client who has logged
 // nothing. An empty array runs the check and finds nothing, which reads as a
 // check that ran and passed; null stands it down and says so.
-const noClient = reviewProgram(base(squats, { log: null }));
+// `injuries: null` is what says no client is attached — both callers pass it as
+// `clientId ? theirDisclosures : null` — so it goes with the null log here.
+const noClient = reviewProgram(base(squats, { log: null, injuries: null }));
 eq(only(noClient.findings, 'volume-jump'), [], 'a draft with no client attached is not compared with a history');
 eq(noClient.skipped.filter((s) => s.id === 'volume-jump').map((s) => s.kind), ['absent'],
    'and that is an absent skip, not a failed read');
 eq(noClient.status, 'ready', 'and a draft with no client is not a partial review');
-eq(reviewProgram(base(squats, { log: null, logStatus: 'error' })).status, 'ready',
+ok(noClient.skipped.find((s) => s.id === 'volume-jump')!.why.includes('no client attached'),
+   'and it says there is nobody attached, which is the fact');
+eq(reviewProgram(base(squats, { log: null, injuries: null, logStatus: 'error' })).status, 'ready',
    'and no client to compare against beats whatever the status says');
+
+/* ── the client who IS attached and has no account ───────────────────────────
+ *
+ * A hand-added client: a `coach_clients` row, a name showing in the picker, and
+ * no `clients` row for `is_my_client()` to find, so the caller passes a null log
+ * under a read that did not fail. The check still stands down — that part was
+ * always right — but "There is no client attached to this draft" said about
+ * somebody whose name is on the screen reads as a broken picker.
+ */
+const noAccount = reviewProgram(base(squats, { log: null }));
+eq(only(noAccount.findings, 'volume-jump'), [], 'a client with no account is not compared with a history');
+eq(noAccount.skipped.filter((s) => s.id === 'volume-jump').map((s) => s.kind), ['absent'],
+   'and that is an absent skip, not a failed read');
+eq(noAccount.status, 'ready', 'and it does not make the review partial');
+const noAccountWhy = noAccount.skipped.find((s) => s.id === 'volume-jump')!.why;
+ok(!noAccountWhy.includes('no client attached'),
+   'and it does not contradict the name the screen is showing');
+ok(noAccountWhy.includes('no account'), 'it says what is actually missing');
+ok(!/logged nothing|never|no training/i.test(noAccountWhy),
+   'and it does not turn an absent account into a claim that they have not trained');
+
+// A failed read that arrives as a null log — which is how
+// app/(trainer)/client-training.tsx passes one — is a read that did not land
+// and not an absent client. It was reported as 'absent' under a 'ready' review.
+const failedNull = reviewProgram(base(squats, { log: null, logStatus: 'error' }));
+eq(failedNull.skipped.filter((s) => s.id === 'volume-jump').map((s) => s.kind), ['unread'],
+   'a failed log read is unread even when it arrives as a null');
+eq(failedNull.status, 'partial', 'and the review says it is not whole');
+ok(failedNull.skipped.find((s) => s.id === 'volume-jump')!.why.includes('could not be read'),
+   'and it names the read rather than the client');
+eq(reviewProgram(base(squats, { log: null, logStatus: 'loading' })).skipped
+  .filter((s) => s.id === 'volume-jump').map((s) => s.kind), ['unread'],
+   'and one still in flight is the same');
 
 // And the log read that did not land.
 for (const status of ['loading', 'partial', 'error'] as const) {
