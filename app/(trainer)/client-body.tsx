@@ -398,6 +398,20 @@ export default function ClientBody() {
     void load(picked, askable);
   }, [picked, askable, load]);
 
+  // The member's typed sleep and water, read only if they have said so. Its own
+  // hook and its own statuses, because it fails independently of the scans: a
+  // refused `scans` read says nothing about their nights, and a member who has
+  // not shared their nights has a body composition that is still perfectly
+  // readable. `askable` travels with it for the same reason it travels with
+  // `load` — a hand-added client has no account, so nothing was ever asked of
+  // them and no read of theirs ever failed.
+  const wellness = useWellnessShare(picked, askable);
+  // Held by identity rather than through `wellness`, which is a fresh object on
+  // every render: a pull handler rebuilt every render would hand the
+  // RefreshControl a new callback each time. `refresh` is a useCallback and
+  // changes only when the subject does.
+  const wellnessRefresh = wellness.refresh;
+
   // The scans and the manual entries are written by the CLIENT, on their own
   // phone, and this screen is where a coach finds out whether a weigh-in
   // happened. `load` reads both together and is the whole of what this screen
@@ -407,17 +421,8 @@ export default function ClientBody() {
   // what a pull can honestly ask for.
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     r.refresh(),
-    ...(picked ? [load(picked, askable), wellness.refresh()] : []),
-  ]), [r, picked, askable, load, wellness]));
-
-  // The member's typed sleep and water, read only if they have said so. Its own
-  // hook and its own statuses, because it fails independently of the scans: a
-  // refused `scans` read says nothing about their nights, and a member who has
-  // not shared their nights has a body composition that is still perfectly
-  // readable. `askable` travels with it for the same reason it travels with
-  // `load` — a hand-added client has no account, so nothing was ever asked of
-  // them and no read of theirs ever failed.
-  const wellness = useWellnessShare(picked, askable);
+    ...(picked ? [load(picked, askable), wellnessRefresh()] : []),
+  ]), [r, picked, askable, load, wellnessRefresh]));
 
   const fullName = client?.name ?? '';
   const who = fullName ? fullName.split(' ')[0] : 'They';
