@@ -2521,7 +2521,8 @@ export default function TrainerClients() {
       {/* ── client detail ────────────────────────────────────────────────── */}
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={SCRIM} onPress={() => setSel(null)} />
+        <Pressable style={SCRIM} onPress={() => setSel(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t, { padding: 0, paddingBottom: 0, maxHeight: '86%' })}>
           {sel && (
             <>
@@ -3145,7 +3146,8 @@ export default function TrainerClients() {
           anything. Nested here it presents above the sheet it belongs to. */}
       <Modal visible={!!mealPick} transparent animationType="slide" onRequestClose={() => setMealPick(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={SCRIM} onPress={() => setMealPick(null)} />
+        <Pressable style={SCRIM} onPress={() => setMealPick(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t, { maxHeight: '80%' })}>
           {mealPick && sel ? (
             <>
@@ -3175,7 +3177,8 @@ export default function TrainerClients() {
       {/* ── add a client ─────────────────────────────────────────────────── */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={SCRIM} onPress={() => setAddOpen(false)} />
+          <Pressable style={SCRIM} onPress={() => setAddOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={sheet(t, { maxHeight: '90%' })}>
             {/* Two fields, two chip rows and a note, and the whole sheet had to fit
                 the window because nothing in it scrolled. With the keyboard up over
@@ -3288,7 +3291,8 @@ export default function TrainerClients() {
           Nothing reaches the database until Import is pressed. */}
       <Modal visible={impOpen} transparent animationType="slide" onRequestClose={() => setImpOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={SCRIM} onPress={() => setImpOpen(false)} />
+          <Pressable style={SCRIM} onPress={() => setImpOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '88%', ...elevation.e2 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Import Your Clients</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
@@ -3379,7 +3383,8 @@ export default function TrainerClients() {
       {/* ── broadcast ────────────────────────────────────────────────────── */}
       <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={SCRIM} onPress={() => setBcOpen(false)} />
+          <Pressable style={SCRIM} onPress={() => setBcOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={sheet(t, { maxHeight: '90%' })}>
             {/* Post a Notice is the tallest sheet in this file — a five-line
                 explanation, a 90pt box, a switch row, the button and the last three
@@ -3497,7 +3502,8 @@ export default function TrainerClients() {
       {/* ── invite by email ──────────────────────────────────────────────── */}
       <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable style={SCRIM} onPress={() => setInvOpen(false)} />
+          <Pressable style={SCRIM} onPress={() => setInvOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           {/* Capped and scrolled, following the meal and template sheets on
               this screen. The code section used to be one code and one line;
               it is now a list that grows with every campaign a coach runs, and
@@ -3853,7 +3859,8 @@ export default function TrainerClients() {
       {/* ── AI check-in draft review ─────────────────────────────────────── */}
       <Modal visible={!!draftClient} transparent animationType="slide" onRequestClose={() => setDraftClient(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={SCRIM} onPress={() => setDraftClient(null)} />
+        <Pressable style={SCRIM} onPress={() => setDraftClient(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t)}>
           {draftClient && (
             <>
@@ -3892,7 +3899,8 @@ export default function TrainerClients() {
           refuse outright, and the reason Quiet Clients drafts and will not
           send. */}
       <Modal visible={msgOpen} transparent animationType="slide" onRequestClose={() => setMsgOpen(false)}>
-        <Pressable style={SCRIM} onPress={() => setMsgOpen(false)} />
+        <Pressable style={SCRIM} onPress={() => setMsgOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={sheet(t, { maxHeight: '86%' })}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -3946,7 +3954,8 @@ export default function TrainerClients() {
       </Modal>
 
       <Modal visible={bulkTplOpen} transparent animationType="slide" onRequestClose={() => setBulkTplOpen(false)}>
-        <Pressable style={SCRIM} onPress={() => setBulkTplOpen(false)} />
+        <Pressable style={SCRIM} onPress={() => setBulkTplOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t, { maxHeight: '78%' })}>
           <Text style={{ ...ty.title, color: t.ink }}>Assign to {shownRoster.length} Clients</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick a program template for everyone in {segLabel}.</Text>

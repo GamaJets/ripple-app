@@ -218,10 +218,7 @@ const WEB_ROOTS = ['studio-web'];
  * numbers move every time somebody edits above them, and a ratchet that goes
  * red because a comment was added two hundred lines up is noise.
  */
-const KNOWN = new Set([
-  'app/(trainer)/builder.tsx|scrim',
-  'app/(trainer)/dashboard.tsx|scrim',
-]);
+const KNOWN = new Set([]);
 
 /* ── walking ──────────────────────────────────────────────────────────────── */
 

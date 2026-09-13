@@ -3535,7 +3535,8 @@ export default function Builder() {
       {/* ── exercise picker ──────────────────────────────────────────────── */}
       <Modal visible={pickerDay !== null && !previewing} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={scrim} onPress={() => setPickerDay(null)} />
+        <Pressable style={scrim} onPress={() => setPickerDay(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={[sheet, { maxHeight: '82%' }]}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add Exercise</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
@@ -3734,7 +3735,8 @@ export default function Builder() {
 
       {/* ── start-from-template picker ───────────────────────────────────── */}
       <Modal visible={tplPick} transparent animationType="slide" onRequestClose={() => setTplPick(false)}>
-        <Pressable style={scrim} onPress={() => setTplPick(false)} />
+        <Pressable style={scrim} onPress={() => setTplPick(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={[sheet, { maxHeight: '80%' }]}>
           <Text style={{ ...ty.title, color: t.ink }}>Start From a Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
@@ -3810,7 +3812,8 @@ export default function Builder() {
           each needs its sentence to be choosable at all. A coach who does not
           already know what "rest-pause" means cannot pick it from a label. */}
       <Modal visible={methodOpen !== null} transparent animationType="slide" onRequestClose={() => setMethodOpenFor(null)}>
-        <Pressable style={scrim} onPress={() => setMethodOpenFor(null)} />
+        <Pressable style={scrim} onPress={() => setMethodOpenFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet}>
           {(() => {
             const cur = methodOpen ? days[methodOpen.di]?.exercises.find((x) => x.key === methodOpen.key) : undefined;
@@ -3879,7 +3882,8 @@ export default function Builder() {
 
       <Modal visible={saveOpen} transparent animationType="slide" onRequestClose={() => setSaveOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={scrim} onPress={() => setSaveOpen(false)} />
+        <Pressable style={scrim} onPress={() => setSaveOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Save as Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
