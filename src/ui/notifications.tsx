@@ -62,6 +62,13 @@ import {
   inboxAge, inboxIcon, inboxHeading, safeRoute, unreadBadge,
   inboxControls, clearReadPrompt, deletedNote, clearedNote,
 } from '../lib/notifyInbox';
+// The chip row and every sentence it owes. Which kinds exist and why there are
+// only two of them is argued in that file's header; nothing about it is keyed
+// on which of the three builds is asking.
+import {
+  NO_INBOX_FILTER, bulkOffWhileFiltered, filterInbox, hiddenUnread, inboxChips,
+  inboxFilterActive, inboxFilterLine, inboxKind, type InboxKind, type InboxMode,
+} from '../lib/inboxFilter';
 import { writeFailure } from '../lib/wroteRows';
 // Counts of rows in a table with no ceiling. See the notes on `unreadBadge`
 // and on `onMarkAll` below: `1204` unseparated is what this exists to stop.
@@ -91,6 +98,10 @@ export interface InboxItem {
   heading: string | null;
   body: string;
   icon: IconName;
+  /** What the filter chips sort on. Resolved here, from the icon and not from
+   *  the route, because the icon is the value the legacy-message branch below
+   *  overrides and so the only one that is true of every row. */
+  kind: InboxKind;
   /** Already validated against this build's route group. Null means the row is
    *  worth reading and there is nowhere to send the reader. */
   route: string | null;
@@ -144,12 +155,20 @@ const rowToItem = (r: any, group: AppVariant): InboxItem => {
     // nothing at all. It is derived from the route instead, so every row draws
     // something, with the legacy message rows recognised above.
     icon: icon as IconName,
+    kind: inboxKind(icon),
     // Through safeRoute either way, including the value this file just chose:
     // one path for validating a route means the group check cannot be skipped
     // by whichever branch somebody adds next.
     route: safeRoute(route, group),
     read: r.read === true,
-    at: String(r.created_at ?? ''),
+    // `r.at` is not a column and is not dead code. This function runs over two
+    // populations: server rows, which carry `created_at`, and the AsyncStorage
+    // cache, which holds already-mapped `InboxItem`s and therefore carries `at`.
+    // Without the second name every cached row came back with `at: ''`, which
+    // `inboxAge` renders as the empty string — so the list a person saw before
+    // the server answered had no ages on it at all, on the one screen where how
+    // old a thing is decides whether it still matters.
+    at: String(r.created_at ?? r.at ?? ''),
   };
 };
 
@@ -708,6 +727,37 @@ export function NotificationInbox(f: InboxFraming) {
   const readCount = items.filter((i) => i.read).length;
   const clearPrompt = clearReadPrompt(readCount, status);
 
+  /* ── The filter ─────────────────────────────────────────────────────────
+   *
+   * Held here and nowhere else: it is a question somebody is asking of the list
+   * on this visit, not a preference. Nothing persists it, and leaving the screen
+   * returns it to All — an inbox that reopens tomorrow already narrowed is one
+   * that hides tomorrow's cancellation behind a chip somebody pressed once.
+   *
+   * `items` stays the whole list and `shown` is what is drawn. Everything that
+   * speaks about the INBOX — the "3 new" pill, the read count in the Clear Read
+   * confirmation, the genuinely-empty state — goes on reading `items`, because
+   * those are claims about a person's notifications and not about their current
+   * question. Only the rows and the sentence under the chips read `shown`.
+   */
+  const [mode, setMode] = useState<InboxMode>(NO_INBOX_FILTER);
+  const narrowed = inboxFilterActive(mode);
+  const shown = filterInbox(items, mode);
+  const chips = inboxChips(items, mode, status);
+  const filterLine = inboxFilterLine({
+    status,
+    mode,
+    matched: shown.length,
+    searched: items.length,
+    hidden: hiddenUnread(items, mode),
+  });
+  // Whether the bulk row would have been offered at all, which is the same
+  // condition it is rendered under below. Passed in so the sentence is only
+  // produced when there is really a control missing — explaining the absence of
+  // something that was never going to be there is noise.
+  const bulkOffered = items.length > 0 && (items.some((i) => !i.read) || !!clearPrompt);
+  const bulkNote = bulkOffWhileFiltered(mode, bulkOffered);
+
   const onMarkAll = async () => {
     if (busy) return;
     setBusy(true);
@@ -871,6 +921,59 @@ export function NotificationInbox(f: InboxFraming) {
 
         {note ? <Notice kicker="Inbox" title={note} /> : null}
 
+        {/* ── the chip row ────────────────────────────────────────────────
+            Single-select, so there is never a fifth state nobody named. Drawn
+            only when `inboxChips` returns more than one — a lone All over an
+            unfiltered list is furniture — which also means an owner inbox
+            holding nothing filterable shows no controls rather than three that
+            can only filter to nothing.
+
+            The colours are the ones app/(trainer)/messages.tsx already uses for
+            this exact control: brandInk on brand when lit, ink2 on surface2
+            when not. No lineHeight is pinned anywhere here — `ty.micro` already
+            carries one through grown(), and writing a number after it is what
+            clips a paragraph at the largest text size. */}
+        {chips.length ? (
+          <View style={{ marginBottom: sp.lg }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+              {chips.map((c) => {
+                const on = c.mode === mode;
+                return (
+                  <Pressable
+                    key={c.mode}
+                    onPress={() => setMode(c.mode)}
+                    accessibilityRole="button"
+                    // Both halves. `selected` is what a screen reader uses to
+                    // say which of four is on; the label is what the control
+                    // DOES, and it carries the figure, or the reason there is
+                    // not one, because a number drawn on a chip that nobody can
+                    // hear is the same defect as a number that is wrong.
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={c.a11y}
+                    hitSlop={hitSlopFor(32)}
+                    style={{
+                      paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill,
+                      backgroundColor: on ? t.brand : t.surface2,
+                      borderWidth: on ? 0 : hairline, borderColor: t.ring,
+                    }}
+                  >
+                    <Text style={{ ...ty.micro, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>{c.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {/* What the narrowing did, and what it is holding back. The only
+                thing on this screen allowed to state an absence, and only under
+                a whole read — see src/lib/inboxFilter.ts. The unread rows a chip
+                is hiding are named here whatever the status, because a
+                notification arriving over the realtime subscription into a
+                filter that excludes it is exactly the failure this exists for. */}
+            {filterLine ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{filterLine}</Text>
+            ) : null}
+          </View>
+        ) : null}
+
         <Rule />
 
         {status === 'loading' && !items.length ? (
@@ -885,7 +988,12 @@ export function NotificationInbox(f: InboxFraming) {
           </View>
         ) : null}
 
-        {items.map((item, i) => (
+        {/* `shown`, not `items`. The genuinely-empty state above deliberately
+            stays on `items`: "Nothing to catch up on" is a statement about
+            somebody's inbox, and a chip matching nothing is not that. What a
+            narrowed empty list says instead is the filter line under the chips,
+            which is the one place that can tell the two apart. */}
+        {shown.map((item, i) => (
           <View
             key={item.id}
             style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}
@@ -988,7 +1096,14 @@ export function NotificationInbox(f: InboxFraming) {
           </View>
         ))}
 
-        {items.length > 0 && (items.some((i) => !i.read) || clearPrompt) ? (
+        {/* Withheld under a live filter, and said rather than simply gone. Both
+            of these are scoped by PREDICATE and not by what is drawn — the RPC
+            takes everything unread, the clear takes everything read — so under
+            a chip showing six of forty rows they act on rows the reader cannot
+            see, and `clearReadPrompt` would name a figure counted over the whole
+            inbox beneath a list that is not it. `bulkNote` below says so and
+            says the way back. */}
+        {!narrowed && bulkOffered ? (
           <View style={{ marginTop: layout.section, flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
             {items.some((i) => !i.read) ? (
               <Ghost label={busy ? 'Working…' : 'Mark All Read'} icon="check" onPress={() => void onMarkAll()} />
@@ -1008,6 +1123,10 @@ export function NotificationInbox(f: InboxFraming) {
             list is unconfirmed, and this says what that costs. */}
         {controls.withheld && items.length > 0 ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{controls.withheld}</Text>
+        ) : null}
+
+        {bulkNote ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{bulkNote}</Text>
         ) : null}
 
         {/* WHY THERE IS NO "CLEAR ALL".

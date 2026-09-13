@@ -391,6 +391,8 @@
     "src/lib/rosterSearch.test.ts",
     "src/lib/threadFilter.ts",
     "src/lib/threadFilter.test.ts",
+    "src/lib/inboxFilter.ts",
+    "src/lib/inboxFilter.test.ts",
     "src/lib/inviteDelivery.test.ts",
     "src/lib/gymInvite.ts",
     "src/lib/gymInvite.test.ts",
@@ -668,6 +670,10 @@
     "src/lib/scanCadence.ts",
     "src/lib/scanCadence.test.ts",
     "src/lib/photoTimeline.ts",
-    "src/lib/photoTimeline.test.ts"
+    "src/lib/photoTimeline.test.ts",
+    "src/lib/coachKit.ts",
+    "src/lib/coachKit.test.ts",
+    "src/lib/coachClose.ts",
+    "src/lib/coachClose.test.ts"
   ]
 }

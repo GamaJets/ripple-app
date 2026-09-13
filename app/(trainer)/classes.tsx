@@ -31,6 +31,8 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
+import { useMyGymKit } from '../../src/ui/coachKit';
+import { GymKitRegister } from '../../src/ui/GymKitRegister';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { CLASS_KINDS, branchesFrom, type GymClass } from '../../src/lib/classesMock';
 import {
@@ -117,9 +119,24 @@ export default function TrainerClasses() {
   // a free week does not turn up to teach. Under 'partial' the classes shown
   // are real but the far end of the schedule is missing.
   const { classes, addClass, countsKnown, status, refresh } = useClasses();
+  // ── the kit the timetable above is written on ─────────────────────────
+  //
+  // `gym_equipment` has admitted this coach since supabase/parts/34 and no
+  // screen in `app/(trainer)/**` had ever selected it, so the register was
+  // written by the person who buys the kit and read by the person who buys the
+  // kit. A capacity of 14 is a claim about the room — `capacityFor` in
+  // src/lib/gymEquipment.ts makes the argument — and it stops being true the
+  // moment six of the rowers go down. The coach filling in the form above was
+  // the one person who could not see that.
+  //
+  // Its own hook, its own status: a refused equipment read must not take down
+  // the timetable, which is the bigger answer on this screen.
+  const kit = useMyGymKit();
   // One source, and the booking counts on these rows move without this coach
   // doing anything — a member books or drops a class from their own phone.
-  const pull = usePullToRefresh(useCallback(() => { refresh(); }, [refresh]));
+  // The register comes down with it: a rower taken out of action by whoever
+  // was standing next to it is exactly the kind of change a coach pulls for.
+  const pull = usePullToRefresh(useCallback(() => { refresh(); kit.refresh(); }, [refresh, kit.refresh])); // eslint-disable-line react-hooks/exhaustive-deps -- `kit.refresh` is the stable identity from useMyGymKit, not the object
 
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState<string>(CLASS_KINDS[0]);
@@ -888,6 +905,14 @@ export default function TrainerClasses() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your timetable…</Text>
           ) : null}
         </Section>
+
+        <Rule />
+
+        {/* Below the timetable rather than above it: this screen is for
+            scheduling, and the register is the constraint on it, not the
+            subject. A coach who has just typed a capacity of 14 scrolls past
+            the reason it might only be 9. */}
+        <GymKitRegister kit={kit} />
 
       </ScrollView>
 
