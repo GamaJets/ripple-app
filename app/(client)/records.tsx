@@ -8,6 +8,7 @@
 // screen's one hero figure, the stack of bordered cards became hairline rows,
 // and the est-1RM column reads as ink rather than accent.
 import { useCallback } from 'react';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -231,7 +232,7 @@ export default function Records() {
         wrong question. */}
     {logStatus !== 'partial' ? (
      <View style={{ marginTop: sp.lg }}>
-      <Cta label="Log a Workout" wide onPress={() => router.push('/(client)/workouts')} />
+      <Cta label="Log a Workout" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
      </View>
     ) : null}
    </Section>

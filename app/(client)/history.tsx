@@ -65,6 +65,7 @@
 // chart is bars rather than a line — a polyline from February to May paints ink
 // across two months nobody trained and invents a trajectory through them.
 import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -454,7 +455,7 @@ export default function History() {
           {historyNote(log)} Log one session and this page starts keeping the score for you —
           month by month, for as long as you train.
         </Text>
-        <Cta label="Log a Workout" wide onPress={() => router.push('/(client)/workouts')} />
+        <Cta label="Log a Workout" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
       </Section>
       {/* The import belonged here first and I put it only at the bottom of the
           loaded screen, where somebody who has never logged in Repple never

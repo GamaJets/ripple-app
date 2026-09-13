@@ -14,6 +14,7 @@
 // or miles when they logged the run), so it is already the client's answer and
 // the body-measurement preference has no business overriding it.
 import { useState, useCallback } from 'react';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -271,7 +272,7 @@ export default function Activity() {
                   calling it empty. */}
               {isWhole(feedStatus) ? (
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-                  <Ghost label="Log a Workout" onPress={() => router.push('/(client)/workouts')} />
+                  <Ghost label="Log a Workout" onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
                   <Ghost label="Weekly Check-in" onPress={() => router.push('/(client)/checkin')} />
                 </View>
               ) : null}

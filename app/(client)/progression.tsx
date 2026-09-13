@@ -10,6 +10,7 @@
 // reserved status colour — the status is a coloured mark beside ink text.
 // A list of equal-weight targets is a list, so this screen leads with no hero.
 import { useCallback } from 'react';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -116,7 +117,7 @@ export default function Progression() {
             <Text style={{ ...ty.body, color: t.ink2 }}>Log a few weighted sets and your progression targets will appear here.</Text>
             <View style={{ height: sp.lg }} />
             <View style={{ alignSelf: 'flex-start' }}>
-              <Cta label="Log a Workout" onPress={() => router.push('/(client)/workouts')} />
+              <Cta label="Log a Workout" onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
             </View>
           </Section>
           )

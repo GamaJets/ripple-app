@@ -61,6 +61,7 @@
 // log is a sentence this codebase has shipped; `windowNote` is the function
 // that decides whether the window may be named at all, and what to say instead.
 import { useCallback, useMemo, useState } from 'react';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -554,7 +555,7 @@ export default function Muscles() {
         any of it is train, so the way out goes there rather than to another
         page of the same numbers. */}
     <Section>
-      <Cta label="Log a Workout" wide onPress={() => router.push('/(client)/workouts')} />
+      <Cta label="Log a Workout" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
     </Section>
   </>);
 }

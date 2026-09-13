@@ -6,6 +6,7 @@
 // rows instead of seven bordered cards. Every provider, computation and route is
 // preserved.
 import { View, Text, Pressable, ScrollView } from 'react-native';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { BRAND } from '../../src/lib/brands';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -259,7 +260,7 @@ export default function ThisWeek() {
             return (
               <View key={label}>
                 {i > 0 ? <Rule /> : null}
-                <Pressable onPress={() => router.push('/(client)/workouts')} accessibilityRole="button"
+                <Pressable onPress={() => router.push(trainIntent('/(client)/workouts') as any)} accessibilityRole="button"
                   accessibilityLabel={`${label} ${date.getDate()}. ${focus}. ${done ? 'Logged' : isToday ? 'Today' : 'Open Train'}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <View style={{ width: 38 }}>

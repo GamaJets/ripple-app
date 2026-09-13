@@ -586,6 +586,8 @@
     "src/lib/membershipFreeze.test.ts",
     "src/lib/trainerInvite.test.ts",
     "src/lib/formCheck.test.ts",
+    "src/lib/trainIntent.ts",
+    "src/lib/trainIntent.test.ts",
     "src/lib/llmGateway.test.ts"
   ]
 }

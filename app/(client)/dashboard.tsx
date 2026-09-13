@@ -21,6 +21,7 @@ import { useOutbox } from '../../src/ui/outbox';
 import { OUTBOX_KINDS, lapsedNote, outboxNote } from '../../src/lib/outbox';
 import { BRAND } from '../../src/lib/brands';
 import { weekIndexOf, startOfWeek } from '../../src/lib/weekStart';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -719,7 +720,7 @@ export default function Home() {
                 ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight is covered, but training keeps it growing.`
                 : 'Log one session today to keep it alive.'}>
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-                <View style={{ flex: 1 }}><Cta label="Start Now" wide onPress={() => router.push('/(client)/workouts')} /></View>
+                <View style={{ flex: 1 }}><Cta label="Start Now" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} /></View>
                 {pushAvailable() ? <View style={{ flex: 1 }}><Ghost label="Remind Me Tonight" onPress={remindTonight} /></View> : null}
               </View>
             </Notice>
@@ -882,7 +883,7 @@ export default function Home() {
             note={today.tip}
             cta={today.cta}
             tone={today.tone}
-            onPress={() => router.push(today.route as any)}
+            onPress={() => router.push(trainIntent(today.route) as any)}
           />
         </Section>
 
@@ -1199,7 +1200,7 @@ export default function Home() {
         {/* ── quick actions ──────────────────────────────────────────────── */}
         <Section>
           <QuickRow items={[
-            { icon: 'plus', label: 'Log', onPress: () => router.push('/(client)/workouts') },
+            { icon: 'plus', label: 'Log', onPress: () => router.push(trainIntent('/(client)/workouts') as any) },
             { icon: 'meals', label: 'Food', onPress: () => router.push('/(client)/foodlog') },
             // One slot, so it goes to whichever of the three this client
             // actually has: a session to book, a check-in to send, or — with

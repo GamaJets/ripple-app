@@ -512,10 +512,60 @@ export default function Train() {
   // `?mode=recovery` lets the Recovery screen send somebody straight to the
   // right type, so logging a sauna is one tap from the screen that shows it.
   // Anything unrecognised falls back to the program, which is the default.
-  const { mode: modeParam } = useLocalSearchParams<{ mode?: string }>();
+  const { mode: modeParam, start: startParam } = useLocalSearchParams<{ mode?: string; start?: string }>();
   const startMode: TrainMode = (['strength', 'cardio', 'hiit', 'mobility', 'recovery', 'stretch'] as const)
     .find((m) => m === modeParam) ?? 'strength';
   const [mode, setMode] = useState<TrainMode>(startMode);
+
+  /**
+   * Arriving here because somebody pressed "Start Workout" somewhere else.
+   *
+   * ── The report ────────────────────────────────────────────────────────────
+   *
+   * "When I press start workout - nothing is coming out! It's stuck on the same
+   * screen." Home was showing "Ready to Train · Full Body A" with a live Start
+   * Workout, and pressing it appeared to do nothing at all.
+   *
+   * It was doing something. Train is a TAB, and a tab screen stays MOUNTED once
+   * it has been visited — so `router.push('/(client)/workouts')` switches to a
+   * screen that is still in whatever state it was last left in. `mode` and
+   * `dayIdx` are both plain `useState` seeded once at mount, so a member who had
+   * earlier tapped Cardio, or read ahead to Thursday, came back to exactly that:
+   * the Cardio log, or a rest day. Neither has a Start button on it.
+   *
+   * And there is nothing on screen to explain the absence. `startGate` returns
+   * `note: null` for 'not-strength' on purpose — "a member reading the Cardio
+   * tab is not missing a strength button", which is right for somebody who
+   * chose that tab — so the control is simply not there, with no sentence and
+   * no error. That is the whole of "nothing is coming out": the app changed
+   * tabs, the tab looked untouched, and every trace of the intent was lost on
+   * the way. Nothing throws, so app_errors has nothing to show either, which is
+   * why this could not be found by looking for a crash.
+   *
+   * ── The fix ───────────────────────────────────────────────────────────────
+   *
+   * The intent travels WITH the navigation. `?start=` carries a fresh value on
+   * every press — a nonce, not a flag, so pressing it twice in a row is two
+   * arrivals and not one — and landing with it resets the three pieces of state
+   * that decide whether there is a session in front of the member: the log they
+   * are looking at, the week, and the day.
+   *
+   * `startMode` still wins over 'strength' when the caller named a mode, because
+   * `?mode=recovery` from the Recovery screen is an intent too and a more
+   * specific one. The reset is to what was ASKED FOR, not unconditionally to the
+   * programme.
+   *
+   * Deliberately not a `useFocusEffect`: this must fire on arrival-with-intent
+   * and NOT every time the tab is focused, or a member who taps Cardio, wanders
+   * to Home and taps Train would be bounced back to the programme by an app
+   * overruling a choice they just made.
+   */
+  useEffect(() => {
+    if (!startParam) return;
+    setMode(startMode);
+    setWeekOffset(0);
+    setDayIdx(weekIndexOf(new Date()));
+  }, [startParam, startMode]);
   // Swaps, edits, removals and added movements, all four persisted. They were
   // plain `useState` — a swap made on Tuesday was gone on Wednesday and the
   // coach never heard about any of it.

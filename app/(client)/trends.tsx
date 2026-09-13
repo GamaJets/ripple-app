@@ -10,6 +10,7 @@
 // 8.5px labels are gone, and the est-1RM delta no longer paints itself in a
 // reserved status colour — it carries a coloured mark beside ink text.
 import { useMemo, useState, useCallback } from 'react';
+import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -329,7 +330,7 @@ export default function Trends() {
               logging another set. */}
           {!anyVolume && logKnown ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
-              <Ghost label="Log a Workout" onPress={() => router.push('/(client)/workouts')} />
+              <Ghost label="Log a Workout" onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
             </View>
           ) : null}
           <View style={{ height: sp.lg }} />
