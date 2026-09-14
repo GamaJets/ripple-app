@@ -249,5 +249,27 @@ ok(/1 is waiting for you to accept them/.test(codeUptakeLine({ joined: 0, pendin
 ok(/0 people have joined/.test(codeUptakeLine({ joined: 0, pending: 0 })),
   'a read zero is stated, because it is true and it is what a new code looks like');
 
+/* ── the figure is every code's, and may not be attributed to one ────────────
+ *
+ * `my_join_code_stats()` filters on `source = 'code'` and nothing else — it
+ * never looks at `via_code` — so these two numbers span the main code and every
+ * named one. This line is drawn directly under the six characters of the MAIN
+ * code, so the words "this code" over it would hand a coach with four named
+ * codes their whole book's intake as the takings of the one card in their hand.
+ * The same shape as every other refusal in this file: a figure may only be
+ * called what it actually counted.
+ */
+for (const stats of [{ joined: 12, pending: 0 }, { joined: 12, pending: 5 }, { joined: 1, pending: 1 }]) {
+  const line = codeUptakeLine(stats);
+  ok(!/\bthis code\b/.test(line),
+    `the all-codes figure is never attributed to one code — got ${JSON.stringify(line)}`);
+  ok(/your codes/.test(line),
+    `and says whose codes it counted — got ${JSON.stringify(line)}`);
+}
+// Including the failed read: "on this code could not be read" would be naming
+// the wrong figure while refusing to state it.
+ok(!/\bthis code\b/.test(codeUptakeLine(null)),
+  'and the unread sentence names the same set the figure would have covered');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`handOutCode: ok (${hand.length} live named codes offered, ${new Set(lines.values()).size} distinct states)`);

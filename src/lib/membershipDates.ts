@@ -29,6 +29,8 @@
 // Pure. One value import — the codebase's single reader for "is this a day" —
 // and one type, which is erased.
 import { isStartDate } from './programStart';
+import { frozenDays } from './membershipFreeze';
+import { addDays } from './termDates';
 import type { MembershipStatus } from './gymRecord';
 
 /** A bare `YYYY-MM-DD`, or nothing. Compared as a string throughout — no Date
@@ -120,6 +122,54 @@ export function datesPatch(current: DraftDates, next: DraftDates): DatesPatch | 
   const nextEnd = isDay(next.endsOn) ? next.endsOn : null;
   if (nextEnd !== curEnd) patch.endsOn = nextEnd;
   return Object.keys(patch).length ? patch : null;
+}
+
+/**
+ * The end date with the pause ALREADY ON THIS ROW taken back off — the term as
+ * it was sold.
+ *
+ * ── the compounding this exists to stop ───────────────────────────────────
+ *
+ * `thawedEndsOn` is `ends_on + the length of the pause`, and it knows nothing
+ * about what is already inside `ends_on`. The header of `setMembershipFreeze`
+ * in src/lib/gymRecord.ts is explicit that the shift is applied ONCE, by the
+ * owner accepting it on the screen, precisely so that "a corrected pause would
+ * compound instead of replace" cannot happen — and it then leaves the screen to
+ * hold that line. `datesNotes` below states the same fact from the other side:
+ * "the end date on this row is not the term that was sold; it is the term plus
+ * the pause."
+ *
+ * app/(owner)/members.tsx was not holding it. Its pause sheet seeds itself from
+ * `frozen_from` / `frozen_to` when a pause is already recorded, and then fed
+ * `m.endsOn` — the ALREADY-MOVED date — straight back into `thawedEndsOn`. So
+ * reopening the sheet on an existing pause and saving it, changed or unchanged,
+ * pushed the end date out by the length of the pause a second time. A member
+ * frozen 12–26 June on a membership ending 30 June correctly ran to 15 July;
+ * one tap of Save Pause on that same sheet made it 30 July, and every further
+ * tap added another fortnight. Nothing else in the product moves `ends_on`, so
+ * nothing else would ever have contradicted it.
+ *
+ * Subtracting is the right inverse because this app is the ONLY writer of
+ * `frozen_from` / `frozen_to` anywhere — the console does not have the field —
+ * so a readable pause on a row with a readable end date is always a pause whose
+ * days were added to that end date by this same screen.
+ *
+ * Null where there is nothing to work from: an open-ended membership has no
+ * date to take days off, and one whose end date cannot be read is one this
+ * cannot reason about. A row with NO readable pause is returned unchanged,
+ * because there is nothing on it to remove — that is the first freeze, and the
+ * case `thawedEndsOn` was always right about.
+ */
+export function unpausedEndsOn(
+  current: Pick<MembershipTerm, 'endsOn' | 'frozenFrom' | 'frozenTo'>,
+): string | null {
+  if (!isDay(current.endsOn)) return null;
+  const given = frozenDays({ from: current.frozenFrom, to: current.frozenTo });
+  // No pause recorded, or one this build cannot read. Nothing was given back
+  // that can be taken off again, and guessing at a quantity here would be the
+  // same mistake in the other direction.
+  if (given == null || given <= 0) return current.endsOn;
+  return addDays(current.endsOn, -given);
 }
 
 /**

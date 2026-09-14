@@ -62,12 +62,41 @@ const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', '
 // so 50000 minor units is KWD 50.000 and not KWD 500.00.
 const THREE_DECIMAL = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
 
-/** Minor units to major, for a currency that was actually stated. Null when it
- *  was not — there is no default currency in this product and a guess here is a
- *  figure the owner acts on. */
+/**
+ * Minor units to major, for a currency that was actually stated. Null when it
+ * was not — there is no default currency in this product and a guess here is a
+ * figure the owner acts on.
+ *
+ * ── AND NULL WHEN THE "CURRENCY" IS NOT A CODE ────────────────────────────
+ *
+ * `if (!c) return null` was the whole guard and it only caught the EMPTY
+ * string. Everything else non-empty fell through to `minor / 100`, so a tenant
+ * whose currency column held 'pounds', 'GB' or '£' had its revenue divided by a
+ * hundred anyway and presented on the Owner Command Center as an amount. None
+ * of the money columns this function reads carries a format check, so a word in
+ * that column reaches here intact; and the portal renders the result as a
+ * figure with no code beside it, so nothing on the screen disagrees.
+ *
+ * `/^[a-z]{3}$/` is a SHAPE test and deliberately not an allowlist.
+ * `majorUnits(1250, 'zzz')` is 13, and that is an answer rather than a default:
+ * the two sets above are Stripe's own and complete, so the only codes reaching
+ * the last return are real currencies this build has not been told about by
+ * name — 'aed', 'chf', 'sek' — all of them two-place. An allowlist would answer
+ * null for the dirham and drop real money, which is the worse failure.
+ *
+ * This is line for line the guard in `currencyDecimals` in
+ * src/lib/coachMoney.ts, which is the rule of record, and which this file
+ * cannot import for the leaf-module reason stated above the two sets. The
+ * sameness is enforced rather than hoped for: scripts/check-currency-copies.mjs
+ * reads this file as text and compares the guard, not only the set literals.
+ * The divisors below are this function's own arithmetic and are NOT compared by
+ * that gate — see its header for what a static comparison cannot see.
+ */
 const majorUnits = (minor: number, currency: string | null): number | null => {
   const c = String(currency ?? '').trim().toLowerCase();
-  if (!c) return null;
+  // Empty and non-code answer alike, because they are the same answer: nobody
+  // has said how many places this money has.
+  if (!/^[a-z]{3}$/.test(c)) return null;
   if (ZERO_DECIMAL.has(c)) return Math.round(minor);
   if (THREE_DECIMAL.has(c)) return Math.round(minor / 1000);
   return Math.round(minor / 100);

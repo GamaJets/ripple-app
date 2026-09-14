@@ -1468,23 +1468,35 @@ export interface TakenSlot {
    */
   waiting: number | null;
   /**
-   * 1-based. 0 means this member is not on that queue.
+   * 1-based. 0 means this member is not on that queue; NULL means nobody read
+   * their position, which is not the same claim and must not be flattened into
+   * one.
    *
-   * Deliberately NOT widened alongside `waiting`, and it has the same defect:
-   * `toNum(r.my_position) ?? 0` reads an unread position as "you are not on this
-   * queue". app/(client)/calendar.tsx tests `k.myPosition > 0` to decide whether
-   * to draw the member as queued, and a `number | null` there is a type error in
-   * a file this lane does not own. The one-line change and the arm that goes
-   * with it are reported rather than made.
+   * Widened tonight, alongside `waiting`. `toNum(r.my_position) ?? 0` read an
+   * unread position as "you are not on this queue", and 0 is what reaches
+   * `waitlistLine`, which says "Nobody is waiting for this slot yet." The
+   * widening had been deferred once because app/(client)/calendar.tsx tested
+   * `k.myPosition > 0` and `number | null` was a type error in a file that lane
+   * did not own. That consumer is null-tolerant now, so the reason is spent and
+   * is recorded here spent rather than deleted. Do not restore the `?? 0`.
+   *
+   * Test null FIRST wherever this is read: `null > 0` is `false`, so a null
+   * placed after a `> 0` test falls silently into the "not queued" arm — the
+   * same arm an absent count would wrongly claim.
    */
-  myPosition: number;
+  myPosition: number | null;
 }
 export interface MyWaitlistRow {
   sessionId: string;
   startsAt: string;
   durationMin: number;
   trainerId: string;
-  position: number;
+  /** 1-based, and NULL when nobody read it. Widened with `TakenSlot.myPosition`
+   *  and for a stronger reason: this row EXISTS because the member is on that
+   *  queue, so a settled 0 here was a contradiction — `toNum(r.queue_position)
+   *  ?? 0` told a member who is demonstrably queued that they are not. Null
+   *  first, always: `null > 0` is `false`. */
+  position: number | null;
   /** The queue length, and NULL when nobody counted it. Same widening and same
    *  reason as `TakenSlot.waiting` above; app/(client)/bookings.tsx renders it
    *  through the same sentence. */
@@ -1564,17 +1576,17 @@ export function useSlotWaitlist(daysAhead: number = 60): {
         // `queueLength`, not `toNum(…) ?? 0`. See `TakenSlot.waiting`: a 0 here
         // is the sentence "Nobody is waiting for this slot yet."
         waiting: queueLength(r.waiting),
-        // Still settled to 0, and still wrong for the same reason. The caller
-        // that would have to change with it is another lane's file tonight, so
-        // this one is reported rather than widened — see the field's note.
-        myPosition: toNum(r.my_position) ?? 0,
+        // `toNum` and no `?? 0`: an unread position is null, not "you are not
+        // on this queue". See the field's note — the calendar consumer that
+        // blocked this now takes null.
+        myPosition: toNum(r.my_position),
       })));
       setMine(((queue.data as any[]) ?? []).map((r) => ({
         sessionId: String(r.session_id),
         startsAt: r.starts_at,
         durationMin: toNum(r.duration_min) ?? 60,
         trainerId: String(r.trainer_id),
-        position: toNum(r.queue_position) ?? 0,
+        position: toNum(r.queue_position),
         waiting: queueLength(r.waiting),
         stillTaken: !!r.still_taken,
       })));

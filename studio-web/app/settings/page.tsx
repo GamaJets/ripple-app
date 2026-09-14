@@ -303,11 +303,85 @@ export default function Settings() {
     : tzCheck.kind === 'bad' ? tzCheck.reason
     : null;
 
+  /**
+   * The two settings on this form whose change is not undoable by changing it
+   * back, said as a question before the write rather than as a warning beside
+   * it.
+   *
+   * The warnings were already here and they were already correct — the currency
+   * one has been under that field since it was written. What was missing is the
+   * step between reading them and the row moving: one press of Save wrote both,
+   * and a gym's currency change permanently splits its ledger (nothing is
+   * re-denominated, by design, so every total spanning the two is withheld
+   * thereafter). A sentence that can be scrolled past is not a decision.
+   *
+   * Only on a CHANGE, never on a first set. A gym setting its currency for the
+   * first time has no ledger to split and no reconciled week to move; asking
+   * them to confirm the only value they have ever had would teach them to
+   * dismiss the dialog before reading it, which is how the one that matters
+   * gets dismissed too.
+   *
+   * `confirm` is what the rest of this console uses for exactly this — /staff
+   * before taking somebody off the roster, /timetable before deleting a class,
+   * /costs in five places.
+   */
+  const consequences = (): string[] => {
+    const out: string[] = [];
+    const nextCcy = ccyCheck.kind === 'currency' ? ccyCheck.currency : null;
+    if (gym?.currency && nextCcy && nextCcy !== gym.currency) {
+      out.push(
+        `Change this gym’s currency from ${gym.currency} to ${nextCcy}?\n\n`
+        + 'Nothing already recorded is re-denominated. Every payment, plan and pass keeps the '
+        + `currency it was written in, so this gym’s ledger will hold both — and any total that `
+        + 'spans the two is withheld rather than added up, for good.',
+      );
+    }
+    if (gym?.currency && ccyCheck.kind === 'clear') {
+      out.push(
+        `Clear this gym’s currency? It is ${gym.currency} now.\n\n`
+        + 'Until one is set again a plan cannot be priced, a payment cannot be recorded and a '
+        + 'price book cannot be imported. What is already recorded keeps its own currency.',
+      );
+    }
+    const nextZone = tzCheck.kind === 'zone' ? tzCheck.zone : null;
+    if (gym?.timezone && nextZone && nextZone !== gym.timezone) {
+      out.push(
+        `Change this gym’s timezone from ${gym.timezone} to ${nextZone}?\n\n`
+        + 'No stored figure changes — every time in this database is an instant. What moves is '
+        + 'which day and which hour a screen files it under, for what has already happened as '
+        + 'well as for what has not. A week you have already reconciled may come out to a '
+        + 'different total.',
+      );
+    }
+    if (gym?.timezone && tzCheck.kind === 'clear') {
+      out.push(
+        `Clear this gym’s timezone? It is ${gym.timezone} now.\n\n`
+        + 'The dates do not go blank. They go back to whichever device is reading them, with '
+        + 'nothing on any screen saying so — two people in two countries would then see this '
+        + 'gym’s Saturday differently and neither would be told.',
+      );
+    }
+    return out;
+  };
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    // An in-flight guard, not just a disabled button. `disabled={busy}` stops
+    // the mouse and nothing else: Enter in any of the five text fields submits
+    // the form directly, so two quick presses were two concurrent UPDATEs on
+    // one row — and the re-read after each lands in whichever order the network
+    // chooses, which is how a screen ends up showing the earlier of two saves
+    // as though it were the stored one.
+    if (busy) return;
     setSaved(null); setWriteErr(null);
     if (blocker) { setWriteErr(blocker); return; }
     if (nameCheck.kind !== 'name') return;
+    // Asked one at a time, in the order the fields sit on the page. Two
+    // consequences folded into one dialog is a dialog somebody agrees to for
+    // the half they were thinking about.
+    for (const q of consequences()) {
+      if (!window.confirm(q)) return;
+    }
     setBusy(true);
     try {
       await saveGymProfile(supabase, tenantId, {

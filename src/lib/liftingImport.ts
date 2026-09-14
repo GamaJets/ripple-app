@@ -194,8 +194,10 @@ export function previewLiftingImport(text: string): LiftingImportPreview {
   const drop = new Map<string, number>();
   const note = (reason: string) => drop.set(reason, (drop.get(reason) ?? 0) + 1);
 
-  /** day + exercise → the entry being built. */
-  const byKey = new Map<string, { at: string; exercise: string; sets: [number, number][] }>();
+  /** day + exercise → the entry being built. `bw` is aligned to `sets` exactly
+   *  as `WorkoutEntry.bw` is, and for the same reason: on a bodyweight set the
+   *  second number of the pair means what was ADDED, not what was loaded. */
+  const byKey = new Map<string, { at: string; exercise: string; sets: [number, number][]; bw: boolean[] }>();
   let setsRead = 0;
 
   for (let r = 1; r < lines.length; r++) {
@@ -223,6 +225,43 @@ export function previewLiftingImport(text: string): LiftingImportPreview {
     // Zero IS a real load — a bodyweight pull-up — so only a missing or
     // negative number is refused.
     if (!Number.isFinite(kg) || kg < 0) { note('the weight could not be read'); continue; }
+    // …and having read it as a bodyweight set, FILE it as one.
+    //
+    // The line above and the block over the blank test have said, since this
+    // module was written, that an explicit zero in the weight column is a
+    // pull-up and a blank one is a row to refuse. Only the refusal was carried
+    // out. The pull-up went in as `[12, 0]` with no `bw` flag — which is not a
+    // bodyweight set, it is an ordinary set with a load of zero — and the three
+    // places that read a load then disagreed with the comment in three
+    // different directions:
+    //
+    //   · `setLoadKg` returns null for an unflagged set of zero, so the work is
+    //     left out of every tonnage;
+    //   · `unknownSets` counts only BODYWEIGHT sets, so it did not count these
+    //     either — and `tonnageNote`, the one sentence that exists to say a
+    //     total is short, stayed null. The work did not go missing loudly, it
+    //     went missing silently;
+    //   · `repRecords` skips anything unflagged, so an imported calisthenics
+    //     history produced an empty Bodyweight Bests board on
+    //     app/(client)/records.tsx, and `personalRecords` could not price it
+    //     even for a member whose weigh-ins were on the account.
+    //
+    // Measured on a two-set Pull Up import against an 82 kg weigh-in: 1,804 kg
+    // of real work scored as 0 kg with `unknownSets: 0` and no note.
+    //
+    // The flag is the app's own convention arriving by a second door —
+    // app/(client)/workouts.tsx writes `bw: rec.loadKg == null` when its own
+    // logger is handed a set with no load. And it is the CONSERVATIVE reading,
+    // not the generous one: a flagged set is priced only where the member has a
+    // weigh-in on or before that day (src/lib/bodyweightSets.ts), and where they
+    // have none it is counted as unpriced and SAID, which is the outcome the
+    // unflagged zero denied them.
+    //
+    // Only an exact zero. A positive figure against a pull-up is a belt, a
+    // dumbbell or a machine and the export does not say which, so it is left as
+    // the plain load it has always been read as rather than guessed at — the
+    // same refusal this module makes about a pounds column.
+    const bodyweight = kg === 0;
 
     const when = new Date(ms);
     const at = when.toISOString();
@@ -231,14 +270,24 @@ export function previewLiftingImport(text: string): LiftingImportPreview {
     // Greenwich while merging two days into one east of it — see the header.
     const key = dayKeyOfDate(when) + '|' + exercise.toLowerCase();
     const e = byKey.get(key);
-    if (e) e.sets.push([reps, kg]);
-    else byKey.set(key, { at, exercise, sets: [[reps, kg]] });
+    if (e) { e.sets.push([reps, kg]); e.bw.push(bodyweight); }
+    else byKey.set(key, { at, exercise, sets: [[reps, kg]], bw: [bodyweight] });
     setsRead += 1;
   }
 
   const entries: WorkoutEntry[] = [...byKey.values()]
     .sort((a, b) => b.at.localeCompare(a.at))
-    .map((e) => ({ t: e.at, exercise: e.exercise, sets: e.sets }));
+    // `bw` is omitted entirely when no set in the entry is a bodyweight one, so
+    // an all-barbell import writes exactly the row it wrote before. Absent is
+    // not false-for-every-set by accident — it is what `WorkoutEntry.bw`
+    // already means, and it keeps this change invisible to every member who
+    // does not need it.
+    .map((e) => ({
+      t: e.at,
+      exercise: e.exercise,
+      sets: e.sets,
+      ...(e.bw.some(Boolean) ? { bw: e.bw } : {}),
+    }));
 
   const skipped = [...drop.entries()].map(([reason, rows]) => ({ reason, rows }));
   return {

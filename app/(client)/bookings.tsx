@@ -943,7 +943,19 @@ export default function Bookings() {
                               this member is worth saying plainly: the queue
                               moved past them, or the coach opened the hour up
                               rather than it being cancelled into the list. */}
-                          {q.stillTaken ? waitlistLine(q.position, q.waiting) : 'This slot is open again and did not come to you — book it from the Book screen if you still want it.'}
+                          {!q.stillTaken
+                            ? 'This slot is open again and did not come to you — book it from the Book screen if you still want it.'
+                            : q.position == null
+                              /* `MyWaitlistRow.position` is still settled with
+                                 `toNum(r.queue_position) ?? 0` in
+                                 src/ui/sessions.tsx, and 0 is the value
+                                 `waitlistLine` reads as "not on this queue" —
+                                 about a row that exists BECAUSE this member is
+                                 on that queue. This arm is what lets that field
+                                 be widened to `number | null`; it is dead until
+                                 it is. */
+                              ? 'You’re on the waitlist for this hour. Your place in the queue didn’t come back, so we can’t say where in it you are — it still stands, in the order you joined.'
+                              : waitlistLine(q.position, q.waiting)}
                         </Text>
                       </View>
                       <Ghost label="Leave" onPress={() => confirmLeave(q)} />

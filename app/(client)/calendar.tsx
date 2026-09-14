@@ -884,9 +884,34 @@ export default function Calendar() {
       Alert.alert('Not added', res.error || `We couldn't put you on the waitlist for ${timeLabel(slot.startsAt)}. Nothing has changed — try again.`, [{ text: 'OK' }]);
       return;
     }
+    // `res.waiting ?? 1` and `res.position ?? 1` until tonight, and both halves
+    // of that were fabricated BEFORE `waitlistLine` was ever reached — which is
+    // why the null arm src/lib/sessionWaitlist.ts was widened to carry could not
+    // fire at this call site at all.
+    //
+    //   · the count. `join()` returns `waiting: number | null` and the null is
+    //     the deliberate answer for "the server sent no count". Defaulting it to
+    //     1 told a member "You're next in line — if it frees up it's yours" over
+    //     a queue nobody had counted. Dropped; the null goes through, and the
+    //     widened sentence says the count is unknown without touching the
+    //     member's own place.
+    //   · the position. The SAME invention and a worse one, because position 1
+    //     is the only value in that sentence that promises anything: `?? 1`
+    //     turned an unread place into "it's yours". `join()` returns
+    //     `position?: number`, undefined when `join_session_waitlist` sent none,
+    //     and there is no defensible default for it — 1 is a promise, 0 is
+    //     `waitlistLine`'s "not on this queue", and the member has just been put
+    //     ON the queue, so both are false. The only true thing left to say is
+    //     that they are on it and we do not know where, which is this arm.
+    const pos = typeof res.position === 'number' && res.position > 0 ? res.position : null;
+    const place = pos != null
+      ? waitlistLine(pos, res.waiting ?? null)
+      : res.waiting != null
+        ? `You’re on the waitlist. Your place in the queue didn’t come back, so we can’t say where in it you are — ${res.waiting === 1 ? 'one person is' : `${res.waiting} people are`} in it. Open this screen again for your place.`
+        : `You’re on the waitlist. Neither your place in the queue nor its length came back, so we can’t say where in it you are. You are in it in the order you joined — open this screen again for your place.`;
     Alert.alert(
       'On the waitlist',
-      `${waitlistLine(res.position ?? 1, res.waiting ?? 1)}\n\nIf whoever has ${timeLabel(slot.startsAt)} cancels, it is booked for you automatically — you don't have to be quick, and nobody can take it ahead of you.`,
+      `${place}\n\nIf whoever has ${timeLabel(slot.startsAt)} cancels, it is booked for you automatically — you don't have to be quick, and nobody can take it ahead of you.`,
       [{ text: 'OK' }],
     );
   }
@@ -1423,7 +1448,15 @@ export default function Calendar() {
               {selDaySessions.length > 0 ? <Rule /> : null}
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: selDaySessions.length > 0 ? sp.lg : 0, marginBottom: sp.sm }}>Taken</Text>
               {selDayTaken.map((k, ki) => {
-                const mine = k.myPosition > 0;
+                // `?? 0` and the null arm below are what unblock the widening
+                // of `TakenSlot.myPosition` to `number | null` in
+                // src/ui/sessions.tsx: that field is still settled with
+                // `toNum(r.my_position) ?? 0`, and 0 is the value this screen
+                // reads as "you are not on this queue" and `waitlistLine` writes
+                // "Nobody is waiting for this slot yet." about. This file was
+                // named as the reason the widening was not made; it no longer is.
+                // Dead today, load-bearing the moment that one line changes.
+                const mine = (k.myPosition ?? 0) > 0;
                 return (
                   <View key={k.sessionId}>
                     {ki > 0 ? <Rule /> : null}
@@ -1434,7 +1467,9 @@ export default function Calendar() {
                         {/* The sentence is the same one `waitlistLine` writes
                             everywhere else, and it never promises the slot to
                             anybody who is not actually at the front. */}
-                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{waitlistLine(k.myPosition, k.waiting)}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{k.myPosition == null
+                          ? 'We couldn’t read your place in the queue for this hour, so we can’t say whether you are in it. Anything you joined still stands.'
+                          : waitlistLine(k.myPosition, k.waiting)}</Text>
                       </View>
                       {mine
                         ? <Ghost label="Leave" onPress={() => leaveWaitlist(k)} />

@@ -339,30 +339,68 @@ export default function MyNutrition() {
    * which matters here for the same reason it matters there: a "0" that was
    * really a mistyped letter is a meal that silently stops counting.
    *
-   * Awaited, and believed only when the row is on the server. `addFood` puts
+   * Awaited, and believed only when the row is on the server. `logFood` puts
    * the entry into today's totals optimistically, so a refused insert leaves a
    * meal on screen that is counting toward a day it is not part of — the coach
    * is told exactly that rather than being shown "Logged".
+   *
+   * ── why this is `logFood` and not `addFood` ─────────────────────────────
+   *
+   * `addFood` is `(await logFood(f)) === 'stored'` (src/ui/foodLog.tsx), and
+   * the two answers it flattens into `false` are opposites:
+   *
+   *   · 'unsent'  — nobody answered. The meal IS kept: it is in `entries`, it
+   *                 is counted in `consumed` and in the day's remaining, it is
+   *                 written to the per-account cache so it survives the app
+   *                 being killed, and `flushQueue` sends it on the next launch,
+   *                 reconnect or foreground.
+   *   · 'refused' — the server read it and declined. `logFood` takes it back
+   *                 out of `entries` and out of the cache, so the day's total
+   *                 no longer counts it, and offering it again as it stands
+   *                 will be refused again.
+   *
+   * Told apart because the sentence for one is a lie about the other. A coach
+   * who logged lunch on gym wifi that dropped was told the meal "will be gone
+   * when you next open the app" and left holding a full form — so the honest
+   * thing to do was type it again, and the queue then delivered both. Two
+   * lunches is a day's calories the coach then eats against.
+   *
+   * Every client screen that writes a meal already branches this way —
+   * app/(client)/nutrition.tsx, app/(client)/foodlog.tsx,
+   * app/(client)/restaurant.tsx all call `logFood`. This write was the odd one
+   * out, on the one screen where the person eating against the figure is the
+   * coach.
    */
   const logMeal = async () => {
     setProblem(null);
     const read = readFoodEdit({ name, kcal: kcalIn, protein, carbs, fat });
     if (!read.ok) { setProblem(read.reason); return; }
     setBusy(true);
-    const saved = await fl.addFood({ ...read.value, via });
+    const out = await fl.logFood({ ...read.value, via });
     setBusy(false);
-    if (saved) {
+    if (out === 'stored') {
       notifySuccess();
       clearForm();
       Alert.alert('Logged', `${read.value.name} — ${num(read.value.kcal)} kcal — is on your own food log for today.`);
       return;
     }
-    // The boxes are deliberately NOT cleared. What was typed is the only copy
-    // of it, and emptying the form would take that away on the one path where
-    // the coach may want to try again.
+    if (out === 'unsent') {
+      // Kept, and already counted in the figures above — it simply has not
+      // reached the server yet. Cleared for the same reason 'stored' is: the
+      // meal exists, and leaving it in the boxes as well invites a second one
+      // against the same day.
+      clearForm();
+      Alert.alert('Saved on this phone',
+        `No connection, so ${read.value.name} has not reached your food log yet — nothing is lost. It is saved here, it is already counted in today's total above, and it goes up on its own the next time you have signal.`);
+      return;
+    }
+    // 'refused'. The boxes are deliberately NOT cleared. What was typed is now
+    // the only copy of it — `logFood` has already taken the meal back out of
+    // today's total — and this is the one path where the coach may want to try
+    // again.
     setProblem(home === 'no-record'
-      ? 'Not saved. We could not find a profile for this account, so there is nowhere on the server to store a meal against it — see the note at the top of this screen.'
-      : 'Not saved — we could not reach your food log. This meal is counting toward today on this phone only and will be gone when you next open the app.');
+      ? 'Not saved. We could not find a profile for this account, so there is nowhere on the server to store a meal against it — see the note at the top of this screen. It is not counting toward today.'
+      : 'Not saved — your food log rejected this meal, so it has not been recorded, it is not counting toward today, and it is not waiting to send. What you typed is still in the boxes; saving it again as it is will be rejected again.');
   };
 
   /**

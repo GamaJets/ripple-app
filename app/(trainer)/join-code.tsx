@@ -123,6 +123,16 @@ export default function CoachJoinCode() {
    * half is the reason it belongs here: a coach reading their code out has no
    * way of knowing three people are already in a queue, and the only surface
    * that ever said so is a push notification that fires once, on insert.
+   *
+   * WHAT IT COUNTS IS EVERY CODE, not the one drawn above it. The function
+   * filters `coach_requests` on `source = 'code'` and never reads `via_code`;
+   * my_join_codes()'s own comment in setup.sql records that its per-code rows
+   * "sum to my_join_code_stats()". This line used to sit under the main code
+   * calling that total "this code", which read a coach's whole intake back to
+   * them as the takings of the six characters in their hand. `codeUptakeLine`
+   * now says "your codes" and its header carries the argument for why widening
+   * the words beats narrowing the figure — the per-code split is already on the
+   * named rows below, through `codeCountLine`.
    */
   const [uptake, setUptake] = useState<{ joined: number; pending: number } | null | undefined>(undefined);
 

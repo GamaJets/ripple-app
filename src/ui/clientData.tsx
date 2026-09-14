@@ -77,6 +77,26 @@ interface Value {
    *  offer the way in rather than hide it, because hiding it is the failure
    *  being fixed and showing it to somebody already coached costs them a tap. */
   coachLinked: boolean | null;
+  /** The id of the coach who trains them — `clients.trainer_id`, the same half
+   *  of the link `coachLinked` is derived from.
+   *
+   *  It exists because it was ALREADY being asked for and always answered null.
+   *  app/(client)/exercise.tsx read `(cd as any).trainerId ?? null` and handed
+   *  it to `videoForExercise` as the tie-break that decides whose demonstration
+   *  a member is shown. `Value` had no such field, so the cast produced
+   *  `undefined` on every render, every member got `null`, and rule 1 of the
+   *  clip ordering — the member's OWN coach's clip wins — could never fire:
+   *  wherever their coach had filmed a movement the platform also had, they
+   *  were served the platform's.
+   *
+   *  null is "nobody, or not read yet" and the two are deliberately NOT
+   *  separated here, because every reader of this field uses it as a TIE-BREAK
+   *  and both of those mean the same thing to a tie-break: no preference. A
+   *  reader that needs to tell an unread profile from an unlinked one has
+   *  `profileStatus` beside it. Nothing may be captioned off this id — whose
+   *  clip it is, is `clipOwner`'s question, and it is asked with this id rather
+   *  than answered by it. */
+  trainerId: string | null;
   diet: Diet; setDiet: (v: Diet) => void;
   avoid: Allergen[]; setAvoid: (v: Allergen[]) => void;
   injuries: Injury[]; addInjury: (v: Injury) => void; updateInjury: (id: string, patch: Partial<Injury>) => void; removeInjury: (id: string) => void;
@@ -224,6 +244,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [mealsPerDay, setMealsPerDay] = useState<3 | 4 | 5>(3);
   const [coachLinked, setCoachLinked] = useState<boolean | null>(null);
+  const [trainerId, setTrainerId] = useState<string | null>(null);
   const [stepGoal, setStepGoal] = useState<number | null>(null);
   const [sleepGoalHours, setSleepGoalHours] = useState<number | null>(null);
   const [waterGoalGlasses, setWaterGoalGlasses] = useState<number | null>(null);
@@ -473,6 +494,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           // true answer to "is anybody coaching me" and it is already in this
           // select.
           setCoachLinked(r.trainer_id != null);
+          // The id itself, not just whether there is one. Guarded on the
+          // type because the column is read back as `unknown`, and an
+          // empty string is not an id.
+          setTrainerId(typeof r.trainer_id === 'string' && r.trainer_id ? r.trainer_id : null);
           if (r.mode != null) {
             const stored = readCoachingMode(r.mode);
             const mine = readCoachingMode(await AsyncStorage.getItem(MODE_KEY).catch(() => null));
@@ -784,7 +809,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       setName(''); setDob(''); setPhoto(null); setHeightCm(null);
       setGoal('muscle'); setCoachingMode('online'); setDiet('meat');
       setAvoid([]); setInjuries([]); setFocusAreas([]); setMealsPerDay(3);
-      setCoachLinked(null);
+      setCoachLinked(null); setTrainerId(null);
       setStepGoal(null); setSleepGoalHours(null); setWaterGoalGlasses(null);
       setScans([]); setManualWeight(null); setManualBodyFat(null); setManualAt(null);
       setSaveFailed(false);
@@ -1009,7 +1034,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     injuries,
     focusAreas, setFocusAreas,
     addInjury: addInjuryStable, updateInjury: updateInjuryStable, removeInjury: removeInjuryStable,
-    coachingMode, setCoachingMode, coachLinked,
+    coachingMode, setCoachingMode, coachLinked, trainerId,
     activity: 1.5, mealsPerDay, setMealsPerDay,
     stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
     weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
@@ -1024,7 +1049,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     sbUid, name, setName, dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex,
     goal, setGoal, diet, setDiet, avoid, setAvoid, injuries, focusAreas, setFocusAreas,
     addInjuryStable, updateInjuryStable, removeInjuryStable,
-    coachingMode, setCoachingMode, coachLinked, mealsPerDay, setMealsPerDay,
+    coachingMode, setCoachingMode, coachLinked, trainerId, mealsPerDay, setMealsPerDay,
     stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
     weightKg, bodyFatPct, latest, setWeightKgStable, setBodyFatStable, saveWeightNow, sorted,
     addScanStable, updateScanStable, deleteScanStable,

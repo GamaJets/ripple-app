@@ -47,10 +47,12 @@
 //
 // ── The order this screen draws, and the order it does not ───────────────
 //
-// `shapeLeads` sorts newest-first and the list below keeps that, because that is
-// the order a coach scans. It is also the order that buries the enquiry that
-// costs them a client: the one from eleven days ago sinks one place for every
-// new arrival, and it sinks faster the better the marketing works. So the wait
+// `shapeLeads` sorts New, then Contacted, then Closed, and newest-first inside
+// each of the three; the list below keeps that, because that is the order a
+// coach scans. Within New — which is the whole of the pile that still needs
+// doing — it is also the order that buries the enquiry that costs them a
+// client: the one from eleven days ago sinks one place for every new arrival,
+// and it sinks faster the better the marketing works. So the wait
 // gets a section of its own, above the list, oldest first —
 // src/lib/leadWait.ts, which carries the whole argument for why that is a
 // separate queue rather than a re-sort of a list somebody is scanning.
@@ -103,13 +105,25 @@ import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { fetchMyCoachBrand } from '../../src/ui/coachBrand';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { appLocale } from '../../src/lib/locale';
+import { localDate } from '../../src/lib/localDate';
 import { BACK_ICON } from '../../src/ui/direction';
 
-/** A date as a coach reads one. Unknown stays unknown. */
+/**
+ * A date as a coach reads one. Unknown stays unknown.
+ *
+ * `localDate` and not `new Date(iso)`. The three values that reach here —
+ * `lead.at`, `lead.joinedAt` and a follow-up's `at` — are timestamptz today and
+ * parse identically either way, but `new Date('2026-09-14')` is UTC midnight
+ * read back through local getters, so the first bare date that ever reaches
+ * this line renders as the day BEFORE for every coach west of Greenwich. That
+ * is the defect src/lib/localDate.ts exists for, and src/lib/leadWait.ts
+ * already refuses to age a bare date for the same reason — one file guarding
+ * against it while the file beside it prints it is how the two disagree about
+ * what day somebody enquired.
+ */
 function when(iso: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '—';
+  const d = localDate(iso);
+  if (!d || !Number.isFinite(d.getTime())) return '—';
   return d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 

@@ -116,7 +116,21 @@ Deno.serve(async (req) => {
 
   // Find or create the Stripe customer for this trainer.
   let customerId = '';
-  const { data: existing } = await service.from('billing_customers').select('stripe_customer_id').eq('trainer_id', userId).maybeSingle();
+  const { data: existing, error: existingErr } = await service.from('billing_customers').select('stripe_customer_id').eq('trainer_id', userId).maybeSingle();
+  // A refused READ is not "this trainer has no Stripe customer yet", and the
+  // error used to be discarded here. supabase-js resolves with `{ error }` and
+  // a null `data`, so a transient PostgREST fault fell straight through to the
+  // `else` and CREATED A SECOND Stripe Customer for a coach who already has
+  // one — the exact duplicate the note under the upsert below spends a
+  // paragraph on, and which connect-onboard and gym-onboard both guard against
+  // by name at the same read ("A refused READ is not 'this trainer has no
+  // account'"). The idempotency key on `customers.create` covers a repeat
+  // within Stripe's 24-hour window and covers nothing after it.
+  //
+  // Refused rather than risked. Nothing has been charged at this point — the
+  // price check above is the only Stripe call made so far and it creates
+  // nothing — so the honest answer is to ask the coach to try again.
+  if (existingErr) return json({ error: 'could not check your billing account: ' + existingErr.message }, 500);
   if (existing?.stripe_customer_id) {
     customerId = existing.stripe_customer_id;
   } else {

@@ -115,7 +115,16 @@ export type MatchResult = {
  * What stops the copies drifting is not discipline, it is an assertion:
  * adMatch.test.ts imports `currencyDecimals` from coachMoney and this file's
  * `adCurrencyDecimals` and requires the two to agree on every currency in both
- * sets. A copy nothing compares is a copy that has already drifted.
+ * sets — AND on the non-codes ('pounds', 'GB', '£', '', '  ', a full-width
+ * string), which is where they actually drifted, invisibly, because the list
+ * that loop walked held nothing but codes. A copy nothing compares is a copy
+ * that has already drifted; so is a copy compared only where it cannot differ.
+ *
+ * The assertion cannot reach owner-metrics at all — that file is Deno and a
+ * node test cannot load it — so scripts/check-currency-copies.mjs reads all
+ * three as TEXT and compares the guard as well as the two set literals. It had
+ * been comparing only the sets, which is how the guard here drifted under a
+ * green gate for as long as it did.
  *
  * Stripe's own two lists. There are no fils in a yen, and there are a THOUSAND
  * of them in a Kuwaiti dinar.
@@ -123,12 +132,41 @@ export type MatchResult = {
 const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf']);
 const THREE_DECIMAL = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
 
-/** How many decimal places this money has, or null when nobody said which
- *  money it is. Null rather than 2: there is no default currency in this
- *  product and there is therefore no default number of places either. */
+/**
+ * How many decimal places this money has, or null when nobody said which money
+ * it is. Null rather than 2: there is no default currency in this product and
+ * there is therefore no default number of places either.
+ *
+ * ── AND NULL WHEN THE "CURRENCY" IS NOT A CODE ────────────────────────────
+ *
+ * `if (!cur) return null` was the whole guard, and it only caught the EMPTY
+ * string. 'pounds', 'GB', '£' and a full-width 'ＵＳＤ' all fell through to the
+ * two-place return, so `centsFromAmount('12.345', 'pounds')` was 1235 — an ad
+ * spend scaled by an assumed hundred and filed as a fact, next to revenue that
+ * was scaled by the real currency. The ad account's currency arrives from a
+ * provider payload and from `ad_accounts.currency`, neither of which has a
+ * format check, so a non-code is reachable rather than theoretical.
+ *
+ * `/^[a-z]{3}$/` is a SHAPE test and deliberately not an allowlist.
+ * `adCurrencyDecimals('zzz')` is 2, and that is an answer: the two sets above
+ * are Stripe's own and complete, so the only codes reaching the last return are
+ * real currencies this build has not been told about by name — 'aed', 'chf',
+ * 'sek' — every one of which has two places. An allowlist would answer null for
+ * the dirham and drop real money, which is the worse failure. See the long note
+ * on `currencyDecimals` in ../lib/coachMoney.ts, which is the rule of record,
+ * and wholeUnits.test.ts:82, which writes that standing rule down.
+ *
+ * Line for line the same guard as `currencyDecimals`, because this is a copy of
+ * it and the copy is forced by the leaf-module rule above — NOT because the two
+ * happen to agree today. scripts/check-currency-copies.mjs compares this guard
+ * across every copy, not just the two set literals; adMatch.test.ts asserts the
+ * two functions agree on non-codes as well as on codes.
+ */
 export function adCurrencyDecimals(currency: string | null | undefined): number | null {
   const cur = (currency || '').trim().toLowerCase();
-  if (!cur) return null;
+  // Empty and non-code answer alike, because they are the same answer: nobody
+  // has said how many places this money has.
+  if (!/^[a-z]{3}$/.test(cur)) return null;
   if (ZERO_DECIMAL.has(cur)) return 0;
   if (THREE_DECIMAL.has(cur)) return 3;
   return 2;

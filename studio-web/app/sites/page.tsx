@@ -81,6 +81,26 @@ export default function SitesPage() {
 
   const { at: readAt, busy, refresh } = useFetched(load, { enabled: me?.role === 'owner' });
 
+  // The first read. `useFetched` deliberately does not fire one on mount — it
+  // reads on `refresh()`, on coming back to the tab, and on a poll — so every
+  // other screen in this console starts its own, keyed on the thing that had to
+  // arrive first. This one did not, and the effect is total: the page mounted
+  // with `read` at its initial `{ status: 'loading', sites: [] }` and stayed
+  // there. An owner opening /sites saw "Every gym's figures has not been read
+  // yet" over an empty list, with nothing in flight and nothing on its way —
+  // a screen about how many gyms you own, permanently claiming none of them,
+  // until somebody happened to press Read again or alt-tab away and back.
+  //
+  // Keyed on the role rather than on `me` itself: `enabled` closes over it, so
+  // `refresh` is a no-op until the profile says owner, and this is the render
+  // after that flips. Same shape as /money and /members, whose note about the
+  // reader being held in a ref assigned during RENDER is the reason it is a
+  // separate effect rather than a call inside the one above.
+  useEffect(() => {
+    if (me?.role === 'owner') refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.role]);
+
   const sites = useMemo(() => orderSites(read.sites), [read.sites]);
   // The gym the rail names is the one this session reads, and this page has
   // already read its name — so it is taken from here rather than fetched a
@@ -119,16 +139,31 @@ export default function SitesPage() {
     );
   }
 
-  const one = sites.length === 1;
+  /**
+   * The roster came back. Not `sites.length`, and not `status !== 'error'`.
+   *
+   * `read` starts at `{ status: 'loading', sites: [] }`, so every count, every
+   * heading and every sentence below that was phrased off the LENGTH spoke
+   * about a gym list nobody had read yet — and the sentence an empty list
+   * produced was the multi-gym one, "every gym you are recorded as owning",
+   * printed above nothing at all. A person who owns one gym opened this screen
+   * and read a plural claim over a blank space.
+   */
+  const listed = read.status === 'ready';
+  // Only ever asked of a list that read. `sites.length === 1` over the initial
+  // empty array is not "you own more than one gym", it is not an answer.
+  const one = listed && sites.length === 1;
   const drill = open ? drillInto(sites, open) : null;
 
   return (
     <Shell me={me} gymName={currentName} gymNameUnread={nameUnread} current="/sites">
       <h1>Sites</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13, maxWidth: '78ch' }}>
-        {one
-          ? 'Your gym, and what is on its record.'
-          : 'Every gym you are recorded as owning, counted side by side. Figures only — the members, payments and timetables of a gym you are not signed in to are not on this sign-in.'}
+        {!listed
+          ? 'Which gyms you are recorded as owning, and what is on each of their records.'
+          : one
+            ? 'Your gym, and what is on its record.'
+            : 'Every gym you are recorded as owning, counted side by side. Figures only — the members, payments and timetables of a gym you are not signed in to are not on this sign-in.'}
       </p>
 
       <Fetched at={readAt} busy={busy} onRefresh={refresh}
@@ -141,12 +176,20 @@ export default function SitesPage() {
         </p>
       ) : null}
 
+      {/* Still reading. Said out loud rather than left as an empty grid under a
+          heading, which is the shape a gym list with nothing in it takes and
+          reads as an answer. */}
+      {read.status === 'loading' ? (
+        <div role="status" aria-live="polite" aria-atomic="true"
+             style={{ padding: '22px 2px', color: 'var(--ink3)' }}>Reading your gyms…</div>
+      ) : null}
+
       {/* ── the roll-up ────────────────────────────────────────────────────
           Only when there is more than one gym to roll up. A "total" beside a
           single row is the same number printed twice, and the sentences under
           it — which gyms were counted, which were not and why — are answers to
           a question nobody with one gym has asked. */}
-      {!one && read.status !== 'error' ? (
+      {listed && !one ? (
         <section aria-label="Across your gyms" style={{ marginBottom: 22 }}>
           <h2 style={{ fontSize: 15, margin: '0 0 8px' }}>Across your gyms</h2>
           <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
@@ -166,9 +209,24 @@ export default function SitesPage() {
         </section>
       ) : null}
 
-      {/* ── one line per gym ───────────────────────────────────────────── */}
+      {/* ── one line per gym ─────────────────────────────────────────────
+          Only under a roster that read. An empty grid under "Each gym" is the
+          same pixels as a person who owns nothing, and on the one screen whose
+          subject is how many gyms you have that is the answer it must never
+          give by accident. */}
+      {listed ? (
       <section aria-label="Your gyms">
         {!one ? <h2 style={{ fontSize: 15, margin: '0 0 8px' }}>Each gym</h2> : null}
+        {/* `my_sites()` returns the profile's own tenant either way, so this is
+            not an ordinary state — but it is a reachable one for an account
+            carrying no tenant at all, and a blank page is not an answer. */}
+        {sites.length === 0 ? (
+          <p style={{ color: 'var(--ink2)', maxWidth: '72ch' }}>
+            Your gyms read fine and the list came back empty, so this account is not recorded
+            against a gym. That is a record to fix rather than a figure to read &mdash; whoever
+            set the gym up needs to add you to it.
+          </p>
+        ) : null}
         <div style={{ display: 'grid', gap: 8 }}>
           {sites.map((s) => (
             <div key={s.siteId}
@@ -203,6 +261,7 @@ export default function SitesPage() {
           ))}
         </div>
       </section>
+      ) : null}
     </Shell>
   );
 }

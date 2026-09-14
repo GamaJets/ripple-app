@@ -127,10 +127,51 @@ eq(centsFromAmount('120.00', ''), null, 'and an empty currency is the same silen
 // coachMoney.ts. It cannot import it — adMatch is loaded by three edge
 // functions and Deno cannot resolve an extensionless relative specifier — so
 // the assertion is what holds them together.
+//
+// ── and the list below used to hold nothing but codes ─────────────────────
+//
+// Which is why it went on passing over a real divergence. coachMoney's
+// `currencyDecimals` was given a `/^[a-z]{3}$/` shape test; adMatch's copy kept
+// `if (!cur) return null`, so the two genuinely disagreed on every non-code —
+// 'pounds' was null in one and 2 in the other — and this loop could not see it,
+// because a loop walking twenty-seven currency CODES exercises the one branch
+// where a truthiness guard and a shape test cannot differ. A parity assertion is
+// only worth the inputs it holds. The non-codes are now first.
+const NON_CODES = [
+  'pounds',      // a word in a currency column; `moneyIn` lists five columns with no format check
+  'GB',          // a country, two letters
+  '£',           // a symbol
+  'Japanese yen',// a name, with a space
+  'usdt',        // four letters
+  'us1',         // right length, wrong alphabet
+  'ＵＳＤ',        // full-width — three characters, and not [a-z] after toLowerCase()
+  '',            // nobody said
+  '   ',         // and whitespace is the same silence, after trim()
+];
+for (const c of NON_CODES) {
+  eq(adCurrencyDecimals(c), currencyDecimals(c),
+    `adMatch and coachMoney agree that ${JSON.stringify(c)} is not a currency`);
+  eq(adCurrencyDecimals(c), null, `and ${JSON.stringify(c)} has no number of decimal places at all`);
+}
 for (const c of ['jpy', 'krw', 'vnd', 'bif', 'clp', 'djf', 'gnf', 'kmf', 'mga', 'pyg', 'rwf', 'ugx', 'vuv', 'xaf', 'xof', 'xpf',
                  'bhd', 'jod', 'kwd', 'omr', 'tnd', 'gbp', 'usd', 'aed', 'eur', '', 'zzz']) {
   eq(adCurrencyDecimals(c), currencyDecimals(c), `adMatch and coachMoney agree on how many places ${c || '(nothing)'} has`);
 }
+// The other half of the shape test, and the reason it is a shape test rather
+// than an allowlist: a stated-but-unrecognised code is still two places, in
+// both copies. 'aed' is a real currency this build does not name, and answering
+// null for it would drop a dirham gym's real money — the worse failure of the
+// two. wholeUnits.test.ts:82 is where that standing rule is written down.
+eq(adCurrencyDecimals('zzz'), 2, 'an unrecognised but well-formed code is two places, not null');
+eq(adCurrencyDecimals('aed'), 2, 'and so is a real currency this build has not been told about by name');
+
+// And the same rule where it turns into an amount. This is the assertion that
+// would have failed on the drifted guard: a word scaled a spend by an assumed
+// hundred and filed it beside revenue that was scaled by the real currency.
+eq(centsFromAmount('12.345', 'pounds'), null, 'a word is not a currency, so an ad spend in it has no minor units — this was 1235');
+eq(centsFromAmount('120.00', '£'), null, 'nor is a symbol — this was 12000');
+eq(centsFromAmount('120.00', 'GB'), null, 'nor is a country code');
+eq(centsFromAmount('120.00', '   '), null, 'and whitespace is the same silence as nothing at all');
 
 /* ── pulling destinations off whatever shape the creative arrived in ───── */
 

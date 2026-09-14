@@ -53,7 +53,12 @@ import { useToast } from '../../src/ui/toast';
 import { Icon } from '../../src/ui/Icon';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useExerciseVideos, type VideoItem } from '../../src/ui/exerciseVideos';
+// Whose clip it is. The row, the caption and the player's precedence all ask
+// this one module rather than each re-deriving it from `trainerId`, which is
+// the expression that captioned a stranger's clip as the member's own coach's.
+import { clipOwner, type ClipOwner } from '../../src/lib/clipOwner';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useClientData } from '../../src/ui/clientData';
 import { tapLight, notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead, Field } from '../../src/ui/kit';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
@@ -189,6 +194,19 @@ export default function Library() {
  // list itself off the first screenful of a phone, and the list is the screen.
  const [facetsOpen, setFacetsOpen] = useState(false);
  const { videos, status, reload } = useExerciseVideos();
+ // Who coaches this member. The library read is filtered by POLICY and not by
+ // trainer — `exvid_read` knows about grants and gym-wide sharing that a
+ // client-side filter would get wrong — so this list holds the platform's
+ // clips, this member's coach's, and every other coach's marked 'public'. The
+ // id is the only thing that tells the second from the third, and without it
+ // every one of them reads as "Recorded by your coach".
+ //
+ // `useClientData` exposes it now (src/ui/clientData.tsx). Until tonight it did
+ // not, and app/(client)/exercise.tsx asked for it anyway through a cast that
+ // produced `undefined` on every render. null here is no tie-break, which is
+ // also what a member with no coach has, and it is never captioned as anything
+ // — `clipOwner` resolves it to 'other', not to 'mine'.
+ const coachId = useClientData().trainerId;
  // A failed read used to strand this screen for the whole session: the only
  // way to ask again was the Try Again button inside the failure notice, and
  // there is no such button on a screen that merely went stale. Pull to refresh
@@ -379,11 +397,52 @@ export default function Library() {
   return () => { cancelled = true; };
  }, [visibleKey]);
 
- // Whose clip it is, in the same words <ExerciseVideo> uses on the workout
- // screen: one clip described two ways on two screens reads as two facts. A null
- // trainerId is a platform clip belonging to no gym; anything else is here
- // because a coach chose to share it with this client.
- const source = (v: VideoItem) => (v.trainerId ? 'Recorded by your coach' : `From the ${BRAND.label} library`);
+ // Whose clip it is, in the same words the workout screen uses: one clip
+ // described two ways on two screens reads as two facts.
+ //
+ // The comment above this line used to say "a null trainerId is a platform clip
+ // belonging to no gym; anything else is here because a coach chose to share it
+ // with this client", and BOTH halves were false — the same two false statements
+ // `SessionDemo` in app/(client)/workouts.tsx made out of the identical
+ // expression, and they are recorded there at length:
+ //
+ //   · null is ALSO the shape of a clip stranded in this handset's storage
+ //     after its insert was refused. No row, nobody else can see it, and it was
+ //     captioned as the platform's — a clip no client can reach, presented as
+ //     something Repple published.
+ //   · non-null is ALSO another coach's PUBLISHED clip. `exvid_read` decides
+ //     what a member may see and it does not narrow to their own coach, so
+ //     those rows are real and reachable here — and every one of them was
+ //     captioned "Recorded by your coach", about somebody the member has never
+ //     met.
+ //
+ // Asked through `clipOwner` (src/lib/clipOwner.ts), which is the one place this
+ // app answers the question, so the row, the player's precedence and the
+ // coverage report cannot drift apart. `preferTrainerId` is the member's own
+ // coach — `coachId`, read at the top of this component — and it is what
+ // separates 'mine' from 'other';
+ // null there means no tie-break, which resolves to 'other' rather than
+ // guessing the flattering answer.
+ //
+ // The four sentences are character-for-character the ones `clipCaption` in
+ // app/(client)/workouts.tsx writes. They are restated rather than imported
+ // because that function lives inside an expo-router route file and the module
+ // that owns the question, src/lib/clipOwner.ts, belongs to another lane
+ // tonight; lifting them into it is the follow-up, and until then any change to
+ // one of these lines has to be made to both.
+ const clipCaption = (owner: ClipOwner): string => {
+  switch (owner) {
+   case 'mine': return 'Recorded by your coach';
+   // Real, published, and not theirs. Named as a coach's rather than as the
+   // library's, because the library's means nobody's.
+   case 'other': return `Recorded by a coach on ${BRAND.label}`;
+   case 'platform': return `From the ${BRAND.label} library`;
+   // Never the library's. There is no row behind this clip, nobody but this
+   // device can see it, and no coach put it here for this member.
+   case 'local': return 'Saved on this device only — not from the library, and not your coach’s';
+  }
+ };
+ const source = (v: VideoItem) => clipCaption(clipOwner({ id: v.id, trainerId: v.trainerId ?? null }, coachId));
  // `dur` is not a duration and never was — it holds the literal word "clip" or
  // "link", which is how the client came to be reading "Legs · clip". What they
  // can use is whose demonstration it is and whether there is one to play at all.

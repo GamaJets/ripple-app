@@ -226,11 +226,43 @@ Deno.serve(async (req) => {
     return data?.trainer_id ?? null;
   };
 
-  const trainerOf = async (customerId: string | null, metaId?: string | null): Promise<string | null> => {
-    if (metaId) return metaId;
-    if (!customerId) return null;
-    const { data } = await service.from('billing_customers').select('trainer_id').eq('stripe_customer_id', customerId).maybeSingle();
-    return data?.trainer_id ?? null;
+  /**
+   * The coach a PLATFORM customer belongs to, or the reason we could not look.
+   *
+   * ── why this answers a pair and not a string ─────────────────────────────
+   *
+   * It used to be `const { data } = await …` with the error thrown away, and
+   * that made a REFUSED READ indistinguishable from "this Stripe customer
+   * belongs to nobody here". Both came back null, and the two callers treat
+   * null very differently from each other and both wrongly:
+   *
+   *   · `customer.subscription.*` on the platform is wrapped in `if (trainerId)`
+   *     with no else. A transient PostgREST fault therefore wrote NOTHING, fell
+   *     through to `{ received: true }`, and the replay ledger at the bottom
+   *     recorded the event as handled — so Stripe never retries and no later
+   *     `customer.subscription.*` is coming either, because Stripe only sends
+   *     one per change. A coach's plan silently keeps whatever status it had.
+   *   · `invoice.*` on the platform writes the row anyway with `trainer_id`
+   *     null, which files one of Repple's own invoices against nobody: it drops
+   *     out of `fetchFailedInvoices` and out of owner-metrics' revenue, and no
+   *     later event repairs it because the ordering guard on `stripe_event_at`
+   *     refuses the older redelivery that would.
+   *
+   * `dbError` is the same shape `saleForCharge` and `gymSaleForCharge` answer
+   * with, and the callers make the same call they do: a read that FAILED is a
+   * 500 so Stripe retries, and every write in both branches is an upsert on a
+   * unique key so being tried again is free. A read that SUCCEEDED and found
+   * nobody is a real answer and is handled, not retried.
+   */
+  const trainerOf = async (
+    customerId: string | null,
+    metaId?: string | null,
+  ): Promise<{ trainerId: string | null; dbError: string | null }> => {
+    if (metaId) return { trainerId: metaId, dbError: null };
+    if (!customerId) return { trainerId: null, dbError: null };
+    const { data, error } = await service.from('billing_customers').select('trainer_id').eq('stripe_customer_id', customerId).maybeSingle();
+    if (error) return { trainerId: null, dbError: error.message };
+    return { trainerId: data?.trainer_id ?? null, dbError: null };
   };
 
   // When Stripe says this happened. Webhooks are retried and are NOT ordered,
@@ -655,7 +687,12 @@ Deno.serve(async (req) => {
         // construction — `isConnect` returns true for any event with an
         // `account`, so arriving here means this event came from the platform,
         // where Repple's coaches pay Repple.
-        const trainerId = await trainerOf(sub.customer as string, (sub.metadata as any)?.trainer_id);
+        const { trainerId, dbError: whoErr } = await trainerOf(sub.customer as string, (sub.metadata as any)?.trainer_id);
+        // A read that FAILED is a 500 and a retry, never a write that is
+        // quietly skipped. See the note on `trainerOf`: the `if (trainerId)`
+        // below has no else, so swallowing this left a coach's plan frozen at
+        // whatever status it already held, with the event marked handled.
+        if (whoErr) return fail('billing_customers lookup', whoErr);
         if (trainerId) {
           // ORDERED, for the reason stated at `eventAt` above and by the same
           // three writes `writeConnectSub` uses. This was a bare upsert with no
@@ -722,6 +759,25 @@ Deno.serve(async (req) => {
           const { error: nullErr } = await service.from('subscriptions').update(row)
             .eq('trainer_id', trainerId).is('stripe_event_at', null);
           if (nullErr) return fail('subscriptions', nullErr.message);
+        } else {
+          // The read SUCCEEDED and named nobody: a platform subscription whose
+          // Stripe customer has no `billing_customers` row and whose metadata
+          // carries no `trainer_id`. Nothing is written, which is right — there
+          // is no coach to file it against and inventing one would be worse —
+          // but until now nothing said so either, and this is the same state
+          // `account.updated` logs when neither account table knows an id.
+          //
+          // A log and NOT a 500, for that branch's reason: a retry cannot
+          // conjure a `billing_customers` row, so spending Stripe's retry
+          // budget on it ends with the delivery abandoned and still nothing
+          // recorded. The remedy is to reconnect the customer by hand, and this
+          // is the only place the pair of ids is ever held at once.
+          console.error(
+            'stripe-webhook: platform ' + event.type + ' for subscription ' + sub.id + ' on customer '
+            + String(sub.customer ?? 'none') + ' resolves to no coach in billing_customers and carries no '
+            + 'trainer_id in its metadata, so its status (' + String(sub.status) + ') was not recorded. '
+            + 'Repple\'s own book does not know about this subscription.',
+          );
         }
       }
     } else if (event.type === 'account.updated') {
@@ -1828,7 +1884,15 @@ Deno.serve(async (req) => {
         // in the table that feeds the owner's failed-payments callout — filing
         // a client's declined card as the COACH failing to pay Repple, and
         // recording none of the money.
-        const trainerId = await trainerOf(inv.customer as string, (inv.subscription_details?.metadata as any)?.trainer_id);
+        const { trainerId, dbError: whoErr } = await trainerOf(inv.customer as string, (inv.subscription_details?.metadata as any)?.trainer_id);
+        // A read that FAILED is a 500 and a retry. Writing the row with a null
+        // `trainer_id` because PostgREST was briefly unavailable files one of
+        // Repple's own invoices against nobody — out of `fetchFailedInvoices`,
+        // out of owner-metrics' revenue — and no later event repairs it,
+        // because the `.lte('stripe_event_at', …)` guard below refuses the
+        // older redelivery that would. The upserts here are keyed on the
+        // invoice id, so a retry is free.
+        if (whoErr) return fail('billing_customers lookup', whoErr);
 
         // ORDERED, and this is the widest of the three unguarded writes.
         //

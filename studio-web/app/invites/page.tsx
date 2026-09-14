@@ -82,6 +82,31 @@ const STATE_COLOUR: Record<MemberInviteState, string> = {
   expired: 'var(--crit)',
 };
 
+/**
+ * What to say instead of "there is already an invitation waiting" when the
+ * invitation on record has lapsed.
+ *
+ * Both halves matter. The rule — one open row per address per gym, over the
+ * stored status, so a lapsed one still occupies the slot — is why the write
+ * cannot go; Reopen is what the owner actually wants and is already on the row.
+ * Without this the sentence would be `inviteBlocker`'s, and "waiting" is the
+ * one thing a lapsed invitation is not.
+ */
+const LAPSED_INVITE_NOTE =
+  'That address already has an invitation on record here and it has lapsed. A gym keeps one open '
+  + 'invitation per address, so a second cannot be written down — find it in the list below and '
+  + 'press Reopen, which gives the same invitation a fresh 30 days.';
+
+/** `inviteBlocker`'s refusal, with the lapsed case given its own sentence. */
+function blockerFor(
+  email: string | null | undefined, openTo: string[], lapsedTo: Set<string>,
+): string | null {
+  const stop = inviteBlocker(email, openTo);
+  if (!stop) return null;
+  const e = normaliseEmail(email);
+  return e !== null && lapsedTo.has(e) ? LAPSED_INVITE_NOTE : stop;
+}
+
 export default function Invites() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   /** The auth call did not come back. `me` stays undefined, which is honest —
@@ -176,12 +201,48 @@ export default function Invites() {
 
   const summary = useMemo(() => (invites ? summariseInvites(invites, nowMs) : null), [invites, nowMs]);
 
-  // The addresses this gym already has an open invitation for. Only ever from a
-  // list that was actually read: [] on a failed read would tell the form there
-  // are no open invitations, and the duplicate would then be refused by the
-  // partial unique index instead — after the owner had typed it.
+  /**
+   * The addresses the database would refuse a second invitation for.
+   *
+   * Only ever from a list that was actually read: [] on a failed read would
+   * tell the form there are no open invitations, and the duplicate would then
+   * be refused by the partial unique index instead — after the owner had typed
+   * it.
+   *
+   * ── Why this is the STORED status and not `inviteState` ──────────────────
+   *
+   * It was `inviteState(i, nowMs) === 'pending'`, which is the screen's word
+   * and not the database's. `uq_member_invites_open` (37-member-invites.sql) is
+   * `unique (tenant_id, lower(email)) where status = 'pending'`, and 'expired'
+   * is not a status anything writes down — a lapsed invitation is still
+   * `status = 'pending'` in the row. So the two rules disagreed over exactly
+   * one set of addresses: the ones whose invitation had run out.
+   *
+   * For those, this screen said the address was free, the form let the owner
+   * type it, and Postgres refused the insert with 23505 — which arrived in the
+   * banner as `duplicate key value violates unique constraint
+   * "uq_member_invites_open"`, on a screen whose own list was at that moment
+   * showing the invitation as "lapsed" with a Reopen button beside it. The
+   * owner is told a system error over a rule this page could have stated, and
+   * the action that works is two inches away.
+   *
+   * Now the two rules are the same rule, and `lapsedTo` below is what turns the
+   * refusal into the sentence that names Reopen.
+   */
   const openTo = useMemo(
-    () => (invites ?? []).filter((i) => inviteState(i, nowMs) === 'pending').map((i) => i.email),
+    () => (invites ?? []).filter((i) => i.status === 'pending').map((i) => i.email),
+    [invites],
+  );
+
+  /** Of those, the ones whose invitation has run out — still one open row as
+   *  far as the index is concerned, and "waiting" is the wrong word for them. */
+  const lapsedTo = useMemo(
+    () => new Set(
+      (invites ?? [])
+        .filter((i) => inviteState(i, nowMs) === 'expired')
+        .map((i) => normaliseEmail(i.email))
+        .filter((e): e is string => e !== null),
+    ),
     [invites, nowMs],
   );
 
@@ -217,7 +278,28 @@ export default function Invites() {
     );
   }
 
-  const tenantId = me.tenantId!;
+  // An owner whose profile carries no gym. A modelled state — /settings has
+  // carried this branch since it was written — and without it the `!` below was
+  // a lie the rest of this screen believed: `tenantId` arrived at both forms as
+  // null, `createInvite` would post `tenant_id: null` into a NOT NULL column,
+  // and the list above it said "Nobody has been invited yet" because the effect
+  // sets `invites` to [] in this branch. An owner would read that as a gym with
+  // an empty roster and start typing two hundred addresses into a form whose
+  // every insert the database is going to refuse.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={null} current="/invites">
+        <h1>Invites</h1>
+        <Banner tone="crit">
+          Your account is not linked to a gym, so there is no roster to invite anybody onto and
+          nothing below could be written. That is a record to fix rather than an empty gym —
+          whoever set the gym up needs to add you to it as its owner first.
+        </Banner>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
   // `refresh` is the hook's — see /money for the same note.
   const unread = invites === null;
 
@@ -295,11 +377,11 @@ export default function Invites() {
 
       <InviteOne
         tenantId={tenantId} me={me} plans={plans} plansErr={plansErr}
-        openTo={openTo} listRead={!unread} onChange={refresh}
+        openTo={openTo} lapsedTo={lapsedTo} listRead={!unread} onChange={refresh}
       />
       <InviteMany
         tenantId={tenantId} me={me} plans={plans} plansErr={plansErr}
-        openTo={openTo} listRead={!unread} onChange={refresh}
+        openTo={openTo} lapsedTo={lapsedTo} listRead={!unread} onChange={refresh}
       />
       <TheList
         invites={invites} readErr={invitesErr} gymName={gymName} zone={zone}
@@ -312,9 +394,9 @@ export default function Invites() {
 
 /* ── one person ────────────────────────────────────────────────────────────── */
 
-function InviteOne({ tenantId, me, plans, plansErr, openTo, listRead, onChange }: {
+function InviteOne({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead, onChange }: {
   tenantId: string; me: Me; plans: MembershipPlan[] | null; plansErr: string | null;
-  openTo: string[]; listRead: boolean; onChange: () => void;
+  openTo: string[]; lapsedTo: Set<string>; listRead: boolean; onChange: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -327,11 +409,17 @@ function InviteOne({ tenantId, me, plans, plansErr, openTo, listRead, onChange }
   // Said while they are still typing, not after the round trip. Only checked
   // against the open invitations when the list actually read — otherwise the
   // duplicate rule is left to the database, which enforces it properly.
-  const blocker = email.trim() ? inviteBlocker(email, listRead ? openTo : []) : null;
+  const blocker = email.trim() ? blockerFor(email, listRead ? openTo : [], lapsedTo) : null;
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    const stop = inviteBlocker(email, listRead ? openTo : []);
+    // Guarded against a second press while the first insert is in flight. The
+    // button is disabled on `busy`, which a keyboard Enter in any of the four
+    // fields goes straight past — and two presses here are two invitations
+    // written against one address, which is the one thing the unique index
+    // below cannot save us from when they race.
+    if (busy) return;
+    const stop = blockerFor(email, listRead ? openTo : [], lapsedTo);
     if (stop) { setWriteErr(stop); return; }
     const validDays = days.trim() === '' ? null : parseInt(days, 10);
     if (validDays !== null && (!Number.isFinite(validDays) || validDays < 1)) {
@@ -416,9 +504,9 @@ function parseLine(line: string): { email: string; fullName: string | null } | n
   return { email: emailPart, fullName: rest || null };
 }
 
-function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange }: {
+function InviteMany({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead, onChange }: {
   tenantId: string; me: Me; plans: MembershipPlan[] | null; plansErr: string | null;
-  openTo: string[]; listRead: boolean; onChange: () => void;
+  openTo: string[]; lapsedTo: Set<string>; listRead: boolean; onChange: () => void;
 }) {
   const [text, setText] = useState('');
   const [planId, setPlanId] = useState('');
@@ -437,10 +525,20 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
       .filter((r): r is { line: number; parsed: { email: string; fullName: string | null } } => r.parsed !== null)
       .map((r) => ({ line: r.line, email: r.parsed.email, fullName: r.parsed.fullName }));
     if (!rows.length) return null;
-    return screenInvites(rows, listRead ? openTo : []);
-  }, [text, openTo, listRead]);
+    const out = screenInvites(rows, listRead ? openTo : []);
+    // Same swap as the single form's: a refusal caused by a LAPSED invitation
+    // says so and names Reopen, rather than calling it one that is waiting.
+    return {
+      send: out.send,
+      rejected: out.rejected.map(({ row, reason }) => {
+        const e = normaliseEmail(row.email);
+        return { row, reason: e !== null && lapsedTo.has(e) ? LAPSED_INVITE_NOTE : reason };
+      }),
+    };
+  }, [text, openTo, lapsedTo, listRead]);
 
   const send = async () => {
+    if (busy) return;
     if (!screened || !screened.send.length) return;
     const validDays = days.trim() === '' ? null : parseInt(days, 10);
     if (validDays !== null && (!Number.isFinite(validDays) || validDays < 1)) {

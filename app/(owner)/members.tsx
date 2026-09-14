@@ -54,7 +54,7 @@ import {
 // src/lib/membershipDates.ts for what a phone that cannot do it costs a gym
 // that types its existing members in.
 import {
-  datesRefusal, datesPatch, datesNotes, termLine,
+  datesRefusal, datesPatch, datesNotes, termLine, unpausedEndsOn,
 } from '../../src/lib/membershipDates';
 
 /**

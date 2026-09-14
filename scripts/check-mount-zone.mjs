@@ -500,7 +500,20 @@ function walk(dir, out = []) {
 const KNOWN = new Map([
   ['studio-web/app/retention/page.tsx', { count: 1, fix: '[fix] `LogForm`\'s `when` is `gymWallValue(Date.now(), zone) ?? localNow()` latched at mount, and the comment above it says in as many words that the reader\'s local parts in this field are the defect it was written to remove. At mount `zone` is null, `gymWallValue` returns null and `localNow()` — the browser\'s wall clock — is what goes in the box, which is then read back by the rest of the console as the gym\'s. Hold null for "nobody has chosen" and render `picked ?? gymWallValue(Date.now(), zone) ?? localNow()`.' }],
   ['studio-web/app/money/page.tsx', { count: 1, fix: '[annotate] `startedOn` is seeded at mount AND corrected by an effect on `[zone]` that only overwrites a value the component itself seeded — `seeded`, a ref sentinel, so a date somebody typed is never clobbered by a late tenant read. That is the second honest answer to this bug and it is already correct. What is missing is the marker: `mount-zone-ok:` saying the effect below corrects it and the sentinel is what makes that safe.' }],
-  ['studio-web/app/analytics/page.tsx', { count: 1, fix: '[annotate] `const [now] = useState(() => Date.now())` freezes an INSTANT on purpose, so the month counted as "running" cannot change underneath a table somebody is reading. scripts/check-frozen-day.mjs names this exact line as a deliberate and correct freeze. Mark it `mount-zone-ok:` saying it is a reporting instant and not a day anybody files against.' }],
+  // studio-web/app/analytics/page.tsx stood here, ratcheted at 1 as an
+  // [annotate]: the frozen instant was read as deliberate, because
+  // check-frozen-day.mjs names the same line as a correct freeze.
+  //
+  // It was not deliberate, and the entry is deleted rather than annotated. The
+  // console has no router — its rail is a plain <a href> — so a front-desk tab
+  // is one document that lives for days, and every month-shaped figure on that
+  // page was built from a Date.now() read once at mount. The page refreshes on
+  // the way back to the tab, so the window the READ asked for moved while the
+  // window the door-log guard tested against did not. Three days open and a
+  // terminal that stopped 31 days ago sits OUTSIDE the read (every member
+  // counts zero visits) and INSIDE the frozen window (doorState says `live`) —
+  // the silent-log disaster doorState exists to prevent, arriving through the
+  // clock instead of through a read. It now takes the month from useMonthTick.
   ['studio-web/app/invites/page.tsx', { count: 1, fix: '[annotate] the same deliberate frozen instant as /analytics — it keeps a column of "3 days ago" from ticking over mid-read, and scripts/check-frozen-day.mjs names it too. Mark it `mount-zone-ok:` with that reason.' }],
   ['studio-web/app/door/page.tsx', { count: 1, fix: '[annotate] `dayTick` is a REPAINT clock, not a day anybody reads: its only job is to change value when the tablet crosses midnight so an untouched screen re-renders, and the day actually compared against is `gymDay(Date.now(), zone) ?? dayTick` sixty lines below, which asks the gym first. It already carries a `reader-day-ok:` marker saying so for a different gate. Add `mount-zone-ok:` with the same sentence.' }],
 ]);

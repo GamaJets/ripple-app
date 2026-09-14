@@ -253,11 +253,35 @@ export default function MyProgress() {
    * written as a 0, which is not a point on a 1–5 scale and would sit in the
    * record as a rating nobody gave.
    *
-   * Awaited, and believed only when the row is on the server. `addCheckIn`
+   * Awaited, and believed only when the row is on the server. `sendCheckIn`
    * inserts the entry into `checkins` optimistically, so on a refused write the
    * weigh-in is on this phone alone — and the client app's own check-in screen
    * throws this answer away and says "Check-in sent" regardless, which is the
    * bug this does not repeat.
+   *
+   * ── why this is `sendCheckIn` and not `addCheckIn` ───────────────────────
+   *
+   * `addCheckIn` is `(await sendCheckIn(c)) === 'stored'` (src/ui/checkins.tsx),
+   * and the two answers it flattens into `false` are opposites:
+   *
+   *   · 'unsent'  — nobody answered. The check-in IS kept: it is in `checkins`,
+   *                 it is on the trend above, it is written to the per-account
+   *                 cache so it survives the app being killed, it is counted in
+   *                 `unsent`, and `flushQueue` sends it on the next launch,
+   *                 reconnect or foreground.
+   *   · 'refused' — the server read it and declined. `sendCheckIn` takes it
+   *                 straight back out of the list, and offering it again as it
+   *                 stands will be refused again.
+   *
+   * Told apart because the sentence for one is a lie about the other. A coach
+   * who weighed in on gym wifi that dropped was told their weigh-in "will be
+   * gone when you next open the app" and left holding a full form — so the
+   * honest thing to do was type it again, and the queue then delivered both.
+   * Two weigh-ins an hour apart is a "Since Last" of 0.0 kg on their own hero.
+   *
+   * This is the same three-way `saveTape` below already makes over
+   * `ms.addEntry`, and the one app/(trainer)/my-training.tsx makes over
+   * `logWorkouts`. This write was the odd one out.
    */
   const logWeighIn = async () => {
     setProblem(null);
@@ -272,17 +296,32 @@ export default function MyProgress() {
       return;
     }
     setBusy(true);
-    const saved = await ci.addCheckIn({ weightKg: kg, energy, sleep, mood, adherence, note: note.trim() });
+    const out = await ci.sendCheckIn({ weightKg: kg, energy, sleep, mood, adherence, note: note.trim() });
     setBusy(false);
-    if (saved) {
+    /** The form, emptied. Only where the weigh-in is actually being kept — a
+     *  form left full beside a kept entry is how the same weigh-in gets
+     *  recorded twice. */
+    const clear = () => { setTyped(''); setEnergy(0); setSleep(0); setMood(0); setAdherence(0); setNote(''); };
+    if (out === 'stored') {
       notifySuccess();
-      setTyped(''); setEnergy(0); setSleep(0); setMood(0); setAdherence(0); setNote('');
+      clear();
       Alert.alert('Weigh-in logged', 'It is on your own record and on the trend above.');
       return;
     }
-    // The fields are deliberately left as they are: what was typed is the only
-    // copy of it, and this is the one path where the coach may want to retry.
-    setProblem('Not saved — we could not reach your record. This weigh-in is on this phone only and will be gone when you next open the app.');
+    if (out === 'unsent') {
+      // Kept, counted, and on the trend above — it simply has not reached the
+      // server yet. Cleared for the same reason 'stored' is: the weigh-in
+      // exists, and leaving it in the boxes as well invites a second one.
+      clear();
+      Alert.alert('Saved on this phone',
+        'No connection, so this weigh-in has not reached your record yet — nothing is lost. It is saved here, it is on the trend above, and it goes up on its own the next time you have signal.');
+      return;
+    }
+    // 'refused'. The server read this and declined it, so it is not on the
+    // record and it is not waiting either — `sendCheckIn` has already taken it
+    // back off the trend. The fields are deliberately left as they are: what
+    // was typed is now the only copy of it.
+    setProblem('Not saved — your record rejected this weigh-in, so it has not been stored and it is not waiting to send. What you typed is still in the boxes; saving it again as it is will be rejected again.');
   };
 
   /* ── logging tape measurements ───────────────────────────────────────── */

@@ -2,7 +2,8 @@
 //
 // ── The gap this closes ────────────────────────────────────────────────────
 //
-// `shapeLeads` in src/lib/leads.ts sorts on `at` DESCENDING, and
+// `shapeLeads` in src/lib/leads.ts sorts by state first — New, then Contacted,
+// then Closed — and on `at` DESCENDING inside each of the three, and
 // app/(trainer)/leads.tsx draws that order straight down the screen. Newest
 // first is the right order for "who has just come in", which is the question a
 // coach asks when the phone buzzes.

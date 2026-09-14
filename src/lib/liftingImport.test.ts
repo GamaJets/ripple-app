@@ -111,6 +111,60 @@ eq(detectSource('a,b,c'), null, 'anything else is not');
   eq(p.setsRead, 1, 'zero IS a load — a plain pull-up — and is kept');
   eq(JSON.stringify(p.entries[0].sets), '[[12,0]]', 'stored as zero rather than dropped');
   ok(p.skipped.some((s) => /weight/.test(s.reason)), 'while a MISSING weight is refused');
+  // …and it is FILED as one. The two lines above were the whole of this case
+  // for as long as it existed, and they are both about `sets`. Nothing asked
+  // whether the entry said the set was a bodyweight set, so it did not — and an
+  // unflagged `[12, 0]` is not a pull-up, it is an ordinary set with a load of
+  // zero. `setLoadKg` returns null for that, `unknownSets` counts only FLAGGED
+  // sets so it counted nothing either, and `tonnageNote` therefore stayed null:
+  // the work was left out of every total with no sentence anywhere saying a
+  // total was short. `repRecords` skips unflagged sets too, so an imported
+  // calisthenics history produced an empty Bodyweight Bests board.
+  eq(JSON.stringify(p.entries[0].bw), '[true]', 'and MARKED as a bodyweight set, not as a zero load');
+}
+
+/* ── 4b. the flag is only claimed where the export supports it ──────────── */
+//
+// An exact zero is a pull-up; a positive figure against the same movement is a
+// belt, a dumbbell or a machine and the export does not say which. Guessing
+// there would be this module inventing what it refuses to invent about a
+// pounds column — so a loaded row stays the plain set it has always been read
+// as, and an all-barbell import writes exactly the row it wrote before.
+{
+  const p = previewLiftingImport([
+    'Date,Workout Name,Exercise Name,Set Order,Weight,Reps',
+    '2026-09-10 18:00:00,E,Squat,1,100,5',
+    '2026-09-10 18:00:00,E,Squat,2,100,5',
+  ].join('\n'));
+  eq(p.entries.length, 1, 'one entry for the day');
+  eq(p.entries[0].bw, undefined, 'no bodyweight set in it, so no bw field at all');
+}
+{
+  // Mixed, in one entry, aligned to `sets` index for index. A flag array that
+  // drifted out of alignment would move the body onto the wrong set, which is
+  // the one way this change could make a figure worse rather than better.
+  const p = previewLiftingImport([
+    'Date,Workout Name,Exercise Name,Set Order,Weight,Reps',
+    '2026-09-10 18:00:00,E,Pull Up,1,0,12',
+    '2026-09-10 18:00:00,E,Pull Up,2,20,6',
+    '2026-09-10 18:00:00,E,Pull Up,3,0,8',
+  ].join('\n'));
+  eq(JSON.stringify(p.entries[0].sets), '[[12,0],[6,20],[8,0]]', 'three sets, in file order');
+  eq(JSON.stringify(p.entries[0].bw), '[true,false,true]', 'and the flags line up with them one for one');
+  eq(p.entries[0].bw!.length, p.entries[0].sets!.length, 'never shorter or longer than the sets');
+}
+{
+  // A refused row must not consume a flag slot. The reps guard `continue`s
+  // BEFORE the push, so a dropped middle row would shift every later flag by
+  // one if the two arrays were not pushed together.
+  const p = previewLiftingImport([
+    'Date,Workout Name,Exercise Name,Set Order,Weight,Reps',
+    '2026-09-10 18:00:00,E,Pull Up,1,0,12',
+    '2026-09-10 18:00:00,E,Pull Up,2,50,0',
+    '2026-09-10 18:00:00,E,Pull Up,3,50,6',
+  ].join('\n'));
+  eq(JSON.stringify(p.entries[0].sets), '[[12,0],[6,50]]', 'the repless row is not filed');
+  eq(JSON.stringify(p.entries[0].bw), '[true,false]', 'and it does not shift the flags behind it');
 }
 
 /* ── 5. pounds are refused, not converted ───────────────────────────────── */

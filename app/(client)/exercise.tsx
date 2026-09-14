@@ -98,9 +98,19 @@ export default function ExerciseScreen() {
 
   // The client's own coach first. cd.trainerId is who actually trains them, so
   // passing it is what stops a stranger's clip being offered as theirs.
+  //
+  // It was read through a cast to `any` until tonight, and `useClientData` had
+  // no such field: every member got `null`, and rule 1 of the clip ordering —
+  // the member's OWN coach's clip wins — could not fire at all, for months,
+  // with nothing failing anywhere. The field is real now (src/ui/clientData.tsx)
+  // and the cast is gone, which is what stops it vanishing again silently: a
+  // rename is a type error now rather than a quiet null. The dependency is
+  // `cd.trainerId` and not `cd` because that is the only part of the context
+  // this memo reads, and the context object's identity changes whenever any
+  // unrelated field of the profile does.
   const clip = useMemo(
-    () => videoForExercise(name, videos, (cd as any).trainerId ?? null),
-    [name, videos, cd],
+    () => videoForExercise(name, videos, cd.trainerId),
+    [name, videos, cd.trainerId],
   );
   // The bought animation, signed like a coach's own clip.
   //
@@ -147,9 +157,9 @@ export default function ExerciseScreen() {
    * convenience: the select policy in supabase/parts/3150 admits exactly the
    * rows whose `coach_id` is the trainer of the signed-in client, so there is
    * no argument this screen could carry that would widen it to a stranger's
-   * cues. (`cd.trainerId` is read a hundred lines above for the clip and does
-   * not exist on `useClientData` — it is cast through `any` and is always
-   * null. Nothing here depends on it.)
+   * cues. (`cd.trainerId` is read a hundred lines above for the clip. It used
+   * to be cast through `any`, did not exist on `useClientData`, and was always
+   * null; both are fixed. Nothing here depends on it either way.)
    *
    * ── This read must not be able to take the screen down ─────────────────
    *
@@ -577,7 +587,7 @@ export default function ExerciseScreen() {
                 <View style={{ marginTop: sp.lg, padding: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
                   {(() => {
                     const stop = clipRefusal({
-                      hasCoach: !!(cd as any).trainerId,
+                      hasCoach: !!cd.trainerId,
                       setExists: !!clipWorkoutId,
                     });
                     // A set still being saved is not a member without a coach,
@@ -629,7 +639,7 @@ export default function ExerciseScreen() {
                                   setIndex: 0,
                                   clip: picked.clip,
                                   note: clipNote,
-                                  hasCoach: !!(cd as any).trainerId,
+                                  hasCoach: !!cd.trainerId,
                                 });
                                 setClipSaid(out.ok
                                   ? 'Sent. Your coach sees it against this set.'

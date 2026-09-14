@@ -243,14 +243,31 @@ export function namedCodesLine(status: LoadStatus, rows: readonly JoinCodeRow[])
  * a coach needs to be told.
  */
 /**
- * What this code has actually brought in, and who is waiting on the coach.
+ * What the coach's codes have actually brought in, and who is waiting on them.
  *
- * `my_join_code_stats` counts `coach_requests` with `source = 'code'`: accepted
- * ones are people now on the book, pending ones are people who used the code
- * and are waiting for the coach to answer. The second half is the one worth
- * putting on this screen — a coach reading their code out to somebody has no
- * idea that three other people are already sitting in a queue, and the only
- * surface that ever said so was a push notification that fires once on insert.
+ * ── "your codes", and never "this code" ───────────────────────────────────
+ *
+ * These two numbers are NOT the main code's. `my_join_code_stats()` counts
+ * every `coach_requests` row with `source = 'code'` for the signed-in coach and
+ * does not look at `via_code` at all — supabase/setup.sql says so in
+ * my_join_codes()'s own comment, which records that its per-code rows "sum to
+ * my_join_code_stats()". So the figure spans the main code and every named one,
+ * live and revoked.
+ *
+ * This line is drawn on app/(trainer)/join-code.tsx directly beneath the six
+ * characters of the MAIN code, so saying "on this code" over an all-codes total
+ * attributes a chain of flyers, bios and ads to the one string the coach is
+ * about to read out loud — a coach with four named codes would read their
+ * whole book's intake as the takings of one card in their hand. The counted
+ * thing is stated as the counted thing instead.
+ *
+ * The per-code split is not missing, it is elsewhere and better: `my_join_codes()`
+ * returns `joined` and `pending` per code and `codeCountLine` renders them on the
+ * named-code rows on the same screen. Narrowing THIS line to the default row
+ * would be worse than leaving it wide, because the second half of the sentence
+ * is the half that matters — "nobody is waiting on you" must be true of the
+ * whole queue, and said over one code it would be false while three people sat
+ * unanswered on a named one.
  *
  * `null` in, and it says the read failed. A zero for an unread count is the
  * mistake this file exists to refuse: "nobody has used your code" is a claim
@@ -259,14 +276,14 @@ export function namedCodesLine(status: LoadStatus, rows: readonly JoinCodeRow[])
  */
 export function codeUptakeLine(stats: { joined: number; pending: number } | null): string {
   if (!stats) {
-    return 'How many people have joined on this code could not be read just now. Nothing is wrong with the code itself — pull down to ask again.';
+    return 'How many people have joined on your codes could not be read just now. Nothing is wrong with the code itself — pull down to ask again.';
   }
   const joined = stats.joined === 1 ? '1 person has joined' : `${stats.joined} people have joined`;
-  if (stats.pending === 0) return `${joined} on this code. Nobody is waiting on you.`;
+  if (stats.pending === 0) return `${joined} on your codes — this one and every named one. Nobody is waiting on you.`;
   const waiting = stats.pending === 1
     ? '1 is waiting for you to accept them'
     : `${stats.pending} are waiting for you to accept them`;
-  return `${joined} on this code, and ${waiting}.`;
+  return `${joined} on your codes — this one and every named one — and ${waiting}.`;
 }
 
 /** Whether the uptake line is reporting somebody left waiting — which is the

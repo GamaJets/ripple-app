@@ -98,6 +98,13 @@ import {
   MONTHS_SHOWN, type MemberSpan, type ChurnMonth,
 } from '@lib/memberChurn';
 import { monthWindow, recentMonths, monthEnded, monthKeyOf } from '@lib/monthEnd';
+// The calendar month it is NOW, which is not the month the tab was opened in.
+// This console has no router — the rail is a plain `<a href>` — so a front-desk
+// tab is one document that lives for days, and every month-shaped figure below
+// used to be built from a `Date.now()` read once at mount. See the fix note on
+// `monthNow` in the component, and studio-web/lib/monthTick.ts for the hook.
+import { monthTickStart } from '@lib/pickerMonth';
+import { useMonthTick } from '@/lib/monthTick';
 import { readAll } from '@lib/rowCap';
 // `sharedCurrency` is gone from this file. It answers "are these all one
 // money", and the only thing this page did with a No was withhold the entire
@@ -219,6 +226,25 @@ export default function Analytics() {
    */
   const [payments, setPayments] = useState<Read<MoneyRow>>(reading);
   const [err, setErr] = useState<string | null>(null);
+  /**
+   * The bounds the last read actually ASKED FOR, carried out of `load`.
+   *
+   * Every "in the last 30 days" and "thirteen months of" sentence on this page
+   * is a claim about a window, and the window belongs to the READ rather than
+   * to the component — the same lesson /revenue records at its own `since`.
+   * These were derived from a `Date.now()` frozen at mount, and this page
+   * refreshes itself on the way back to the tab, so on a desk tablet left open
+   * for three days the door-log guard was testing the log's last entry against
+   * a window opening three days EARLIER than the one the visits read used. That
+   * is not a cosmetic drift: a terminal that stopped 31 days ago is outside the
+   * read (so every member counts zero visits) and inside the frozen window (so
+   * `doorState` says `live`) — which is the silent-log disaster `doorState`
+   * exists to prevent, arriving through the clock rather than through a read.
+   *
+   * Null until a read has run. `doorState` treats that as still loading, which
+   * is what it is.
+   */
+  const [asked, setAsked] = useState<{ at: number; visitsSince: string; moneySince: string } | null>(null);
 
   const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setMemberships(reading); setVisits(reading); setClasses(reading);
@@ -234,10 +260,36 @@ export default function Analytics() {
     // allSettled, not all. Under one catch, a refused classes read — which
     // costs a single tile — would empty the memberships too, and this page
     // would report a gym where nobody has ever joined and nobody has ever left.
-    // Thirteen months back for the money, so the same month last year is on
-    // screen for exactly the reason MONTHS_SHOWN is thirteen: a gym with a
-    // January is not in trouble in January.
-    const moneySince = new Date(now - 400 * DAY).toISOString();
+    //
+    // ── A WHOLE NUMBER OF MONTHS, not 400 days ───────────────────────────────
+    //
+    // This was `now - 400 * DAY`, and every figure it feeds is a MONTH. 400 days
+    // is thirteen months and a few days, which sounds generous and is not: the
+    // table shows thirteen month keys, and the only one of them that can carry a
+    // year-on-year figure is last month — whose comparison month is the
+    // thirteenth back, the one the window opens part-way THROUGH.
+    //
+    // On the 14th of a month that window starts on the 10th of the comparison
+    // month, so twenty-one of its thirty-one days were read and ten were not.
+    // A gym taking exactly the same money every day of both years printed
+    // **+48%** growth, and it printed it on the one row of this table an owner
+    // reads. The error is largest at the end of the month and vanishes on the
+    // 1st, which is why it would never have been caught by looking twice.
+    //
+    // So the window is the first instant of the month MONTHS_SHOWN back. The
+    // table still shows thirteen months; the read reaches one month further so
+    // that the single comparison it is allowed to make divides by a WHOLE month.
+    // `moneyMonthsOf` is told this bound as well and withholds the ratio for any
+    // month whose comparison month is not wholly inside it, so a later change to
+    // this line cannot quietly reintroduce the partial denominator.
+    const moneyFrom = monthWindow(recentMonths(MONTHS_SHOWN + 1, now)[MONTHS_SHOWN]);
+    const moneySince = moneyFrom
+      ? moneyFrom.fromIso
+      // Unreachable: `recentMonths` only emits keys `monthWindow` parses. A
+      // bound is still required, and one that is too SHORT is the safe way to
+      // be wrong — the guard above withholds the ratio rather than taking it.
+      : new Date(now).toISOString();
+    setAsked({ at: now, visitsSince: since, moneySince });
 
     const [mRes, vRes, cRes, dRes, pRes] = await Promise.allSettled([
       // PAGED, for the same reason the two reads below it are. `fetchMemberships`
@@ -341,12 +393,44 @@ export default function Analytics() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.tenantId]);
 
-  // Frozen for the life of the page. `Date.now()` read in the render body moves
-  // on every keystroke elsewhere, which would make every memo below recompute
-  // and — worse — let the month that counts as "running" change underneath a
-  // table the owner is reading.
-  const [now] = useState(() => Date.now());
-  const windowStart = useMemo(() => new Date(now - VISIT_DAYS * DAY).toISOString(), [now]);
+  /**
+   * The calendar month it is NOW — built once a MONTH, not once a mount.
+   *
+   * This was `const [now] = useState(() => Date.now())`, defended as "frozen for
+   * the life of the page" so that the month counting as running could not change
+   * underneath a table somebody was reading. The instinct is right and the
+   * remedy was a month too coarse: `Date.now()` in a render body does move on
+   * every keystroke, but a value fixed at MOUNT is fixed for the life of a
+   * document that this console gives no way to replace — the rail is a plain
+   * `<a href>`, and the page refreshes itself on the way back to the tab.
+   *
+   * So a front-desk tab opened on 28 September and still open on 3 October read
+   * October's payments and October's joiners from the database and then built
+   * its month list from September: October appeared on neither table, September
+   * was still labelled "running" two days after it ended — so the one month
+   * whose year-on-year an owner wants was withheld as unfinished — and "Net
+   * change · last full month" named August for ever. Proved rather than
+   * reasoned; the reproduction is in this lane's notes.
+   *
+   * `useMonthTick` holds a MONTH, not an instant, and React bails out of a
+   * re-render when a setter is handed the value it already has. So this screen
+   * re-renders exactly never on account of the clock and exactly once when the
+   * month turns — which is the one moment it must. Six other console screens
+   * already do this; /analytics was the seventh and had no picker to make the
+   * omission visible.
+   */
+  const tick = useMonthTick();
+  const monthNow = useMemo(() => monthTickStart(tick).getTime(), [tick]);
+
+  /**
+   * The instant the visits read asked about, and the window it opened.
+   *
+   * Not a clock read here at all. See `asked` above: this is the READ's bound,
+   * so `doorState` and the thirty-day figures can never be judging a window
+   * other than the one the rows came from.
+   */
+  const readNow = asked?.at ?? null;
+  const windowStart = asked?.visitsSince ?? null;
 
   const spans = useMemo(
     () => (memberships.rows ? memberSpans(memberships.rows) : null),
@@ -359,8 +443,8 @@ export default function Analytics() {
   const undatedJoins = useMemo(() => undatedJoinCount(spans ?? []), [spans]);
 
   const months = useMemo(
-    () => (spans ? churnMonths(spans, undatedExits, now, MONTHS_SHOWN) : null),
-    [spans, undatedExits, now],
+    () => (spans ? churnMonths(spans, undatedExits, monthNow, MONTHS_SHOWN) : null),
+    [spans, undatedExits, monthNow],
   );
 
   /** Departures inside the thirteen months on screen made by members with no
@@ -389,7 +473,9 @@ export default function Analytics() {
    * through the read the guard was not watching.
    */
   const doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live' =
-    door.state === 'loading' || visits.state === 'loading' ? 'loading'
+    // `windowStart` is null only before the first read has been dispatched, and
+    // a window nobody has asked for cannot judge a log. Reading, not live.
+    door.state === 'loading' || visits.state === 'loading' || windowStart == null ? 'loading'
       : door.state === 'failed' || visits.state === 'failed' ? 'failed'
       : door.at == null ? 'silent'
       : door.at < windowStart ? 'stale'
@@ -462,16 +548,24 @@ export default function Analytics() {
       if (held) held.push(p); else groups.set(c, [p]);
     }
     return [...groups.entries()]
-      .map(([currency, rows]) => ({
-        currency,
-        payments: rows.length,
-        months: moneyMonthsOf(rows, now, currency != null),
-      }))
+      .map(([currency, rows]) => {
+        const months = moneyMonthsOf(rows, monthNow, currency != null, asked?.moneySince ?? null);
+        return {
+          currency,
+          // Payments in the months ON SCREEN, not rows in the read. The read
+          // now reaches one month further back than the table shows — see
+          // `moneySince` in `load` — so that the year-on-year comparison has a
+          // whole month to divide by, and counting the read here would put a
+          // month nobody can see into a sentence about this table.
+          payments: months.reduce((a, m) => a + m.payments, 0),
+          months,
+        };
+      })
       // Largest first, and the currency-less group last however big it is: it
       // is the one with no figures in it, and leading with a table of dashes
       // buries the money the gym can actually read.
       .sort((a, b) => (a.currency == null ? 1 : b.currency == null ? -1 : b.payments - a.payments));
-  }, [payments.rows, now]);
+  }, [payments.rows, monthNow, asked?.moneySince]);
 
   /** Whether this gym's ledger holds more than one money. Not an error — it is
    *  what a gym that changed currency looks like — and the only thing it
@@ -829,7 +923,7 @@ export default function Analytics() {
         doorState={doorState}
         doorNote={doorNote}
         undatedJoins={undatedJoins}
-        now={now}
+        now={readNow}
       />
 
       <Frequency
@@ -865,6 +959,19 @@ interface MoneyMonth {
    *  currency are not known to be in the same money, so the ratio between two
    *  of their months is a ratio of nothing in particular. */
   yoyPct: number | null;
+  /**
+   * Whether the month a year back is WHOLLY inside the read that produced these
+   * rows.
+   *
+   * The distinction the dash used to lose. "No month to compare" was printed
+   * both where the gym has no such month — a gym eleven months old has no last
+   * January — and where the read simply did not reach it, and the second is a
+   * fact about this screen rather than about the gym. It is also the half that
+   * was silently WRONG before: a comparison month the read opened part-way
+   * through still answered `by.get(...)`, with a fraction of its takings, and
+   * the ratio came out as growth the gym never had.
+   */
+  yearAgoRead: boolean;
 }
 
 /**
@@ -900,8 +1007,14 @@ interface MoneySeries {
  * still counted, because the payments are real, but no percentage is taken
  * between two months of money nobody has named.
  */
-function moneyMonthsOf(rows: MoneyRow[], now: number, comparable: boolean): MoneyMonth[] {
+function moneyMonthsOf(
+  rows: MoneyRow[], now: number, comparable: boolean, since: string | null,
+): MoneyMonth[] {
   const keys = recentMonths(MONTHS_SHOWN, now);
+  // The first instant the read asked for, as a number. Null — nobody has read
+  // anything yet — disqualifies every comparison, because no month is known to
+  // be whole.
+  const from = since == null ? null : Date.parse(since);
   const by = new Map<string, { cents: number; payers: Set<string>; count: number }>();
   for (const p of rows) {
     const k = monthKeyOf(Date.parse(p.takenAt));
@@ -920,6 +1033,17 @@ function moneyMonthsOf(rows: MoneyRow[], now: number, comparable: boolean): Mone
     const running = k === thisMonth || (w != null && !monthEnded(w, now));
     const yearAgoKey = `${Number(k.slice(0, 4)) - 1}-${k.slice(5, 7)}`;
     const yearAgo = by.get(yearAgoKey);
+    // ── The denominator has to be a WHOLE month ──────────────────────────────
+    //
+    // `by.get(yearAgoKey)` answers for a month the read opened part-way through
+    // exactly as confidently as for one it read end to end — with a fraction of
+    // that month's takings. Dividing by a fraction reads as growth, it reads as
+    // growth for every gym at once, and it is worst at the end of the month and
+    // absent on the 1st. So the comparison month is required to begin at or
+    // after the read's own bound before any ratio is taken from it.
+    const yearAgoW = monthWindow(yearAgoKey);
+    const yearAgoRead =
+      from != null && yearAgoW != null && Date.parse(yearAgoW.fromIso) >= from;
     return {
       key: k,
       label: w ? w.label : k,
@@ -930,12 +1054,14 @@ function moneyMonthsOf(rows: MoneyRow[], now: number, comparable: boolean): Mone
       // Null rather than zero: nobody paid means there is no average to take,
       // and 0.00 per member reads as a gym whose members pay nothing.
       arpuCents: v.payers.size ? Math.round(v.cents / v.payers.size) : null,
-      // Withheld on a running month and where there is no matching month in
-      // the read at all — a gym eleven months old has no last January, and
-      // "−100%" would be the answer to a question nobody asked.
-      yoyPct: !comparable || running || !yearAgo || yearAgo.cents === 0
+      // Withheld on a running month, where there is no matching month in the
+      // read at all — a gym eleven months old has no last January, and "−100%"
+      // would be the answer to a question nobody asked — and where the read
+      // holds only part of that month.
+      yoyPct: !comparable || running || !yearAgoRead || !yearAgo || yearAgo.cents === 0
         ? null
         : Math.round(((v.cents - yearAgo.cents) / yearAgo.cents) * 100),
+      yearAgoRead,
     };
   });
 }
@@ -1037,6 +1163,12 @@ function MoneyTable({ series, named }: { series: MoneySeries; named: boolean }) 
       render: (m) => {
         if (currency == null) return <span className="dash">no currency stated</span>;
         if (m.running) return <span className="dash">the month has not finished</span>;
+        // Said apart from "no month to compare", which is a fact about the GYM.
+        // This one is a fact about this screen: the read reaches thirteen months
+        // and a comparison needs twenty-five, so every row but the newest
+        // finished one is outside it. Printing the gym's sentence over the
+        // screen's limitation is how an owner concludes they have no history.
+        if (!m.yearAgoRead) return <span className="dash">last year&rsquo;s month is outside this read</span>;
         if (m.yoyPct == null) return <span className="dash">no month to compare</span>;
         return (
           <span style={{ color: m.yoyPct < 0 ? 'var(--crit)' : m.yoyPct > 0 ? 'var(--good)' : undefined }}>
@@ -1260,7 +1392,9 @@ function Cohorts({ rows, state, doorState, doorNote, undatedJoins, now }: {
   doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live';
   doorNote: string;
   undatedJoins: number;
-  now: number;
+  /** The instant the READ asked about, not a clock this component may take for
+   *  itself. Null before a read has run — see `asked` on the page. */
+  now: number | null;
 }) {
   const cols: Column<Cohort>[] = [
     { key: 'label', header: 'Joined in', value: (c) => c.label },
@@ -1322,7 +1456,7 @@ function Cohorts({ rows, state, doorState, doorNote, undatedJoins, now }: {
 function retention(
   c: Cohort,
   doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live',
-  now: number,
+  now: number | null,
 ): { rate: number | null; note: string } {
   if (doorState !== 'live') {
     return {
@@ -1332,6 +1466,10 @@ function retention(
           : 'the door log is silent, so activity is unknown',
     };
   }
+  // Unreachable while `doorState` is 'live' — the same read sets both — and
+  // written rather than asserted, because a maturity test against a missing
+  // clock would otherwise silently pass every cohort as mature.
+  if (now == null) return { rate: null, note: 'reading the door log\u2026' };
   const key = keyOfLabel(c.label);
   const w = key ? monthWindow(key) : null;
   if (w && now < Date.parse(w.toIso) + COHORT_MATURITY_DAYS * DAY) {

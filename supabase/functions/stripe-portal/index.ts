@@ -58,9 +58,35 @@ Deno.serve(async (req) => {
   const userId = auth?.user?.id;
   if (!userId) return json({ error: 'no user' }, 401);
 
-  const { data: cust } = await service.from('billing_customers').select('stripe_customer_id').eq('trainer_id', userId).maybeSingle();
+  const { data: cust, error: custErr } = await service.from('billing_customers').select('stripe_customer_id').eq('trainer_id', userId).maybeSingle();
+  // A refused READ is not "no subscription yet", and the error used to be
+  // discarded here. supabase-js resolves with `{ error }` and a null `data`, so
+  // a transient PostgREST fault told a coach whose card is being charged every
+  // month that they have no subscription — the exact consequence
+  // supabase/functions/stripe-checkout's own note names, one table across:
+  // "answers 'no subscription yet' (404) to somebody whose card is being
+  // charged every month, so they cannot cancel, cannot update the card and
+  // cannot reach an invoice."
+  //
+  // "We could not look" and "there is nothing there" are different sentences
+  // and the second one is the one a coach acts on by emailing support about a
+  // charge they cannot see.
+  if (custErr) return json({ error: 'could not check your billing account: ' + custErr.message }, 500);
   if (!cust?.stripe_customer_id) return json({ error: 'no subscription yet' }, 404);
 
-  const portal = await stripe.billingPortal.sessions.create({ customer: cust.stripe_customer_id, return_url: returnUrl });
-  return json({ url: portal.url });
+  // Stripe's own refusal, in the response, rather than an uncaught throw — the
+  // same reasoning as connect-onboard's and gym-onboard's. This call was bare,
+  // so a rejected portal session escaped the handler as a 500 with no body and
+  // the coach read it as a shrug. The causes are specific and actionable: the
+  // Customer has been deleted at Stripe, or the Billing Portal has no default
+  // configuration on this account, and neither is guessable from "something
+  // went wrong".
+  try {
+    const portal = await stripe.billingPortal.sessions.create({ customer: cust.stripe_customer_id, return_url: returnUrl });
+    return json({ url: portal.url });
+  } catch (e) {
+    const msg = (e as { message?: string })?.message || String(e);
+    console.error('stripe-portal: billing portal refused by Stripe for ' + userId + ':', msg);
+    return json({ error: msg }, 502);
+  }
 });
