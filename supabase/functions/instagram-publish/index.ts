@@ -578,8 +578,13 @@ Deno.serve(async (req) => {
     return fail(`The card could not be put where Instagram can fetch it: ${up.error.message}. Nothing has been posted.`);
   }
 
+  // The error is READ, not inferred from the absence of a throw. supabase-js
+  // resolves on a failed insert, so `await service.from(…).insert(…)` with
+  // nothing destructured off it succeeds in exactly the same way whether the
+  // row landed or not — and this is the row that records that a post did NOT
+  // go up. Losing it silently is how a failure becomes invisible twice.
   const recordFailure = async (why: string, containerId: string | null) => {
-    await service.from('instagram_posts').insert({
+    const { error: ledgerErr } = await service.from('instagram_posts').insert({
       trainer_id: trainerId,
       status: containerId ? 'container' : 'failed',
       container_id: containerId,
@@ -588,6 +593,9 @@ Deno.serve(async (req) => {
       object_key: key,
       failure: why.slice(0, 500),
     });
+    if (ledgerErr) {
+      console.error('instagram-publish: a failed post could not be recorded for ' + key + ': ' + ledgerErr.message);
+    }
   };
 
   /* ── 1. the container. This is the call Meta fetches the URL during ──── */
@@ -675,7 +683,14 @@ Deno.serve(async (req) => {
   const link = await graph(`${GRAPH}/${encodeURIComponent(mediaId)}?fields=permalink&access_token=${encodeURIComponent(token)}`);
   if (link.ok && link.body?.permalink) permalink = String(link.body.permalink);
 
-  await service.from('instagram_posts').insert({
+  // Same rule as `recordFailure` above, on the row that says the post DID go
+  // up. This insert was awaited and never destructured, so a rejected write —
+  // a policy refusal, a column that moved, the database briefly unreachable —
+  // was indistinguishable from a successful one, and the coach's post history
+  // would simply not contain a post that is live on their feed. The post is up
+  // either way and `ok` stays true; what is not true is that Repple recorded
+  // it, so that is said rather than left to be discovered.
+  const { error: ledgerErr } = await service.from('instagram_posts').insert({
     trainer_id: trainerId,
     status: 'published',
     container_id: containerId,
@@ -685,6 +700,9 @@ Deno.serve(async (req) => {
     object_key: key,
     published_at: new Date().toISOString(),
   });
+  if (ledgerErr) {
+    console.error('instagram-publish: a published post could not be recorded for ' + key + ': ' + ledgerErr.message);
+  }
 
   // Meta has the media. The public object has done its whole job and goes now,
   // with the removal CONFIRMED rather than assumed. A removal that cannot be
@@ -705,10 +723,19 @@ Deno.serve(async (req) => {
     // confirmed deleted AND could not be recorded is one the sweep reads no row
     // for and will never come back to, so saying "Repple will remove it" there
     // would be a claim about a thing that is not going to happen.
-    warning: removal.removed ? undefined
-      : recorded
-        ? 'Your post is up. The temporary copy of the card could not be confirmed as deleted, so Repple will remove it on the next sweep.'
-        : 'Your post is up. The temporary copy of the card could not be confirmed as deleted, and Repple has no record left to sweep it from, so it will not be removed on its own. Tell whoever runs this Repple, and quote ' + key + '.',
+    // A fourth state, and it outranks the other three: if the ledger row did
+    // not land, the post is on Instagram and absent from Repple's history of
+    // it. That is a discrepancy the coach should hear about from us rather
+    // than notice later, so it is said first and the sweep note follows.
+    warning: [
+      ledgerErr
+        ? 'Your post is up on Instagram, but Repple could not record it, so it will not appear in your post history here. Nothing needs reposting — the post is live.'
+        : undefined,
+      removal.removed ? undefined
+        : recorded
+          ? 'Your post is up. The temporary copy of the card could not be confirmed as deleted, so Repple will remove it on the next sweep.'
+          : 'Your post is up. The temporary copy of the card could not be confirmed as deleted, and Repple has no record left to sweep it from, so it will not be removed on its own. Tell whoever runs this Repple, and quote ' + key + '.',
+    ].filter(Boolean).join(' ') || undefined,
   });
 });
 

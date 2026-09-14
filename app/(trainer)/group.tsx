@@ -37,6 +37,27 @@
 // screen with their own reason, and the button says "Assign to 7 of 8" rather
 // than "Assigned". Nobody is silently skipped. See src/lib/groupProgram.ts.
 //
+// ── And the answer the gate had no word for ────────────────────────────────
+//
+// Applying the gate per member was not enough, because what reached it had
+// already been flattened. A HAND-ADDED member — a `coach_clients` row the coach
+// typed in, no account, no app — is in the roster, so their disclosures read
+// 'ready'; their `injuries` is `undefined`, which src/ui/roster.tsx leaves
+// undefined on purpose because undefined is "nobody has ever asked this person"
+// and `[]` is "they were asked and said none"; and `(c?.injuries ?? [])` turned
+// the first into the second. `guardInjuries` returns ALLOWED on an empty list.
+// So the member with the LEAST known about them opened the gate most easily,
+// and the silence read as an all-clear — on the one write that reaches eight
+// people at once.
+//
+// The answers are told apart in src/lib/disclosureFact.ts and each has a
+// sentence. The assign is NOT withheld for a hand-added member — that is the
+// ordinary use of Add Client and refusing it would be a worse product than the
+// defect — but it is no longer made in silence: their row says nobody has ever
+// asked them, and the alert the coach confirms NAMES them. Named, not counted:
+// "some members have never been asked" is a sentence a coach taps through,
+// because it is not about anybody.
+//
 // ── LoadStatus ─────────────────────────────────────────────────────────────
 //
 // A group whose membership could not be read must never render as an empty
@@ -65,8 +86,8 @@ import {
   memberVersions, versionSpread, behindNote, bespokeNote,
   type FanOutMember, type MemberState,
 } from '../../src/lib/groupProgram';
-import type { LoadStatus } from '../../src/ui/loadStatus';
-import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
+import { areaLabel, injuryFlag } from '../../src/lib/injuries';
+import { disclosureFact, neverAskedBrief, type DisclosureFact } from '../../src/lib/disclosureFact';
 import { num } from '../../src/lib/format';
 import type { Program } from '../../src/lib/programs';
 import { supabase } from '../../src/lib/supabase';
@@ -198,26 +219,50 @@ export default function Groups() {
   // is what separates them: under a failed roster read nobody is trustworthy,
   // and a member missing from a whole read is somebody we did not find out
   // about.
+  //
+  // The status was not enough on its own, and this is the screen where that
+  // cost the most. A HAND-ADDED member — a `coach_clients` row the coach typed
+  // in, no account, no app — IS in the roster, so `c` was truthy and
+  // `disclosures` read 'ready'; their `injuries` is `undefined`, which
+  // src/ui/roster.tsx leaves undefined deliberately because undefined is
+  // "nobody has ever asked this person" and `[]` is "they were asked and said
+  // none"; and `(c?.injuries ?? [])` turned the first into the second.
+  // `guardInjuries` returns ALLOWED on an empty list, so the member with the
+  // LEAST known about them opened the gate most easily — and this is the
+  // fan-out, so one press put a programme in front of eight people on the
+  // strength of a silence.
+  //
+  // src/lib/disclosureFact.ts holds the three apart and hands this screen both
+  // the status the gate needs and the sentence the coach needs. The assign is
+  // NOT withheld for a hand-added member — that is the ordinary use of Add
+  // Client and refusing it would be a worse product than the defect — but it is
+  // no longer made in silence: `fact.note` is drawn on their row below and they
+  // are NAMED in the sentence the coach confirms. A caller that takes
+  // `gateStatus` and draws no `note` has put this defect back.
+  const factFor = (clientId: string): DisclosureFact => {
+    const c = roster.find((r) => r.id === clientId);
+    return disclosureFact(rosterStatus, c, clientId, c?.name.split(' ')[0] ?? 'This client');
+  };
   const asMember = (clientId: string): FanOutMember => {
     const c = roster.find((r) => r.id === clientId);
-    const disclosures: LoadStatus =
-      rosterStatus === 'error' ? 'error'
-      : c ? 'ready'
-      : rosterStatus === 'loading' ? 'loading'
-      : 'error';
-    const injuries: Injury[] = (c?.injuries ?? []).map((i, n) => ({
-      id: `${clientId}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
-      status: 'active', note: i.note, at: '',
-    }));
+    const fact = factFor(clientId);
     return {
       clientId,
       name: c?.name.split(' ')[0] ?? 'This client',
-      disclosures,
+      disclosures: fact.gateStatus,
       ackStatus: acks.status,
-      injuries,
+      injuries: fact.injuries,
       acknowledged: acks.acknowledged(clientId),
     };
   };
+  /** First names of the people this assign WOULD write to who have never been
+   *  asked about injuries. Read off `plan.send` rather than off the membership:
+   *  a member the gate is already holding is a different sentence, said by the
+   *  gate on their own row, and naming them twice teaches a coach to skip
+   *  both. */
+  const neverAskedNames = (ids: readonly string[]): string[] =>
+    ids.filter((id) => factFor(id).kind === 'never-asked')
+      .map((id) => roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client');
 
   const members = useMemo(() => (open ? open.memberIds.map(asMember) : []), [open, roster, rosterStatus, acks]);
   const groupSig = useMemo(() => programSignature(open?.program ?? null), [open]);
@@ -376,18 +421,33 @@ export default function Groups() {
       // anyway. Asked once for the whole group, because it is one programme —
       // but itemised by person, so the coach sees whose shoulder it is.
       const loaded = sending.map((m) => ({ m, movements: loadsFor(m) })).filter((x) => x.movements.length > 0);
-      if (loaded.length) {
+      // The third fact, said at the moment of decision and not only on a row
+      // the coach may have scrolled past. NAMED rather than counted, and that
+      // matters more here than anywhere: this is the one write that reaches
+      // eight people at once, and "some members have never been asked" is a
+      // sentence a coach taps straight through because it is not about anybody.
+      // src/lib/disclosureFact.ts builds it out of the same facts the rows use.
+      const askedNote = neverAskedBrief(neverAskedNames(plan.send));
+      if (loaded.length || askedNote) {
         const lines = loaded.slice(0, 6).map((x) =>
           `· ${x.m.name} — ${x.movements.slice(0, 2).map((v) => `${v.exercise} (${areaLabel(v.area).toLowerCase()}, ${v.severity})`).join('; ')}`);
         const more = loaded.length - lines.length;
+        const loadedBody = loaded.length
+          ? `${lines.join('\n')}${more > 0 ? `\n· and ${more} more` : ''}\n\n`
+            + 'You can absolutely programme these on purpose. Confirming records that you chose to, with the date, for each of them — and they can see that record too.'
+          : null;
+        // Two different confirmations, because they are two different
+        // decisions. Loading a disclosed injury on purpose is destructive and
+        // is recorded against the coach; assigning to somebody nobody has asked
+        // is the ordinary case and is only being STATED. A red button on both
+        // is a red button nobody reads.
         const go = await new Promise<boolean>((resolve) => {
           Alert.alert(
-            'This programme loads what they disclosed',
-            `${lines.join('\n')}${more > 0 ? `\n· and ${more} more` : ''}\n\n` +
-              'You can absolutely programme these on purpose. Confirming records that you chose to, with the date, for each of them — and they can see that record too.',
+            loaded.length ? 'This programme loads what they disclosed' : 'Never asked about injuries',
+            [loadedBody, askedNote].filter(Boolean).join('\n\n'),
             [
-              { text: 'Change the Programme', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'I Know — Assign', style: 'destructive', onPress: () => resolve(true) },
+              { text: loaded.length ? 'Change the Programme' : 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: loaded.length ? 'I Know — Assign' : 'Assign', style: loaded.length ? 'destructive' : 'default', onPress: () => resolve(true) },
             ],
             { cancelable: true, onDismiss: () => resolve(false) },
           );
@@ -652,6 +712,31 @@ export default function Groups() {
                 // be a fact invented out of a failure.
                 const mv = versionRows[i];
                 const held = plan.blocked.find((b) => b.clientId === id);
+                // What this screen knows about their injuries, as one of three
+                // facts rather than as an empty list. See the note over
+                // `asMember` and src/lib/disclosureFact.ts.
+                //
+                // The gate speaks first where it has something to say — it
+                // knows whether the coach has read a disclosure and whether a
+                // read failed, and has better words for both. `fact.note` fills
+                // the two silences the gate leaves: a member who was asked and
+                // disclosed nothing, and a member nobody has ever asked.
+                //
+                // Drawn on every row here, clearance included, and that is the
+                // difference from the picker in app/(trainer)/templates.tsx,
+                // where a clearance waits for a tick: there is no unticked row
+                // in a group. Every name on this list is a person the button
+                // below writes to, so every one of them is at the point of
+                // decision already.
+                const fact = factFor(id);
+                const factLine = held ? held.reason : fact.note;
+                // The one unread status src/lib/disclosureFact.ts writes a sentence for, and
+                // the only one drawn BESIDE the gate's refusal rather than instead of it. The
+                // gate says their injuries "could not be read", which of a row that actually
+                // arrived is not quite true, and "held until they load" is advice that will not
+                // help — the read landed and carried no list. Every other unread status has
+                // `note: null` precisely so this does not happen twice on one row.
+                const noListLine = held && fact.why === 'no-list' ? fact.note : null;
                 // Read once, not once per branch: this walks the roster.
                 const lastSeen = lastSeenLineFor(id);
                 const tone = held ? t.warn : st === 'on' ? t.good : st === 'unknown' ? t.ink3 : t.ink3;
@@ -703,8 +788,16 @@ export default function Groups() {
                         <Icon name="minus" size={17} color={t.ink3} />
                       </Pressable>
                     </View>
-                    {held ? (
-                      <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{held.reason}</Flag>
+                    {/* Their own sentence, on their own row. A count of how
+                        many are held tells the coach nothing about whose
+                        shoulder it is — and an absence gets a sentence here
+                        too, because the row that says nothing at all is the one
+                        that reads as an all-clear. */}
+                    {factLine ? (
+                      <Flag tone={held || fact.warn ? t.warn : t.ink3} style={{ marginTop: sp.sm }}>{factLine}</Flag>
+                    ) : null}
+                    {noListLine ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{noListLine}</Text>
                     ) : null}
                   </View>
                 );

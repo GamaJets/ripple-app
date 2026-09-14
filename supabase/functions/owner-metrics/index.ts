@@ -165,7 +165,16 @@ Deno.serve(async (req: Request) => {
   //    unscoped fails closed, the same rule 30-classes-tenant-scope.sql applies
   //    to a class with no tenant.
   const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
-  const { data: prof } = await admin.from('profiles').select('role, tenant_id').eq('id', uid).maybeSingle();
+  //
+  //    And the ERROR from that lookup is read, because a failed read here is
+  //    not a verdict about the caller. supabase-js resolves with `data` null
+  //    and `error` set when the query fails, so the discarded-error version of
+  //    this line turned a database blip into `!prof` and answered a real gym
+  //    owner with "Owner access only." — a 403 that says they are not who they
+  //    are. Refusing is still correct (this fails closed either way); the
+  //    sentence and the status are not. 503 says come back, 403 says never.
+  const { data: prof, error: profErr } = await admin.from('profiles').select('role, tenant_id').eq('id', uid).maybeSingle();
+  if (profErr) return json({ ok: false, error: 'Repple could not check your access just now — that is our end, not yours. Nothing has changed. Try again in a moment.' }, 503);
   if (!prof || prof.role !== 'owner') return json({ ok: false, error: 'Owner access only.' }, 403);
   const tenantId: string | null = prof.tenant_id ?? null;
   if (!tenantId) return json({ ok: false, error: 'This owner account is not attached to a gym.' }, 403);

@@ -11,6 +11,8 @@ import {
 import { VARIANT, VARIANT_ACCENT } from '../lib/variant';
 import { Icon } from './Icon';
 import { passwordRules } from '../lib/passwordRules';
+import { passwordNeedsSpoken } from '../lib/passwordNeeds';
+import { hitSlopFor } from '../lib/a11y';
 import { reportError } from '../lib/reportError';
 
 interface ThemeControls {
@@ -199,6 +201,22 @@ export function useThemeControls(): ThemeControls {
  * used by nothing else in this file.
  */
 
+/** The eye glyph's drawn size. Named so the icon and its touch target cannot
+ *  disagree — otherwise they are the same number written twice. */
+const EYE_SIZE = 20;
+
+/**
+ * The slop that brings the eye up to a reachable control.
+ *
+ * The Pressable has no width of its own: it is absolutely positioned with
+ * `end`, so it shrink-wraps the glyph. A hand-typed `hitSlop={10}` therefore
+ * bought a 40pt target — four short of the floor src/lib/a11y.ts sets and
+ * argues for ("used one-handed, mid-set, with a wet screen"). `hitSlopFor` is
+ * that arithmetic, so the two numbers cannot drift apart again if either moves.
+ * Vertically the control already spans the field and the extra costs nothing.
+ */
+const EYE_SLOP = hitSlopFor(EYE_SIZE);
+
 // Password input with a tappable eye toggle so people can check what they
 // typed before submitting. `style` should be the same object used for
 // sibling TextInputs (e.g. the local `inp` style) — its marginBottom (if any)
@@ -236,10 +254,10 @@ export function PasswordField({
           onPress={() => setVisible((v) => !v)}
           accessibilityRole="button"
           accessibilityLabel={visible ? 'Hide password' : 'Show password'}
-          hitSlop={10}
+          hitSlop={EYE_SLOP}
           style={{ position: 'absolute', end: 12, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}
         >
-          <Icon name={visible ? 'eye-off' : 'eye'} size={20} color={t.ink3} />
+          <Icon name={visible ? 'eye-off' : 'eye'} size={EYE_SIZE} color={t.ink3} />
         </Pressable>
       </View>
     </View>
@@ -264,25 +282,47 @@ export function PasswordRules({ value }: { value: string }) {
   const rules = passwordRules(value);
   const started = (value || '').length > 0;
   return (
-    <View style={{ marginTop: 8, marginBottom: 4 }} accessibilityRole="summary"
-      accessibilityLabel={`Password needs ${rules.filter((r) => !r.met).map((r) => r.label).join(', ') || 'nothing further'}`}>
-      <Text style={{ fontSize: 12, color: t.ink3, marginBottom: 4 }}>Needs:</Text>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-        {rules.map((r) => (
-          <View key={r.label} style={{
-            flexDirection: 'row', alignItems: 'center', gap: 4,
-            paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999,
-            backgroundColor: r.met ? (t.good || t.brand) + '22' : t.surface2,
-          }}>
-            {/* The glyph itself is the channel — a tick or a bullet — and the
-                pill behind it still carries the good tint. The 11pt character
-                takes ink, because good as text does not clear 4.5:1. */}
-            <Text style={{ fontSize: 11, color: r.met ? t.ink2 : t.ink3 }}>
-              {r.met ? '✓' : '•'}
-            </Text>
-            <Text style={{ fontSize: 12, color: r.met ? t.ink2 : t.ink3 }}>{r.label}</Text>
-          </View>
-        ))}
+    <View style={{ marginTop: 8, marginBottom: 4 }}>
+      {/* ── One element, not eleven ──────────────────────────────────────────
+          The summary role and the label below used to sit on the OUTER View and
+          were read by nobody. React Native's `accessible` defaults to false on a
+          View (Pressable is the one that opts itself in), and a View that is not
+          an accessibility element does not get to speak for its children: the
+          role and the label are inert, the eleven Texts stay individually
+          focusable, and what VoiceOver actually offered was a swipe through
+          "Needs:", "bullet", "8 characters or more", "bullet", "a lowercase
+          letter" … — eleven stops, with the tick and the bullet announced as
+          punctuation and nothing anywhere saying which rules are MET. The one
+          attribute that carried that fact was the one the platform ignored.
+
+          `accessible` is the missing word. With it this is a single stop that
+          says what is still missing, once, in a sentence — and the tick/bullet
+          glyphs stop being read at all, which is right: they are the visual
+          channel for a fact the sentence now states outright.
+
+          The "should be accepted" note is deliberately OUTSIDE this group. A
+          label REPLACES its subtree rather than adding to it (see rule 3 of
+          scripts/check-a11y.mjs), so anything swept inside here is a sentence
+          the reader loses. */}
+      <View accessible accessibilityRole="summary" accessibilityLabel={passwordNeedsSpoken(rules)}>
+        <Text style={{ fontSize: 12, color: t.ink3, marginBottom: 4 }}>Needs:</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {rules.map((r) => (
+            <View key={r.label} style={{
+              flexDirection: 'row', alignItems: 'center', gap: 4,
+              paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999,
+              backgroundColor: r.met ? (t.good || t.brand) + '22' : t.surface2,
+            }}>
+              {/* The glyph itself is the channel — a tick or a bullet — and the
+                  pill behind it still carries the good tint. The 11pt character
+                  takes ink, because good as text does not clear 4.5:1. */}
+              <Text style={{ fontSize: 11, color: r.met ? t.ink2 : t.ink3 }}>
+                {r.met ? '✓' : '•'}
+              </Text>
+              <Text style={{ fontSize: 12, color: r.met ? t.ink2 : t.ink3 }}>{r.label}</Text>
+            </View>
+          ))}
+        </View>
       </View>
       {started && rules.every((r) => r.met) ? (
         <Text style={{ fontSize: 12, color: t.ink3, marginTop: 6 }}>

@@ -98,6 +98,7 @@ import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
 import { alreadyAt, progressionOffer, loadTapLabel } from '../../src/lib/builderProgression';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
+import { disclosureFact, neverAskedBrief, type DisclosureFact } from '../../src/lib/disclosureFact';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 // `getUser()` resolves rather than rejecting when the auth host is unreachable,
@@ -637,29 +638,45 @@ export default function Builder() {
   // because they withhold the button for unrelated reasons and each has its
   // own sentence; see src/lib/injuryGate.ts.
   const acks = useInjuryAcks();
-  const clientInjuries: Injury[] = (client?.injuries ?? []).map((i, n) => ({
-    id: `${clientId}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
-    status: 'active', note: i.note, at: '',
-  }));
-  // How the read of the DISCLOSURES themselves went, which is a different
-  // question from how the read of the acknowledgements went and was the one
-  // nobody asked. `client?.injuries ?? []` is an empty list under a roster that
-  // failed exactly as it is under a client who has nothing wrong with them, and
-  // the gate opened on both — so an outage handed the coach a clean Assign
-  // button for somebody with a severe shoulder. This is the injuries half of
-  // the same discipline the rest of the screen already applies to `roster`.
   //
-  // A client we DID find is trustworthy under 'partial': that status means the
-  // roster was truncated, not that this row came back half-read, and their
-  // injuries travelled on the row. Under 'error' the `clients` read is the one
-  // that failed and anybody still in the list came from the manual half, so
-  // even a client we can see is a client whose disclosures we did not read.
-  const disclosureStatus: LoadStatus =
-    !clientId ? 'ready'
-    : rosterStatus === 'error' ? 'error'
-    : client ? 'ready'
-    : rosterStatus === 'loading' ? 'loading'
-    : 'error';
+  // How the read of the DISCLOSURES themselves went is a different question
+  // from how the read of the acknowledgements went, and was the one nobody
+  // asked. `client?.injuries ?? []` is an empty list under a roster that failed
+  // exactly as it is under a client who has nothing wrong with them, and the
+  // gate opened on both — so an outage handed the coach a clean Assign button
+  // for somebody with a severe shoulder.
+  //
+  // The status was not enough on its own, and the same `?? []` hid a second
+  // person behind it. A HAND-ADDED client — a `coach_clients` row the coach
+  // typed in, no account, no app — IS in the roster, so `client` was truthy and
+  // the status read 'ready'; their `injuries` is `undefined`, which
+  // src/ui/roster.tsx leaves undefined deliberately because undefined is
+  // "nobody has ever asked this person" and `[]` is "they were asked and said
+  // none"; and `?? []` turned the first into the second. `guardInjuries`
+  // returns ALLOWED on an empty list, so the client with the least known about
+  // them opened the programme gate as though they had been asked and had
+  // answered that there was nothing wrong.
+  //
+  // Both are now decided in src/lib/disclosureFact.ts, which keeps four answers
+  // apart — asked and disclosed something, asked and disclosed nothing, never
+  // asked, and a row that came back with no injury list at all — and hands this
+  // screen the status the gate needs together with the sentence the coach
+  // needs. The assign is NOT withheld for a hand-added client; it is no longer
+  // made in silence. `fact.note` is drawn on their row in Assign To and again
+  // in the sentence the coach confirms, and a caller that takes `gateStatus`
+  // without drawing `note` has put the defect back.
+  //
+  // Null when there is no client focused at all, which is neither a state of a
+  // person nor a failed read: this screen writes templates with nobody picked,
+  // and holding the gate over an unread nobody would be a wall across the
+  // ordinary use of it.
+  const clientFact: DisclosureFact | null = clientId
+    ? disclosureFact(rosterStatus, client, clientId, client?.name.split(' ')[0] ?? 'This client')
+    : null;
+  // Non-empty only where somebody actually disclosed something — never under an
+  // absence, and never the flattened `?? []` again.
+  const clientInjuries: Injury[] = clientFact ? clientFact.injuries : [];
+  const disclosureStatus: LoadStatus = clientFact ? clientFact.gateStatus : 'ready';
   const injuryGate = guardInjuries(
     disclosureStatus,
     acks.status,
@@ -1570,31 +1587,39 @@ export default function Builder() {
     setPicked((p) => (Object.keys(p).some((k) => p[k]) ? p : { [clientId]: true }));
   }, [clientId]);
 
-  /** One client's disclosures, as both guards need to see them. */
-  const injuriesOf = (id: string): Injury[] => {
+  /** What this screen knows about ONE RECIPIENT's injuries — the same four
+   *  answers, from the same module, as the focused client above. The fan-out
+   *  carried its own copy of the flattening `?? []` and its own copy of the
+   *  status ladder, so a hand-added client ticked in this list opened the gate
+   *  even after the client at the top of the screen had stopped doing so. One
+   *  module, so the two cannot drift apart again. */
+  const factFor = (id: string): DisclosureFact => {
     const c = roster.find((r) => r.id === id);
-    return (c?.injuries ?? []).map((i, n) => ({
-      id: `${id}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
-      status: 'active', note: i.note, at: '',
-    }));
+    return disclosureFact(rosterStatus, c, id, c?.name.split(' ')[0] ?? 'This client');
   };
-  /** How the read of THIS person's own disclosures went — a different question
-   *  from how the acknowledgement read went, and the one nobody asked. A client
-   *  the roster never produced has an empty injury list for exactly the same
-   *  reason a healthy client does. */
-  const disclosuresOf = (id: string): LoadStatus =>
-    rosterStatus === 'error' ? 'error'
-    : roster.some((r) => r.id === id) ? 'ready'
-    : rosterStatus === 'loading' ? 'loading'
-    : 'error';
-  const asMember = (id: string): FanOutMember => ({
-    clientId: id,
-    name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
-    disclosures: disclosuresOf(id),
-    ackStatus: acks.status,
-    injuries: injuriesOf(id),
-    acknowledged: acks.acknowledged(id),
-  });
+  /** One client's disclosed injuries, as both guards need to see them. Empty
+   *  under every absence, and empty for a different reason than it used to
+   *  be. */
+  const injuriesOf = (id: string): Injury[] => factFor(id).injuries;
+  const asMember = (id: string): FanOutMember => {
+    const fact = factFor(id);
+    return {
+      clientId: id,
+      name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
+      disclosures: fact.gateStatus,
+      ackStatus: acks.status,
+      injuries: fact.injuries,
+      acknowledged: acks.acknowledged(id),
+    };
+  };
+  /** First names of the people this assign WOULD write to who have never been
+   *  asked about injuries. Read off `plan.send` rather than off the ticks: a
+   *  client the gate is already holding is a different sentence, said by the
+   *  gate on their own row, and naming them twice teaches a coach to skip
+   *  both. */
+  const neverAskedNames = (ids: readonly string[]): string[] =>
+    ids.filter((id) => factFor(id).kind === 'never-asked')
+      .map((id) => roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client');
   // The same fan-out plan the Groups screen and the template library use, so
   // the injury gate is consulted ONCE PER RECIPIENT and the ones it holds are
   // named rather than silently dropped. Not re-implemented here: a second
@@ -2004,8 +2029,16 @@ export default function Builder() {
       onProgramme: !!getProgram(id),
     }));
     const brief = overwriteBrief(targets, title.trim() || 'this programme');
+    // The moment of decision, so the third fact is said here too and not only
+    // on a row the coach may have scrolled past. `overwriteBrief` says what is
+    // being replaced; this says what is NOT known about the people it is being
+    // replaced for, and names them rather than counting them. Appended rather
+    // than woven in, because the two are separate facts and
+    // src/lib/bulkActions.ts owns the first.
+    const askedNote = neverAskedBrief(neverAskedNames(plan.send));
+    const body = [brief.body, askedNote].filter(Boolean).join('\n\n');
     const go = await new Promise<boolean>((resolve) => {
-      Alert.alert(brief.title, brief.body, [
+      Alert.alert(brief.title, body, [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
         // Destructive only when something is actually being destroyed. A red
         // button on every assign is a red button nobody reads.
@@ -3789,6 +3822,29 @@ export default function Builder() {
             // one without realising.
             const replaces = programStatus === 'ready' && !!getProgram(c.id);
             const held = plan.blocked.find((b) => b.clientId === c.id);
+            // What this screen knows about their injuries, as one of three
+            // facts rather than as an empty list. The gate speaks first where
+            // it has something to say — it knows whether the coach has read a
+            // disclosure and whether a read failed, and has better words for
+            // both. `fact.note` fills the two silences it leaves: a client who
+            // was asked and disclosed nothing, and a client nobody has ever
+            // asked.
+            //
+            // Drawn on every row for an absence and only on a TICKED row for a
+            // clearance. "They have never been asked" is a property of the
+            // person a coach wants while choosing; "they were asked and said
+            // none" is a reassurance that only matters at the point of
+            // decision, and twenty of them down a list is twenty lines nobody
+            // reads.
+            const fact = factFor(c.id);
+            const factLine = held ? held.reason : (on || fact.warn) ? fact.note : null;
+            // The one unread status src/lib/disclosureFact.ts writes a sentence for, and
+            // the only one drawn BESIDE the gate's refusal rather than instead of it. The
+            // gate says their injuries "could not be read", which of a row that actually
+            // arrived is not quite true, and "held until they load" is advice that will not
+            // help — the read landed and carried no list. Every other unread status has
+            // `note: null` precisely so this does not happen twice on one row.
+            const noListLine = held && fact.why === 'no-list' ? fact.note : null;
             return (
               <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
                 accessibilityRole="button"
@@ -3801,7 +3857,8 @@ export default function Builder() {
                   `${on ? 'Do not assign to' : 'Assign to'} ${c.name}`,
                   c.goal,
                   replaces ? 'This replaces the programme they are on' : null,
-                  held ? held.reason : null,
+                  factLine,
+                  noListLine,
                 ].filter(Boolean).join('. ')}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -3820,8 +3877,16 @@ export default function Builder() {
                     </Text>
                   </View>
                   {/* Their own sentence, on their own row. A count of how many
-                      are held tells the coach nothing about whose knee it is. */}
-                  {held ? <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag> : null}
+                      are held tells the coach nothing about whose knee it is —
+                      and an absence gets a sentence here too, because the row
+                      that says nothing at all is the one that reads as an
+                      all-clear. */}
+                  {factLine ? (
+                    <Flag tone={held || fact.warn ? t.warn : t.ink3} style={{ marginTop: 4 }}>{factLine}</Flag>
+                  ) : null}
+                  {noListLine ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{noListLine}</Text>
+                  ) : null}
                 </View>
               </Pressable>
             );

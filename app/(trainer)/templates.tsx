@@ -653,6 +653,13 @@ export default function Templates() {
                   // twenty lines nobody reads.
                   const fact = disclosureFact(rosterStatus, c, c.id, c.name.split(' ')[0]);
                   const factLine = held ? held.reason : (on || fact.warn) ? fact.note : null;
+                  // The one case where the gate's reason is not the whole truth. For
+                  // 'no-list' the gate says "held until they load" — advice that cannot
+                  // help, because the read LANDED and simply carried no injury list.
+                  // Every other unread status has `note: null` exactly so this cannot
+                  // double up; this one has words of its own and they were being
+                  // shadowed. Same shape as app/(trainer)/group.tsx.
+                  const noListLine = held && fact.why === 'no-list' ? fact.note : null;
                   return (
                     <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
                       accessibilityRole="button"
@@ -666,6 +673,7 @@ export default function Templates() {
                         c.goal,
                         replaces ? 'This replaces the program they are on' : null,
                         factLine,
+                        noListLine,
                       ].filter(Boolean).join('. ')}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -695,6 +703,13 @@ export default function Templates() {
                             one that reads as an all-clear. */}
                         {factLine ? (
                           <Flag tone={held || fact.warn ? t.warn : t.ink3} style={{ marginTop: 4 }}>{factLine}</Flag>
+                        ) : null}
+                        {/* Quieter than the gate's own line and underneath it, because
+                            it is the more precise half of the same fact: the read
+                            landed, and what came back had no injury list in it. Drawn
+                            in ink3 so the row carries one warn mark, not two. */}
+                        {noListLine ? (
+                          <Flag tone={t.ink3} style={{ marginTop: 4 }}>{noListLine}</Flag>
                         ) : null}
                       </View>
                     </Pressable>
