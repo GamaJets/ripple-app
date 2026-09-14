@@ -60,6 +60,7 @@ import type { LoadStatus } from '../ui/loadStatus';
 import { worstStatus } from '../ui/loadStatus';
 import { formatSleepHours } from './sleepMerge';
 import type { Readiness, ReadinessSignal, ReadinessSleep } from './readiness';
+import type { ReadinessDirection } from './readinessDirection';
 
 /**
  * One device's part in the sleep read, reduced to what a member needs told.
@@ -162,6 +163,30 @@ export interface ReadinessBreakdownInput {
   recoveryDeviceConnected?: boolean;
   /** As passed to readinessScore: null means the training log was unreadable. */
   workoutsLast2Days: number | null;
+  /**
+   * Which way the score has moved since yesterday, from `readinessDirection` —
+   * or null/omitted where the caller has no yesterday to offer.
+   *
+   * Optional for the same reason `recoveryPct` is: three callers build this
+   * input and an omitted field means the same as an explicit null, so they do
+   * not all have to be edited in one commit to keep compiling.
+   *
+   * Only its `caveat` is read here, and only two of the four direction states
+   * carry one — a yesterday that FAILED to read, and a yesterday whose score was
+   * built from a different set of signals and therefore out of a different
+   * denominator. Both make the number above them worth less than it looks, which
+   * is the only thing this list is for. A yesterday that is simply not there is
+   * a complete answer and gets no flag; see the note on `short` at the bottom of
+   * this file for why an ordinary absence must never be dressed as a short read.
+   *
+   * The caller, not this file, decides whether an incomparable pair is worth
+   * saying out loud: an incomparability that is a fact about YESTERDAY is rare
+   * and worth a sentence, and one that is a fact about what we are able to
+   * rebuild is permanent, would print on every single day, and is exactly the
+   * flag members learn to stop reading. src/ui/readiness.ts draws that line and
+   * says how.
+   */
+  direction?: ReadinessDirection | null;
 }
 
 export interface ReadinessBreakdown {
@@ -548,5 +573,22 @@ export function readinessBreakdown(i: ReadinessBreakdownInput): ReadinessBreakdo
   // is not a short read, and calling it one would train the member to ignore
   // the word on the many days it means nothing.
   const short = caveats.length > 0 || lines.some((l) => l.state === 'unread');
-  return { lines, status: short ? 'partial' : 'ready', caveats, absence: null };
+
+  // The direction's caveat joins the LIST but is deliberately not part of
+  // `short`, and it is appended after the line above rather than inside
+  // `caveatsFor` so that it cannot become part of it by accident.
+  //
+  // `status` answers "how complete is the thing on screen". Every other sentence
+  // in this list is evidence that today's own inputs came back short; a
+  // yesterday that failed to read, or one built out of a different denominator,
+  // takes nothing away from today's figure at all. Calling the score 'partial'
+  // for it would report a complete read as an incomplete one — and on a screen
+  // that colours the word, it would do so every day a member's strap started or
+  // stopped reporting.
+  //
+  // Last in the list, because it is the least of them: the others say a figure
+  // IN the score may be missing, this one only that the score cannot be placed
+  // beside yesterday's.
+  const withDirection = i.direction?.caveat ? [...caveats, i.direction.caveat] : caveats;
+  return { lines, status: short ? 'partial' : 'ready', caveats: withDirection, absence: null };
 }

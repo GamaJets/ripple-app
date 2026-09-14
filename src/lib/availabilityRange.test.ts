@@ -4,7 +4,13 @@ import {
   rangeSlotCount, rangeBlocker, expandRange, remainderNote,
   splitAgainstExisting, addButtonLabel, rangeSummary, addOutcome,
   MAX_WEEK_SLOTS, LARGEST_POSSIBLE_WEEK, MAX_DURATION_MIN, type RangeInput,
+  type RangeSlot,
+  AVAILABILITY_CACHE_PREFIX, LEGACY_AVAILABILITY_KEY, availabilityCacheKey,
+  availabilityCache, isAvailabilityCacheKey,
 } from './availabilityRange';
+import {
+  cacheHydrated, mayWriteCache, pushUpDecision, type DeviceCache,
+} from './deviceAccountCache';
 
 const errors: string[] = [];
 const ok = (c: boolean, msg: string) => { if (!c) errors.push(msg); };
@@ -223,9 +229,193 @@ ok(addOutcome(48, 48, 0).includes('Generate Open Slots'), 'and points at the ste
 ok(addOutcome(0, 0, 20).includes('nothing was changed'), 'an all-duplicate add is not reported as a failure');
 ok(addOutcome(28, 28, 20).includes('20 you already offered'), 'and duplicates are mentioned beside a real add');
 
+
+/* ── whose week it is, across a sign-in, a sign-out and a sign-in ──────────
+ *
+ * The defect: `useAvailability` read and wrote the coach's weekly template
+ * under one device-wide key, and its "the server has none, this phone has
+ * some" branch INSERTED whatever it found with `trainer_id` set to whoever was
+ * signed in. On a gym's shared handset that published the previous coach's
+ * working week as this coach's, and `run_open_slot_extension` (part 650) turns
+ * `trainer_availability` rows into `sessions` rows with status 'available'
+ * every night — so a stranger's Tuesday morning became bookable time under the
+ * wrong name and clients filled it.
+ *
+ * What is driven below is the REAL key composition and the REAL push-up
+ * decision, against a fake store, over ONE long-lived provider object — because
+ * that is what the provider is: it is mounted above the sign-out, so every bug
+ * in this class lives in what the SECOND sign-in inherits from the first. The
+ * awaits are elided (each step is called in the order the hook calls it); what
+ * is modelled faithfully is a read that never lands, which is the case that
+ * turns this from showing the wrong week into destroying the right one.
+ */
+
+/** The handset's store. `refuse` makes the next read throw, which is the case
+ *  that must never arm a write. */
+class FakeStore {
+  private m = new Map<string, string>();
+  refuse = false;
+  get(k: string): string | null {
+    if (this.refuse) { this.refuse = false; throw new Error('storage refused'); }
+    return this.m.has(k) ? this.m.get(k)! : null;
+  }
+  set(k: string, v: string) { this.m.set(k, v); }
+  remove(k: string) { this.m.delete(k); }
+  keys(): string[] { return [...this.m.keys()].sort(); }
+}
+
+/** The provider, as a value: the store it talks to, the cache record its ref
+ *  holds, and the week in memory. */
+interface Provider { store: FakeStore; cache: DeviceCache; slots: RangeSlot[] }
+
+/** The head of the effect, run synchronously on every account change —
+ *  including a sign-out, which is an account change to nobody. */
+const account = (p: Provider, uid: string | null) => {
+  p.cache = availabilityCache(uid);
+  // The week leaves the screen with the key. A provider mounted at the root
+  // outlives a sign-out; without this the departing coach's hours stay in
+  // memory, where `addSlot` reads them.
+  p.slots = [];
+};
+
+/** The cached read. `throws` is a refused store, after which the flag must
+ *  stay false. */
+const readCache = (p: Provider, o: { throws?: boolean } = {}) => {
+  if (!p.cache.key) return;
+  p.store.refuse = !!o.throws;
+  try {
+    const raw = p.store.get(p.cache.key);
+    p.slots = raw ? (JSON.parse(raw) as RangeSlot[]) : [];
+    p.cache = cacheHydrated(p.cache);
+  } catch { /* not hydrated; nothing may be written over bytes nobody read */ }
+};
+
+/** `persist`: on screen always, kept only where this device may keep it. */
+const persist = (p: Provider, next: RangeSlot[]) => {
+  p.slots = next;
+  if (mayWriteCache(p.cache)) p.store.set(p.cache.key, JSON.stringify(next));
+};
+
+/** The push-up branch's gate. */
+const pushUp = (p: Provider, writeUid: string | null, serverHas: boolean | null) =>
+  pushUpDecision({ cache: p.cache, writeUid, hasCached: p.slots.length > 0, serverHas });
+
+const A = '11111111-1111-4111-8111-111111111111';
+const B = '22222222-2222-4222-8222-222222222222';
+const weekA: RangeSlot[] = [{ dow: 2, hour: 7, minute: 0, dur: 60 }];
+const weekB: RangeSlot[] = [{ dow: 4, hour: 18, minute: 30, dur: 45 }];
+
+/* ── the key carries the account ─────────────────────────────────────────── */
+
+eq(availabilityCacheKey(A), `${AVAILABILITY_CACHE_PREFIX}${A}`, 'a key is the prefix and the account');
+ok(availabilityCacheKey(A) !== availabilityCacheKey(B), 'two coaches on one handset do not share a key');
+ok((availabilityCacheKey(A) ?? '').includes(A), 'and the account is IN the key, not merely known about');
+
+eq(availabilityCacheKey(null), null, 'signed out there is no key, and no key means do not persist');
+eq(availabilityCacheKey(undefined), null, 'nor before the session has been restored');
+eq(availabilityCacheKey(''), null, 'an empty id is not an account');
+eq(availabilityCacheKey('   '), null, 'nor is whitespace');
+eq(availabilityCacheKey('unknown'), null,
+  "'unknown' is the literal clientData settles on before the auth read lands — every signed-out session would otherwise share one key");
+
+ok(!isAvailabilityCacheKey(LEGACY_AVAILABILITY_KEY),
+  'the legacy unqualified key is not one of the per-account family');
+ok(isAvailabilityCacheKey(availabilityCacheKey(A)!), 'an account key is');
+ok(!isAvailabilityCacheKey(AVAILABILITY_CACHE_PREFIX), 'and a bare prefix with no account after it is not');
+
+/* ── one provider, across sign-in → sign-out → sign-in ───────────────────── */
+
+{
+  const p: Provider = { store: new FakeStore(), cache: availabilityCache(null), slots: [] };
+
+  // ── coach A signs in and sets their week ──
+  account(p, A);
+  readCache(p);
+  ok(mayWriteCache(p.cache), 'a read that landed on an empty store still arms the write');
+  persist(p, weekA);
+  eq(p.store.keys().join(','), `${AVAILABILITY_CACHE_PREFIX}${A}`,
+    "A's week is stored under A's key and nowhere else");
+  ok(!p.store.keys().includes(LEGACY_AVAILABILITY_KEY),
+    'and nothing is written to the unqualified key this replaces');
+
+  // ── A signs out ──
+  account(p, null);
+  eq(p.slots.length, 0, "the departing coach's week leaves the screen with their key");
+  ok(!mayWriteCache(p.cache), 'and nothing may be written with nobody signed in');
+  persist(p, weekA);
+  eq(p.store.keys().length, 1, 'so a signed-out write lands nowhere');
+  eq(pushUp(p, null, false), 'no-account', 'and there is nobody to publish a week as');
+
+  // ── coach B signs in on the same handset ──
+  account(p, B);
+  eq(p.slots.length, 0, "B does not open the sheet on A's hours");
+  readCache(p);
+  eq(p.slots.length, 0, "and B's own store is empty, because A's week is behind A's key");
+  eq(pushUp(p, B, false), 'nothing-cached',
+    "so the push-up branch has nothing to publish — A's week is never inserted as B's");
+
+  // B sets their own week; A's is untouched.
+  persist(p, weekB);
+  eq(p.store.keys().length, 2, 'two coaches, two keys');
+  eq(JSON.parse(p.store.get(availabilityCacheKey(A)!)!)[0].hour, 7, "A's week survives B's session");
+  eq(JSON.parse(p.store.get(availabilityCacheKey(B)!)!)[0].hour, 18, "and B's is their own");
+
+  // ── the sharp one: B signs in again and the store refuses the read ──
+  account(p, B);
+  readCache(p, { throws: true });
+  ok(!mayWriteCache(p.cache), 'a refused read does not arm the write');
+  persist(p, []);
+  eq(JSON.parse(p.store.get(availabilityCacheKey(B)!)!).length, 1,
+    "B's stored week survives a session that could not read it — an unread store is not an empty one");
+  eq(pushUp(p, B, false), 'not-hydrated',
+    'and a week nobody managed to read is never published to the account');
+}
+
+/* ── the flag must not survive the key change ────────────────────────────── */
+
+{
+  const p: Provider = { store: new FakeStore(), cache: availabilityCache(null), slots: [] };
+  account(p, A);
+  readCache(p);
+  persist(p, weekA);
+  ok(mayWriteCache(p.cache), "A's session is armed");
+
+  // B's store already holds B's week, from an earlier session on this handset.
+  account(p, B);
+  readCache(p);
+  persist(p, weekB);
+
+  // Now the switch itself: the account changes and the read has NOT come back.
+  account(p, A);
+  ok(!p.cache.hydrated,
+    'the arming flag is false the instant the key changes, before any read of the new key');
+  ok(!mayWriteCache(p.cache), 'so nothing may be written yet');
+  persist(p, []);
+  eq(JSON.parse(p.store.get(availabilityCacheKey(A)!)!).length, 1,
+    "an account switch whose read never landed does not write an empty week over the new account's stored one");
+}
+
+/* ── the write is checked against the account it will be made AS ─────────── */
+
+{
+  const p: Provider = { store: new FakeStore(), cache: availabilityCache(null), slots: [] };
+  account(p, A);
+  readCache(p);
+  persist(p, weekA);
+
+  eq(pushUp(p, A, false), 'push', "A's own cached week, read under A's key, may be published as A's");
+  eq(pushUp(p, B, false), 'other-account',
+    'the same blob may NOT be inserted as B — this is the defect, caught');
+  eq(pushUp(p, 'unknown', false), 'no-account', "'unknown' is not an account to write as");
+  eq(pushUp(p, '', false), 'no-account', 'nor is an empty id');
+  eq(pushUp(p, A, true), 'server-has-rows', 'an account with its own week keeps it; the server wins');
+  eq(pushUp(p, A, null), 'server-unknown',
+    'and a server nobody read is never treated as an empty one — a failed read is not an empty list');
+}
+
 if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);
   console.error(`availabilityRange: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);
   process.exit(1);
 }
-console.log('availabilityRange: ok — one stretch becomes many slots, the last one ends inside the range, and nothing claims a write the server did not confirm');
+console.log('availabilityRange: ok — one stretch becomes many slots, the last one ends inside the range, nothing claims a write the server did not confirm, and no coach publishes another coach\u2019s week');

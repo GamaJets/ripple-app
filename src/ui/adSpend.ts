@@ -210,7 +210,11 @@ export type UnmatchedRow = {
 export type SpendSource = {
   codeId: string | null;
   source: 'manual' | 'synced';
-  cents: number;
+  /** The figure in use for this code, or null where the row came back without
+   *  a readable one. `cents(s.amount_cents) ?? 0` overruled the reader here and
+   *  made the screen say a coach had entered nothing for a code they had
+   *  entered a budget against. */
+  cents: number | null;
   currency: string;
   updatedAt: string | null;
 };
@@ -322,7 +326,9 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
     const shapedSources: SpendSource[] = (sources ?? []).map((s: any) => ({
       codeId: s.code_id ?? null,
       source: s.source === 'synced' ? 'synced' : 'manual',
-      cents: cents(s.amount_cents) ?? 0,
+      // No `?? 0` behind `cents`. A spend figure that did not come back is not
+      // a coach who spent nothing, and the sentence that reads it says which.
+      cents: cents(s.amount_cents),
       currency: String(s.currency || '').toUpperCase(),
       updatedAt: text(s.updated_at),
     }));
@@ -437,12 +443,37 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
       for (const m of matchedPage.rows) {
         const s = byRun.get(String(m.run_id));
         if (!s) continue;
+        /*
+         * Both figures read BEFORE the row is built, and an unreadable one
+         * fails the whole read rather than being settled to nought.
+         *
+         * `cents(m.amount_cents) ?? 0` and `cents(m.ads) ?? 0` were the forms.
+         * The first is money: these rows are summed per code and across
+         * channels by `combineChannelSpend`, which takes `Number(c.cents)` and
+         * keeps anything finite — so a nought was added in silently and every
+         * channel looked cheaper than it is. The second is a count of ads, and
+         * a zero there reads as "Across 0 ads pointing at this code's join
+         * link" beside a cost the same row just reported.
+         *
+         * Failing the read is the answer this file already gives, thirty lines
+         * up, to the same question: a matched page that came back truncated
+         * returns `failed(…)` because the total "would be short by an unknown
+         * amount". A row with no readable amount on it is the same shortfall
+         * arriving a different way, and "nothing is shown rather than a figure
+         * that is too small" is the same sentence.
+         */
+        const spent = cents(m.amount_cents);
+        const adCount = cents(m.ads);
+        if (spent == null || adCount == null) {
+          reportError('adSpend.matched', new Error('a matched spend row came back without a readable amount or ad count'));
+          return failed('One of the ads your last check matched to a code came back without a cost on it, so any figure here would be short by an unknown amount. Nothing is shown rather than a total that is too small. Run the check again.');
+        }
         s.matched.push({
           codeId: m.code_id ?? null,
           code: String(m.code || '').toUpperCase(),
-          cents: cents(m.amount_cents) ?? 0,
+          cents: spent,
           currency: String(m.currency || '').toUpperCase(),
-          ads: cents(m.ads) ?? 0,
+          ads: adCount,
           applied: !!m.applied,
         });
       }

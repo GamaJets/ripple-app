@@ -98,8 +98,14 @@ export default function Notices() {
           </Section>
         ) : null}
 
+        {/* `undefined` rather than a zero. `shown` renders as "Showing the
+            first N", and "Showing the first 0" is not a sentence — the
+            component's own no-count arm says "Showing part of the list", which
+            is what a page that came back at the cap carrying nothing this
+            reader may see actually amounts to. `rows` is the filtered list, so
+            it can be shorter than the page it came from. */}
         {status === 'partial' ? (
-          <Section><PartialRead what="notices" shown={rows.length} /></Section>
+          <Section><PartialRead what="notices" shown={rows.length || undefined} /></Section>
         ) : null}
 
         <Section>

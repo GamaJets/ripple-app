@@ -1,7 +1,7 @@
 // Trainer weekly availability template. A set of recurring day-of-week + hour
 // slots the coach offers every week; "generate" turns them into concrete open
-// sessions for the next few weeks. Persists to AsyncStorage (per device). Kept
-// as a self-contained hook so it needs no provider wiring.
+// sessions for the next few weeks. Persists to AsyncStorage, under a key that
+// carries the signed-in account — see below.
 //
 // ── The cache that could not say it was stale ──────────────────────────────
 //
@@ -16,6 +16,25 @@
 // Nothing about the fallback changes. `status` simply says which copy you are
 // looking at: 'ready' means the server confirmed these slots, 'error' means
 // these came off this device and could not be checked.
+//
+// ── The week that belonged to whoever used the handset last ────────────────
+//
+// The device copy lived under `'repple.trainer.availability'` — one key, no
+// account in it, removed by nothing — and the branch below that pushes a device
+// copy up to an empty account inserted it with `trainer_id` set to whoever was
+// signed in NOW. On a gym's shared handset that is coach A's working week
+// written as coach B's, and it does not stop at a wrong screen:
+// `run_open_slot_extension` (part 650) turns every `trainer_availability` row
+// into `sessions` rows with status 'available' each night, so a stranger's
+// Tuesday morning opened as bookable time under the wrong name and clients
+// filled it.
+//
+// The key now carries the account (src/lib/availabilityRange.ts), the flag that
+// arms the device write is reset with it, the week in memory is cleared on an
+// account change because this hook outlives a sign-out, and the push-up is
+// gated on the blob having been read under the very account it would be written
+// as. The old unqualified key is removed UNREAD rather than migrated — the
+// whole argument is in src/lib/deviceAccountCache.ts.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
@@ -25,7 +44,14 @@ import { capLimit, capped } from '../lib/rowCap';
 import { writeFailure } from '../lib/wroteRows';
 import { settleRemoval } from '../lib/optimisticList';
 import { useAuthRevision } from './authRevision';
+import { useAuth } from './auth';
 import { shapeSeries, type RecurringSeries, type RawSeries } from '../lib/recurring';
+// Whose week this is. The key carries the account; the cache record carries the
+// arming flag that must not survive an account switch. See the section at the
+// foot of src/lib/availabilityRange.ts and the header of
+// src/lib/deviceAccountCache.ts.
+import { availabilityCache, LEGACY_AVAILABILITY_KEY } from '../lib/availabilityRange';
+import { cacheHydrated, mayWriteCache, pushUpDecision, type DeviceCache } from '../lib/deviceAccountCache';
 // The zone a weekly hour is an hour IN. See the header of that file: the
 // nightly generator uses the row's `tz` and this screen's button used to use the
 // handset's, and the two are a different hour for any coach who has travelled.
@@ -75,7 +101,6 @@ export type AddSlotResult = 'saved' | 'duplicate' | 'local';
  *  that used to stop at the hour and therefore shuffled 9:45 above 9:15). */
 const byTime = (a: AvailSlot, b: AvailSlot) => a.dow - b.dow || a.hour - b.hour || a.minute - b.minute;
 
-const KEY = 'repple.trainer.availability';
 let SEQ = 1;
 
 export function useAvailability() {
@@ -97,7 +122,60 @@ export function useAvailability() {
   const slotsRef = useRef<AvailSlot[]>([]);
   /** The one place `slots` is assigned, so the ref cannot drift from the state. */
   const applySlots = (next: AvailSlot[]) => { slotsRef.current = next; setSlots(next); };
-  const [uid, setUid] = useState<string | null>(null);
+  // ── whose week ───────────────────────────────────────────────────────────
+  //
+  // A render value, from the session rather than from a `getUser()` inside the
+  // effect. Two reasons, and the second is the defect this file was changed
+  // for:
+  //
+  //  · The KEY has to be a render value. The effect below is keyed on the
+  //    account, which is what makes an account switch a re-read rather than
+  //    the previous coach's week left standing on the screen.
+  //  · `getUser()` is a network call. Deriving the cache key from it would put
+  //    the coach in the basement gym — the whole reason this hook caches at all
+  //    — behind a request that cannot answer, and they would see an empty week
+  //    instead of theirs. The stored session names the account offline.
+  //
+  // `uid` used to be state set from `getUser()` inside the effect, so it was
+  // null for the first read and the CACHE was read under one device-wide key
+  // regardless. That key is gone; see src/lib/availabilityRange.ts.
+  const { user } = useAuth();
+  const uid = user?.id ?? null;
+  // Which account's blob this hook is reading and writing, and whether a read
+  // of THAT key has come back. A ref rather than state because `persist` is
+  // called from callbacks created in an earlier render — `addSlot` awaits the
+  // network and then persists — and a stale `hydrated` there would silently
+  // drop the write that records the server id.
+  const cache = useRef<DeviceCache>(availabilityCache(uid));
+  // Whose week is currently on screen. Distinguishes an account change — where
+  // everything in memory has to go — from a reload of the same account, where
+  // nothing should flicker. Starts `undefined`, which is not null: signed out
+  // at mount is still an account change, and a `null` here would skip the clear
+  // that sets the status honestly.
+  const shownFor = useRef<string | null | undefined>(undefined);
+
+  /**
+   * Keep this week on the device, if this device may keep it.
+   *
+   * Two guards, and neither is an "ignore":
+   *
+   *  · no key — nobody is signed in, so there is no account to keep a week
+   *    under. The unqualified key it used to fall back to is what the next
+   *    coach on a gym handset inherited.
+   *  · not hydrated — the read of this key has not come back, or came back
+   *    unreadable. Writing now would put this session's list on top of bytes
+   *    nobody managed to read.
+   *
+   * In both cases the week is on screen for this session and is simply not
+   * kept. The `try { AsyncStorage.setItem(…) } catch {}` this replaces could
+   * not catch anything at all: setItem returns a promise, so a storage refusal
+   * was an unhandled rejection rather than the ignored one the comment claimed.
+   */
+  const writeCache = (next: AvailSlot[]) => {
+    const c = cache.current;
+    if (!mayWriteCache(c)) return;
+    AsyncStorage.setItem(c.key, JSON.stringify(next)).catch(() => { /* the slots are correct this session either way */ });
+  };
   // How many server rows carry no timezone, or null when the read did not
   // come back whole. Null is never folded into zero — see the header of
   // src/lib/slotGeneration.ts for why an unchecked week is not a clear one.
@@ -111,21 +189,63 @@ export function useAvailability() {
 
   useEffect(() => {
     let cancelled = false;
+    // ── nothing from the last account may stand ───────────────────────────
+    //
+    // The cache record first, synchronously, on every run: it carries the flag
+    // that arms the device write, and a flag that survived a key change would
+    // let an account switch whose read then FAILED write this session's list
+    // over the NEW account's stored week. That is the one way this bug destroys
+    // a week rather than merely showing the wrong one, and two lanes have been
+    // caught by it. `availabilityCache` can only produce hydrated:false, so the
+    // reset and the key change are one statement and cannot come apart.
+    cache.current = availabilityCache(uid);
+    // The week in memory goes when the ACCOUNT changed and not on a reload.
+    //
+    // It has to go at all because this hook is held under a provider tree that
+    // OUTLIVES a sign-out, and `slots` is plain React state: without this the
+    // departing coach's hours stayed on screen, and in `slotsRef` where
+    // `addSlot` reads them, until somebody else's read came back, which for a
+    // refused read is never.
+    //
+    // It must not go on a reload because `reload` comes back through this
+    // effect, and blanking the grid under a pull-to-refresh is the flash
+    // src/lib/pullRefresh.ts exists about. The coach asked for the week to be
+    // checked, not taken away.
+    if (shownFor.current !== uid) {
+      shownFor.current = uid;
+      applySlots([]);
+      setZoneless(null);
+      setStatus(USE_SUPABASE ? 'loading' : 'ready');
+    }
     (async () => {
       let local: AvailSlot[] = [];
       // The cached copy predates `minute`, so every slot in it is on the hour.
       // Normalised on the way in rather than trusted, for the same reason the
       // server rows are.
-      try {
-        const raw = await AsyncStorage.getItem(KEY);
-        if (raw) {
-          // `tz` arrived after this cache did, exactly as `minute` did, so a
-          // saved copy from an older build has none. Null means "fall back to
-          // this handset", which is what that build did for every slot.
-          local = (JSON.parse(raw) as AvailSlot[]).map((sl) => ({ ...sl, minute: Number(sl.minute) || 0, tz: typeof sl.tz === 'string' && sl.tz ? sl.tz : null }));
-          if (!cancelled) applySlots(local);
-        }
-      } catch { /* no cached copy; the server read below is the only source */ }
+      //
+      // No key is no cache. Signed out — or a session still restoring — there
+      // is no account to scope a week to, and the unqualified key that used to
+      // stand in for one is what handed the next coach this one's hours.
+      const key = cache.current.key;
+      if (key) {
+        try {
+          const raw = await AsyncStorage.getItem(key);
+          if (cancelled) return;
+          if (raw) {
+            // `tz` arrived after this cache did, exactly as `minute` did, so a
+            // saved copy from an older build has none. Null means "fall back to
+            // this handset", which is what that build did for every slot.
+            local = (JSON.parse(raw) as AvailSlot[]).map((sl) => ({ ...sl, minute: Number(sl.minute) || 0, tz: typeof sl.tz === 'string' && sl.tz ? sl.tz : null }));
+            applySlots(local);
+          }
+          // An empty store is a read that LANDED, so the flag is armed here and
+          // not only where a week came back: a coach with no cached week may
+          // still save one. A read that threw lands in the catch and leaves the
+          // flag false, so nothing is written over bytes nobody could read.
+          cache.current = cacheHydrated(cache.current);
+        } catch { /* no readable cached copy; the server read below is the only source */ }
+      }
+      if (cancelled) return;
       // Local-only build: this device IS the store, so what is on screen is
       // authoritative and there is no absent server to misreport.
       if (!USE_SUPABASE) { if (!cancelled) setStatus('ready'); return; }
@@ -145,7 +265,6 @@ export function useAvailability() {
         const u = auth?.user?.id;
         // Signed out: there is no server copy to be out of step with.
         if (!u) { setStatus('ready'); return; }
-        setUid(u);
         // A weekly grid: seven days by twenty-four hours is 168 slots at the
         // absolute most, so this cannot truncate. Capped regardless, because
         // "the table only holds a few rows" is a fact about today's schema that
@@ -174,7 +293,7 @@ export function useAvailability() {
           // Deliberately not cached when short. This copy is what the coach
           // sees offline, and writing a truncated grid over the good one would
           // turn a temporary gap into the device's idea of their week.
-          if (!page.truncated) { try { AsyncStorage.setItem(KEY, JSON.stringify(server)); } catch { /* the slots are correct this session either way */ } }
+          if (!page.truncated) writeCache(server);
           setStatus(page.truncated ? 'partial' : 'ready');
         } else if (local.length) {
           // Server has nothing, this device does: push the device copy up. Until
@@ -190,6 +309,33 @@ export function useAvailability() {
           // the server, and read back onto the phone at the next launch. The
           // slot they had closed kept re-appearing, and the sessions generated
           // from it were real.
+          //
+          // ── and whose week is being published ───────────────────────────
+          //
+          // This branch is the sharp end of the shared-handset defect. It used
+          // to read `local` out of a device-wide key and insert it with
+          // `trainer_id: u` — whoever is signed in NOW — so on a gym's handset
+          // the previous coach's working week was written as this coach's, and
+          // `run_open_slot_extension` (part 650) opened real bookable sessions
+          // on those hours every night for clients to fill.
+          //
+          // `pushUpDecision` is the gate, and it is a pure function so the
+          // whole sign-in → sign-out → sign-in sequence is tested rather than
+          // reasoned about: the blob must have been read under a key carrying
+          // an account, that read must have landed, and the account must be
+          // the same one the rows would be written as.
+          const verdict = pushUpDecision({
+            cache: cache.current, writeUid: u, hasCached: local.length > 0, serverHas: false,
+          });
+          if (verdict !== 'push') {
+            // Not 'ready'. The account's own week came back empty and that much
+            // is confirmed, but what is on SCREEN is the device copy, and this
+            // is the path on which we have just declined to vouch for it. The
+            // coach sees their slots marked unchecked rather than silently
+            // treated as the account's.
+            setStatus('error');
+            return;
+          }
           const { data: up, error: upErr } = await supabase.from('trainer_availability')
             .insert(local.map((sl) => ({ trainer_id: u, dow: sl.dow, hour: sl.hour, minute: Number(sl.minute) || 0, dur: sl.dur, tz: deviceZone() })))
             .select('id, dow, hour, minute, dur, tz');
@@ -202,7 +348,7 @@ export function useAvailability() {
           // that cannot name its zone, and assuming zero here would claim a
           // week is generating when it is not.
           setZoneless(up.filter((r: any) => r.tz == null).length);
-          try { AsyncStorage.setItem(KEY, JSON.stringify(synced)); } catch { /* the slots are correct this session either way */ }
+          writeCache(synced);
           setStatus('ready');
         } else {
           // Server confirmed: this coach genuinely has no availability set.
@@ -220,17 +366,32 @@ export function useAvailability() {
       } catch { if (!cancelled) setStatus('error'); /* offline: local copy stands, and now says so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev, nonce]);
+    // `uid` is in here and that is the point: an account change re-reads, under
+    // the new account's key, with the previous account's week already cleared
+    // above. `authRev` stays as well — it moves on USER_UPDATED and on a
+    // restored INITIAL_SESSION, neither of which changes the id.
+  }, [authRev, nonce, uid]);
 
   /** Ask the server for this coach's week again. Goes back through the effect
    *  above rather than repeating its rules — the local-push-up branch and the
    *  truncation handling are not worth having two copies of. */
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
+  // The legacy unqualified key, removed UNREAD.
+  //
+  // Not migrated into the signed-in account, and that is a decision rather than
+  // an omission: the blob carries no account, so nothing on the device can tell
+  // this coach's own old week from the previous coach's on a shared handset. A
+  // migration is therefore a guess, and its wrong answer is a stranger's hours
+  // inserted under this coach's id and opened for booking by the nightly job.
+  // Losing it costs a coach re-entering a week that never reached the server —
+  // one gesture, through the range sheet in src/lib/availabilityRange.ts.
+  useEffect(() => { AsyncStorage.removeItem(LEGACY_AVAILABILITY_KEY).catch(() => { /* it will be removed on the next launch */ }); }, []);
+
   const persist = (next: AvailSlot[]) => {
     const sorted = [...next].sort(byTime);
     applySlots(sorted);
-    try { AsyncStorage.setItem(KEY, JSON.stringify(sorted)); } catch { /* ignore */ }
+    writeCache(sorted);
   };
 
   /** What happened to a weekly slot the coach just added.

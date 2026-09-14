@@ -214,6 +214,21 @@ export function restSoundConsent(): SoundConsent { return soundAnswer; }
 export function recordRestSoundConsent(answer: 'yes' | 'no'): void { soundAnswer = answer; }
 
 /**
+ * Un-know the answer, because the person it belonged to has signed out.
+ *
+ * The counterpart of `forgetPushConsent` in src/lib/pushConsent.ts, and the same
+ * reasoning: the rule above is about a live session, and a sign-out ends the
+ * only session this answer was ever about. SettingsProvider sits at the root of
+ * app/_layout.tsx and outlives it, so without this the previous member's 'no'
+ * silences — or their 'yes' un-silences — the next member's rest timer.
+ *
+ * Silencing for the moments before the next read lands costs nobody a cue: a
+ * rest period begins minutes into a session, which is the argument
+ * `restSoundConsent` already makes for refusing while unknown.
+ */
+export function forgetRestSoundConsent(): void { soundAnswer = 'unknown'; }
+
+/**
  * Which phone the note is describing.
  *
  * `Platform.OS`, narrowed to the three cases this sentence has to tell apart,

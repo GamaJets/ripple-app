@@ -27,7 +27,8 @@ import {
   deviceSleepTrust, readinessBreakdown,
   type ReadinessBreakdownInput, type ReadinessSource,
 } from './readinessBreakdown';
-import type { Readiness, ReadinessSleep } from './readiness';
+import type { Readiness, ReadinessSignal, ReadinessSleep } from './readiness';
+import { readinessDirection } from './readinessDirection';
 import { readinessScore } from './readiness';
 
 const errors: string[] = [];
@@ -521,6 +522,61 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
       }
     }
   }
+}
+
+// ── the direction, where it joins the caveats and where it must not ───────
+//
+// src/lib/readinessDirection.ts decides which way the score has moved and which
+// of the four ways of not knowing this is. The only thing this file owns is
+// where that answer lands: a sentence in `caveats`, and — the part that is easy
+// to get wrong — NOT a contribution to `status`.
+//
+// Asserted here rather than only in readinessDirection.test.ts because this
+// suite is the one wired into `npm test`, and the defect it guards is a
+// completely-read score being coloured as an incomplete one.
+{
+  const yesterday = '2026-09-13';
+  const same: ReadinessSignal[] = [...scored.from];
+
+  const failed = readinessDirection(scored, { status: 'error', score: null }, new Date(2026, 8, 14, 9));
+  ok(failed != null && failed.state === 'unread', 'a yesterday that could not be read is unread');
+  const withFailed = br({ direction: failed });
+  eq(withFailed.caveats.length, 1, "an unread yesterday puts one sentence in the hero's flags");
+  eq(withFailed.caveats[0], failed!.caveat, 'and it is the direction sentence, verbatim');
+  eq(withFailed.status, 'ready',
+    "but today's own read is still whole — a missing yesterday takes nothing out of today's scale");
+
+  const absent = readinessDirection(scored, { status: 'ready', score: null }, new Date(2026, 8, 14, 9));
+  eq(absent?.state, 'no-record', 'a yesterday that is simply not there is no-record');
+  eq(br({ direction: absent }).caveats.length, 0,
+    'and it raises no flag — an ordinary absence dressed as a short read is how a warning stops being read');
+
+  const moved = readinessDirection(
+    scored, { status: 'ready', score: { day: yesterday, score: scored.score - 9, from: same } },
+    new Date(2026, 8, 14, 9),
+  );
+  eq(moved?.state, 'scored', 'a same-scale yesterday gives a direction');
+  eq(br({ direction: moved }).caveats.length, 0, 'and a direction that worked out is not a caveat');
+
+  const mismatched = readinessDirection(
+    scored, { status: 'ready', score: { day: yesterday, score: 62, from: ['sleep', 'load'] } },
+    new Date(2026, 8, 14, 9),
+  );
+  eq(mismatched?.state, 'not-comparable', 'a yesterday out of another denominator is not comparable');
+  eq(mismatched?.delta, null, 'and is never subtracted');
+  const withMismatch = br({ direction: mismatched });
+  eq(withMismatch.caveats.length, 1, 'it can be said out loud');
+  eq(withMismatch.status, 'ready', 'and still does not make today a partial read');
+
+  // Behind everything that says a figure IN the score may be missing.
+  const both = br({ typedStatus: 'error', direction: failed });
+  ok(both.caveats.length === 2 && both.caveats[1] === failed!.caveat,
+    'the direction sentence is last, behind the ones about the score\'s own inputs');
+
+  // And never under a hero showing a dash, where `absence` is the whole answer.
+  const none = br({ readiness: null, sleep: sleepOf(0, 0), direction: failed });
+  eq(none.caveats.length, 0, 'no score, no direction caveat');
+  ok(none.absence != null, 'the absence is what speaks there');
 }
 
 if (errors.length) {

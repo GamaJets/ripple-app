@@ -28,11 +28,36 @@ export default function Explore() {
   const cd = useClientData();
   const [q, setQ] = useState('');
 
+  const solo = cd.coachingMode === 'solo';
   const list = useMemo(() => {
-    const solo = cd.coachingMode === 'solo';
     const base = CLIENT_FEATURES.filter((f) => !(solo && f.soloHide));
     return searchFeatures(base, q);
-  }, [q, cd.coachingMode]);
+  }, [q, solo]);
+
+  // ── what "Nothing matches" was saying, and why it was not true ───────────
+  //
+  // Five features carry `soloHide`, and a self-managed member never sees them:
+  // Book a Session, Ask for a Time, Standing Appointments, Weekly Check-in and
+  // Messages. That is right — they are all things you do WITH a coach, and a
+  // member who has none cannot do any of them.
+  //
+  // What was wrong is what the screen then said. This is the app's only search,
+  // and a solo member who typed "messages", or "book", or "check in", was told
+  // "Nothing matches" — a sentence that asserts the feature does not exist. It
+  // does exist; it is one coach away. So somebody who had been messaging a
+  // coach last month, or who is deciding whether coaching is worth paying for,
+  // was given a flatly false answer by the one screen whose whole job is
+  // answering "does this app do X".
+  //
+  // The hidden set is searched SEPARATELY and named rather than shown. Listing
+  // the rows would be worse than hiding them: tapping Messages with no coach
+  // opens a thread with nobody in it. A sentence can say the true thing —
+  // these exist, this is what they need — and the way to get one is one tap
+  // from here, which is the answer the member was actually looking for.
+  const hiddenHits = useMemo(
+    () => (solo && q.trim() ? searchFeatures(CLIENT_FEATURES.filter((f) => f.soloHide), q) : []),
+    [q, solo],
+  );
 
   const grouped = ORDER
     .map((area) => ({ area, items: list.filter((f) => f.area === area) }))
@@ -64,7 +89,15 @@ export default function Explore() {
         {grouped.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
             <Icon name="search" size={26} color={t.ink3} />
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Nothing matches “{q}”.</Text>
+            {/* Only when there is genuinely nothing. A match in the hidden set
+                is not nothing, and saying so would be the false answer. */}
+            {hiddenHits.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Nothing matches “{q}”.</Text>
+            ) : (
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
+                Nothing you can open matches “{q}”.
+              </Text>
+            )}
           </View>
         ) : grouped.map((g, gi) => (
           <View key={g.area}>
@@ -77,6 +110,23 @@ export default function Explore() {
             </Section>
           </View>
         ))}
+
+        {/* Under the results rather than instead of them: one word can match
+            both sets. "session" finds Sessions to Approve, which a solo member
+            can open, and Book a Session, which they cannot. */}
+        {hiddenHits.length ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Rule />
+            <Section>
+              <SectionHead title="Needs a coach" />
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                {hiddenHits.map((f) => f.label).join(', ')} {hiddenHits.length === 1 ? 'is part of this app' : 'are part of this app'}, but {hiddenHits.length === 1 ? 'it is' : 'they are'} something you do with a coach. You are set to training yourself, so {hiddenHits.length === 1 ? 'it is' : 'they are'} hidden rather than missing.
+              </Text>
+              <ListRow icon="people" title="Find a Trainer" note="Have a code from your coach? Enter it here"
+                onPress={() => router.push('/(client)/trainers')} />
+            </Section>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

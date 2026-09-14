@@ -1592,13 +1592,43 @@ export default function TrainerClients() {
     const reason = attnReason(client) || 'general check-in';
     const ctx = {
       goal: client.goal,
-      adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet',
+      // Was `client.adherence != null ? … : 'no check-ins yet'` — the same
+      // sentence as the "0 meals in the last 7 days" defect that the sibling
+      // field on the summary ask below (`mealsLoggedCount`) was already fixed
+      // for, and it takes the same three answers rather than two. A hand-added
+      // client has no Repple account and therefore no check-in screen to have
+      // been silent from, so "no check-ins yet" is an accusation about somebody
+      // who was never asked — and the coach may forward the draft built on it.
+      // `clientIsQueryable` is the one thing that knows which (src/lib/clientRecord.ts).
+      adherence: !clientIsQueryable(client.id, client.handAdded)
+        ? 'unknown — they have no account in the app, so there is no check-in for them to have made and no '
+          + 'adherence figure exists; do not suggest they have missed any'
+        : client.adherence != null
+          ? client.adherence + '%'
+          : 'unknown — no adherence figure has come back for them (they may have no check-in on record, or that '
+            + 'read was short), so state none and do not conclude they have been skipping',
       lastActive: client.lastActive,
       coachedMode: client.mode,
       // Areas and severity, never the note. The note is seeded from the line
       // off an uploaded medical document (src/lib/injuryExtract.ts) and
       // src/ui/injuryDocs.ts states the rule it would break.
-      injuryAreas: sharedAreas(client.injuries ?? []) || 'none disclosed',
+      //
+      // Was `sharedAreas(client.injuries ?? []) || 'none disclosed'`, under a
+      // prompt whose standing rule is to ALWAYS train around a disclosed
+      // injury — so that literal is the one sentence that unlocks programming
+      // an injured area. Two separate silences reached it. A hand-added client
+      // carries no `injuries` field at all (src/ui/roster.tsx builds those rows
+      // out of `coach_clients`, which has no such column), so `?? []` turned
+      // "never asked" into "disclosed none" — the defect src/lib/clientRecord.ts
+      // exists for. And for a linked client the empty array really is "the
+      // coach has recorded none", which is a fact about the RECORD: "none
+      // disclosed" says something about the CLIENT that nobody established.
+      injuryAreas: !clientIsQueryable(client.id, client.handAdded)
+        ? 'unknown — they have no account in the app and have never been asked to record an injury, so nothing '
+          + 'here says they have none: treat no area as cleared'
+        : sharedAreas(client.injuries ?? [])
+          || 'none recorded against their account — nobody has stated they are injury-free, so avoid loading a '
+            + 'joint hard without checking first',
       reason,
     };
     const answer = await askAboutClient([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Address them as {name} — write that literally, it is filled in afterwards. Write only the message, no preamble.' }], ctx);
@@ -1892,10 +1922,27 @@ export default function TrainerClients() {
     setAiBusy(true); setAiSummary('');
     const ctx = {
       goal: client.goal,
-      adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet',
+      // The same three answers as `mealsLoggedCount` below and as the nudge
+      // draft above: no account, an account with no figure, or the figure.
+      adherence: !clientIsQueryable(client.id, client.handAdded)
+        ? 'unknown — they have no account in the app, so there is no check-in for them to have made and no '
+          + 'adherence figure exists; do not suggest they have missed any'
+        : client.adherence != null
+          ? client.adherence + '%'
+          : 'unknown — no adherence figure has come back for them (they may have no check-in on record, or that '
+            + 'read was short), so state none and do not conclude they have been skipping',
       lastActive: client.lastActive,
       coachedMode: client.mode,
-      injuryAreas: sharedAreas(client.injuries ?? []) || 'none disclosed',
+      // See the nudge draft above for why this is three answers and why the
+      // last of them is about the record rather than about the client. The
+      // prompt below ends "do not suggest anything that loads a flagged injury
+      // area", and an empty list is not a flag that nothing is wrong.
+      injuryAreas: !clientIsQueryable(client.id, client.handAdded)
+        ? 'unknown — they have no account in the app and have never been asked to record an injury, so nothing '
+          + 'here says they have none: treat no area as cleared'
+        : sharedAreas(client.injuries ?? [])
+          || 'none recorded against their account — nobody has stated they are injury-free, so avoid loading a '
+            + 'joint hard without checking first',
       // A COUNT, not the names. "Logged 9 meals this week" is the adherence
       // fact a summary needs; "chicken shawarma, protein shake" is a diary.
       //
@@ -1913,7 +1960,16 @@ export default function TrainerClients() {
         : mealsThisWeek == null
           ? 'their food log could not be read — do not comment on their food logging'
           : `${mealsThisWeek} in the last 7 days`,
-      programTitle: getProgram(client.id)?.title ?? 'no coach-assigned programme',
+      // One literal used to serve two different states: this client is on
+      // nothing, and the assigned programmes did not come back. `noProgramme`
+      // at :1394 states the rule this now keeps — `getProgram` returning null
+      // is only an answer behind `isWhole(programStatus)` — and the question
+      // this prompt asks is what to focus on next week, which a model told the
+      // client is on nothing answers by writing them a programme.
+      programTitle: !isWhole(programStatus)
+        ? 'unknown — their assigned programmes could not be read, so do not say they are on nothing and do not '
+          + 'write them a new programme on the strength of it'
+        : getProgram(client.id)?.title ?? 'no coach-assigned programme',
     };
     const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only — you have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
     setAiBusy(false);

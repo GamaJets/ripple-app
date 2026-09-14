@@ -15,6 +15,7 @@
 import {
   EXPIRING_SOON_DAYS, amount, daysBetween, fetchMyMemberships, isCurrent, methodLabel, planStateOf,
   primaryMembership, renewalNote, standingLabel, standingOf, todayIso, totalsByCurrency,
+  fetchMyPasses, passUsesLine,
   type MemberMembership, type MemberPlan,
 } from './memberRecord';
 // The freeze rules are NOT reimplemented here and are not re-asserted here —
@@ -383,6 +384,53 @@ async function reads(): Promise<void> {
     const { sb } = reader({ membershipsError: { message: 'permission denied' } });
     const r = await fetchMyMemberships(sb, 'u1');
     eq(r.ok, false, 'a refused membership read is { ok: false } — never [], which reads as "you have no membership"');
+  }
+
+  /* ── a pass carries what it carries, or says it could not be read ───────── */
+  //
+  // `intOrNull(r.uses_total) ?? 0` was the form, which is this file's own
+  // reader overruled four characters later. The two figures fail in OPPOSITE
+  // directions out of the same coercion: an unread `uses_total` is a pass with
+  // nothing on it, and an unread `uses_spent` is one nobody has used.
+  {
+    const passes = async (row: Record<string, unknown>) => {
+      const sb = {
+        from: () => ({
+          select: () => ({ eq: () => ({ order: () => ({
+            limit: () => Promise.resolve({ data: [{
+              id: 'p1', paid_cents: 5000, currency: 'AED', issued_on: '2026-08-01',
+              expires_on: null, ...row,
+            }], error: null }),
+          }) }) }),
+        }),
+      };
+      const r = await fetchMyPasses(sb, 'u1');
+      return r.ok ? r.value.rows[0] : null;
+    };
+
+    const read = await passes({ uses_total: 10, uses_spent: 3 });
+    eq(read?.usesTotal, 10, 'a pass that was read carries its figures');
+    eq(read?.usesSpent, 3, 'both of them');
+    eq(passUsesLine({ usesTotal: 10, usesSpent: 3 }), '3 of 10 used', 'and the line is the plain one');
+
+    const noTotal = await passes({ uses_total: null, uses_spent: 3 });
+    eq(noTotal?.usesTotal, null, 'a total that did not come back is not a pass with nothing on it');
+    ok(!/\b0\b/.test(passUsesLine({ usesTotal: null, usesSpent: 3 })), 'and the line never prints a nought for it');
+    ok(/couldn’t read/.test(passUsesLine({ usesTotal: null, usesSpent: 3 })), 'it says so instead');
+
+    const noSpent = await passes({ uses_total: 10, uses_spent: null });
+    eq(noSpent?.usesSpent, null, 'and an unread spend is not a pass nobody has used');
+    ok(/couldn’t read/.test(passUsesLine({ usesTotal: 10, usesSpent: null })), 'which the line also says');
+    ok(/10/.test(passUsesLine({ usesTotal: 10, usesSpent: null })), 'while keeping the figure it does hold');
+
+    const neither = passUsesLine({ usesTotal: null, usesSpent: null });
+    ok(!/\b0\b|null|undefined|NaN/.test(neither), 'neither figure is invented when neither was read');
+
+    // The zero that IS a reading survives — the half `?? 0` could never tell
+    // apart from the three above.
+    const fresh = await passes({ uses_total: 10, uses_spent: 0 });
+    eq(fresh?.usesSpent, 0, 'a pass genuinely untouched still reads as nought used');
+    eq(passUsesLine({ usesTotal: 10, usesSpent: 0 }), '0 of 10 used', 'and says so plainly');
   }
 }
 

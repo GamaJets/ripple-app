@@ -49,11 +49,11 @@ import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchPlans, type MembershipPlan } from '@lib/gymRecord';
 import { gymDateText } from '@lib/gymWhen';
-import { parseGymZone } from '@lib/gymZone';
+import { parseGymZone, NO_ZONE_NOTE } from '@lib/gymZone';
 import {
   fetchInvites, createInvite, createInvites, extendInvite, revokeInvite,
   inviteState, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites,
-  normaliseEmail, DEFAULT_VALID_DAYS,
+  normaliseEmail, DEFAULT_VALID_DAYS, isDuplicateInvite,
   inviteMessage, inviteMailto, bulkInviteMailto,
   type MemberInvite, type MemberInviteState, type NewMemberInvite,
 } from '@lib/memberInvites';
@@ -96,6 +96,54 @@ const LAPSED_INVITE_NOTE =
   'That address already has an invitation on record here and it has lapsed. A gym keeps one open '
   + 'invitation per address, so a second cannot be written down — find it in the list below and '
   + 'press Reopen, which gives the same invitation a fresh 30 days.';
+
+/**
+ * The duplicate-refusal predicate moved to `isDuplicateInvite` in
+ * src/lib/memberInvites.ts, beside the insert that provokes the 23505.
+ *
+ * Knowing that 23505 on `member_invites` means "there is already an open
+ * invitation for that address" is database knowledge, and it was being
+ * re-derived here by a screen that does not own the constraint. The library's
+ * predicate is the same three tests plus one more: the code, the constraint
+ * name, and `DuplicateInviteError` — the wrapper `createInvite` now throws —
+ * so the swap needed no second branch at either call site below.
+ *
+ * ── a correction, recorded rather than erased ─────────────────────────────
+ *
+ * This block used to end by holding `createInvite` to account. It said that
+ * its doc comment claims it throws "a readable reason … rather than letting a
+ * constraint violation surface as raw Postgres", and that this "is true of
+ * the address checks it makes itself and not of this, which is Postgres's".
+ *
+ * That was true when it was written and is now wrong the other way round.
+ * `createInvite` translates the 23505 itself, and its comment says so in
+ * terms: the refusal "is translated here rather than rethrown raw". The
+ * charge stands only against the version of the library that predates that
+ * change, and is left here so that the next reader of these two branches knows
+ * the sentences below are a choice and not a repair — the screen keeps its own
+ * wording because it names console buttons ("Read again", "Reopen", "the
+ * list below") that a library shared with the phone cannot truthfully name.
+ *
+ * The `else` branches are unchanged and still interpolate `x?.message`. They
+ * are not the duplicate case — that is caught above — and for everything else
+ * the library rethrows what arrived, having nothing true to add to it.
+ */
+
+/**
+ * How many days the invitation stays open, as somebody typed it — or NaN, which
+ * both callers already refuse with a sentence.
+ *
+ * Not `parseInt`, which reads a prefix and throws the rest away: "30 days" came
+ * back 30 and so did "30.7", and "1e3" — a person typing a thousand the way a
+ * spreadsheet writes it — came back as ONE DAY. That is an invitation that
+ * lapses tomorrow, written down as the owner's own answer, with nothing on the
+ * screen disagreeing. Whole digits only; anything else is refused by name.
+ */
+function openDays(typed: string): number | null {
+  const raw = typed.trim();
+  if (raw === '') return null;
+  return /^\d+$/.test(raw) ? Number(raw) : NaN;
+}
 
 /** `inviteBlocker`'s refusal, with the lapsed case given its own sentence. */
 function blockerFor(
@@ -384,7 +432,8 @@ export default function Invites() {
         openTo={openTo} lapsedTo={lapsedTo} listRead={!unread} onChange={refresh}
       />
       <TheList
-        invites={invites} readErr={invitesErr} gymName={gymName} zone={zone}
+        invites={invites} readErr={invitesErr} gymName={gymName}
+        zone={zone} zoneUnread={gymNameUnread}
         nowMs={nowMs}
         tenantId={tenantId} onChange={refresh}
       />
@@ -421,7 +470,7 @@ function InviteOne({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead, 
     if (busy) return;
     const stop = blockerFor(email, listRead ? openTo : [], lapsedTo);
     if (stop) { setWriteErr(stop); return; }
-    const validDays = days.trim() === '' ? null : parseInt(days, 10);
+    const validDays = openDays(days);
     if (validDays !== null && (!Number.isFinite(validDays) || validDays < 1)) {
       setWriteErr('How many days should it stay open? Leave it blank for the gym’s default.');
       return;
@@ -440,7 +489,17 @@ function InviteOne({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead, 
     } catch (x: any) {
       // The address stays in the box on purpose: nothing was written, so there
       // is something to retry.
-      setWriteErr(`That invitation was not recorded: ${x?.message ?? 'the write was refused'}. Nothing has been written against that address.`);
+      setWriteErr(isDuplicateInvite(x)
+        // The rule, not the index. This is reachable with the list unread (the
+        // form then checks against nothing on purpose) and reachable when the
+        // other machine at the desk wrote the same address a minute ago, so the
+        // sentence names Read as well as Reopen — the invitation that is in the
+        // way may genuinely not be in the list under this form yet.
+        ? `${email.trim()} already has an open invitation at this gym, so a second could not be `
+          + 'written down — a gym keeps one per address, and a lapsed one still holds the place '
+          + 'until it is reopened. Nothing has been written. Press “Read again” at the top of this '
+          + 'page to bring the list up to date, then use Reopen beside that address for a fresh 30 days.'
+        : `That invitation was not recorded: ${x?.message ?? 'the write was refused'}. Nothing has been written against that address.`);
     } finally { setBusy(false); }
   };
 
@@ -540,7 +599,7 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead,
   const send = async () => {
     if (busy) return;
     if (!screened || !screened.send.length) return;
-    const validDays = days.trim() === '' ? null : parseInt(days, 10);
+    const validDays = openDays(days);
     if (validDays !== null && (!Number.isFinite(validDays) || validDays < 1)) {
       setWriteErr('How many days should these stay open? Leave it blank for the gym’s default.');
       return;
@@ -572,7 +631,17 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead,
       // createInvites inserts the batch in one statement, so a refusal means
       // NOT ONE of them landed. Saying so is what stops the owner pasting the
       // list again minus the rows they think went through.
-      setWriteErr(`Not one of these invitations was recorded: ${x?.message ?? 'the write was refused'}. The whole batch is written in one go, so nothing has changed and the list above is still to record.`);
+      setWriteErr(isDuplicateInvite(x)
+        // Which address it was is not in the refusal, and guessing one would be
+        // worse than saying so: the owner would strike the wrong line out of
+        // their list. What the batch case needs is the rule and a way to find
+        // the row, and Read puts every open invitation in the list below.
+        ? 'Not one of these invitations was recorded. One of these addresses already has an open '
+          + 'invitation at this gym — a gym keeps one per address, and a lapsed one still holds '
+          + 'the place until it is reopened. Which address is not in the refusal, so nothing is '
+          + 'struck off here: press “Read again” at the top of this page to bring the list of invitations up to date, and '
+          + 'the ones already on it will be refused beside their own line before you press again.'
+        : `Not one of these invitations was recorded: ${x?.message ?? 'the write was refused'}. The whole batch is written in one go, so nothing has changed and the list above is still to record.`);
     } finally { setBusy(false); }
   };
 
@@ -653,11 +722,19 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, lapsedTo, listRead,
 
 /* ── the list ──────────────────────────────────────────────────────────────── */
 
-function TheList({ invites, readErr, gymName, zone, nowMs, tenantId, onChange }: {
+function TheList({ invites, readErr, gymName, zone, zoneUnread, nowMs, tenantId, onChange }: {
   invites: MemberInvite[] | null; readErr: string | null;
   gymName: string | null;
   /** `tenants.timezone`, or null when the gym has not set one. */
   zone: string | null;
+  /**
+   * Null because the gym record could not be READ, rather than because the gym
+   * has not set a zone. The same `tenants` read supplies both this and the name,
+   * and the rail already separates those two nulls — this column had them
+   * collapsed, so a refused read would have printed "this gym has not set its
+   * timezone" as a claim about a row nobody could see.
+   */
+  zoneUnread: boolean;
   /**
    * The instant these invitations were read, and the one every expiry below is
    * judged against — the same instant the counts above the table are judged at.
@@ -898,6 +975,25 @@ function TheList({ invites, readErr, gymName, zone, nowMs, tenantId, onChange }:
     >
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+
+      {/* Whose calendar the "Written down" column is drawn on.
+          `gymDateText` renders in the gym's zone when there is one and in the
+          READER's when there is not — src/lib/gymWhen.ts states the bargain at
+          the head of the text-only forms: a screen that uses them owes the
+          reader `whoseClockNote` somewhere on the page. This one did not pay
+          it. So a gym that has never set a timezone had every invitation
+          stamped with the date on the laptop that happened to be open, and a
+          bookkeeper a few hours away read a different day against the same row
+          with nothing on the screen saying which of the two it was. The dates
+          are not wrong by much, and either side of midnight they are wrong by a
+          day — which is the day an owner counts a lapse from. */}
+      {zone ? null : (
+        <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12, color: 'var(--ink3)', maxWidth: '72ch' }}>
+          {zoneUnread
+            ? 'The gym’s record could not be read, so this console does not know what its timezone is — the dates below are your own device’s, not necessarily the gym’s. That is not the same as the gym having none.'
+            : `Written down is a date, and ${NO_ZONE_NOTE}.`}
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '12px 14px 0', flexWrap: 'wrap' }}>
         <input

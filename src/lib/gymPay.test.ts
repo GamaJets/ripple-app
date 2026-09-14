@@ -11,7 +11,7 @@ import {
   rateForSession, withResolvedRates, payCurrency, parseRate, payRateBlocker, saveTrainerPay,
   classPayAmount, classPayBlocker, adjustmentSign, adjustmentBlocker,
   runTotal, runCurrencyBlocker, reversalReasonBlocker,
-  adjustmentsTotal, runScopeOf, scopedToRun,
+  adjustmentsTotal, runScopeOf, scopedToRun, payLinesTotal, unreadableAmountBlocker,
   ADJUSTMENT_KINDS,
   type PayIndex, type TrainerPay,
 } from './gymPay';
@@ -430,6 +430,39 @@ eq(runTotal({ sessionCents: null, sessions: 0, classCents: 9600, classes: 1, adj
 eq(runTotal({ sessionCents: 0, sessions: 0, classCents: 9600, classes: 1, adjustmentCents: 0, adjustments: 0 }),
   9600, 'a coach who taught classes and delivered no one-to-ones is owed for the classes');
 
+// ── and the other two parts can be unstateable too ────────────────────────
+//
+// The note on `runTotal` used to say a class line and an adjustment "cannot
+// exist unpriced", which was true of the schema and never true of the READ:
+// `Number(r.amount_cents) || 0` made a column that did not come back into a
+// class taught for nothing, and the run that paid for it recorded itself as the
+// whole of what was owed.
+eq(runTotal({ sessionCents: 7500, sessions: 2, classCents: null, classes: 1, adjustmentCents: 0, adjustments: 0 }),
+  null, 'a class line nobody could price makes the run unstateable, not cheaper');
+eq(runTotal({ sessionCents: 7500, sessions: 2, classCents: 0, classes: 0, adjustmentCents: null, adjustments: 1 }),
+  null, 'and so does an adjustment nobody could read');
+
+/* ── a total is every line or it is nothing ──────────────────────────────── */
+
+eq(payLinesTotal([]), 0, 'no lines really is no money from lines');
+eq(payLinesTotal([{ amountCents: 4000 }, { amountCents: 600 }]), 4600, 'lines that were all read add up');
+eq(payLinesTotal([{ amountCents: 4000 }, { amountCents: null }]), null,
+  'one unreadable line makes the total null — a smaller figure here looks exactly like the truth');
+eq(payLinesTotal([{ amountCents: 0 }, { amountCents: 500 }]), 500,
+  'a line genuinely worth nothing is still a line that was read');
+
+/* ── and the run says which of the two it is ─────────────────────────────── */
+
+eq(unreadableAmountBlocker([{ amountCents: 1 }], [{ amountCents: 2 }]), null, 'everything read, nothing to say');
+{
+  const one = unreadableAmountBlocker([{ amountCents: null }], []);
+  ok(one != null && /One line/.test(one), 'one unreadable line is named singular');
+  ok(one != null && !/settle it now/i.test(one) && /Read it again/.test(one),
+    'and the instruction is to read the run again, never to settle it');
+  const two = unreadableAmountBlocker([{ amountCents: null }], [{ amountCents: null }]);
+  ok(two != null && /^2 lines/.test(two), 'both halves are counted into one sentence');
+}
+
 eq(runCurrencyBlocker(['GBP', 'GBP', null]), null, 'one currency, and a silent part, is one currency');
 ok(runCurrencyBlocker(['GBP', 'EUR']) != null, 'two currencies on one run is not a total');
 eq(runCurrencyBlocker([null, null]), null, 'nothing stated is nothing to disagree about');
@@ -446,7 +479,7 @@ eq(reversalReasonBlocker('Paid before the transfer cleared'), null, 'and a reaso
  * button, but only after the figure has been believed.
  */
 {
-  const adj = (kind: 'bonus' | 'deduction' | 'reimbursement' | 'advance', amountCents: number, currency: string | null) =>
+  const adj = (kind: 'bonus' | 'deduction' | 'reimbursement' | 'advance', amountCents: number | null, currency: string | null) =>
     ({ kind, amountCents, currency } as const);
 
   const one = adjustmentsTotal([adj('bonus', 5000, 'GBP'), adj('deduction', -1500, 'GBP')]);
@@ -471,6 +504,20 @@ eq(reversalReasonBlocker('Paid before the transfer cleared'), null, 'and a reaso
     'and an adjustment stating no currency is not silently the gym’s');
   eq(adjustmentsTotal([adj('bonus', 100, ' gbp ')]).currency, 'GBP',
     'spacing and case are one currency, not two — the same normalisation sharedCurrency does');
+
+  // ── the third reason there is no figure ────────────────────────────────
+  //
+  // An amount that did not come back. `Number(r.amount_cents) || 0` in
+  // `fetchAdjustments` used to make it a bonus of nothing, which adds cleanly
+  // and is wrong — and the column on /payroll would have printed the rest as
+  // the total.
+  const unread = adjustmentsTotal([adj('bonus', 5000, 'GBP'), adj('deduction', null, 'GBP')]);
+  eq(unread.cents, null, 'one unreadable amount leaves the column with no total');
+  eq(unread.taxableCents, null, 'and no split either — a split of a partial sum is two wrong figures');
+  eq(unread.reimbursementCents, null, 'both halves withheld together');
+  eq(unread.unreadable, 1, 'the screen is told how many, so it can say which problem this is');
+  eq(unread.currency, 'GBP', 'the currency is still known, which is why it cannot be the sentence');
+  eq(adjustmentsTotal([adj('bonus', 5000, 'GBP')]).unreadable, 0, 'and a clean set says none');
 }
 
 /* ── a run pays for its own period ────────────────────────────────────────

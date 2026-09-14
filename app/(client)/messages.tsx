@@ -86,7 +86,7 @@ import {
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
-import { fmtRelativeDay } from '../../src/lib/format';
+import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import { attachmentNoun } from '../../src/lib/messageAttachments';
 import { atBottom, isLocalId } from '../../src/lib/readReceipt';
 import { useReadReceipt } from '../../src/ui/readReceipts';
@@ -467,7 +467,29 @@ export default function Messages() {
   // glued to `${d.getDate()}/${d.getMonth() + 1}` — day-before-month, which a
   // reader in the United States reads the other way round. Both are the
   // reader's own now. See `fmtRelativeDay` in src/lib/format.ts.
-  const fmt = (iso: string) => fmtRelativeDay(iso);
+  //
+  // ── and the half of it that was missing ────────────────────────────────
+  //
+  // The day, and no hour. Every message sent today read "Today", so a thread
+  // with nine messages in it carried nine identical stamps and there was no way
+  // to tell the one sent at breakfast from the one sent ten minutes ago. On a
+  // chat that matters twice over: "come at 7" needs to be readable as this
+  // morning's or last night's, and `deliveryLine` composes this into "Sent
+  // Today", which is a claim about delivery with no time on it at all — the
+  // header of src/lib/readReceipt.ts has been describing that sentence as
+  // "Sent 09:41" since it was written.
+  //
+  // Both halves are the reader's own locale and both already refuse to invent
+  // anything: each returns '—' for a timestamp it cannot read, and a stamp with
+  // one unreadable half says only the half it has rather than pairing a real
+  // value with a dash.
+  const fmt = (iso: string) => {
+    const day = fmtRelativeDay(iso);
+    const time = fmtTime(iso);
+    if (day === '—') return day;
+    if (time === '—') return day;
+    return `${day} ${time}`;
+  };
   const G = layout.gutter;
   const { ref: barRef, lift } = useKeyboardLift();
   return (

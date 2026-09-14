@@ -1448,14 +1448,23 @@ export default function Calendar() {
               {selDaySessions.length > 0 ? <Rule /> : null}
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: selDaySessions.length > 0 ? sp.lg : 0, marginBottom: sp.sm }}>Taken</Text>
               {selDayTaken.map((k, ki) => {
-                // `?? 0` and the null arm below are what unblock the widening
-                // of `TakenSlot.myPosition` to `number | null` in
-                // src/ui/sessions.tsx: that field is still settled with
-                // `toNum(r.my_position) ?? 0`, and 0 is the value this screen
-                // reads as "you are not on this queue" and `waitlistLine` writes
-                // "Nobody is waiting for this slot yet." about. This file was
-                // named as the reason the widening was not made; it no longer is.
-                // Dead today, load-bearing the moment that one line changes.
+                // The widening this file was once named as blocking has been
+                // made. `TakenSlot.myPosition` is `number | null` in
+                // src/ui/sessions.tsx and the mapper there reads it with
+                // `toNum(r.my_position)` and no `?? 0`, so the null arm below
+                // is LIVE, not dead: a member whose place in the queue did not
+                // come back reaches it, and reads that it did not come back
+                // rather than that they are not in the line.
+                //
+                // The `?? 0` on this line survives on purpose, because it
+                // answers a narrower question than the caption does: whether to
+                // draw this hour as one this member is queued for, and to offer
+                // Leave rather than Wait For It. An unread position is not
+                // evidence that they are queued, so it falls to the same side
+                // as 0 — and nothing is claimed out loud from that, because the
+                // caption tests the null itself. Test null FIRST anywhere it is
+                // compared: `null > 0` is `false`, so a null placed after the
+                // comparison falls silently into the wrong arm.
                 const mine = (k.myPosition ?? 0) > 0;
                 return (
                   <View key={k.sessionId}>

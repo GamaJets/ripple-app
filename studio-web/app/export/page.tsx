@@ -65,7 +65,7 @@ import {
 import {
   buildGymExport, exportBlocker, partSlice,
   EXPORT_PARTS, EXPORT_LABEL, EXPORT_COST, EXPORT_DATE_FIELD, EXPORT_UNBOUNDED_WHY,
-  type ExportPart, type ExportFile, type GymExportInput,
+  type ExportPart, type ExportFile, type GymExportInput, type GymExportBundle,
   type Slice, type MemberBooking, type GymClass,
   memberSlices, memberRowCount, MEMBER_PARTS, windowSlices,
   type ExportInvoice, type ExportSettlement, type ExportEquipment, type ExportShift,
@@ -760,7 +760,7 @@ function Files({ bundle, blocker, me }: {
       // protection officer reads as evidence.
       await logExport(
         me, 'gym', null,
-        bundle.files.reduce((a, f) => a + (f.rows ?? 0), 0),
+        bundleRowCount(bundle),
         bundle.manifest.parts.map((p) => p.part).filter((p): p is ExportPart => !!p),
         { from: bundle.manifest.window.from, to: bundle.manifest.window.to },
       );
@@ -1035,6 +1035,51 @@ function MemberRecord({ input, blocker, readAt, me }: {
  * A gap in the log is visible as a gap; a refused export is a gym that cannot
  * leave.
  */
+/**
+ * How many rows a whole-gym bundle actually contains, or null when nobody can
+ * say.
+ *
+ * This was `bundle.files.reduce((a, f) => a + (f.rows ?? 0), 0)`, and the
+ * figure it produced goes into `gym_export_runs.rows_exported` — the row a data
+ * protection officer reads as the record of what left this platform. Three
+ * separate ways for that sum to be wrong, all silent:
+ *
+ *  · A part that FAILED to read is written into the bundle as a named stub with
+ *    `rows: null`. `?? 0` scored it as nought rows, so a bundle missing the
+ *    entire payments register logged a total as confidently as a whole one. A
+ *    failed read is not an empty table.
+ *  · A part that came back TRUNCATED takes the same shape — `buildGymExport`
+ *    refuses to write a prefix as a CSV and substitutes a stub — so it too
+ *    scored nought. And had it ever been written out, its prefix would have
+ *    been summed as though it were the set.
+ *  · README.txt and manifest.json are not tables and carry `rows: null`
+ *    honestly. They are the only files whose null legitimately contributes
+ *    nothing, and the old `??` could not tell them from the other two.
+ *
+ * `memberRowCount` in src/lib/gymExport.ts already settled the rule for the
+ * one-member bundle — "one unreadable part makes the COUNT unknown rather than
+ * smaller" — and this is that rule for the whole-gym one. `bundle.complete` is
+ * false when any part failed, truncated or was still loading, so it is the gate;
+ * the loop then refuses to be talked into a total by any remaining null.
+ *
+ * Null is a value the column takes: `rows_exported integer check (rows_exported
+ * is null or rows_exported >= 0)`, and `logExport` has always accepted
+ * `number | null`. An unstated figure in that row is a gap somebody can see. A
+ * confident nought is not.
+ */
+function bundleRowCount(bundle: GymExportBundle): number | null {
+  if (!bundle.complete) return null;
+  let n = 0;
+  for (const f of bundle.files) {
+    // Not a table: the README and the manifest have no rows to count, and that
+    // is the only null this may pass over.
+    if (f.part === null) continue;
+    if (f.placeholder || f.rows == null) return null;
+    n += f.rows;
+  }
+  return n;
+}
+
 async function logExport(
   me: Me, scope: 'gym' | 'member', memberId: string | null,
   rows: number | null, parts: ExportPart[], window: ExportWindow,

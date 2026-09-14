@@ -1003,11 +1003,63 @@ addEventListener('DOMContentLoaded', function () {
           The clock starts the moment they tap it in the app, not when you next open the console —
           so the queue exists, it counts down, and it goes red when a request is past the promise.
         </p>
+        <!-- NO NUMBER HERE, DELIBERATELY — and this is the note that stops the
+             next editor putting one back.
+
+             The figure IS known and IS measured. As of 14 September 2026, an
+             erasure reaches 118 tables in `public` plus 11 inside Supabase's
+             own `auth` schema, 129 in all. Measured against the live database
+             (project phgfwzpkkwdysftlgkoq) as the transitive closure of
+             `on delete cascade` from the row `action_account_deletion()`
+             actually deletes:
+
+               with recursive fk as (
+                 select (conrelid::regclass)::text  as child,
+                        (confrelid::regclass)::text as parent
+                   from pg_constraint
+                  where contype = 'f' and confdeltype = 'c')
+               , rec as (
+                 select 'auth.users'::text as tbl
+                  union
+                 select fk.child from fk join rec on fk.parent = rec.tbl)
+               select count(*) from rec;
+
+             Count it against the LIVE catalogue, never by parsing
+             supabase/setup.sql: a `create table` clause is not the last word
+             on a foreign key, and the retention part drops and recreates
+             memberships_member_id_fkey, gym_invoices_member_id_fkey and
+             gym_payments_member_id_fkey with a different action. The
+             file-parsed closure gives 125 and is wrong.
+
+             This page never carried the figure; four other surfaces did, and
+             all four said 39 until 14 September 2026 — the owner console, the
+             owner app's confirmation, a comment in src/ui/notifications.tsx
+             and one in supabase/parts/41-account-deletion.sql. 39 was taken
+             when the schema was about a quarter of its present size and was
+             never re-counted, so every one of them understated an irreversible
+             act by a factor of three while sounding precise. What this bullet
+             carried instead was the sentence "Their invoices and memberships
+             go too", which was not stale but INVERTED: those three foreign
+             keys are `on delete set null`, so the gym's financial record
+             survives on purpose, for its retention obligation. This page told
+             an owner their books would be destroyed.
+
+             The fix is not a fresher number on this page. A count belongs
+             where something polices it: web/security.html carries the chart,
+             with a "Counted from the live catalogue, <date>" stamp, and
+             check F of scripts/check-site-claims.mjs fails on a partial edit
+             to it. A figure repeated in prose over here would be a second
+             place to update and nothing would notice when it was missed —
+             which is precisely how this site once shipped a password minimum
+             corrected on four screens and missed on the fifth. So this bullet
+             states the KIND of thing that goes and the kind that survives,
+             which does not go stale when a table is added, and sends a reader
+             who wants the count to the page that holds it. -->
         <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Two confirmations, and both say what goes</strong> — the profile, the workouts, the logs, the scans, the messages and the bookings, across every table that holds them. Their invoices and memberships go too.</span></li>
+            <span><strong>Two confirmations, and both say what goes</strong> — the profile, the workouts, the logs, the scans, the messages and the bookings, across every table that hangs off the account, and the sign-in account itself. Their invoices and memberships are not in that set. Those are your financial record and they survive; <a href="/security#deletion">the deletion page counts what is reached</a>, from the database's own foreign keys rather than from memory.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>What stays, and why</strong> — payments, door-log visits and guest passes remain, with the person detached from them. Your books do not develop a hole because somebody exercised their rights.</span></li>
+            <span><strong>What stays, and why</strong> — invoices, memberships and payments remain, and so do door-log visits and guest passes. Each loses its link to the account. Several keep the name on purpose, copied onto the row as the account goes, because an invoice billed to nobody reconciles nothing and a waiver without the name that signed it is not evidence of anything. Detached is not anonymous, and your books do not develop a hole because somebody exercised their rights.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>The erasure is logged even though the person is not</strong> — that they asked, and when you actioned it, is kept. The record of the deletion is the evidence that it happened.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>

@@ -279,10 +279,29 @@ export default function SessionCredits() {
     return lines.find((l) => l.id === row.entitlementId)?.label ?? null;
   };
 
-  const Row = ({ row }: { row: LedgerRow }) => (
-    <View style={{ paddingVertical: sp.md }}>
-      <Text style={{ ...ty.label, color: t.ink }}>{when(row.startsAt)}</Text>
-      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{clientLedgerLine(row, labelFor(row))}</Text>
+  /**
+   * One ledger line: when the session is, and what it drew or is expected to
+   * draw.
+   *
+   * A PLAIN FUNCTION, called as `{row(r)}`, and not a component rendered as
+   * `<Row row={r} />`. A component declared in this body is a new function
+   * object on every render, so React sees a different element TYPE each time
+   * and unmounts and remounts both lists rather than updating them — and this
+   * screen re-renders on each of three independent reads landing, on pull to
+   * refresh, and on every focus. Nothing in here holds a TextInput or an
+   * accessibility label, so the cost is work and not a lost caret; the rule is
+   * the same one app/(client)/report.tsx:475 states about `narrativeBlock` and
+   * app/(client)/injuries.tsx:185 now follows.
+   *
+   * Local rather than lifted to module scope because it closes over `labelFor`,
+   * which closes over the `lines` read. The `key` moves onto the returned View,
+   * because a call cannot carry one and there is no longer an element above it
+   * that could.
+   */
+  const row = (r: LedgerRow) => (
+    <View key={r.sessionId} style={{ paddingVertical: sp.md }}>
+      <Text style={{ ...ty.label, color: t.ink }}>{when(r.startsAt)}</Text>
+      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{clientLedgerLine(r, labelFor(r))}</Text>
     </View>
   );
 
@@ -407,7 +426,7 @@ export default function SessionCredits() {
           <Rule />
           <Section>
             <SectionHead title="Booked" note="What these are expected to draw" />
-            {ledger.upcoming.map((r) => <Row key={r.sessionId} row={r} />)}
+            {ledger.upcoming.map((r) => row(r))}
           </Section>
         </>) : null}
 
@@ -415,7 +434,7 @@ export default function SessionCredits() {
           <Rule />
           <Section>
             <SectionHead title="Already Had" note="What each one actually cost you" />
-            {ledger.past.map((r) => <Row key={r.sessionId} row={r} />)}
+            {ledger.past.map((r) => row(r))}
           </Section>
         </>) : null}
 

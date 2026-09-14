@@ -71,7 +71,7 @@ import { runCurrency, totalNote } from '@lib/gymRateCurrency';
 // pays them disagreeing about what a run comes to is the whole failure.
 import {
   fetchTrainerPay, withResolvedRates, fetchClassPay, fetchAdjustments,
-  scopedToRun, runScopeOf, runTotal, runCurrencyBlocker,
+  scopedToRun, runScopeOf, runTotal, runCurrencyBlocker, payLinesTotal,
   ADJUSTMENT_LABEL, CLASS_PAY_LABEL,
   type PayIndex, type ClassPayLine, type Adjustment,
 } from '@lib/gymPay';
@@ -971,12 +971,18 @@ export default function CoachEarnings() {
     // produce a figure out of one.
     : outstanding.some((x) => x.rateCents == null)
       ? null
+      // `payLinesTotal`, not a reduce. Both amounts are `number | null` now —
+      // they always could be unread, and `Number(x) || 0` in `fetchClassPay`
+      // and `fetchAdjustments` used to hide it — and a reduce over a null puts
+      // a class taught for nothing into the figure a coach reads as their
+      // month. Null makes the whole run unstateable, exactly as an unpriced
+      // session already does two lines above.
       : runTotal({
           sessionCents: settlementAmount(outstanding),
           sessions: outstanding.length,
-          classCents: myClasses.reduce((a, c) => a + c.amountCents, 0),
+          classCents: payLinesTotal(myClasses),
           classes: myClasses.length,
-          adjustmentCents: myAdjustments.reduce((a, x) => a + x.amountCents, 0),
+          adjustmentCents: payLinesTotal(myAdjustments),
           adjustments: myAdjustments.length,
         });
 
@@ -1542,8 +1548,12 @@ function Extras({
           ? <span className="dash">no register</span>
           : String(c.attendees)) },
     { key: 'amount', header: 'Amount', value: (c) => c.amountCents, numeric: true,
-      render: (c) => money(c.amountCents, c.currency)
-        ?? <span className="dash">{NO_CURRENCY_NOTE}</span> },
+      // Two different dashes, because they are two different facts: a line with
+      // no readable amount is not a line whose gym has set no currency, and the
+      // coach reading this is owed for it either way.
+      render: (c) => (c.amountCents == null
+        ? <span className="dash">no amount on the line</span>
+        : money(c.amountCents, c.currency) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
   ];
   const adjCols: Column<Adjustment>[] = [
     { key: 'when', header: 'Applies', value: (a) => a.appliesOn ?? '',
@@ -1562,6 +1572,10 @@ function Extras({
       // taken from. Drawn exactly as /payroll draws it, colour as a MARK on the
       // figure and never as the ink of a sentence.
       render: (a) => {
+        // The amount before the currency: `money` answers null for both a
+        // missing currency and an amount that did not come back, and those are
+        // different sentences to the person being paid.
+        if (a.amountCents == null) return <span className="dash">no amount on the line</span>;
         const drawn = money(a.amountCents, a.currency);
         if (drawn == null) return <span className="dash">{NO_CURRENCY_NOTE}</span>;
         return (

@@ -110,6 +110,53 @@ export async function loadFloorQueue(uid: string | null): Promise<void> {
   announce();
 }
 
+/**
+ * A load that did not finish, and what that means about this phone.
+ *
+ * `loadFloorQueue` handles the failure it expects — a device that will not
+ * answer `getItem` — and latches `readable` false itself. What reaches here is
+ * everything above and below that: a listener that threw out of `announce`, or
+ * any step a later change adds. Before this, both callers dropped the load
+ * promise on the floor with `void` and chained a bare `.then`, so such a
+ * rejection was an unhandled promise rejection: silent, and the `.then` never
+ * ran, so the flush it exists to trigger never ran either — for the life of the
+ * process,
+ * because `loaded` stayed false and the module's own registration in
+ * `registerFlush` above is gated on it. A coach's attendance sat on the phone
+ * and the three screens said nothing was waiting.
+ *
+ * ── What a failed load is allowed to SAY ──────────────────────────────────
+ *
+ * Not "the queue is empty". This module's second rule is that a queue which has
+ * not been read is not an empty one, and the sentences for it already exist:
+ * with `readable` false the three screens print "What this phone is still
+ * carrying could not be read … Nothing has been lost — it is not being written
+ * over either", and `registerVisibilityLine` says the same to a coach reading
+ * the register. So the state chosen here is exactly the state an unreadable
+ * device already produces, and it is chosen rather than defaulted:
+ *
+ *   · `readable` false — `persist` writes nothing, so whatever is really on the
+ *     device survives to a launch that can read it, and the screens withhold
+ *     "nothing waiting" instead of claiming it.
+ *   · `acts` empty — nothing may be flushed or shown as pending, because
+ *     nothing about the queue is known.
+ *   · `loaded` TRUE — the attempt is over. Left false it would not mean "still
+ *     loading", it would mean "waiting forever", and the app's flush registry
+ *     would skip this queue on every reconnect and every foreground from here
+ *     on.
+ */
+function loadFailed(uid: string | null, e: unknown): void {
+  reportError('floorQueue.load', e);
+  // A later account has taken this module over since the read began. Its state
+  // is not this failure's to latch — the same rule `resetFor` and the flusher
+  // keep, and for the same reason.
+  if (owner !== uid) return;
+  acts = [];
+  readable = false;
+  loaded = true;
+  announce();
+}
+
 /* ── the three senders ──────────────────────────────────────────────────── */
 
 /**
@@ -388,10 +435,20 @@ registerFlush('floorQueue', () => (owner && loaded ? flushAll(owner) : undefined
 export function FloorQueueSync({ uid }: { uid: string | null }): null {
   useEffect(() => {
     let live = true;
-    void loadFloorQueue(uid).then(() => {
+    // Written as an awaited sequence rather than `.then(…).catch(…)` so that the
+    // two failures stay separable: a load that did not finish must not go on to
+    // flush, and a flush that rejected must not be reported as a load that
+    // failed.
+    void (async () => {
+      try { await loadFloorQueue(uid); }
+      catch (e) { loadFailed(uid, e); return; }
       if (!live || !uid) return;
-      void flushAll(uid);
-    });
+      // A rejected flush changes nothing about the queue — every act keeps its
+      // place, stays counted, and is offered again on the next reconnect — but
+      // thrown away by `void` it was the same silence the load's was.
+      try { await flushAll(uid); }
+      catch (e) { reportError('floorQueue.flush', e); }
+    })();
     return () => { live = false; };
   }, [uid]);
   return null;
@@ -442,13 +499,20 @@ export function useFloorQueue(uid: string | null): FloorQueue {
 
   useEffect(() => {
     let live = true;
-    void loadFloorQueue(uid).then(() => {
+    // The same shape as `FloorQueueSync`, because it is the same two failures.
+    // This site had the identical missing `.catch` and it is the one a coach
+    // actually reaches: `FloorQueueSync` is mounted by the trainer layout, but
+    // this runs on every one of the four screens that own the queue.
+    void (async () => {
+      try { await loadFloorQueue(uid); }
+      catch (e) { loadFailed(uid, e); return; }
       if (!live || !uid) return;
       // Anything written on a previous visit goes up as soon as a screen that
       // uses this queue is opened with signal. Failing here is neither fatal
       // nor silent: the act keeps its place, stays counted, and is tried again.
-      void flushAll(uid);
-    });
+      try { await flushAll(uid); }
+      catch (e) { reportError('floorQueue.flush', e); }
+    })();
     return () => { live = false; };
   }, [uid]);
 

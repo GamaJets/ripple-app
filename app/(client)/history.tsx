@@ -296,6 +296,22 @@ export default function History() {
 
   const [load, setLoad] = useState<Load>({ state: 'loading' });
 
+  /* The clock the whole page is windowed against.
+   *
+   * `monthlyHistory(log, Date.now(), …)` sat in the render body below. A render
+   * body is not a memo, so it is not frozen at mount — but it is only right at
+   * the moment something else happens to redraw, and this screen is reached
+   * from a tab and is never unmounted. Nothing on it re-renders on its own: the
+   * read runs on focus, and a member who leaves History open overnight on the
+   * last of the month is looking at a 36-month window that ends in the month
+   * before the one they are in. `monthsSinceLast` is counted off the end of
+   * that window, so the Breaks line below would be a month out with it.
+   * `useNow` re-settles on the local day rolling over and on the app coming
+   * back to the foreground, which are the two moments it can go wrong.
+   * See src/ui/today.ts — the MuscleSection at the foot of this file already
+   * reached this conclusion about its own seven-day window. */
+  const now = useNow();
+
   const read = useCallback(async () => {
     setLoad({ state: 'loading' });
     if (!USE_SUPABASE) { setLoad({ state: 'ready', log: localRef.current, partialBefore: null }); return; }
@@ -468,7 +484,7 @@ export default function History() {
     );
   }
 
-  const cells = monthlyHistory(log, Date.now(), MAX_MONTHS, weightSeries);
+  const cells = monthlyHistory(log, now.getTime(), MAX_MONTHS, weightSeries);
   const life = lifetimeTotals(log, weightSeries)!;
   const peak = peakVolume(cells);
   const best = bestMonth(cells);
@@ -480,7 +496,18 @@ export default function History() {
   const active = trainedMonths(cells).length;
   const breaks = gaps(cells);
   const worstGap = longestGap(cells);
-  const quiet = monthsSinceLast(cells) ?? 0;
+  /* Whole months since the last logged session, or NULL when the charted
+   * window holds no training at all.
+   *
+   * It was `?? 0`, which turns "nothing in this window to measure from" into a
+   * confident "you trained this month". `cells` is the last MAX_MONTHS months,
+   * not the member's history, so a member whose last session was more than
+   * three years ago reaches here with every cell untrained — and the Breaks
+   * section, whose whole job is to say how long the silence has run, rendered
+   * nothing at all for the one person it is most about. Null is carried and
+   * answered in its own arm below, off `life.lastAt`, which is the real last
+   * session and not the end of a window. */
+  const quiet = monthsSinceLast(cells);
   const arc = volumeArc(cells);
   const records = prTimeline(log, weightSeries).slice().reverse().slice(0, 12);
   const rows = yearRows(cells);
@@ -490,6 +517,19 @@ export default function History() {
   // hero figure printed over it looks exactly as measured as one that is whole.
   const lifeNote = tonnageNote({ kg: life.volumeKg ?? 0, unknownSets: life.unpricedSets });
   const earlier = span.months - cells.length;      // months clipped by MAX_MONTHS
+  /* The month the HERO's figure actually starts from.
+   *
+   * It was `cells[0].key` — the oldest month on the CHART, which is capped at
+   * MAX_MONTHS. The figure beside it is `life.volumeKg`, summed by
+   * `lifetimeTotals` over the whole of `log` and not over `cells`. So a member
+   * five years in read "Lifted since Sep 2022 · 214 tonnes" over a total that
+   * included 2020 and 2021: the right figure, dated to a start it was not
+   * measured from, and understating the period by two years in the one place
+   * the page puts a lifetime in words. `life.firstAt` is the first session the
+   * total actually counted. The fallback is the old expression and is only
+   * reached on a timestamp `monthKey` cannot parse, which `historySpan` has
+   * already refused once to produce `life` at all. */
+  const sinceKey = monthKey(life.firstAt) ?? cells[0].key;
   const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
   return frame(<>
@@ -520,7 +560,7 @@ export default function History() {
         is a wrong one — the same rule `money()` follows for a currency nobody
         chose. `historyNote` goes with it: it counts days and sessions. */}
     <Hero
-      label={whole ? `Lifted since ${monthLabel(cells[0].key)}` : `Lifted since ${monthLabel(cells[0].key)}, at least`}
+      label={whole ? `Lifted since ${monthLabel(sinceKey)}` : `Lifted since ${monthLabel(sinceKey)}, at least`}
       figure={whole ? fig(headline?.figure.toLocaleString()) : fig(null)}
       unit={whole && headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : undefined}
       note={whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}
@@ -577,7 +617,21 @@ export default function History() {
             qualified, because the Notice at the top of the screen already says
             how far back the read reached and says it better than a four-word
             note could. */}
-        <SectionHead title="Your Years" note={whole ? `${active} month${active === 1 ? '' : 's'} trained` : undefined} />
+        {/* …and `earlier`, which is the OTHER way this count is not a lifetime.
+            `cells` is capped at MAX_MONTHS, so for anybody with more history
+            than that `active` is the trained months IN THE CHART and the bare
+            words "months trained" claim it is all of them: five years of
+            unbroken training read "36 months trained" under a heading called
+            Your Years, and a member whose last session predates the window read
+            "0 months trained" over a grid of their own years. The figure is
+            kept — it is true about the chart it sits on — and it now says which
+            window it was counted over. `earlier` is 0 or less for everybody
+            whose whole history is charted, so that reader sees exactly what
+            they saw before. */}
+        <SectionHead title="Your Years"
+          note={!whole ? undefined
+            : earlier > 0 ? `${active} of the last ${cells.length} months`
+            : `${active} month${active === 1 ? '' : 's'} trained`} />
         <YearGrid rows={rows} peak={peak} t={t} unit={wu} />
         <GridLegend t={t} />
       </>)}
@@ -760,7 +814,13 @@ export default function History() {
     </>) : null}
 
     {/* ── the breaks, kept ───────────────────────────────────────────────── */}
-    {(breaks.length > 0 || quiet > 0) ? (<>
+    {/* `quiet` is null when the charted window has no training in it at all —
+        somebody whose last session is older than MAX_MONTHS. That is the
+        longest silence this page can be about and it used to open no section
+        at all, because `?? 0` had already turned it into "trained this month".
+        `dormant` is the same sentence said off `life.lastAt`, which is the real
+        last session rather than the end of a window. */}
+    {(breaks.length > 0 || (quiet != null && quiet > 0) || quiet == null) ? (<>
       <Rule />
       <Section>
         <SectionHead title="Breaks" note={worstGap ? `Longest ${worstGap.months} month${worstGap.months === 1 ? '' : 's'}` : undefined} />
@@ -772,11 +832,23 @@ export default function History() {
             </Text>
           </View>
         ))}
-        {quiet > 0 ? (
+        {quiet != null && quiet > 0 ? (
           <View style={{ paddingVertical: sp.sm }}>
             <Text style={{ ...ty.body, color: t.ink2 }}>
               Nothing logged since {monthLabel(cells[cells.length - 1 - quiet].key)}, {quiet} month
               {quiet === 1 ? '' : 's'} ago. That one is still open — everything above is still yours.
+            </Text>
+          </View>
+        ) : quiet == null ? (
+          <View style={{ paddingVertical: sp.sm }}>
+            {/* No month count beside it: the distance is longer than the chart
+                and counting it off `cells` is what produced the zero this
+                replaces. The month is named, which is the fact, and the reader
+                can see for themselves how far back it is. */}
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              Nothing logged since {monthLabel(monthKey(life.lastAt) ?? cells[cells.length - 1].key)} —
+              longer ago than this chart reaches back. That one is still open, and everything above is
+              still yours.
             </Text>
           </View>
         ) : null}
@@ -856,6 +928,21 @@ export default function History() {
          the status beside it. */
       windowDays={null}
       unit={wu}
+      /* The member's own weight over time, which is what prices a bodyweight
+         set (src/lib/bodyweightSets.ts). It was never passed, so the prop fell
+         to its `[]` default and this panel alone on this screen read a pull-up
+         as a set with no load: no est. 1RM, no volume, no trend — while the
+         lifetime tonnage, the PR timeline and the muscle board three sections
+         above all priced the very same sets from `weightSeries`. One screen,
+         one log, two answers for one movement. app/(client)/exercise.tsx
+         already passes it to the same module's <ExerciseTrail>, which is why
+         the movement's own page and this one disagreed too.
+         Unconditional, like every other consumer of it here: a failed scans
+         read leaves `weightSeries` empty, and empty is exactly the prop's
+         documented default — a bodyweight set with no load rather than an
+         invented one. The hero's note above already says when that has
+         happened. */
+      history={weightSeries}
       voice={{ they: 'You', their: 'your', have: 'have' }}
       /* The panel already draws a read stamp; without this it said WHEN and
          offered nothing to do about it, which is half an answer — see the prop's

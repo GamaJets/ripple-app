@@ -30,7 +30,11 @@ import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, weightToKg, readBodyWeight, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, readNumber, type WeightUnit, type LengthUnit } from '../../src/lib/units';
+import { weightIn, weightLabel, weightToKg, readBodyWeight, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, type WeightUnit, type LengthUnit } from '../../src/lib/units';
+// The two boxes either side of the weight, which had between them one silent
+// bound and no bound at all. See src/lib/bodyEntry.ts — both refuse out loud
+// now, in the unit the figure was typed in.
+import { readBodyFat, readHeight } from '../../src/lib/bodyEntry';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { uploadMyAvatar } from '../../src/ui/avatarUpload';
@@ -465,10 +469,30 @@ export default function Profile() {
   // that series. The body-fat box two fields down has been bounded all along.
   const weightRead = readBodyWeight(weightVal, wu);
   const enteredKg = weightRead.ok ? weightRead.kg : null;
-  const enteredCm = heightToCm(heightVal, lu, heightInVal);
+  // Through `readHeight`, for exactly the reason the line above goes through
+  // `readBodyWeight`. `heightToCm` converts and rounds and BOUNDS NOTHING, and
+  // this sheet is the only place in the client app a member types their own
+  // height: 1750 in the cm box stored somebody seventeen and a half metres
+  // tall, and ten inches with the feet box empty stored one 25 cm tall. Height
+  // is on the row the coach reads and the console prints, and there is no
+  // delete on it. `heightToCm` is still used by `switchLengthUnit` above, where
+  // an unbounded conversion is right: that carries a half-typed figure across
+  // a unit change rather than committing one.
+  const heightRead = readHeight(heightVal, lu, heightInVal);
+  const enteredCm = heightRead.ok ? heightRead.cm : null;
+  // And the body fat, which WAS bounded — `bf > 3 && bf < 70`, with no else.
+  // A member who typed 85 got no sentence, no refusal and no stored figure;
+  // they got "Sending…" and a sheet that closed. A write that did not happen,
+  // reported as one that did, on the field they opened the sheet to change.
+  const bfRead = readBodyFat(bfVal);
   // What the two height boxes hold when they are showing the record untouched.
   const heightFieldOfRecord = lu === 'cm' ? asText(shownHeight) : (shownParts ? String(shownParts.feet) : '');
   const heightInchFieldOfRecord = lu === 'in' && shownParts ? String(shownParts.inches) : '';
+  // The same, for body fat — so a record that already holds an out-of-range
+  // figure does not block somebody who came here to change their name.
+  const bfFieldOfRecord = cd.bodyFatPct != null ? String(round1(cd.bodyFatPct)) : '';
+  const heightEdited = heightVal !== heightFieldOfRecord || heightInVal !== heightInchFieldOfRecord;
+  const bfEdited = bfVal !== bfFieldOfRecord;
   // Said once, under the field, when and only when it is true. Repple records
   // kilograms and centimetres; a client reading pounds is reading a conversion,
   // and their InBody sheet will say a number that looks different. Without this
@@ -477,7 +501,6 @@ export default function Profile() {
   const lengthNote = convertedNote(lu);
 
   const save = () => {
-    cd.setName(nameVal.trim() || cd.name);
     // Two rules here, and the first one used to be broken outright.
     //
     // Nothing empty is written. `parseFloat(weightVal) || 0` stored 0 kg and
@@ -494,16 +517,31 @@ export default function Profile() {
     // who mistyped their weight and had their name change go through would have
     // no reason to look at the weight again. The sentence names the range in the
     // unit they are typing in.
+    //
+    // All three refusals are checked BEFORE the first setter runs, and each
+    // abandons the whole save. Refusing one field and writing the other two
+    // would leave a member whose name change went through with no reason to
+    // look at the figure that did not — which is the same silence one field
+    // narrower. They are tested in the order the boxes appear on the sheet, so
+    // the sentence names the topmost thing that is wrong.
+    if (!heightRead.ok && heightEdited) {
+      Alert.alert('Check that height', heightRead.reason);
+      return;
+    }
     if (!weightRead.ok && weightVal !== asText(shownWeight)) {
       Alert.alert('Check that weight', weightRead.reason);
       return;
     }
+    if (!bfRead.ok && bfEdited) {
+      Alert.alert('Check that body fat', bfRead.reason);
+      return;
+    }
+    cd.setName(nameVal.trim() || cd.name);
     if (enteredKg != null && weightVal !== asText(shownWeight)) cd.setWeightKg(enteredKg);
-    if (enteredCm != null && (heightVal !== heightFieldOfRecord || heightInVal !== heightInchFieldOfRecord)) cd.setHeightCm(enteredCm);
-    // `readNumber`, so a decimal comma reads as a decimal point — this box is
-    // a decimal pad now, and 22,5 through `parseFloat` is 22.
-    const bf = readNumber(bfVal);
-    if (bf != null && bf > 3 && bf < 70) cd.setBodyFat(round1(bf));
+    if (enteredCm != null && heightEdited) cd.setHeightCm(enteredCm);
+    // `readBodyFat` reads a decimal comma and rounds to the one decimal place
+    // the column holds, so there is nothing left for `round1` to do here.
+    if (bfRead.ok && bfRead.pct != null && bfEdited) cd.setBodyFat(bfRead.pct);
     // "Saved — plan updated" was a 900 ms timer and nothing else. It fired
     // whether or not anything reached the server: these four setters are local,
     // and the write behind them is a debounced push in clientData.tsx that
@@ -530,8 +568,14 @@ export default function Profile() {
     : null;
   // The same reader as `save` above uses, so the macro preview on screen is
   // built from the same number the button is about to store.
-  const _bfPrev = readNumber(bfVal);
-  const _bfForPreview = _bfPrev == null ? cd.bodyFatPct : _bfPrev;
+  //
+  // It said that before and it was not true. `readNumber` alone accepted any
+  // figure at all, so a member who typed 85 read "New target · 1,980 kcal"
+  // directly above a Save that would discard it — a day's food on screen,
+  // computed from a body nobody has, over a button that was never going to
+  // record it. A refused figure falls back to the record, which is what the
+  // targets are actually still built from.
+  const _bfForPreview = bfRead.ok && bfRead.pct != null ? bfRead.pct : cd.bodyFatPct;
   // `enteredKg` is null for an empty field where the old expression produced 0,
   // so the preview no longer quietly computes a day of food for a 0 kg client.
   const previewMacros = (enteredKg != null && enteredKg > 0 && _bfForPreview != null)
@@ -581,9 +625,12 @@ export default function Profile() {
   // again, with per-group collapse (see `collapsed` above, expanded by default) so
   // the length costs nothing, and Explore is the shortcut rather than the door.
   //
-  // Every route below was checked against app/(client)/ before this shipped —
-  // all 32 resolve to a real file. A row pointing at nothing is worse than no
-  // row, so if one is ever deleted, delete its row here in the same change.
+  // Every route below resolves to a real file in app/(client)/. A row pointing
+  // at nothing is worse than no row, so if one is ever deleted, delete its row
+  // here in the same change. The claim carries no COUNT any more — the sentence
+  // said 32 while there were 41, which is the third time a number kept by hand
+  // in this comment has gone stale, and the paragraph below is about exactly
+  // that. scripts/check-reachable.mjs is what actually holds it.
   //
   // That count said 28 while there were 30 rows, which is the ordinary fate of
   // a number kept by hand. Both halves of the claim are now checked by a script

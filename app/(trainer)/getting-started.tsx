@@ -39,6 +39,7 @@ import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
@@ -51,6 +52,49 @@ import {
   type CoachSetupRow,
 } from '../../src/lib/coachFirstRun';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+
+/**
+ * The mark against one setup row — a filled tick, a hairline ring, a dash for a
+ * state nothing could read, or a short bar for a step that does not apply.
+ *
+ * A module-scope PLAIN FUNCTION, called as `tick(r.state, t)`, and not a
+ * component written as `<Tick state={…} />`. Declared inside the screen body it
+ * was a new function object on every render, so React saw a different element
+ * TYPE each time and threw away every mark on the list rather than updating it
+ * — and this screen re-reads on every focus, which is the whole point of it.
+ * Nothing here holds a TextInput or an accessibility label (the label is on the
+ * Pressable around it), so what that cost was wasted work, not a coach's caret.
+ * The rule is app/(client)/report.tsx:475 and scripts/check-remount.mjs.
+ *
+ * At module scope because it closes over nothing from the render body: the
+ * sizes and the hairline are module imports, and the theme is passed.
+ *
+ * The member's copy is app/(client)/getting-started.tsx and is deliberately a
+ * second function rather than a shared one: these are route modules in two
+ * route groups, the two states differ ('na' is a coach-only answer), and
+ * importing one screen into the other to save eight lines would make a route
+ * file into a library. If they are ever shared, the shared one belongs in
+ * src/ui/.
+ */
+const tick = (state: CoachSetupRow['state'], t: Theme) => (
+  <View style={{
+    width: 24, height: 24, borderRadius: radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: state === 'done' ? t.brand : 'transparent',
+    borderWidth: state === 'done' ? 0 : hairline,
+    borderColor: t.ring,
+  }}>
+    {state === 'done' ? <Icon name="check" size={13} color={t.brandInk} /> : null}
+    {/* A dash, not an empty circle. An empty circle is a claim that this has
+        not been done, and under a failed read that is a claim we have not
+        earned. */}
+    {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
+    {/* Neither a tick nor a dash. A step that does not apply to this coach
+        has been answered and does not need doing, and both of the other two
+        marks would say something untrue about it. */}
+    {state === 'na' ? <View style={{ width: 8, height: hairline * 2, backgroundColor: t.ink3, borderRadius: 1 }} /> : null}
+  </View>
+);
 
 export default function CoachGettingStarted() {
   const t = useTheme();
@@ -84,26 +128,6 @@ export default function CoachGettingStarted() {
   const next = coachSetupNext(rows);
   const G = layout.gutter;
 
-  const Tick = ({ state }: { state: CoachSetupRow['state'] }) => (
-    <View style={{
-      width: 24, height: 24, borderRadius: radius.pill,
-      alignItems: 'center', justifyContent: 'center',
-      backgroundColor: state === 'done' ? t.brand : 'transparent',
-      borderWidth: state === 'done' ? 0 : hairline,
-      borderColor: t.ring,
-    }}>
-      {state === 'done' ? <Icon name="check" size={13} color={t.brandInk} /> : null}
-      {/* A dash, not an empty circle. An empty circle is a claim that this has
-          not been done, and under a failed read that is a claim we have not
-          earned. */}
-      {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
-      {/* Neither a tick nor a dash. A step that does not apply to this coach
-          has been answered and does not need doing, and both of the other two
-          marks would say something untrue about it. */}
-      {state === 'na' ? <View style={{ width: 8, height: hairline * 2, backgroundColor: t.ink3, borderRadius: 1 }} /> : null}
-    </View>
-  );
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
@@ -129,7 +153,7 @@ export default function CoachGettingStarted() {
               accessibilityLabel={`${r.item.title}. ${r.state === 'done' ? 'Done' : r.state === 'unknown' ? 'Not known' : r.state === 'na' ? 'Does not apply to you' : 'Still to do'}. ${r.item.note}`}
               style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}
             >
-              <View style={{ paddingTop: 2 }}><Tick state={r.state} /></View>
+              <View style={{ paddingTop: 2 }}>{tick(r.state, t)}</View>
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' || r.state === 'na' ? t.ink3 : t.ink }}>{r.item.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.item.note}</Text>

@@ -429,10 +429,28 @@ export default function TrainerAdSpend() {
                           one is in use — never a silent replacement. */}
                       {overridden ? (
                         <View style={{ marginTop: sp.md }}>
+                          {/* The unreadable figure gets its own sentence rather
+                              than a dash mid-clause. `src.cents` is
+                              `number | null` because the row can come back
+                              without an amount on it, and "You entered AED 0.00
+                              for this code" — which is what `?? 0` produced —
+                              is a specific, wrong claim about what the coach
+                              typed, made where it says that figure is the one
+                              being used. */}
                           <Flag tone={t.warn}>
-                            You entered {money(src!.cents, src!.currency) ?? DASH} for this code, and yours is the figure being
-                            used. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported and it has
-                            not replaced anything.
+                            {src!.cents == null ? (
+                              <>
+                                Your own figure for this code is the one being used, and we couldn’t read it back to show you
+                                here. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported and it
+                                has not replaced anything.
+                              </>
+                            ) : (
+                              <>
+                                You entered {money(src!.cents, src!.currency) ?? DASH} for this code, and yours is the figure
+                                being used. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported
+                                and it has not replaced anything.
+                              </>
+                            )}
                           </Flag>
                           <View style={{ marginTop: sp.md }}>
                             <Ghost

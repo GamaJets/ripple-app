@@ -321,13 +321,25 @@ async function main() {
     eq((await readOne({ pay_kind: 'per_head' })).payKind, 'per_class',
       'a kind this build does not know is read as flat rather than multiplied by a register');
 
-    // The columns are NOT NULL, so a null here means the read itself brought
-    // back something unusable — and the only safe figure for money nobody can
-    // read is nothing. Any other fallback is the app inventing a payment.
+    // The columns are NOT NULL in supabase/parts/183, so a null here means the
+    // READ brought back something unusable: a build that did not select the
+    // column, a value that does not parse. This block used to assert 0 for
+    // that, on the argument that "the only safe figure for money nobody can
+    // read is nothing". Nought is not the absence of a figure — it is a figure,
+    // and on this screen it is the sentence "this coach is owed nothing for
+    // that class". `rowOwed` added it in silently, the settlement recorded
+    // itself as the whole of what was owed, and the line was stamped paid.
+    //
+    // Null instead, which is the position src/ui/coachSettlements.ts already
+    // takes about these very columns — the coach's own copy of these lines has
+    // carried `number | null` all along, so one row was being read two ways.
     const unreadable = await readOne({ rate_cents: null, amount_cents: null });
-    eq(unreadable.rateCents, 0, 'a rate that came back unreadable is nought rather than a number this file made up');
-    eq(unreadable.amountCents, 0, 'and so is an amount — money nobody can read is not money somebody is owed');
-    eq((await readOne({ amount_cents: 'lots' })).amountCents, 0, 'including one that is not a number at all');
+    eq(unreadable.rateCents, null, 'a rate that came back unreadable is unknown, never nought');
+    eq(unreadable.amountCents, null, 'and so is an amount — money nobody can read is not a class taught for free');
+    eq((await readOne({ amount_cents: 'lots' })).amountCents, null, 'including one that is not a number at all');
+    // The zero that IS a reading still arrives as one. This is the half `|| 0`
+    // could never tell apart from the three above.
+    eq((await readOne({ amount_cents: 0 })).amountCents, 0, 'a line genuinely stamped at nothing reads back as nothing');
   }
 
   /* ── fetchAdjustments pages to the end ─────────────────────────────────────── */

@@ -20,7 +20,7 @@
 // in the unit the account reads in. Body fat does not: it is a percentage, and
 // a percentage does not have a unit system.
 import { View, Text, ScrollView } from 'react-native';
-import { num, num1 } from '../../src/lib/format';
+import { num, num1, fmtDay } from '../../src/lib/format';
 import { startOfWeek } from '../../src/lib/weekStart';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -88,10 +88,54 @@ export default function WeeklyReport() {
   const trainingWhole = isWhole(logStatus);
   const bodyWhole = isWhole(c.status);
   const mWhole = isWhole(mStatus);
+  // The fourth read, named like the other three rather than spelled out at the
+  // two places that happened to remember it.
+  //
+  // ── the one health fact that was not gated on its own read ───────────────
+  //
+  // Every other line in `healthTagged` below asks first whether the read
+  // behind it landed whole: the body line on `hasBody` (which is `bodyWhole &&
+  // …`), the waist line on `mWhole` through `mLatest`, composition and balance
+  // on `isWhole(c.scansStatus)` through `comp`. The check-in line asked only
+  // whether a check-in existed — and `useCheckIns` deliberately KEEPS its
+  // cached history when a refresh fails (src/ui/checkins.tsx: "offline: the
+  // cached history stands, and now says so"), setting 'error' and returning.
+  //
+  // So under a failed check-ins read the screen still had a `checkIn` object,
+  // and it went into the fact list — the summariser's ONLY source — as
+  // "Check-in energy 2/5, sleep 2/5…" beside "Week of 8 Sep – 14 Sep", with no
+  // date on it and nothing saying it might be a month old. The model writes
+  // that back in the second person as this week's, on the document the member
+  // sends to their coach. The fallback narrative a hundred lines down already
+  // guards the same fact with `isWhole(ciStatus) && checkIn`; the model's copy
+  // of it did not, which is the half that travels.
+  //
+  // ── and why the gate is "did it land", not `isWhole` ─────────────────────
+  //
+  // Two flags, because the two questions are different here and folding them
+  // would withhold a fact that is perfectly good.
+  //
+  // `ciWhole` is `isWhole` and gates the REPORT's "from what loaded" caption,
+  // which is a claim about the whole set.
+  //
+  // `ciLanded` gates the one check-in FACT, and admits 'partial' on purpose.
+  // `useCheckIns` reads newest-first and caps (`order('at', { ascending:
+  // false })` … `limit(capLimit())`), so a truncated page loses the OLDEST
+  // rows and its first row is still the newest one there is. `latestSent` is
+  // that row. This is not a count, a sum or an average over a prefix — the
+  // three things src/ui/loadStatus.ts forbids under 'partial' — it is a single
+  // row a truncated read is fully able to supply, and the same argument
+  // `programmeChoiceState` makes in src/lib/injuryGate.ts: a truncated read
+  // did land.
+  //
+  // What neither admits is 'error' and 'loading', where the object on screen
+  // is a cache or nothing at all.
+  const ciWhole = isWhole(ciStatus);
+  const ciLanded = ciStatus === 'ready' || ciStatus === 'partial';
   // What the report as a whole can stand behind. A weekly summary assembled
   // from four reads is only as complete as its worst one, and the narrative
   // draws on all four at once.
-  const reportWhole = trainingWhole && bodyWhole && mWhole && isWhole(ciStatus);
+  const reportWhole = trainingWhole && bodyWhole && mWhole && ciWhole;
   const st = useSettings();
   const wu = st.weightUnit;
   const lu = st.lengthUnit;
@@ -122,6 +166,23 @@ export default function WeeklyReport() {
   // able to read what they recorded. An empty `weightSeries` under a failed
   // profile read is not a client who has never been weighed.
   const hasBody = bodyWhole && wSeries.length > 0;
+
+  // ── "no change" was said about a member who has been weighed ONCE ──────
+  //
+  // `wDelta` is `wSeries.length > 1 ? last − first : 0`, and `hasBody` above
+  // asks only that the series is not empty. So a member with exactly one
+  // weigh-in had a delta of 0, and `deltaLabel(…, { noChange: 'no change' })`
+  // turned that into the WORDS "no change overall" — in the Weight row of the
+  // Body block, and in the fact list that is the summariser's only source. The
+  // model then writes it back to them in the second person, on a document they
+  // send to their coach: your weight is holding steady, about a member whose
+  // weight has never been compared to anything.
+  //
+  // Nothing had changed because nothing had been measured twice. A zero is a
+  // measurement and this is not one — it is the arithmetic of a series with one
+  // point in it. The figure itself is fine and still printed; it is the CHANGE
+  // that is not known, and it now says so and says why.
+  const wChangeKnown = hasBody && wSeries.length > 1;
 
   const mLatest = mWhole ? entries[0] : undefined;
   const mPrev = mWhole ? entries[1] : undefined;
@@ -183,6 +244,13 @@ export default function WeeklyReport() {
   const weekStart = startOfWeek(today);
   const range = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${today.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
   const wk = statsSince(log, weekStart.getTime(), c.weightSeries);
+  // Whether the latest check-in falls inside the week this report is headed
+  // with. `Date.parse` of `check_ins.at` is right here and not the bare-date
+  // trap: `at` is a timestamptz, an INSTANT, and `weekStart` is a local Date —
+  // two instants compared as instants. The bare `YYYY-MM-DD` rule is about
+  // date-only columns, and this is not one.
+  const checkInAtMs = checkIn ? Date.parse(checkIn.at) : NaN;
+  const checkInInWeek = Number.isFinite(checkInAtMs) && checkInAtMs >= weekStart.getTime();
   // ── the tonnage that needed no failed read to be wrong ────────────────
   //
   // `statsSince` returns `unpricedSets` alongside `volumeKg` and its doc says
@@ -198,6 +266,23 @@ export default function WeeklyReport() {
   // sets are missing and what to do about it, in the same words history.tsx,
   // trends.tsx and workouts.tsx already use.
   const volNote = tonnageNote({ kg: wk.volumeKg, unknownSets: wk.unpricedSets });
+  // ── and the same shape one column over, which nothing names ───────────
+  //
+  // `statsSince` sums energy as `kcal += e.kcal ?? 0` (src/lib/streaks.ts), and
+  // `WeekStats` carries no companion to `unpricedSets` for it. So an entry with
+  // no energy figure contributes a zero to the week's total exactly the way an
+  // unpriced bodyweight set used to contribute a zero to its tonnage — and a
+  // week where NOTHING carries one totals "~0 kcal", which went to the model as
+  // a fact about how hard somebody trained.
+  //
+  // Counted here rather than in `statsSince`, which belongs to another lane:
+  // the same window, over the same log, asking the one question the aggregate
+  // does not answer. Gated on `trainingWhole`, so this counts over a set that
+  // was read in full — a filter over a short list would answer a different
+  // question in the same words.
+  const weekEntries = trainingWhole ? log.filter((e) => Date.parse(e.t) >= weekStart.getTime()) : [];
+  const kcalGaps = weekEntries.filter((e) => e.kcal == null).length;
+  const kcalKnownFor = weekEntries.length - kcalGaps;
 
   const comp = compositionInsights(isWhole(c.scansStatus) ? c.scans : []);
   // Facts only. A line built from a read that did not land whole is not a
@@ -226,8 +311,28 @@ export default function WeeklyReport() {
     // seven movements. It says days now rather than a session count because
     // this app cannot count sessions: see the note on `WeekStats.days` in
     // src/lib/streaks.ts for the production rows that settle it.
+    // ── the counts below are counts over a set that was READ ───────────
+    //
+    // Said in the facts and not only asserted in the code. Every count here is
+    // gated on `trainingWhole`, so the log behind it landed in full — but the
+    // model is handed the figures and not the gate, and a bare "Trained on 0
+    // day(s)" is indistinguishable to it from the 0 a failed read produces.
+    // That is the defect scripts/check-ask-prompt.mjs exists for, arriving as
+    // prose instead of as a field: "nobody had been assessed and the model was
+    // told nobody is at risk". One line establishes the set for all four.
+    trainingWhole ? 'Their training log for these seven days was read in full, so the counts below are complete — a zero among them is a measured zero and not a gap.' : '',
     trainingWhole ? `Trained on ${wk.days} day(s) this week.` : '',
-    trainingWhole ? `Volume ${num1(wk.volumeKg / 1000)} tonnes, ~${num(wk.kcal)} kcal.` : '',
+    trainingWhole ? `Volume ${num1(wk.volumeKg / 1000)} tonnes.` : '',
+    // Energy, on the same footing as the tonnage beside it and for the same
+    // reason. Three arms, because "~0 kcal" over a week that carries no energy
+    // figures at all is not a small number, it is the absence of every number.
+    trainingWhole && weekEntries.length > 0 && kcalKnownFor === 0
+      ? `Energy burned this week is not known — none of the ${num(weekEntries.length)} exercise(s) logged carries an energy figure. Do not state a calorie figure for their week and do not call it an easy one.`
+      : '',
+    trainingWhole && kcalKnownFor > 0 ? `~${num(wk.kcal)} kcal.` : '',
+    trainingWhole && kcalKnownFor > 0 && kcalGaps > 0
+      ? `That kcal figure covers only ${num(kcalKnownFor)} of the ${num(weekEntries.length)} exercise(s) logged this week; the other ${num(kcalGaps)} carry no energy figure, so it is a floor and not a total.`
+      : '',
     // Said to the model too, for the same reason the caveats above and below
     // are: the fact lines are its only source, so a tonnage handed over bare is
     // one it will describe as the whole of their week's work.
@@ -255,11 +360,65 @@ export default function WeeklyReport() {
     // Through deltaLabel: an unchanged weight used to be stated to the model as
     // "(0 kg overall)", which is a change of zero rather than the absence of
     // one, and the model writes back about it as though something happened.
-    { kind: 'body', line: hasBody ? [`Weight ${fig(weightLabel(c.weightKg, wu))} (${deltaLabel(wDeltaShown, { since: null, unit: wu, noChange: 'no change' })} overall)`,
+    // The change is stated only where a change has been MEASURED. See
+    // `wChangeKnown`: one weigh-in is not a change of nought, and "no change"
+    // is the reassuring absence the gate's Rule A is written about — a string
+    // opening with an absence word, in a field naming no unknown, about
+    // somebody nothing has been compared for.
+    { kind: 'body', line: hasBody ? [`Weight ${fig(weightLabel(c.weightKg, wu))} (${wChangeKnown
+      ? `${deltaLabel(wDeltaShown, { since: null, unit: wu, noChange: 'no change' })} overall`
+      : 'overall change not known — there is one weigh-in on record and nothing to measure a change against, so do not say their weight is steady or that it has moved'})`,
       c.bodyFatPct != null ? `body fat ${c.bodyFatPct}%` : null,
       c.muscleKg != null ? `muscle ${fig(weightLabel(c.muscleKg, wu))}` : null].filter(Boolean).join(', ') + '.' : '' },
     { kind: 'waist', line: waistDShown != null && mLatest ? `Waist ${fig(lengthLabel(mLatest.waist, lu))} (${deltaLabel(waistDShown, { since: null, unit: lu, noChange: 'no change' })} since the previous tape reading).` : '' },
-    { kind: 'checkin', line: checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '' },
+    // `ciLanded &&`, for the reason argued where that flag is declared: a
+    // cached check-in under a FAILED read is not this week's news, and there is
+    // no date on this line for the model to notice that with. A truncated read
+    // is admitted — its newest row is still the newest row.
+    // DATED, and the date is not decoration.
+    //
+    // `latestSent` is the most recent check-in there has ever been, not the
+    // most recent one inside the week this report is headed with. Every other
+    // line in these two lists is bounded — `wk` counts from `weekStart`, the
+    // waist delta says "since the previous tape reading", the weight delta says
+    // "overall" — and this one arrived beside "Week of 8 Sep – 14 Sep" carrying
+    // nothing at all. A summariser handed an undated fact among dated ones
+    // writes it into the same sentence as the rest, so a check-in from three
+    // weeks ago was described to the member, in the second person, as this
+    // week's mood and this week's sleep.
+    //
+    // Whoop and Oura both refuse this shape: nothing derived is shown without
+    // the window it was derived over. Saying when costs one clause and it is
+    // the clause that makes the fact true.
+    { kind: 'checkin', line: ciLanded && checkIn ? `Their most recent check-in, ${fmtDay(checkIn.at)}${checkInInWeek ? ' (this week)' : ' — BEFORE the week above, so do not describe it as this week\u2019s'}: energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '' },
+    // ── a health read that did not land is SAID, not left as a silence ───
+    //
+    // The fitness half has told the model in as many words since its own
+    // repair — "Their training log could not be read this week. Do not say they
+    // did not train" — and the health half said nothing at all. A failed
+    // profile read, a failed tape read, a failed check-in read and a failed
+    // scan read each produced the empty string, and `reportHealthLines` dropped
+    // it, so the model saw a SHORTER LIST and no author for the shortness.
+    //
+    // That is the argument WITHHELD_FACTS_INSTRUCTION is built on in
+    // src/lib/coachShare.ts — "silence is not an instruction … the withheld
+    // lines are simply absent, and absence has no author" — and it holds
+    // identically here, except that a withholding is the member's decision and
+    // this is a read that failed. A summariser handed weight and waist and no
+    // scan writes the scan sentence anyway, because that is what a weekly
+    // summary looks like in every text it has read.
+    //
+    // `not known` and not `unknown`: the member-side spelling, the one the gate
+    // documents at NAMED_UNKNOWN_RE for this side of the app.
+    //
+    // These carry the kind they are about, so `REPORT_SHARE_BULLETS` still
+    // describes the payload — a line saying a figure could not be read
+    // discloses less than the figure, never more.
+    { kind: 'body', line: bodyWhole ? '' : 'not known — their weight, body fat and muscle could not be read this week, so no body figure is among these facts. Do not say they have not been weighed, and do not estimate one.' },
+    { kind: 'body', line: bodyWhole && wSeries.length === 0 ? 'not known — this member has no weigh-in on record at all, so there is no weight, body fat or muscle figure to speak about. Do not estimate one and do not treat it as a lapse.' : '' },
+    { kind: 'waist', line: mWhole ? '' : 'not known — their tape measurements could not be read this week. Do not say they have not measured and do not comment on their waist.' },
+    { kind: 'checkin', line: ciLanded ? '' : 'not known — their check-ins could not be read this week, so no energy, sleep, mood or adherence score is among these facts. Do not say they skipped a check-in.' },
+    { kind: 'composition', line: isWhole(c.scansStatus) ? '' : 'not known — their body-composition scans could not be read this week. Do not say nothing is improving, and do not name anything to watch.' },
     { kind: 'composition', line: comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '' },
     { kind: 'composition', line: comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '' },
     { kind: 'balance', line: comp.balance.length ? comp.balance.join(' ') : '' },
@@ -300,7 +459,7 @@ export default function WeeklyReport() {
     if (bodyWhole && deltaMoved(wDeltaShown)) bits.push(`Weight is ${wDeltaShown > 0 ? 'up' : 'down'} ${Math.abs(wDeltaShown)} ${wu} overall${movementIsProgress(wDeltaShown, c.goal, 'weight') ? ', trending your way' : ''}.`);
     if (comp.improving.length) bits.push(`On composition, ${comp.improving.slice(0, 2).join(' and ')} moved the right way.`);
     else if (comp.watch.length) bits.push(`Keep an eye on ${comp.watch.slice(0, 2).join(' and ')} from your latest scan.`);
-    if (isWhole(ciStatus) && checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
+    if (ciLanded && checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
     return bits.join(' ');
   })();
   // Whether any of the five reads behind this page is still in flight. Not the
@@ -393,7 +552,13 @@ export default function WeeklyReport() {
     // `good: wDelta <= 0` said that down is better whoever is reading it. A
     // member training to Build Muscle was shown the accent dot — this row's
     // "well done" — for losing the weight they are working to put on.
-    { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, delta: deltaMoved(wDeltaShown) ? `${deltaLabel(wDeltaShown, { since: null, unit: wu })} overall` : 'no change', good: movementIsProgress(wDeltaShown, c.goal, 'weight') },
+    // `'no change'` was printed for a member weighed once — see `wChangeKnown`.
+    // The figure is theirs and stays; the caption says what the app actually
+    // knows about how it has moved, which so far is nothing.
+    { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu,
+      delta: !wChangeKnown ? 'one weigh-in so far'
+        : deltaMoved(wDeltaShown) ? `${deltaLabel(wDeltaShown, { since: null, unit: wu })} overall` : 'no change',
+      good: wChangeKnown && movementIsProgress(wDeltaShown, c.goal, 'weight') },
     // hasBody only checks that a weight exists — a client can log a weight in a
     // check-in without ever having a scan, in which case body fat and muscle are
     // still unknown and used to print the 20% / 0 kg placeholders.
@@ -621,9 +786,35 @@ export default function WeeklyReport() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Latest Check-in" />
+              {/* Dated on screen too. "Latest Check-in" over four scores
+                  says nothing about whether they are this week's, and this is
+                  the block a member reads as the week's summary of how they
+                  felt. `fmtDay` is the app's own resolver (src/lib/locale.ts);
+                  `at` is a timestamp, so it carries its own instant. */}
+              <SectionHead title="Latest Check-in" note={checkIn.at ? fmtDay(checkIn.at) : undefined} />
+              {!checkInInWeek && Number.isFinite(checkInAtMs) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                  From before the week above, so it is not a reading of this week.
+                </Text>
+              ) : null}
               <Text style={{ ...ty.body, color: t.ink2 }}>Energy {checkIn.energy}/5 · Sleep {checkIn.sleep}/5 · Mood {checkIn.mood}/5 · Adherence {checkIn.adherence}/5</Text>
               {checkIn.note ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, fontStyle: 'italic' }}>“{checkIn.note}”</Text> : null}
+              {/* Still shown, and said to be what it is. `useCheckIns` keeps the
+                  cached history when a refresh fails — correctly, it is the
+                  member's own record — and its own note says the point of the
+                  status is that the screen "says so". This screen showed the
+                  cached row under the heading "Latest" and said nothing, so a
+                  failed read rendered as a current answer. The line goes no
+                  further than the screen: the fact handed to the summariser is
+                  withheld outright under the same condition, because a model
+                  cannot be shown a caption. */}
+              {!ciLanded ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {ciStatus === 'loading'
+                    ? 'Reading your check-ins…'
+                    : 'We couldn’t reach your check-ins just now, so this is the last one this phone had — there may be a newer one. It is left out of the summary above rather than described as this week’s.'}
+                </Text>
+              ) : null}
             </Section>
           </View>
         ) : null}

@@ -68,7 +68,7 @@ import { gymDateText } from '@lib/gymWhen';
 import { fetchGymZone, gymDay } from '@lib/gymZone';
 import { fetchMemberships, matchPayment, fetchOnlineOrders, type Membership, type OnlineOrder } from '@lib/gymRecord';
 import { onlineOrderProblem } from '@lib/gymOrderPayment';
-import { fetchGymCosts, gymCostsTaken, gymCostCategoryLabel, type GymCost } from '@lib/gymCosts';
+import { fetchGymCosts, gymCostCategoryLabel, type GymCost } from '@lib/gymCosts';
 // The paper behind a cost. `gym_documents` could say a file was about a member
 // or about a machine and had no way to say it was about a COST, so the amount
 // and the supplier's invoice sat in one database unable to point at each other
@@ -134,6 +134,10 @@ import {
 } from '@lib/gymReconcile';
 import { toCsv } from '@lib/gymExport';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+// A figure quoted per currency, side by side, that says how many of its rows it
+// could not speak for. See the block below `sumOf` for the two figures this
+// page used to withhold and the sentences it printed instead.
+import { quotedOf, quotedText, quotedNote, quotedWhole, type Quoted, type Noun } from '@lib/quotedTotal';
 import { saveText } from '@/lib/save';
 import { Banner, Announce } from '@/components/Banner';
 
@@ -334,61 +338,72 @@ const EMPTY: Books = {
   chases: reading(), filings: reading(), marks: new Map(), marksErr: null, online: reading(),
 };
 
-/* ── totals that refuse ────────────────────────────────────────────────────── */
+/* ── totals that are quoted, never withheld for want of one number ──────── */
 
 /**
- * The sum of a set of amounts, or the reason there isn't one.
+ * A set of amounts as this page quotes it.
  *
- * Three ways a set has no total, and all three are ordinary in a real gym's
- * data: nobody recorded anything, a row carries no amount, or the rows are in
- * more than one currency. Adding dirhams to pounds is not a sum, and treating a
- * missing amount as nothing shrinks the figure by exactly the row somebody
- * forgot to fill in.
+ * ── what this used to be, and the two figures it took off the page ─────
+ *
+ * It was a refusing sum: one currency and every row priced, or a dash and a
+ * sentence. Both refusals were wrong on the screen an accountant is handed.
+ *
+ *   · A gym that took AED 6,000 and GBP 400 in August read "Money in —" with
+ *     "AED and GBP in one set" under it. Those are two real totals of like
+ *     things and the page quoted neither. The Costs section of this same file
+ *     already printed both, side by side, and the rule was never generalised.
+ *   · A gym with 41 payments, 3 of them recorded with no amount, read a dash
+ *     where £4,210.02 of banked money stood. "£4,210.02" and "£4,210.02,
+ *     covering the 38 of 41 payments that carried an amount" are different
+ *     claims; a dash is a third one and it is not the safest of the three.
+ *
+ * So the figure is now per currency, side by side, and it always says how many
+ * rows it could not speak for. `quotedTotal.ts` holds the arithmetic and the
+ * sentence, tested under plain node, because /close needs the same answer.
+ *
+ * `whole` is the one thing that did not change and is why `cents` and
+ * `currency` survive: it is true only for a single currency with every row
+ * counted, and NOTHING may be derived from a figure that is not whole. A net
+ * position taken from a total missing three rows, or a collection rate taken
+ * over two moneys, is a number with an unstated error in it.
  */
-type Sum =
-  | { known: true; cents: number; currency: string }
-  | { known: false; why: string };
+interface Sum {
+  /** Every pot, side by side, already formatted. Null only when not one row
+   *  could be totalled — which renders a dash and never a zero. */
+  text: string | null;
+  /** The sentence under it: what it covers, what it does not, and why the
+   *  currencies were not added. Always a sentence; never empty. */
+  note: string;
+  /** One currency, every row counted. The gate on deriving anything. */
+  whole: boolean;
+  /** The single total, present only when `whole`. */
+  cents: number | null;
+  /** What that total is in, present only when `whole`. */
+  currency: string | null;
+  q: Quoted;
+}
 
 function sumOf(
   rows: Array<{ amountCents: number | null; currency: string | null }>,
+  noun: Noun,
   whenEmpty: string,
 ): Sum {
-  if (!rows.length) return { known: false, why: whenEmpty };
-
-  const missing = rows.filter((r) => !Number.isFinite(r.amountCents as number)).length;
-  if (missing) {
-    return {
-      known: false,
-      why: `${missing} of ${rows.length} rows carry no amount, so this set cannot be totalled — the sum would be short by exactly ${missing === 1 ? 'that row' : 'those rows'}`,
-    };
-  }
-
-  // A row that states no currency is not a row that agrees with the others —
-  // it is a row that cannot be added to them. It refuses the total in its own
-  // words rather than being quietly folded into whatever the neighbours say,
-  // which is what a `?? 'AED'` up in the mapper used to do for it.
-  if (rows.some((r) => !r.currency)) {
-    const n = rows.filter((r) => !r.currency).length;
-    return {
-      known: false,
-      why: `${n} of ${rows.length} rows do not say what currency they are in, so this set cannot be totalled`,
-    };
-  }
-
-  const currencies = [...new Set(rows.map((r) => r.currency as string))].sort();
-  if (currencies.length > 1) {
-    return { known: false, why: `${currencies.join(' and ')} in one set — not summed` };
-  }
-
+  const q = quotedOf(rows);
+  const whole = quotedWhole(q);
   return {
-    known: true,
-    cents: rows.reduce((a, r) => a + (r.amountCents as number), 0),
-    currency: currencies[0],
+    text: quotedText(q, money),
+    note: quotedNote(q, noun, whenEmpty),
+    whole,
+    cents: whole ? q.pots[0].minorUnits : null,
+    currency: whole ? q.pots[0].currency : null,
+    q,
   };
 }
 
-const sumText = (s: Sum): string | null => (s.known ? money(s.cents, s.currency) : null);
-const sumNote = (s: Sum): string | undefined => (s.known ? undefined : s.why);
+const PAYMENTS: Noun = { one: 'payment', many: 'payments' };
+const SETTLEMENTS: Noun = { one: 'settlement', many: 'settlements' };
+const COSTS: Noun = { one: 'cost', many: 'costs' };
+const INVOICES: Noun = { one: 'invoice', many: 'invoices' };
 
 /* ── the screen ────────────────────────────────────────────────────────────── */
 
@@ -811,13 +826,13 @@ function Month({ at, zone, zoneErr, books, gymName, ccy, members, tenantId, me, 
   const settledRows = books.settled.rows ?? [];
   const costRows = books.costs.rows ?? [];
 
-  const cashIn = sumOf(inMonthPayments, `no payment is recorded in ${w.label} — which is not the same as none being taken`);
-  const cashOut = sumOf(settledRows, `no payroll settlement is recorded in ${w.label}`);
+  const cashIn = sumOf(inMonthPayments, PAYMENTS, `No payment is recorded in ${w.label}, which is not the same as none being taken.`);
+  const cashOut = sumOf(settledRows, SETTLEMENTS, `No payroll settlement is recorded in ${w.label}.`);
   // The same refusing sum as everything else on this page, so a month holding
   // two currencies of cost gets the reason rather than a number.
-  const costsOut = sumOf(costRows, `no cost is recorded in ${w.label} — which is not the same as none being paid`);
-  const raisedSum = sumOf(raised.filter((i) => isRaised(i.status)), `no invoice was raised in ${w.label}`);
-  const owedSum = sumOf(outstanding, `nothing was outstanding as at ${asAt}`);
+  const costsOut = sumOf(costRows, COSTS, `No cost is recorded in ${w.label}, which is not the same as none being paid.`);
+  const raisedSum = sumOf(raised.filter((i) => isRaised(i.status)), INVOICES, `No invoice was raised in ${w.label}.`);
+  const owedSum = sumOf(outstanding, INVOICES, `Nothing was outstanding as at ${asAt}.`);
 
   const net = netOf(cashIn, cashOut, books);
 
@@ -852,39 +867,49 @@ function Month({ at, zone, zoneErr, books, gymName, ccy, members, tenantId, me, 
       >
         {/* A read that has not returned shows a dash whatever the sum says —
             `sumOf([])` over rows nobody has yet is "nothing recorded", which is
-            a claim about the month, and the month has not been read. */}
+            a claim about the month, and the month has not been read.
+
+            `sum.text` is every currency the month holds, side by side, and
+            `sum.note` says how many rows are behind it and how many are not.
+            These three tiles used to print a dash for a gym trading in two
+            moneys: the figure was refused because there was no ONE figure, on
+            the page whose figures get quoted to an accountant. */}
         <Kpi
           label="Money in"
-          text={books.payments.state ? null : sumText(cashIn)}
-          note={note(books.payments, 'the payments') ?? (cashIn.known ? `${inMonthPayments.length} payment${inMonthPayments.length === 1 ? '' : 's'} banked` : cashIn.why)}
+          text={books.payments.state ? null : cashIn.text}
+          note={note(books.payments, 'the payments') ?? cashIn.note}
         />
         <Kpi
           label="Money out (payroll)"
-          text={books.settled.state ? null : sumText(cashOut)}
-          note={note(books.settled, 'the settlements') ?? (cashOut.known ? `${settledRows.length} settlement${settledRows.length === 1 ? '' : 's'}` : cashOut.why)}
+          text={books.settled.state ? null : cashOut.text}
+          note={note(books.settled, 'the settlements') ?? cashOut.note}
         />
         <Kpi
           label="Money out (costs)"
-          text={books.costs.state ? null : sumText(costsOut)}
-          note={note(books.costs, 'the recorded costs') ?? (costsOut.known ? `${costRows.length} cost${costRows.length === 1 ? '' : 's'} recorded` : costsOut.why)}
+          text={books.costs.state ? null : costsOut.text}
+          note={note(books.costs, 'the recorded costs') ?? costsOut.note}
         />
         {/* Deliberately still payments less PAYROLL, with the costs beside it
             rather than inside it. Folding them in would produce a figure over
             two sides of different completeness — see the paragraph under it. */}
+        {/* The one tile that still refuses outright, and the reason is that it
+            is DERIVED. A difference between two figures is only a figure when
+            both sides are whole and in one money; anything else is a number
+            with an error in it that nothing on the line states. */}
         <Kpi
           label="Cash recorded in Repple"
-          text={net.known ? sumText(net) : null}
-          note={net.known ? 'not profit, and costs are not in it — see below' : net.why}
+          text={net.whole ? net.text : null}
+          note={net.whole ? 'not profit, and costs are not in it — see below' : net.note}
         />
         <Kpi
           label="Invoiced"
-          text={books.invoices.state ? null : sumText(raisedSum)}
-          note={note(books.invoices, 'the invoices') ?? (raisedSum.known ? `${raised.length} raised in ${w.label}` : raisedSum.why)}
+          text={books.invoices.state ? null : raisedSum.text}
+          note={note(books.invoices, 'the invoices') ?? `${raisedSum.note} Raised in ${w.label}.`}
         />
         <Kpi
           label="Outstanding"
-          text={books.invoices.state ? null : sumText(owedSum)}
-          note={note(books.invoices, 'the invoices') ?? (owedSum.known ? `${outstanding.length} invoice${outstanding.length === 1 ? '' : 's'} unpaid at ${asAt}` : owedSum.why)}
+          text={books.invoices.state ? null : owedSum.text}
+          note={note(books.invoices, 'the invoices') ?? `${owedSum.note} Unpaid as at ${asAt}.`}
         />
       </div>
 
@@ -892,6 +917,21 @@ function Month({ at, zone, zoneErr, books, gymName, ccy, members, tenantId, me, 
         w={w} gymName={gymName} asAt={asAt}
         payments={inMonthPayments} settled={settledRows}
         raised={raised} outstanding={outstanding} books={books}
+        /* The figures exactly as the screen states them, not re-totalled inside
+           the exporter. A second summing in the CSV is a second answer, and the
+           day the two disagree the file an accountant filed and the page it was
+           taken from are saying different things about one month. */
+        sums={[
+          { label: 'Money in (net of refunds)', sum: cashIn, read: books.payments },
+          { label: 'Money out (payroll)', sum: cashOut, read: books.settled },
+          { label: 'Money out (costs)', sum: costsOut, read: books.costs },
+          // `netOf` already answers for both of its sides, so this one carries
+          // no read of its own: a figure whose ingredients failed to load says
+          // so in its own sentence.
+          { label: 'Cash recorded in Repple', sum: net, read: null },
+          { label: `Invoiced in ${w.label}`, sum: raisedSum, read: books.invoices },
+          { label: `Outstanding as at ${asAt}`, sum: owedSum, read: books.invoices },
+        ]}
       />
       <MoneyIn read={books.payments} rows={inMonthPayments} w={w} total={cashIn} />
       <MoneyOut read={books.settled} rows={settledRows} total={cashOut} zone={zone} />
@@ -932,17 +972,37 @@ function Month({ at, zone, zoneErr, books, gymName, ccy, members, tenantId, me, 
  * earned in a month whose income simply did not load.
  */
 function netOf(cashIn: Sum, cashOut: Sum, books: Books): Sum {
+  // A refusal is still a Sum, so the tile beside it can render one shape. The
+  // figure is null and the sentence says which silence this is.
+  const no = (why: string): Sum => ({
+    text: null, note: why, whole: false, cents: null, currency: null,
+    q: { pots: [], unlabelled: 0, unpriced: 0, rows: 0, counted: 0 },
+  });
   if (books.payments.state === 'loading' || books.settled.state === 'loading') {
-    return { known: false, why: 'still reading both sides' };
+    return no('Still reading both sides.');
   }
-  if (books.payments.state === 'failed') return { known: false, why: 'the payments could not be read, so there is no in to subtract from' };
-  if (books.settled.state === 'failed') return { known: false, why: 'the settlements could not be read, so there is no out to subtract' };
-  if (!cashIn.known) return { known: false, why: `money in has no total — ${cashIn.why}` };
-  if (!cashOut.known) return { known: false, why: `money out has no total — ${cashOut.why}` };
+  if (books.payments.state === 'failed') return no('The payments could not be read, so there is no in to subtract from.');
+  if (books.settled.state === 'failed') return no('The settlements could not be read, so there is no out to subtract.');
+  // `whole` and not "has a figure". Money in may now QUOTE a figure that is
+  // short three unpriced rows, or that is two pots in two moneys, and neither
+  // of those is something to subtract from: the answer would carry an error
+  // nothing on the line states. This is the gate that keeps the quoting change
+  // above from leaking into a derived number.
+  if (!cashIn.whole) return no(`Money in is not a single whole figure. ${cashIn.note}`);
+  if (!cashOut.whole) return no(`Money out is not a single whole figure. ${cashOut.note}`);
   if (cashIn.currency !== cashOut.currency) {
-    return { known: false, why: `money in is in ${cashIn.currency} and money out in ${cashOut.currency} — not subtracted` };
+    return no(`Money in is in ${cashIn.currency} and money out in ${cashOut.currency}, so one is not subtracted from the other.`);
   }
-  return { known: true, cents: cashIn.cents - cashOut.cents, currency: cashIn.currency };
+  const cents = (cashIn.cents as number) - (cashOut.cents as number);
+  const currency = cashIn.currency as string;
+  return {
+    text: money(cents, currency),
+    note: 'not profit, and costs are not in it',
+    whole: true,
+    cents,
+    currency,
+    q: { pots: [{ currency, minorUnits: cents, count: 1 }], unlabelled: 0, unpriced: 0, rows: 1, counted: 1 },
+  };
 }
 
 /* ── money in ──────────────────────────────────────────────────────────────── */
@@ -987,6 +1047,30 @@ function MoneyIn({ read, rows, w, total }: {
   const unpriced = rows.filter((p) => !Number.isFinite(p.amountCents));
   const unattributed = rows.filter((p) => !p.memberId);
 
+  /*
+   * ── gross, given back, net ────────────────────────────────────────────
+   *
+   * The figure above this section is NET of every refund and correction, and
+   * until now nothing on this page or in the file it exports said so.
+   *
+   * `reversePayment` in src/lib/gymRecord.ts records a refund as a NEGATIVE
+   * `gym_payments` row carrying `kind`, and supabase/parts/168 argues that
+   * design at length. It is the right shape and it has one consequence nobody
+   * had followed through to this screen: every total here silently nets. A gym
+   * that took £12,400 and refunded £900 read "£11,500" under "Money in" with
+   * nothing naming either half — and gross, refunded and net as three separate
+   * lines is the first thing an accountant asks a month-end sheet for. It is
+   * also the shape every other console in this market ships: a sales report
+   * that cannot show what was given back cannot be reconciled against a card
+   * processor's statement, which reports both.
+   *
+   * No new read. `kind` is on every row this page already holds.
+   */
+  const takings = rows.filter((p) => p.kind === 'payment');
+  const back = rows.filter((p) => p.kind !== 'payment');
+  const grossIn = sumOf(takings, PAYMENTS, `No payment is recorded as taken in ${w.label}.`);
+  const backOut = sumOf(back, PAYMENTS, 'Nothing was refunded or corrected in this month.');
+
   const cols: Column<MethodLine>[] = [
     { key: 'method', header: 'Method', value: (l) => l.method.replace('_', ' ') },
     { key: 'currency', header: 'Currency', value: (l) => l.currency },
@@ -1004,15 +1088,33 @@ function MoneyIn({ read, rows, w, total }: {
             cost="money in is unknown for this month, and so is everything computed from it">
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
-            {total.known
-              ? <>{money(total.cents, total.currency)} across {rows.length} payment{rows.length === 1 ? '' : 's'}.</>
-              : <>No total: {total.why}.</>}
+            {/* The figure, then the sentence that qualifies it. Both come out
+                of `quotedTotal.ts`: two currencies are two amounts printed side
+                by side, and a set with holes in it still quotes what it has and
+                says what it left out. This line used to read "No total: 3 of 41
+                rows carry no amount" over thirty-eight banked payments. */}
+            {total.text ? <>{total.text}. </> : null}
+            {total.note}
             {unpriced.length
-              ? ` ${unpriced.length} payment${unpriced.length === 1 ? '' : 's'} carr${unpriced.length === 1 ? 'ies' : 'y'} no amount and ${unpriced.length === 1 ? 'is' : 'are'} left out of the table below entirely rather than counted as nothing.`
+              ? ` The ${unpriced.length === 1 ? 'one' : unpriced.length} with no amount ${unpriced.length === 1 ? 'is' : 'are'} left out of the table below entirely rather than counted as nothing.`
               : null}
             {unattributed.length
-              ? ` ${unattributed.length} payment${unattributed.length === 1 ? '' : 's'} carr${unattributed.length === 1 ? 'ies' : 'y'} nobody's name — counted in the total, and unmatchable against any invoice.`
+              ? ` ${unattributed.length} payment${unattributed.length === 1 ? '' : 's'} carr${unattributed.length === 1 ? 'ies' : 'y'} nobody's name, counted in the total and unmatchable against any invoice.`
               : null}
+          </p>
+          <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
+            <Figure label="Taken" text={grossIn.text} note={grossIn.note} />
+            <Figure label="Refunded or corrected" text={backOut.text}
+                    note={back.length
+                      ? `${backOut.note} Recorded as negative rows, so the figure above is already net of ${back.length === 1 ? 'it' : 'them'}.`
+                      : backOut.note} />
+            <Figure label="Net" text={total.text} note="what the two above come to — the figure at the top of this page" />
+          </div>
+          <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5 }}>
+            A refund is a negative payment row pointing at what it undid, never an
+            erasure of the original, so both sides of it survive in the table below
+            and in the export. That is why the three figures above can be stated
+            separately at all.
           </p>
           <DataTable noun="payment methods"
             rows={lines} columns={cols} rowKey={(l) => l.key}
@@ -1145,9 +1247,8 @@ function MoneyOut({ read, rows, total, zone }: { read: Read<Settled>; rows: Sett
             cost="money out is unknown for this month, so no net position is offered">
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
-            {total.known
-              ? <>{money(total.cents, total.currency)} across {rows.length} settlement{rows.length === 1 ? '' : 's'}.</>
-              : <>No total: {total.why}.</>}
+            {total.text ? <>{total.text}. </> : null}
+            {total.note}
             {' '}This is payroll only. It is not everything the gym paid out — it is
             everything the gym paid out <em>through Repple</em>.
           </p>
@@ -1340,10 +1441,6 @@ function CostsOut({ read, rows, w, total, receipts, receiptsWhole, tenantId, me,
       } },
   ];
 
-  // Per currency, because a month holding two of them has two amounts of money
-  // and not a sum — and the KPI above has already refused to state one.
-  const pots = gymCostsTaken(rows).pots;
-
   return (
     <Section
       title="Money out (costs)"
@@ -1353,12 +1450,12 @@ function CostsOut({ read, rows, w, total, receipts, receiptsWhole, tenantId, me,
             cost="what this gym spent outside payroll is unknown for this month, not nil">
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
-            {total.known
-              ? <>{money(total.cents, total.currency)} across {rows.length} cost{rows.length === 1 ? '' : 's'}.</>
-              : <>No single total: {total.why}.</>}
-            {!total.known && pots.length > 1
-              ? ` ${pots.map((p) => money(p.minorUnits, p.currency)).join(' and ')} — kept apart, because this app holds no rate between them.`
-              : null}
+            {/* This section reached the right answer first, by hand, and
+                nothing else on the page had it. `sumOf` now returns it for
+                every figure here, so the per-currency list below is the same
+                one the tile at the top of the page prints. */}
+            {total.text ? <>{total.text}. </> : null}
+            {total.note}
           </p>
           <DataTable noun="costs"
             rows={rows} columns={cols} rowKey={(c) => c.id}
@@ -1969,12 +2066,12 @@ function NetCash({ net, w, costs }: { net: Sum; w: MonthWindow; costs: Read<GymC
       <div style={{ padding: 14 }}>
         <div
           className="mono"
-          style={{ fontSize: 25, letterSpacing: '-0.02em', color: net.known ? 'var(--ink)' : 'var(--ink3)' }}
+          style={{ fontSize: 25, letterSpacing: '-0.02em', color: net.whole ? 'var(--ink)' : 'var(--ink3)' }}
         >
-          {net.known ? sumText(net) : '—'}
+          {net.whole ? net.text : '—'}
         </div>
-        {!net.known ? (
-          <p style={{ margin: '6px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{net.why}</p>
+        {!net.whole ? (
+          <p style={{ margin: '6px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{net.note}</p>
         ) : null}
 
         <p style={{ margin: '12px 0 0', color: 'var(--ink2)', fontSize: 13.5, maxWidth: 760 }}>
@@ -2075,22 +2172,27 @@ function Invoiced({ read, raised, w }: { read: Read<Invoice>; raised: Invoice[];
 
   const raisedRows = raised.filter((i) => isRaised(i.status));
   const paidRows = raised.filter((i) => i.status === 'paid');
-  const raisedSum = sumOf(raisedRows, 'nothing was raised');
-  const paidSum = sumOf(paidRows, 'none of this month’s invoices is marked paid');
+  const raisedSum = sumOf(raisedRows, INVOICES, 'Nothing was raised.');
+  const paidSum = sumOf(paidRows, INVOICES, 'None of this month’s invoices is marked paid.');
 
   // A collection rate, and the denominator is the whole reason this is written
   // out rather than inlined. Zero invoices raised does not mean 0% collected —
   // it means the question has no answer, and 0% on an accountant's page reads
   // as a gym that collected nothing.
+  //
+  // `whole` on BOTH sides, not "has a figure". The two figures above may now
+  // quote two currencies side by side, or quote a total short of the rows that
+  // carried no amount; a proportion taken over either is a percentage with an
+  // error in it that the "%" sign hides completely.
   const rate: string | null =
-    raisedSum.known && paidSum.known && raisedSum.currency === paidSum.currency && raisedSum.cents > 0
-      ? `${Math.round((paidSum.cents * 100) / raisedSum.cents)}%`
+    raisedSum.whole && paidSum.whole && raisedSum.currency === paidSum.currency && (raisedSum.cents as number) > 0
+      ? `${Math.round(((paidSum.cents as number) * 100) / (raisedSum.cents as number))}%`
       : null;
   const rateWhy =
-    !raisedSum.known ? raisedSum.why
-      : raisedSum.cents === 0 ? 'the invoices raised total nothing, so there is no proportion to take'
-      : !paidSum.known ? paidSum.why
-      : raisedSum.currency !== paidSum.currency ? 'raised and paid are in different currencies'
+    !raisedSum.whole ? `What was raised is not a single whole figure, so there is no proportion to take. ${raisedSum.note}`
+      : raisedSum.cents === 0 ? 'The invoices raised total nothing, so there is no proportion to take.'
+      : !paidSum.whole ? `What is marked paid is not a single whole figure, so there is no proportion to take. ${paidSum.note}`
+      : raisedSum.currency !== paidSum.currency ? 'Raised and paid are in different currencies.'
       : null;
 
   const cols: Column<StatusLine>[] = [
@@ -2112,8 +2214,8 @@ function Invoiced({ read, raised, w }: { read: Read<Invoice>; raised: Invoice[];
             cost="what the gym billed this month is unknown, and so is what it collected">
         <>
           <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
-            <Figure label="Raised" text={sumText(raisedSum)} note={sumNote(raisedSum) ?? `${raisedRows.length} invoice${raisedRows.length === 1 ? '' : 's'}`} />
-            <Figure label="Marked paid" text={sumText(paidSum)} note={sumNote(paidSum) ?? `${paidRows.length} invoice${paidRows.length === 1 ? '' : 's'}`} />
+            <Figure label="Raised" text={raisedSum.text} note={raisedSum.note} />
+            <Figure label="Marked paid" text={paidSum.text} note={paidSum.note} />
             <Figure label="Collected" text={rate} note={rate ? 'of what was raised this month, by value' : rateWhy ?? undefined} />
           </div>
           <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5 }}>
@@ -2540,10 +2642,21 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, drops, me, on
  * with an empty section — which would be indistinguishable from a gym that
  * billed nothing, permanently, in a file somebody keeps.
  */
-function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, books }: {
+function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, books, sums }: {
   w: MonthWindow; gymName: string | null; asAt: string;
   payments: GymPayment[]; settled: Settled[];
   raised: Invoice[]; outstanding: Invoice[]; books: Books;
+  /**
+   * The figures as the page states them, in the order the tiles are read.
+   *
+   * `read` rides with each one and is the whole reason this is not a list of
+   * numbers. `sumOf` over the rows of a REFUSED read is `sumOf([])`, which says
+   * "no payment is recorded in August" — a claim about the till, made out of a
+   * broken query. The screen guards every tile on the read state and the file
+   * has to guard the same way, or the export is the one copy of that sentence
+   * somebody keeps. Null where the figure answers for its own ingredients.
+   */
+  sums: Array<{ label: string; sum: Sum; read: Read<unknown> | null }>;
 }) {
   const loading = books.payments.state === 'loading' || books.settled.state === 'loading'
     || books.costs.state === 'loading' || books.invoices.state === 'loading';
@@ -2560,6 +2673,37 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
         new Date().toISOString(),
       ]],
     ));
+
+    /*
+     * ── the summary this file did not have ────────────────────────────────
+     *
+     * Every section below is rows, and nothing in the file was the FIGURE. So
+     * the one thing an accountant does with a month-end export — read the
+     * total — was a thing they had to do themselves in a spreadsheet, over
+     * columns holding more than one currency, with a SUM() that would happily
+     * add dirhams to pounds. This page spends its whole design budget refusing
+     * exactly that addition on screen and then handed over the ingredients for
+     * it.
+     *
+     * One line per figure per currency, because that is what the figure IS.
+     * A figure with no currency to state gets a line saying so in words: an
+     * empty cell in a spreadsheet somebody keeps is indistinguishable, forever,
+     * from a zero.
+     */
+    parts.push(head('SUMMARY — the figures on this page'));
+    parts.push(toCsv(
+      ['Figure', 'Currency', 'Amount (minor units)', 'Rows in this amount', 'What this figure covers'],
+      sums.flatMap(({ label, sum, read }) => {
+        if (read && read.state) {
+          return [[label, 'not read', 'not read', 'not read',
+            unreadable(`this figure's rows`, read.state, read.why).trim()]];
+        }
+        return sum.q.pots.length
+          ? sum.q.pots.map((pot) => [label, pot.currency, pot.minorUnits, pot.count, sum.note])
+          : [[label, 'no figure', 'no figure', sum.q.rows, sum.note]];
+      }),
+    ));
+    parts.push('\nEach line is one currency. Two lines for one figure are two amounts of money and not an amount to add up: this app holds no rate between them.\n');
 
     parts.push(head('MONEY IN — payments recorded in the month'));
     parts.push(books.payments.state !== null
@@ -2789,7 +2933,7 @@ function Ageing({ read, rows, asAt, total }: {
         key: b,
         label: BAND_LABEL[b],
         count: g.length,
-        sum: sumOf(g, 'no invoice sits in this band'),
+        sum: sumOf(g, INVOICES, 'No invoice sits in this band.'),
       };
     });
   }, [rows, asAt]);
@@ -2820,10 +2964,13 @@ function Ageing({ read, rows, asAt, total }: {
     { key: 'label', header: 'Band', value: (l) => l.label,
       render: (l) => <span style={{ color: BAND_TONE[l.key] }}>{l.label}</span> },
     { key: 'count', header: 'Invoices', value: (l) => l.count, numeric: true },
-    { key: 'amount', header: 'Amount', value: (l) => (l.sum.known ? l.sum.cents : null), numeric: true,
-      render: (l) => (l.sum.known
-        ? <>{money(l.sum.cents, l.sum.currency)}</>
-        : <span className="dash">{l.sum.why}</span>) },
+    // `value` sorts, and only a whole single-currency band has a number to sort
+    // on. A band holding two moneys sorts as unknown rather than on whichever
+    // of the two happens to be bigger.
+    { key: 'amount', header: 'Amount', value: (l) => (l.sum.whole ? l.sum.cents : null), numeric: true,
+      render: (l) => (l.sum.text
+        ? <>{l.sum.text}</>
+        : <span className="dash">{l.sum.note}</span>) },
   ];
 
   return (
@@ -2835,9 +2982,8 @@ function Ageing({ read, rows, asAt, total }: {
             cost="the debt is unknown — no ageing is shown rather than an empty one, which would read as a gym owed nothing">
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
-            {total.known
-              ? <>{money(total.cents, total.currency)} outstanding across {rows.length} invoice{rows.length === 1 ? '' : 's'}.</>
-              : <>No outstanding total: {total.why}.</>}
+            {total.text ? <>{total.text} outstanding. </> : null}
+            {total.note}
             {' '}Void and written-off invoices are money the gym has decided not to
             collect and are counted in neither this nor what came in.
           </p>

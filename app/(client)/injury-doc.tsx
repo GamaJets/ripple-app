@@ -350,14 +350,38 @@ export default function InjuryDoc() {
   const openCount = Object.values(drafts).filter((d) => d.verdict === 'open').length;
   const addedCount = Object.values(drafts).filter((d) => d.verdict === 'added').length;
 
-  /* ── one proposal ────────────────────────────────────────────────────── */
-  const Proposal = ({ cand }: { cand: InjuryCandidate }) => {
+  /* ── one proposal ──────────────────────────────────────────────────────
+     A PLAIN FUNCTION, called as `proposal(cand)`, and not a component
+     rendered as `<Proposal cand={…} />`. That distinction is the whole of a
+     defect, and it is not a style preference.
+
+     A component declared inside this body is a NEW function object on every
+     render of this screen. React compares element types by identity, so it
+     does not update the card — it unmounts the old one and mounts a fresh
+     one. The card holds a <TextInput>, and a remounted TextInput is a new
+     native view: it is not the one holding the keyboard.
+
+     So the Note field — the one field on this screen the member has to write
+     themselves, deliberately seeded EMPTY a few lines below so the report's
+     own sentence is never put in their mouth — dismissed the keyboard and
+     lost the caret after every single character typed into it. `setDraft`
+     sets state on this screen; this screen re-renders; `Proposal` is a
+     different function; the card is torn down and rebuilt around whatever
+     had been typed so far. The chips did it too, less visibly.
+
+     app/(client)/report.tsx already states the rule about its own
+     `narrativeBlock`: "written as a plain call and not a component so it does
+     not remount the text — and therefore does not interrupt a screen reader —
+     every time this screen redraws." Same rule. The `key` moves onto the
+     returned elements, because there is no longer an element above them to
+     carry one. */
+  const proposal = (cand: InjuryCandidate) => {
     const d = drafts[cand.key];
     if (!d) return null;
 
     if (d.verdict !== 'open') {
       return (
-        <View style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+        <View key={cand.key} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           <Icon name={d.verdict === 'added' ? 'check' : 'minus'} size={16} color={t.ink3} />
           <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>
             {areaLabel(d.area)} — {d.verdict === 'added' ? 'added to your injuries' : 'not added'}
@@ -370,7 +394,7 @@ export default function InjuryDoc() {
     }
 
     return (
-      <Card style={{ marginTop: sp.md }}>
+      <Card key={cand.key} style={{ marginTop: sp.md }}>
         {/* What we matched on and the line it came from. The client is being
             asked to agree with a reading of their own document, so they get to
             see the reading. */}
@@ -612,7 +636,7 @@ export default function InjuryDoc() {
               <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{msg.note}</Text>
 
               {extraction.outcome === 'candidates'
-                ? extraction.candidates.map((cand) => <Proposal key={cand.key} cand={cand} />)
+                ? extraction.candidates.map((cand) => proposal(cand))
                 : (
                   // Not an empty list. An empty list on this screen reads as
                   // "you have no injuries", and the app has no idea whether
@@ -807,12 +831,27 @@ export default function InjuryDoc() {
               <Text style={{ ...ty.label, color: '#fff', opacity: 0.8, textAlign: 'center' }}>
                 Your file is still stored — this is a problem loading it, not a missing document. Try again, or close this and pull the list down to refresh.
               </Text>
+              {/* A failed re-signature used to `return` with nothing said, so
+                  the one button on a black screen over somebody's medical
+                  record did visibly nothing when it did not work — which reads
+                  as the app having stopped responding, on the screen where it
+                  has just failed to show them their own document. `openDoc`
+                  alerts on exactly this failure and says the same thing: the
+                  file is still stored, the link is what could not be minted.
+                  Silence is never the answer here; it is the shape of "we tried
+                  and said nothing" the rest of this screen refuses. */}
               <Ghost label="Try Again" onPress={() => {
                 const doc = viewing;
                 if (!doc) return;
                 void (async () => {
                   const fresh = await signInjuryDoc(doc.path);
-                  if (!fresh) return;
+                  if (!fresh) {
+                    Alert.alert(
+                      'Still could not open it',
+                      'Your document is still stored — this is a problem getting a link to it, not a missing file. Close this and pull the list down to refresh, then try again.',
+                    );
+                    return;
+                  }
                   setViewErr(false);
                   setViewing({ ...doc, url: fresh });
                   setDocs((prev) => prev.map((d) => (d.path === doc.path ? { ...d, url: fresh } : d)));

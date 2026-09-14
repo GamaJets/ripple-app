@@ -45,7 +45,14 @@ import type { LoadStatus } from './loadStatus';
 export interface GymInvitesValue {
   invites: MemberInvite[];
   /** Under 'error' an empty list means we could not check — never that no gym
-   *  has invited you. That distinction is the whole of src/ui/loadStatus.ts. */
+   *  has invited you. That distinction is the whole of src/ui/loadStatus.ts.
+   *
+   *  'partial' is now reachable and was not: `fetchMyInvites` had no `.limit()`
+   *  and PostgREST's own thousand-row ceiling is silent, so a cut read arrived
+   *  here as 'ready' and this hook stated a prefix of somebody's invitations as
+   *  all of them. It now comes back capped, and a truncated page lands here as
+   *  'partial' — the rows are real and may be listed; a COUNT of them may not,
+   *  which is what `isWhole` in loadStatus.ts is for. */
   status: LoadStatus;
   /** tenantId → the gym's own name, for the invitations we could get one for.
    *  A missing key is "not known" and is rendered as a description, not a gap. */
@@ -88,10 +95,15 @@ export function useGymInvites(): GymInvitesValue {
     const mine = ++run.current;
     setStatus((s) => (s === 'ready' ? s : 'loading'));
     try {
-      const rows = await fetchMyInvites(supabase);
+      const { rows, truncated } = await fetchMyInvites(supabase);
       if (run.current !== mine) return;
       setInvites(rows);
-      setStatus('ready');
+      // Not 'ready' when the page was cut. The invitations in hand are real and
+      // every one of them is redeemable, so they are kept and shown — that is
+      // what src/lib/rowCap.ts says the phone does instead of throwing — but
+      // the screen is told the set is a prefix rather than being left to assume
+      // it is the whole of it.
+      setStatus(truncated ? 'partial' : 'ready');
       const names = await readGymNames();
       if (run.current !== mine) return;
       setGymNames(names);

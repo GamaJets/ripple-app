@@ -44,7 +44,8 @@ import {
   PHOTO_REFUSED_NOTE, PHOTO_UNREAD_NOTE, PHOTO_OFF_NOTE,
 } from '../../src/lib/photoAI';
 import { usePhotoAI } from '../../src/ui/photoAI';
-import { parseFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
+import { readFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
+import { foodReadSay, namedGaps } from '../../src/lib/readerAnswer';
 import { searchProducts, type OffProduct } from '../../src/lib/openfoodfacts';
 import { searchCommonFoods } from '../../src/lib/foods';
 import { searchDishes } from '../../src/lib/restaurant';
@@ -429,74 +430,129 @@ export default function FoodLog() {
  const logNL = async () => {
    const text = nl.trim(); if (!text) return;
    setNlBusy(true);
-   const parsed = await parseFoodText(text);
+   const read = await readFoodText(text);
+   // ── four answers, four sentences ──────────────────────────────────────
+   //
+   // This was `const parsed = await parseFoodText(text)` and, at the bottom,
+   // one Alert reading "Could not read that" for every way it could come back
+   // empty. `nutrition-parse` has told the four apart on the wire since Lane
+   // 129 and src/lib/readerAnswer.ts reads them; the four sentences a member
+   // gets live in FOOD_READ_SAY beside the reading, so no screen can word one
+   // of them as another.
+   //
+   // The third is the one that matters. A member who types "a bowl of soup"
+   // and is shown an error learns the app is broken; one told the reader read
+   // their description and named no food in it learns to type differently.
+   // That branch is a READ THAT WORKED — `read.ok` with an empty list — and it
+   // is deliberately not styled or worded as a failure.
+   if (!read) {
+    // The fifth thing, which is not one of the four: no reader was asked. The
+    // feature is off, or the box was empty.
+    setNlBusy(false);
+    Alert.alert('Nothing was read', foodAIAvailable()
+     ? 'Try describing it differently, e.g. \"2 eggs, toast and a coffee\".'
+     : 'AI food logging turns on with the AI backend.');
+    return;
+   }
+   if (!read.ok || !read.items.length) {
+    setNlBusy(false);
+    const say = foodReadSay(read);
+    Alert.alert(say.title, say.body);
+    return;
+   }
+   const parsed = read.items;
    // A read that came back missing a macro is NOT logged with a zero in the
-   // gap. `parseFoodText` used to coerce an absent protein to 0 and this loop
-   // wrote it, so a described meal the model only knew the calories of counted
-   // as a zero-protein meal against the day's remaining macros. Those go to the
+   // gap. The reader used to coerce an absent protein to 0 and this loop wrote
+   // it, so a described meal the model only knew the calories of counted as a
+   // zero-protein meal against the day's remaining macros. Those go to the
    // sheet instead, one at a time, where a person fills the gap in.
-   // Calories are on the same footing as the macros now. `parseFoodText` used
-   // to coerce an absent calorie figure to 0 and then FILTER THE FOOD OUT for
-   // being zero — so a described item the model could not price simply never
-   // appeared, and a member who typed three things and got two back was never
-   // told the third had been read at all. It goes to the sheet with the others,
-   // where the calories box seeds empty and refuses to log until somebody types
-   // one. `NaN` is what a FoodFacts carries for a calorie figure nobody has
+   // Calories are on the same footing as the macros now. They used to be
+   // coerced to zero and the food then FILTERED OUT for being worth nothing —
+   // so a described item the model could not price simply never appeared, and
+   // a member who typed three things and got two back was never told the third
+   // had been read at all. It goes to the sheet with the others, where the
+   // calories box seeds empty and refuses to log until somebody types one.
+   // `NaN` is what a FoodFacts carries for a calorie figure nobody has
    // supplied yet; the sheet has always read it that way (LogFoodSheet.tsx).
    const whole = (it: ParsedFood): it is ParsedFood & { kcal: number; protein: number; carbs: number; fat: number } =>
      it.kcal != null && it.protein != null && it.carbs != null && it.fat != null;
-   const items = parsed ? parsed.filter(whole) : null;
-   const gaps: FoodFacts[] = parsed
-     ? parsed.filter((it) => !whole(it))
-       .map((it) => ({ name: it.name, kcal: it.kcal ?? NaN, protein: it.protein, carbs: it.carbs, fat: it.fat, basis: null }))
-     : [];
-   if (parsed && parsed.length) {
-    // Awaited in sequence and counted, rather than fired off in a forEach: a
-    // description can be four foods, and four separate "not saved" alerts
-    // stacked on top of each other tells somebody nothing they can act on.
-    //
-    // `via: 'manual'`, not the 'ai' this used to send. `food_logs.via` carries a
-    // CHECK constraint listing search / barcode / photo / manual, so every
-    // insert from this box was refused by the database — and because the result
-    // was discarded, the described meal appeared in the list, counted against
-    // the day, and existed nowhere. A person typing here logged it by hand, so
-    // manual is what it is; the reader in rowToEntry already coerces to that.
-    let queued = 0;
-    let refused = 0;
-    // ONE instant for the whole description, read once before the loop. Four
-    // foods typed in one box were eaten at one sitting, and stamping each with
-    // its own `new Date()` would spread them across a second or two for no
-    // reason — and, at four seconds to midnight, across two different days.
-    const stamp = stampFor();
-    if (!stamp) { setNlBusy(false); return; }
-    for (const it of items ?? []) {
-     const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' }, stamp.at);
-     if (out === 'unsent') queued++;
-     else if (out === 'refused') refused++;
-    }
-    setNlBusy(false);
-    setNl('');
-    // The incomplete ones go to the sheet rather than into the log. The first
-    // is on screen and the rest wait behind it — a description can be four
-    // foods, and the sheet holds one.
-    if (gaps.length) {
-     setPendingTitle('Check This One');
-     setPendingVia('manual');
-     setPendingNote(`Read from what you typed. Some of the figures did not come back, so they are blank rather than nought — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
-     setPendingPhoto(null);
-     setPending(gaps[0]);
-     setQueue(gaps.slice(1));
-    }
-    // Refusal is reported ahead of the queue, because it is the one the client
-    // has to do something about: those foods are not logged anywhere.
-    const n = (items ?? []).length;
-    if (refused) sayLogged(refused === n ? 'What you described' : `${refused} of the ${n} foods`, 'refused', stamp.backdated, logDay);
-    else if (queued) sayLogged(queued === n ? 'What you described' : `${queued} of the ${n} foods`, 'unsent', stamp.backdated, logDay);
-    else if (n) sayLogged(n === 1 ? 'What you described' : `All ${n} foods`, 'stored', stamp.backdated, logDay);
-    return;
+   const items = parsed.filter(whole);
+   const short = parsed.filter((it) => !whole(it));
+   const gaps: FoodFacts[] = short
+     .map((it) => ({ name: it.name, kcal: it.kcal ?? NaN, protein: it.protein, carbs: it.carbs, fat: it.fat, basis: null }));
+   // Awaited in sequence and counted, rather than fired off in a forEach: a
+   // description can be four foods, and four separate "not saved" alerts
+   // stacked on top of each other tells somebody nothing they can act on.
+   //
+   // `via: 'manual'`, not the 'ai' this used to send. `food_logs.via` carries a
+   // CHECK constraint listing search / barcode / photo / manual, so every
+   // insert from this box was refused by the database — and because the result
+   // was discarded, the described meal appeared in the list, counted against
+   // the day, and existed nowhere. A person typing here logged it by hand, so
+   // manual is what it is; the reader in rowToEntry already coerces to that.
+   let queued = 0;
+   let refused = 0;
+   // ONE instant for the whole description, read once before the loop. Four
+   // foods typed in one box were eaten at one sitting, and stamping each with
+   // its own `new Date()` would spread them across a second or two for no
+   // reason — and, at four seconds to midnight, across two different days.
+   const stamp = stampFor();
+   if (!stamp) { setNlBusy(false); return; }
+   for (const it of items) {
+    const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' }, stamp.at);
+    if (out === 'unsent') queued++;
+    else if (out === 'refused') refused++;
    }
    setNlBusy(false);
-   Alert.alert('Could not read that', foodAIAvailable() ? 'Try describing it differently, e.g. \"2 eggs, toast and a coffee\".' : 'AI food logging turns on with the AI backend.');
+   setNl('');
+   // The incomplete ones go to the sheet rather than into the log. The first
+   // is on screen and the rest wait behind it — a description can be four
+   // foods, and the sheet holds one.
+   if (gaps.length) {
+    setPendingTitle('Check This One');
+    setPendingVia('manual');
+    // WHICH figures did not come back, named. The reader sends the list and
+    // nothing on this side read it, so the note said only "some of the
+    // figures" and left the member hunting for the blank boxes.
+    const missing = namedGaps(short[0].notGiven);
+    setPendingNote(`Read from what you typed, and the figures are the reader’s estimate rather than anything measured. ${missing
+      ? `It did not give ${missing} for this one, so ${short[0].notGiven.length === 1 ? 'that box is' : 'those boxes are'} blank rather than nought`
+      : 'Some of the figures did not come back, so they are blank rather than nought'} — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
+    setPendingPhoto(null);
+    setPending(gaps[0]);
+    setQueue(gaps.slice(1));
+   }
+   // Entries that were in the reader's list and could not be read as food at
+   // all are COUNTED on the payload rather than dropped, and carried into the
+   // sentence rather than dropped again here: a member handed back less than
+   // they typed has to be told that is what happened.
+   const lost = read.unreadableItems;
+   const alsoLost = lost
+    ? ` (${lost === 1 ? 'one more thing' : `${lost} more things`} you typed could not be read as food and ${lost === 1 ? 'is' : 'are'} not logged)`
+    : '';
+   // Refusal is reported ahead of the queue, because it is the one the client
+   // has to do something about: those foods are not logged anywhere.
+   const n = items.length;
+   if (refused) sayLogged((refused === n ? 'What you described' : `${refused} of the ${n} foods`) + alsoLost, 'refused', stamp.backdated, logDay);
+   else if (queued) sayLogged((queued === n ? 'What you described' : `${queued} of the ${n} foods`) + alsoLost, 'unsent', stamp.backdated, logDay);
+   else if (n) {
+    sayLogged((n === 1 ? 'What you described' : `All ${n} foods`) + alsoLost, 'stored', stamp.backdated, logDay);
+    // …AND WHERE THE FIGURES CAME FROM. Every other route into this log says
+    // so: the photo sheet says "Read from your photo", the gap sheet above
+    // says "Read from what you typed", and app/(client)/scans.tsx says "Read
+    // from your scan". A food the reader priced in FULL was the one route
+    // where a model's estimate went onto the record with nothing said at all
+    // — `sayLogged` on a same-day write is a haptic and no words.
+    //
+    // Not said on a backdated write, where the toast is already carrying
+    // which day the food went to. That is the more urgent fact and a second
+    // `say()` would replace it rather than queue behind it (src/ui/toast.tsx).
+    if (!stamp.backdated) toast.say('Logged from what you typed. The figures are the reader’s estimate rather than anything measured — tap a meal to correct one.');
+   }
+   // Nothing landed in the log at all — every food the reader named went to
+   // the sheet with a gap in it — and some of what was typed could not be read
+   // as food either. The sheet says nothing about that, so this does.
+   else if (lost) toast.say(`${lost === 1 ? 'One more thing' : `${lost} more things`} you typed could not be read as food and ${lost === 1 ? 'is' : 'are'} not logged.`);
  };
 
  // ── correcting a meal already logged (TF-02) ────────────────────────────

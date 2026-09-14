@@ -37,7 +37,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
 import { plainExact } from '../../src/lib/units';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
@@ -300,6 +300,35 @@ export default function Promotions() {
         {/* ── new promotion ──────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="New Promotion" />
+          {/* ── what the duplicate check was checked against ─────────────────
+              `addPromo` in src/ui/promos.tsx refuses a code that is already in
+              `promos` — the array THIS screen holds. Under 'error' that array
+              is empty because the read failed, and under 'partial' it is the
+              first page of a longer list, so on both the check runs against
+              something that is not the gym's set of codes and a code that
+              already exists can pass it.
+
+              That matters more here than a duplicate usually would, because
+              nothing stops it downstream: `promos` has no unique constraint on
+              (tenant_id, code) — supabase/parts/02 — and `redeem_promo`
+              (part 104) selects `where upper(btrim(code)) = upper(btrim($1))
+              limit 1` with NO order by, so with two rows carrying one code
+              Postgres promises nothing about which one a member gets. Two
+              discounts, or a live one and a switched-off one, and which the
+              member is handed is not decided by anything in this product.
+
+              Creating is still offered: a gym past the read ceiling cannot
+              make itself smaller, and taking the button away would leave it
+              unable to run a promotion ever again. What it no longer does is
+              stay quiet about which check did not run. */}
+          {status === 'error' || (status !== 'loading' && !countable) ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+              {status === 'error'
+                ? 'Your existing codes could not be read, so nothing here can tell you whether the code you are about to type is already in use.'
+                : 'Your existing codes did not all come back, so the ones on screen are part of the list rather than all of it, and nothing here can tell you whether the code you are about to type is further down it.'}
+              {' '}Two codes spelled the same way can both be saved, and a member typing one of them gets whichever the database reaches first. Pull down to read the list again before creating a code you are not sure about.
+            </Flag>
+          ) : null}
           <TextInput value={title} onChangeText={setTitle} accessibilityLabel="What this promotion is called" placeholder="Title — e.g. Summer Special" placeholderTextColor={t.ink3} style={inp} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
             <TextInput value={code} onChangeText={setCode} accessibilityLabel="The code a member types to claim it" placeholder="CODE" autoCapitalize="characters" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />

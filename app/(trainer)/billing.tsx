@@ -15,7 +15,7 @@
 // this screen is allowed to put a Subscribe button under, so no plan is ever
 // offered that cannot be bought and no button here is ever dead.
 import { useState, useCallback } from 'react';
-import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Alert, ActivityIndicator, Pressable, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -24,13 +24,69 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/
 import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { PLANS } from '../../src/lib/ownerMock';
 import { planOffer } from '../../src/lib/planOffer';
-import { subscribeToPlan, openBillingPortal, fetchMySubscription, PRICE_IDS, type Subscription } from '../../src/lib/billing';
+import { subscribeToPlan, openBillingPortal, fetchMySubscription, money, PRICE_IDS, type Invoice, type Subscription } from '../../src/lib/billing';
 import { trialDisagreement, TRIAL_NOT_YET_ENFORCED } from '../../src/lib/trialGate';
 import { useTrialReading } from '../../src/ui/trialReading';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BACK_ICON } from '../../src/ui/direction';
+// The billing history this screen promised in its own subtitle and never had.
+// The sentences and the three claims it may not make are in the module; the
+// read is below and the rendering is at the bottom of this file.
+import {
+  INVOICES_ARE_NOT_TOTALLED, invoiceListNote, invoiceListState, invoiceNeedsMark,
+  invoiceOpenable, invoiceStatusLine,
+} from '../../src/lib/planInvoices';
+import { supabase } from '../../src/lib/supabase';
+import { capLimit, capped } from '../../src/lib/rowCap';
+import { reportError } from '../../src/lib/reportError';
+import { fmtFullDay } from '../../src/lib/format';
+import type { LoadStatus } from '../../src/ui/loadStatus';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Active', trialing: 'Trial', past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete' };
+
+/**
+ * This coach's own Repple invoices, newest first.
+ *
+ * Read here rather than added to src/lib/billing.ts because that module is
+ * imported by the dashboard and the money screen as well, and the only read it
+ * carries over this table — `fetchFailedInvoices` — answers a different
+ * question (what is OUTSTANDING, for the callout on money.tsx). This is the
+ * whole history, which is what a billing screen is for.
+ *
+ * `.eq('trainer_id', uid)` on top of the policy, not instead of it. `inv_read`
+ * (supabase/parts/106) already restricts this table to `trainer_id =
+ * auth.uid()`, so the filter changes nothing for a signed-in coach — but with
+ * no session it is the difference between an empty list that means "nobody is
+ * signed in" and one that means "you have never been billed". The uid is read
+ * first for exactly that reason and its absence is 'error', never 'ready'.
+ *
+ * `.limit(capLimit())` and `capped()` for the reason every list in this repo
+ * carries them: PostgREST stops at 1000 rows and says nothing about having
+ * stopped, and a billing history quietly cut at its ceiling is one somebody
+ * hands an accountant.
+ */
+async function readMyInvoices(): Promise<{ rows: Invoice[] | null; status: LoadStatus }> {
+  try {
+    const { data: auth, error: authErr } = await supabase.auth.getUser();
+    if (authErr) { reportError('billing.invoices.auth', authErr); return { rows: null, status: 'error' }; }
+    const uid = auth?.user?.id ?? null;
+    if (!uid) return { rows: null, status: 'error' };
+    const { data, error } = await supabase.from('invoices')
+      .select('id, trainer_id, amount_due, currency, status, attempt_count, hosted_invoice_url, created_at')
+      .eq('trainer_id', uid)
+      // `.order('id')` behind the date so which invoices a capped read drops is
+      // the same on every read rather than whatever Postgres does with a tie.
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(capLimit());
+    if (error) { reportError('billing.invoices', error); return { rows: null, status: 'error' }; }
+    const page = capped((data as Invoice[]) ?? []);
+    return { rows: page.rows, status: page.truncated ? 'partial' : 'ready' };
+  } catch (e) {
+    reportError('billing.invoices', e);
+    return { rows: null, status: 'error' };
+  }
+}
 
 export default function TrainerBilling() {
   const t = useTheme();
@@ -39,6 +95,14 @@ export default function TrainerBilling() {
   const [subErr, setSubErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  /* The invoices Repple has raised against this coach. Null is UNKNOWN — a
+   * read that failed or has not run — and is never an empty history, because
+   * "you have never been billed" and "we could not look" are opposite things
+   * to tell somebody checking what they have paid. `invStatus` carries the
+   * third case: 'partial' means the rows are real and are not all of them,
+   * under which no count of them may be stated. */
+  const [invoices, setInvoices] = useState<Invoice[] | null>(null);
+  const [invStatus, setInvStatus] = useState<LoadStatus>('loading');
   // The trial as the ACCOUNT records it (part 191), and as this phone happens
   // to remember it. Two separate values on purpose: the account is the
   // authority and the device's copy is kept only so the screen can SAY when
@@ -65,9 +129,15 @@ export default function TrainerBilling() {
   // paying — and the obvious thing to do on that screen is pay again.
   const load = useCallback(async () => {
     setLoading(true);
-    const [r] = await Promise.all([fetchMySubscription(), reloadTrial()]);
+    setInvStatus('loading');
+    const [r, , inv] = await Promise.all([fetchMySubscription(), reloadTrial(), readMyInvoices()]);
     setSub(r.sub);
     setSubErr(r.error);
+    // Set together, and the rows are set even under 'partial': they are real
+    // invoices and worth reading. It is the CLAIM over them — that this is the
+    // whole history — that 'partial' withholds.
+    setInvoices(inv.rows);
+    setInvStatus(inv.status);
     setLoading(false);
   }, [reloadTrial]);
   // On focus, not on mount, and the comment directly above is the reason.
@@ -88,6 +158,26 @@ export default function TrainerBilling() {
   // the coach is looking at this screen — a card declining, a portal
   // cancellation settling — and refocusing is not always available to them.
   const pull = usePullToRefresh(load);
+
+  /**
+   * Open one invoice on Stripe's own hosted page.
+   *
+   * Stripe's copy is the authority and this table is a webhook's mirror of it,
+   * so the receipt an accountant gets comes from there rather than from
+   * anything drawn here. A row with no url is not offered as a tap at all
+   * (`invoiceOpenable`), and a device that refuses to open it says so — an
+   * unexplained nothing on a tap reads as a broken screen and the next move is
+   * to tap it again.
+   */
+  const openInvoice = async (inv: Invoice) => {
+    const url = inv.hosted_invoice_url;
+    if (!url || !invoiceOpenable(inv)) return;
+    try { await Linking.openURL(url); }
+    catch (e) {
+      reportError('billing.invoices.open', e);
+      Alert.alert('Couldn’t open it', 'This device would not open that invoice. Nothing about it has changed — try Manage Billing for the same page.');
+    }
+  };
 
   const subscribe = async (plan: string) => {
     setBusy(plan);
@@ -188,8 +278,34 @@ export default function TrainerBilling() {
             </View>
             {sub.current_period_end ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {sub.cancel_at_period_end ? 'Ends' : 'Renews'} {new Date(sub.current_period_end).toLocaleDateString()}
+                {/* `fmtFullDay`, not `new Date(x).toLocaleDateString()`, which
+                    is what stood here. Two differences and both are on this
+                    screen: it writes the date in the locale the APP is set to
+                    rather than the one the handset is (src/lib/locale.ts, for a
+                    white-labelled product where those are not the same thing),
+                    and a `current_period_end` that will not parse becomes a
+                    dash instead of the words "Invalid Date" beside "Renews". */}
+                {sub.cancel_at_period_end ? 'Ends' : 'Renews'} {fmtFullDay(sub.current_period_end)}
               </Text>
+            ) : null}
+            {/* ── a payment that did not go through, said in words ──────────
+                'past_due' and 'unpaid' were a coloured dot and one word. The
+                dot is a mark and the word is Stripe's, and neither says what
+                has happened or what fixes it — so the state a coach most needs
+                to act on was the state this screen explained least. The
+                invoice for it is in the list below, with the number of times
+                the card has been tried on it.
+
+                The words carry it and the dot marks it: `t.crit` as ink is
+                below AA on the light palettes. And nothing here claims what
+                Repple will do about it — no threat of losing access, because
+                nothing in this app enforces one (TRIAL_NOT_YET_ENFORCED above
+                says the same thing about the trial). */}
+            {sub.status === 'past_due' || sub.status === 'unpaid' ? (
+              <Flag tone={t.crit} style={{ marginTop: sp.md }}>
+                A payment for this plan has not gone through. Stripe will try the card again, and updating it
+                in Manage Billing is what settles it — your clients see nothing about any of this.
+              </Flag>
             ) : null}
             <View style={{ height: sp.lg }} />
             <Cta label={busy === 'portal' ? 'Opening…' : 'Manage Billing'} wide disabled={busy === 'portal'} onPress={manage} />
@@ -264,6 +380,86 @@ export default function TrainerBilling() {
             ))}
           </Section>
         )}
+
+        {/* ── what Repple has charged you ─────────────────────────────────
+            The screen's own subtitle has said "your Repple plan, payment
+            method and invoices" since it was written, and there was no
+            invoice on it — paid or unpaid. The ledger existed (`invoices`,
+            supabase/parts/20), the coach was already allowed to read their own
+            rows (`inv_read`, part 106), and the only thing in the app that
+            touched it was the outstanding-only callout on money.tsx, which
+            points the coach HERE for the rest.
+
+            Four states and not two: reading, could-not-read, nothing billed,
+            and a list — with a fifth, a list that hit its ceiling, which shows
+            its rows and withholds the claim that they are the whole history.
+            src/lib/planInvoices.ts holds all five and the test beside it is
+            what stops "nothing has been billed to you yet" being said over a
+            read that failed.
+
+            No total, here or anywhere near here. Every row carries its own
+            currency from Stripe and two currencies do not add up. */}
+        <Section>
+          <SectionHead title="Your Invoices" note="what Repple has charged you" />
+          {(() => {
+            const state = invoiceListState(invoices, invStatus);
+            const note = invoiceListNote(state);
+            const rows = state === 'some' || state === 'some-partial' ? (invoices ?? []) : [];
+            return (<>
+              {/* A failed read is a Flag, not warn-coloured ink: `t.warn` as
+                  text is 3.87–4.08:1 on the three light palettes. */}
+              {note ? (
+                state === 'unread' || state === 'some-partial'
+                  ? <Flag tone={t.warn}>{note}</Flag>
+                  : <Text style={{ ...ty.label, color: t.ink3 }}>{note}</Text>
+              ) : null}
+              {rows.map((i, n) => {
+                const openable = invoiceOpenable(i);
+                const line = invoiceStatusLine(i);
+                return (
+                  <Pressable key={i.id}
+                    onPress={() => { void openInvoice(i); }}
+                    disabled={!openable}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !openable }}
+                    accessibilityLabel={openable
+                      ? `Open the invoice of ${fmtFullDay(i.created_at)} for ${money(i.amount_due, i.currency)} on Stripe. ${line}`
+                      : `Invoice of ${fmtFullDay(i.created_at)} for ${money(i.amount_due, i.currency)}. ${line}. There is no receipt page for this one.`}
+                    style={{
+                      flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
+                      gap: sp.md, paddingVertical: sp.md,
+                      borderTopWidth: n === 0 ? 0 : hairline, borderTopColor: t.ring,
+                    }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, color: t.ink }}>{fmtFullDay(i.created_at)}</Text>
+                      {/* The words carry it and the dot marks it. An amount
+                          somebody owes is the last thing here that should be
+                          hard to read. */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        {invoiceNeedsMark(i) ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} /> : null}
+                        <Text style={{ ...ty.caption, color: invoiceNeedsMark(i) ? t.ink2 : t.ink3 }}>{line}</Text>
+                      </View>
+                    </View>
+                    {/* `money`, never `amount / 100`: the divisor comes from
+                        the currency on the row — there is no sen in a yen and
+                        a dinar is thousandths — and an amount nobody read is a
+                        dash rather than a free month. */}
+                    <Text style={{ ...value(16), color: t.ink }}>{money(i.amount_due, i.currency)}</Text>
+                  </Pressable>
+                );
+              })}
+              {rows.length ? (
+                // numbers-ok: not a figure. The name ends in TOTALLED and that is
+                // what the check matched; the value is a sentence in
+                // src/lib/planInvoices.ts saying these amounts are NOT added up,
+                // because they each carry their own currency. There is no number
+                // in it to group, and a total is the one thing this list refuses
+                // to produce.
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{INVOICES_ARE_NOT_TOTALLED}</Text>
+              ) : null}
+            </>);
+          })()}
+        </Section>
 
         <Rule />
 

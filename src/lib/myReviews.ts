@@ -48,7 +48,11 @@ export interface MyCoachReview {
   /** Whether that coach's profile is in the public directory. The one fact
    *  that decides whether "anybody browsing" is a true thing to say. */
   coachListed: boolean;
-  rating: number;
+  /** What they gave out of MAX_RATING, or null where the row carried no
+   *  readable one. Never 0: a rating is 1–5, so a zero here could only ever be
+   *  a figure nobody sent, and `myReviewRatingLine` has a third sentence for
+   *  that rather than printing it. */
+  rating: number | null;
   body: string | null;
   createdAt: string;
   edited: boolean;
@@ -128,8 +132,20 @@ export function myReviewsNote(
  * The name is dropped rather than replaced when the coach's profile carries
  * none: "You rated — 4 out of 5" is the hole scripts/check-prose.mjs exists for,
  * and "You rated your coach" would be a lie about a coach they have left.
+ *
+ * The unread rating is tested FIRST, before the name, because it decides which
+ * sentence is being written at all rather than which half of one. A null here
+ * is "the row came back without a readable rating on it", and the member is
+ * told that in those terms — the row is still shown, because their own words
+ * underneath it are the part they came to read, and because dropping the row
+ * would tell them they never wrote it.
  */
 export function myReviewRatingLine(r: MyCoachReview): string {
+  if (r.rating == null) {
+    return r.coachName
+      ? `We couldn’t read the rating you gave ${r.coachName}. Your review is below; the number it carried didn’t come back.`
+      : 'We couldn’t read the rating you gave. Your review is below; the number it carried didn’t come back.';
+  }
   return r.coachName
     ? `You rated ${r.coachName} ${r.rating} out of ${MAX_RATING}.`
     : `You gave ${r.rating} out of ${MAX_RATING}.`;

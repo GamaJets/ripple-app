@@ -111,6 +111,7 @@ import {
   parseGymZone, zoneOptions, gymTimeLabel, gymDay, readerZone, zoneGapNote,
 } from '@lib/gymZone';
 import { parseSessionFee, parseGymName, sessionFeeFieldValue } from '@lib/gymSettings';
+import { consequences, storedPolicy } from '@lib/gymSettingChange';
 import {
   fetchGymMerchant, startGymOnboarding, merchantState, type GymMerchant,
 } from '@lib/gymMerchant';
@@ -304,65 +305,35 @@ export default function Settings() {
     : null;
 
   /**
-   * The two settings on this form whose change is not undoable by changing it
-   * back, said as a question before the write rather than as a warning beside
-   * it.
+   * The questions this save has to ask before it writes, and the rule for which
+   * of them are asked at all.
    *
-   * The warnings were already here and they were already correct — the currency
-   * one has been under that field since it was written. What was missing is the
-   * step between reading them and the row moving: one press of Save wrote both,
-   * and a gym's currency change permanently splits its ledger (nothing is
-   * re-denominated, by design, so every total spanning the two is withheld
-   * thereafter). A sentence that can be scrolled past is not a decision.
-   *
-   * Only on a CHANGE, never on a first set. A gym setting its currency for the
-   * first time has no ledger to split and no reconciled week to move; asking
-   * them to confirm the only value they have ever had would teach them to
-   * dismiss the dialog before reading it, which is how the one that matters
-   * gets dismissed too.
+   * Both live in src/lib/gymSettingChange.ts now, with the four backward-
+   * reaching settings named and a test over the rule. The wording is the same
+   * wording; what moved is where it can be checked. A dialog nobody can test is
+   * a dialog that quietly stops matching the field it belongs to — and the pay
+   * policy and the session fee are here BECAUSE that had already happened: the
+   * currency and the timezone were asked and those two, which reach just as far
+   * backwards, were not.
    *
    * `confirm` is what the rest of this console uses for exactly this — /staff
    * before taking somebody off the roster, /timetable before deleting a class,
    * /costs in five places.
    */
-  const consequences = (): string[] => {
-    const out: string[] = [];
-    const nextCcy = ccyCheck.kind === 'currency' ? ccyCheck.currency : null;
-    if (gym?.currency && nextCcy && nextCcy !== gym.currency) {
-      out.push(
-        `Change this gym’s currency from ${gym.currency} to ${nextCcy}?\n\n`
-        + 'Nothing already recorded is re-denominated. Every payment, plan and pass keeps the '
-        + `currency it was written in, so this gym’s ledger will hold both — and any total that `
-        + 'spans the two is withheld rather than added up, for good.',
-      );
-    }
-    if (gym?.currency && ccyCheck.kind === 'clear') {
-      out.push(
-        `Clear this gym’s currency? It is ${gym.currency} now.\n\n`
-        + 'Until one is set again a plan cannot be priced, a payment cannot be recorded and a '
-        + 'price book cannot be imported. What is already recorded keeps its own currency.',
-      );
-    }
-    const nextZone = tzCheck.kind === 'zone' ? tzCheck.zone : null;
-    if (gym?.timezone && nextZone && nextZone !== gym.timezone) {
-      out.push(
-        `Change this gym’s timezone from ${gym.timezone} to ${nextZone}?\n\n`
-        + 'No stored figure changes — every time in this database is an instant. What moves is '
-        + 'which day and which hour a screen files it under, for what has already happened as '
-        + 'well as for what has not. A week you have already reconciled may come out to a '
-        + 'different total.',
-      );
-    }
-    if (gym?.timezone && tzCheck.kind === 'clear') {
-      out.push(
-        `Clear this gym’s timezone? It is ${gym.timezone} now.\n\n`
-        + 'The dates do not go blank. They go back to whichever device is reading them, with '
-        + 'nothing on any screen saying so — two people in two countries would then see this '
-        + 'gym’s Saturday differently and neither would be told.',
-      );
-    }
-    return out;
-  };
+  /** The stored pay policy, when this build can read it — the one answer the
+   *  warning beside the picker and the question in front of the write both ask
+   *  of, so the two cannot disagree about whether this is a change. */
+  const storedPol = storedPolicy({ payPolicy: gym?.payPolicy ?? null });
+
+  const asks = (): string[] => consequences(
+    {
+      currency: gym?.currency ?? null,
+      sessionFee: gym?.sessionFee ?? null,
+      payPolicy: gym?.payPolicy ?? null,
+      timezone: gym?.timezone ?? null,
+    },
+    { currency: ccyCheck, fee: feeCheck, policy, zone: tzCheck },
+  );
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -379,7 +350,7 @@ export default function Settings() {
     // Asked one at a time, in the order the fields sit on the page. Two
     // consequences folded into one dialog is a dialog somebody agrees to for
     // the half they were thinking about.
-    for (const q of consequences()) {
+    for (const q of asks()) {
       if (!window.confirm(q)) return;
     }
     setBusy(true);
@@ -512,6 +483,28 @@ export default function Settings() {
               style={{ ...field, width: 200 }}
             />
             {feeCheck.kind === 'bad' ? <Bad>{feeCheck.reason}</Bad> : null}
+            {/* Which sessions this reaches, said beside the field rather than
+                discovered when a month changes value. `rateForSession` prices a
+                session by its own snapshot first, then the coach's own rate,
+                then this — and the third layer is read fresh every time the
+                figure is drawn, so it prices the PAST as well as the future for
+                every session that reached it. */}
+            {gym?.sessionFee != null && feeCheck.kind === 'fee' && feeCheck.fee !== gym.sessionFee ? (
+              <Bad tone="warn">
+                This prices more than the sessions still to come. A session that was priced when it
+                was marked keeps that price, and so does a coach on a rate of their own; everything
+                else is priced at whatever this says when the figure is read — so a month already
+                worked and not yet settled will be worth a different amount afterwards. Settlements
+                already written hold their own figure.
+              </Bad>
+            ) : null}
+            {gym?.sessionFee != null && feeCheck.kind === 'clear' ? (
+              <Bad tone="warn">
+                Emptying this does not value a session at nothing. A session with no price of its
+                own, delivered by a coach with no rate of their own, then has no rate at all and
+                payroll withholds the figure rather than settling it short.
+              </Bad>
+            ) : null}
           </Field>
 
           <Field
@@ -702,6 +695,26 @@ export default function Settings() {
                 what they are paid.
               </Bad>
             ) : null}
+            {/* Backwards as well as forwards, and this field had nothing saying
+                so — the two settings either side of it did. A month that has
+                been worked and not yet settled is recounted against whatever
+                this says the next time anybody opens it, including the coach
+                whose earnings screen it is. */}
+            {storedPol && policy !== '' && policy !== storedPol ? (
+              <Bad tone="warn">
+                This is not only about sessions from here on. Every month that has been worked and
+                not yet settled is recounted against the new answer the next time Payroll, Close or
+                a coach&rsquo;s own earnings screen is opened — a coach who has been told what they
+                are owed for last month may see a different figure afterwards. Settlements already
+                written hold theirs.
+              </Bad>
+            ) : null}
+            {/* The cleared case has no second sentence here on purpose: the
+                `policy === ''` block above already says what a gym with no
+                policy gets, in the same words, and two warnings saying one
+                thing is how a reader learns to skip both. The CONFIRM still
+                asks it, because clearing a policy a gym has been settling
+                against is a decision and the sentence beside it is not. */}
             {gym && gym.payPolicy && !payPolicyOf(gym.payPolicy) ? (
               <Bad>
                 The stored policy is <span className="mono">{gym.payPolicy}</span>, which this build

@@ -7,6 +7,32 @@ import { Linking } from 'react-native';
 import { appLink, WEB_ORIGIN } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
+// ── why every "who is signed in" in this file goes through one function ───
+//
+// Ten reads here asked `supabase.auth.getUser()` and dropped the `error` beside
+// it. That call does not reject when the auth server is unreachable — it
+// RESOLVES with `{ data: { user: null }, error }`, the same shape it resolves
+// with for somebody who genuinely has no session (src/lib/authReadFate.ts has
+// the library source and the reasoning). So `!uid` meant "nobody is signed in,
+// OR we could not ask", and this is the file where that ambiguity is about
+// somebody's payout account and somebody else's pack of ten sessions.
+//
+// What it did NOT mean, and this was checked rather than assumed: none of the
+// ten took the empty answer for an empty ANSWER. Every one of them already
+// returns `null` or `status: 'error'` — its own word for "could not read" —
+// because earlier parts hardened those same returns for the refused-read case
+// and the `!uid` guard shares them. The outage was therefore landing on the
+// harmless side of authReadFate.ts's asymmetry by inheritance, and one site was
+// not: `createPackage` told a coach "Not signed in." over an action that never
+// reached its insert.
+//
+// `signedInUid` keeps the two fates apart on the near side of that collapse. The
+// return types still cannot carry a third answer — widening them reaches
+// screens other lanes hold tonight — so an outage is RECORDED, under the
+// calling function's own key, and a sign-out is not, because somebody not being
+// signed in is not a fault. `authGateMessage` is for the site that speaks.
+import { signedInUid } from './signedInUid';
+import { authGateMessage } from './authedUid';
 import { capLimit, capped, TruncatedRead, ROW_CAP } from './rowCap';
 import { readByIds } from './idLookup';
 import { writeFailure } from './wroteRows';
@@ -220,8 +246,7 @@ export async function startTrainerOnboarding(): Promise<{ ok: boolean; error?: s
 /** The signed-in trainer's Connect account status. */
 export async function fetchMyConnect(): Promise<ConnectStatus | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.fetchMyConnect'); if (!uid) return null;
     // A refused read used to fall through to the same default a trainer with no
     // account gets — telling somebody who IS set up for payments that they are
     // not. null means "could not read"; the caller renders that differently.
@@ -259,8 +284,7 @@ export async function fetchMyConnect(): Promise<ConnectStatus | null> {
  */
 export async function fetchMyPackages(): Promise<{ rows: TrainerPackage[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('connect.fetchMyPackages'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('trainer_packages').select('*')
       .eq('trainer_id', uid)
       // `.order('id')` behind the date so the set is totally ordered: two
@@ -285,8 +309,19 @@ export async function fetchMyPackages(): Promise<{ rows: TrainerPackage[]; statu
  */
 export async function createPackage(p: { name: string; price_cents: number; sessions: number | null; currency: string; billing_interval?: 'month' | 'year' | null; validity_days?: number | null }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { ok: false, error: 'Not signed in.' };
+    const who = await signedInUid('connect.createPackage');
+    // The one site in these two files that SPOKE, and it said the wrong thing.
+    // This error string goes straight into an Alert headed "Could not save" on
+    // app/(trainer)/payments.tsx, and it used to read "Not signed in." — so a
+    // coach putting a package on sale during an auth outage was told their
+    // session had ended, over an action whose insert is three guards further
+    // down and was never reached. Nothing was written either way; what changes
+    // is that the sentence now matches which of the two actually happened.
+    // Guarded on `fate`, not on `!uid` — see the note in src/lib/signedInUid.ts.
+    // `uid` is `string | null` and a blank string is falsy, so only `fate` can
+    // discriminate the union for the compiler.
+    if (who.fate !== null) return { ok: false, error: authGateMessage(who.fate) };
+    const uid = who.uid;
     // No fallback currency, on purpose. This used to be `p.currency || 'usd'`,
     // which is a literal that silently applies — and Repple is white-labelled,
     // so there is no currency that is right for both a London gym and a Dubai
@@ -395,8 +430,7 @@ export async function updatePackage(id: string, patch: PackagePatch): Promise<{ 
  */
 export async function countActiveSubscribers(packageId: string): Promise<number | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.countActiveSubscribers'); if (!uid) return null;
     const { data, error } = await supabase.from('client_subscriptions').select('status')
       .eq('package_id', packageId).eq('trainer_id', uid).limit(capLimit());
     if (error) { reportError('connect.countActiveSubscribers', error); return null; }
@@ -596,8 +630,7 @@ export function portalPurchase(rows: Purchase[] | null | undefined): Purchase | 
  */
 export async function fetchMyPurchases(): Promise<Purchase[] | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.fetchMyPurchases'); if (!uid) return null;
     // Capped, and a truncated read answers `null` — the same answer as a
     // refusal, because to the caller it is the same fact.
     //
@@ -670,8 +703,7 @@ export async function sessionsRemaining(trainerId?: string): Promise<number | nu
  */
 export async function sessionPacks(trainerId?: string): Promise<PackBalance | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.sessionsRemaining'); if (!uid) return null;
     // The three expiry columns come back with the balance, because a pack that
     // ran out of time and a pack that was used up are the same two numbers by
     // the time part 612's pass has run — `sessions_total` is reduced to
@@ -759,8 +791,7 @@ export interface CoachPurchase extends Purchase {
  */
 export async function fetchClientPurchases(): Promise<{ rows: CoachPurchase[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('connect.fetchClientPurchases'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('client_purchases').select('*')
       .eq('trainer_id', uid).order('created_at', { ascending: false }).limit(capLimit());
     if (error) { reportError('connect.fetchClientPurchases', error); return { rows: [], status: 'error' }; }
@@ -887,8 +918,7 @@ export interface CoachDispute {
  */
 export async function fetchMyDisputes(): Promise<{ rows: CoachDispute[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('connect.fetchMyDisputes'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('client_disputes')
       .select('id, stripe_dispute_id, stripe_charge_id, amount_cents, currency, reason, status, evidence_due_by, opened_at, closed_at, client_id, purchase_id, renewal_id')
       .eq('trainer_id', uid)
@@ -1132,12 +1162,22 @@ export async function adjustPackCredit(purchaseId: string, delta: 1 | -1): Promi
  */
 export interface RefundResult {
   ok: boolean;
-  /** Minor units Stripe actually returned. Stripe's figure, not the one asked
-   *  for; they are the same today and a Stripe-side adjustment that made them
-   *  differ would otherwise leave this app permanently out by it. */
-  refundedCents?: number;
-  /** The running total on the row after this refund. */
-  totalRefundedCents?: number;
+  /**
+   * Minor units Stripe actually returned. Stripe's figure, not the one asked
+   * for; they are the same today and a Stripe-side adjustment that made them
+   * differ would otherwise leave this app permanently out by it.
+   *
+   * `null` when the function answered `ok` without a readable figure on it —
+   * which is a refund that HAPPENED and whose amount we do not have. It was
+   * `Number(data.refunded_cents) || 0` and that told the coach "0.00 has gone
+   * back to them" about money that had already left their Stripe balance,
+   * beside a Refunded title. Null travels; the screen has a sentence for it.
+   */
+  refundedCents?: number | null;
+  /** The running total on the row after this refund, or null where the answer
+   *  carried none. Not 0: zero refunded in total, said after a refund, is a
+   *  figure that contradicts the act it is reporting. */
+  totalRefundedCents?: number | null;
   currency?: string | null;
   /** False when the money went back and this app could not record it. */
   mirrored?: boolean;
@@ -1162,6 +1202,18 @@ export interface RefundResult {
   unconfirmed?: boolean;
   error?: string;
 }
+
+/** Minor units, or null for anything that is not a number. A `bigint` reaches
+ *  an edge function's JSON as a string often enough that every money reader in
+ *  this codebase coerces one; what none of them may do is coerce an ABSENCE,
+ *  because `Number(null)` is 0 and 0 is an amount of money. The same five lines
+ *  as `minorOrNull` in src/lib/memberRecord.ts and src/lib/membershipOrder.ts,
+ *  both module-private there for the same reason this one is here. */
+const minorOrNull = (v: unknown): number | null => {
+  if (v == null) return null;
+  const n = typeof v === 'string' ? Number(v.trim()) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+};
 
 async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?: number): Promise<RefundResult> {
   try {
@@ -1193,8 +1245,13 @@ async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?
     if (data?.ok) {
       return {
         ok: true,
-        refundedCents: Number(data.refunded_cents) || 0,
-        totalRefundedCents: Number(data.refunded_total_cents) || 0,
+        // `minorOrNull`, not `Number(x) || 0`. This is money that has already
+        // moved: an absent key, a null column and a bigint arriving as an
+        // unparseable string all used to land here as a confident 0.00 under
+        // the word "Refunded", and the coach's next act is to tell their client
+        // what went back.
+        refundedCents: minorOrNull(data.refunded_cents),
+        totalRefundedCents: minorOrNull(data.refunded_total_cents),
         currency: data.currency ?? null,
         mirrored: data.mirrored !== false,
       };
@@ -1390,8 +1447,7 @@ export async function archivePromoCode(promotionCodeId: string): Promise<{ ok: b
  */
 export async function myPtPasses(): Promise<PtPassRow[] | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.myPtPasses'); if (!uid) return null;
     const [passRes, coachRes] = await Promise.all([
       supabase
         .from('gym_passes')
@@ -1495,8 +1551,7 @@ export interface PtPassRow {
  */
 export async function mySessionCredits(): Promise<CreditSession[] | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('connect.mySessionCredits'); if (!uid) return null;
     const { data, error } = await supabase
       .from('sessions')
       .select('id, starts_at, status, outcome, series_id, pack_drawn_at, pack_drawn_kind, pack_drawn_purchase_id, pack_drawn_pass_id, pack_draw_shortfall_at, booking_drew_credit_at')

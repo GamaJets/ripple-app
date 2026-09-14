@@ -781,12 +781,50 @@ Deno.serve(async (req) => {
   try {
     const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
     userId = data?.user?.id || '';
-  } catch { /* ignore */ }
+  } catch (e) {
+    // A THROW, not a rejected token: supabase-js resolves `{ data, error }` for
+    // a token it can read and refuse, so reaching here means the auth service
+    // could not be asked at all. Failing closed is right — this function reads
+    // the caller's JWT and that is its entire security boundary, so an
+    // unverifiable caller is not a caller — but it was also silent, and an auth
+    // outage looked to every client exactly like everyone's session expiring
+    // at once. The 401 below still stands; what is added is the log.
+    console.error('wearable-day: could not verify the caller’s token for a ' + provider + ' read, so the request is refused as unauthenticated:', (e as Error).message);
+  }
   if (!userId) return json({ error: 'no user' }, 401);
 
-  const { data: row } = await service.from('wearable_tokens').select('*').eq('user_id', userId).eq('provider', provider).maybeSingle();
+  const { data: row, error: rowErr } = await service.from('wearable_tokens').select('*').eq('user_id', userId).eq('provider', provider).maybeSingle();
+  // ── "WE COULD NOT LOOK" IS NOT "YOU ARE NOT CONNECTED" ───────────────────
+  //
+  // This was `const { data: row } = await …` with the error dropped, and
+  // supabase-js resolves with `{ data: null, error }` rather than throwing — so
+  // a transient PostgREST fault fell straight through to the `connected: false`
+  // below, which the comment under it correctly calls "a real signal".
+  //
+  // It is a real signal, and that is exactly what made dropping the error
+  // expensive. `fetchVendorDay` in src/lib/wearables/oauth.ts answers
+  // `connected: false` by calling `noteTokenDead(id, …)` and throwing
+  // `WearableNotConnectedError`. `noteTokenDead` WRITES TO THE LEDGER: the row
+  // on Watch & Devices stops saying "Repple is reading it" and starts telling
+  // the client their connection has died and to reconnect. So one failed read
+  // of `wearable_tokens` — a row that is sitting there, perfectly valid — filed
+  // a permanent fact about somebody's device on the strength of a network
+  // blip, and the remedy it then recommends is to tear down a working OAuth
+  // connection and build it again.
+  //
+  // A read that FAILED is answered with an error instead. Every caller in
+  // oauth.ts treats an invoke error as "we could not reach the server" and
+  // records NOTHING — `fetchVendorDay` returns null without touching the
+  // ledger, and `fetchVendorSleep` answers `ok: false` with a reason, which is
+  // the distinction that whole file exists to preserve.
+  if (rowErr) {
+    console.error('wearable-day: could not read the stored ' + provider + ' connection for ' + userId + ', so this request answers "we could not look" rather than "not connected":', rowErr.message);
+    return json({ metrics: null, error: 'could not read the connection' }, 500);
+  }
   // connected:false is a real signal, not just 'no data' — the client uses it to
-  // stop claiming a dead connection is live.
+  // stop claiming a dead connection is live. Reached only on a read that
+  // SUCCEEDED and found no row, which is a connection that genuinely is not
+  // there.
   if (!row) return json({ metrics: null, connected: false });
 
   let access = row.access_token as string;
@@ -830,8 +868,27 @@ Deno.serve(async (req) => {
       const days = Math.min(365, Math.max(1, Number(body.sinceDays) || 14));
       const workouts = await whoopWorkouts(access, days);
       return json({ workouts, connected: true });
-    } catch (_e) {
-      return json({ workouts: [], connected: true, error: 'could not read workouts' });
+    } catch (e) {
+      // ── A READ THAT FAILED IS NOT A FORTNIGHT WITH NO TRAINING ──────────
+      //
+      // This answered 200 with `{ workouts: [], connected: true }` and an
+      // `error` key nobody reads. `fetchVendorWorkouts` in
+      // src/lib/wearables/oauth.ts checks the INVOKE error and the `connected`
+      // flag, finds neither, and so calls `noteTokenAlive(id)` and returns the
+      // empty list — recording that this token was proven to work on a request
+      // where WHOOP never answered, and handing the import screen a fortnight
+      // of no sessions that is indistinguishable from a real one.
+      //
+      // `noteTokenAlive` is not a cosmetic note: `accountProvenAlive` is what
+      // lets a later refusal on the sleep endpoint be read as a scope gap
+      // rather than as a dead account, so a false one there mis-classifies a
+      // genuinely dead connection as a working one with a missing scope.
+      //
+      // A 5xx instead. The same caller then returns an empty list WITHOUT
+      // claiming anything about the token, which is the honest outcome — and
+      // the throw is logged, because until now nothing recorded it at all.
+      console.error('wearable-day: could not read ' + provider + ' workouts for ' + userId + ', so none are offered for import — this is NOT the same as none having been recorded:', (e as Error).message);
+      return json({ workouts: [], error: 'could not read workouts' }, 502);
     }
   }
 

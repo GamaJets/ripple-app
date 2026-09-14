@@ -27,6 +27,9 @@ import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+// A count that can pass a thousand is grouped in the reader's own locale. A
+// 1,412-member gym reading "Everyone · 1412" is the house rule not being held.
+import { num } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { readState, hasRows, canSayEmpty, staleNote, failedNote } from '../../src/lib/staleRead';
@@ -55,6 +58,7 @@ import {
 // that types its existing members in.
 import {
   datesRefusal, datesPatch, datesNotes, termLine, unpausedEndsOn,
+  lensMatch, EXPIRING_DAYS, type RosterLens,
 } from '../../src/lib/membershipDates';
 
 /**
@@ -141,6 +145,14 @@ export default function OwnerMembers() {
    *  read by a gym owner. */
   const [reason, setReason] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  /* ── which of them the owner is looking for ──────────────────────────────
+     A name search only helps somebody who already knows the name, and the
+     three questions an owner actually opens this screen with — who is up for
+     renewal, whose term has already run out, and who is away — could not be
+     asked of four hundred rows at all. See `lensMatch` in
+     src/lib/membershipDates.ts for what each of the three means and for why
+     'overrun' is the one specific to this product. */
+  const [lens, setLens] = useState<RosterLens>('all');
   const [busy, setBusy] = useState(false);
 
   // add-a-membership sheet
@@ -318,13 +330,39 @@ export default function OwnerMembers() {
     [sum.mrrCents, sum.mrrCurrency, cur],
   );
 
+  /** The lens first, then the name. Both narrow, and the empty-state copy
+   *  below has to be able to say which of the two emptied the list. */
+  const inLens = useMemo(
+    () => (lens === 'all' ? list : list.filter((m) => lensMatch(lens, m, dayWindow.day))),
+    [list, lens, dayWindow.day],
+  );
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return list;
-    return list.filter((m) =>
+    if (!needle) return inLens;
+    return inLens.filter((m) =>
       (m.memberName ?? '').toLowerCase().includes(needle) ||
       (m.planName ?? '').toLowerCase().includes(needle));
-  }, [list, q]);
+  }, [inLens, q]);
+  /**
+   * How many are in each lens, for the chips.
+   *
+   * Counted only where there are rows to count — `fetchMemberships` is
+   * whole-or-throws (it pages with `readAll` and refuses past the page
+   * ceiling), so under `hasRows` this is the register and not a page of it.
+   * Under 'loading' or 'failed' the chips carry no numeral at all rather than
+   * a nought: nobody expiring and nobody-we-could-ask look identical as a 0,
+   * and on this screen the second one is a gym still billing people whose
+   * memberships ran out.
+   */
+  const lensCounts = useMemo(() => {
+    if (!hasRows(state)) return null;
+    return {
+      all: list.length,
+      expiring: list.filter((m) => lensMatch('expiring', m, dayWindow.day)).length,
+      overrun: list.filter((m) => lensMatch('overrun', m, dayWindow.day)).length,
+      paused: list.filter((m) => lensMatch('paused', m, dayWindow.day)).length,
+    } as Record<RosterLens, number>;
+  }, [list, state, dayWindow.day]);
 
   const frozen = list.filter((m) => m.status === 'frozen').length;
 
@@ -393,7 +431,27 @@ export default function OwnerMembers() {
     // cannot half-apply. Null when the membership is open-ended: there is no
     // term to extend, and inventing one would sell somebody an end date nobody
     // agreed to.
-    const moved = thawedEndsOn(m.endsOn, { from: fzFrom, to: fzTo });
+    //
+    // ── from the TERM, not from the row ──────────────────────────────────
+    //
+    // This was `thawedEndsOn(m.endsOn, …)`, and `m.endsOn` is not the term that
+    // was sold — it is the term with the pause ALREADY on it, because this
+    // screen put it there the last time Save Pause was pressed. This sheet
+    // seeds itself from `frozen_from` / `frozen_to`, so reopening an existing
+    // pause and saving it, changed or unchanged, added the same days a second
+    // time. A member paused 12–26 June on a membership ending 30 June correctly
+    // ran to 15 July; one further tap made it 30 July, and every tap after that
+    // another fortnight. Nothing else in this product writes `ends_on`, so
+    // nothing would ever have contradicted it.
+    //
+    // `unpausedEndsOn` takes the recorded pause back off first, so the arithmetic
+    // is always base-term plus the pause now being saved — which REPLACES the old
+    // one rather than compounding with it, and shrinks the end date correctly
+    // when the owner shortens a pause. See its header, and the header of
+    // `setMembershipFreeze` in src/lib/gymRecord.ts, which says the shift is
+    // applied once and leaves this screen to hold the line.
+    const base = unpausedEndsOn({ endsOn: m.endsOn, frozenFrom: m.frozenFrom, frozenTo: m.frozenTo });
+    const moved = thawedEndsOn(base, { from: fzFrom, to: fzTo });
     setFzBusy(true);
     try {
       await setMembershipFreeze(supabase, m.id, fzFrom, fzTo, moved ?? undefined);
@@ -635,7 +693,58 @@ export default function OwnerMembers() {
         <Rule />
 
         <Section>
-          <SectionHead title={loaded && list.length ? `Memberships · ${list.length}` : 'Memberships'} />
+          {/* The heading counts the REGISTER and the note counts what is on
+              screen. With a lens on, "Memberships · 412" over six rows is true
+              and incomplete; the note is the half that says which six. */}
+          <SectionHead
+            title={loaded && list.length ? `Memberships · ${num(list.length)}` : 'Memberships'}
+            note={loaded && list.length && (lens !== 'all' || q.trim()) ? `${num(shown.length)} shown` : undefined}
+          />
+
+          {/* ── the three questions, above the name box ────────────────────
+              A name search is for somebody who already knows the name. These
+              are what an owner actually opens the register to ask, and the
+              rows have always carried the answers — nothing here is a new read
+              or a new column. `lensMatch` in src/lib/membershipDates.ts is
+              where each one is defined.
+
+              'Ran out' is the one worth naming twice: supabase/parts/2616 is
+              deliberate that nothing flips `status` at midnight, so a term
+              that ended in June sits beside a status of Active and the
+              turnstile reads the status. `datesNotes` has always said that to
+              an owner who happened to open the dates sheet on the right
+              person. Until now nothing anywhere let them find those people. */}
+          {loaded && list.length > 0 ? (
+            <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.md }}>
+              {(
+                [
+                  ['all', 'Everyone', 'Every membership on the register'],
+                  ['expiring', `Renewing · ${EXPIRING_DAYS}d`, `Memberships running out in the next ${EXPIRING_DAYS} days`],
+                  ['overrun', 'Ran out', 'Memberships whose end date has passed and that the door still lets through'],
+                  ['paused', 'Paused', 'Memberships with a pause recorded that has not finished'],
+                ] as const
+              ).map(([key, label, hint]) => {
+                const on = lens === key;
+                // A count only where there are rows behind it. Null under a
+                // read that has not landed — the chip keeps its word and drops
+                // its numeral, rather than offering a 0 that reads as an
+                // all-clear.
+                const n = lensCounts ? lensCounts[key] : null;
+                return (
+                  <Pressable key={key} onPress={() => setLens(key)}
+                    accessibilityRole="button"
+                    accessibilityLabel={n == null ? label : `${label}, ${num(n)}`}
+                    accessibilityHint={hint}
+                    accessibilityState={{ selected: on }}
+                    style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
+                    <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>
+                      {label}{n == null ? '' : ` · ${num(n)}`}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
 
           {loaded && list.length > 0 ? (
             <TextInput
@@ -645,6 +754,18 @@ export default function OwnerMembers() {
               style={{ ...inp, marginBottom: sp.md }}
               accessibilityLabel="Search memberships"
             />
+          ) : null}
+
+          {/* What the lens means, where it is not self-evident and where
+              somebody is about to act on it. Said under the chips rather than
+              in them: a chip is a word and this is a consequence. */}
+          {loaded && list.length > 0 && lens === 'overrun' && (lensCounts?.overrun ?? 0) > 0 ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+              These memberships have an end date that has already passed and a status the door
+              still reads as live, because nothing in this product closes a membership at
+              midnight. Cancel the ones that are over, or correct the end date on the ones that
+              are not — an end date on its own changes nothing.
+            </Flag>
           ) : null}
 
           {/* `state === 'failed'`, not `failed`. This branch is for a screen
@@ -674,7 +795,21 @@ export default function OwnerMembers() {
               used the app is invited rather than imported.
             </Text>
           ) : shown.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No membership matches “{q.trim()}”.</Text>
+            /* Which of the two narrowings emptied it. "No membership matches"
+               over an empty Ran-out lens would read as "nobody by that name",
+               and an owner who had typed nothing would be told their search
+               found nothing. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {inLens.length === 0
+                ? lens === 'expiring'
+                  ? `Nobody's membership runs out in the next ${EXPIRING_DAYS} days.`
+                  : lens === 'overrun'
+                  ? 'Nobody is training on a membership whose end date has passed.'
+                  : lens === 'paused'
+                  ? 'Nobody is paused, and no pause is booked.'
+                  : 'No membership matches “' + q.trim() + '”.'
+                : `No membership here matches “${q.trim()}”. Tap Everyone to search the whole register.`}
+            </Text>
           ) : shown.map((m, i) => {
             const tone = STATUS_TONE(t, m.status);
             const live = m.status === 'active' || m.status === 'frozen';
@@ -976,14 +1111,37 @@ export default function OwnerMembers() {
                 silently. */}
             {(() => {
               const days = frozenDays({ from: fzFrom, to: fzTo });
-              const moved = thawedEndsOn(freezeFor.endsOn, { from: fzFrom, to: fzTo });
+              // The SAME arithmetic `savePause` will do, off the same base — a
+              // preview computed differently from the write is worse than no
+              // preview, because the owner accepts the one they were shown.
+              const base = unpausedEndsOn({
+                endsOn: freezeFor.endsOn, frozenFrom: freezeFor.frozenFrom, frozenTo: freezeFor.frozenTo,
+              });
+              const moved = thawedEndsOn(base, { from: fzFrom, to: fzTo });
+              // Days already given back by the pause recorded on this row, which
+              // this save REPLACES rather than adds to. Said out loud whenever
+              // there is one, because the end date can come back SHORTER than it
+              // is now and an owner who is not told will read that as a bug.
+              const had = freezeFor.frozenFrom || freezeFor.frozenTo
+                ? frozenDays({ from: freezeFor.frozenFrom, to: freezeFor.frozenTo })
+                : null;
               if (days == null) return null;
               return (
                 <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
                   {days === 1 ? '1 day' : `${days} days`} paused.{' '}
                   {moved
-                    ? `The end date moves from ${freezeFor.endsOn} to ${moved}.`
+                    ? moved === freezeFor.endsOn
+                      ? `The end date stays at ${moved}.`
+                      : `The end date moves from ${freezeFor.endsOn} to ${moved}.`
+                    : base == null && freezeFor.endsOn
+                    // An end date that is there and cannot be read is not an
+                    // open-ended membership, and calling it one would tell an
+                    // owner their member has no term at all.
+                    ? 'The end date on this membership could not be read, so this app cannot say where it moves to. Ask before relying on it.'
                     : 'This membership has no end date, so there is nothing to extend — it simply does not run on those days.'}
+                  {had != null
+                    ? ` This replaces the pause already recorded here, so the ${had === 1 ? 'day it gave' : `${had} days it gave`} back ${had === 1 ? 'is' : 'are'} taken off first rather than kept on top.`
+                    : ''}
                 </Text>
               );
             })()}

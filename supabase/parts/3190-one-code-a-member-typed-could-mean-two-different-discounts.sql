@@ -1,0 +1,348 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- One code a member typed could mean two different discounts, and which one
+-- they got was not decided by anything in this product.
+--
+-- NOT APPLIED. The pre-flight query below has NOT been run against the live
+-- database by this lane — see "Run this BEFORE applying".
+--
+-- ── The defect, in three parts ─────────────────────────────────────────────
+--
+-- Found by the lane working app/(owner)/promotions.tsx, which could see all
+-- three from one screen and owned none of the files any of them live in. Each
+-- was re-verified here before this part was written.
+--
+--   1. THE SCREEN CHECKS A LIST IT MAY NOT HAVE. `addPromo` in
+--      src/ui/promos.tsx refused a code already present in `promos` — the array
+--      the provider is holding. Under 'error' that array is whatever the last
+--      successful read left behind, or empty; under 'partial' it is the first
+--      `capLimit()` page of a longer list. On both, a miss means "not in the
+--      part we have", and the screen reported it as "not in use".
+--
+--      It was also checking the wrong equality. It compared a raw stored `code`
+--      against an upper-cased input, so a stored `Summer` did not match a typed
+--      `SUMMER` — while `redeem_promo` below matches them to each other. The
+--      one comparison in the product that could have caught the collision was
+--      the one comparison that did not use the collision's own definition.
+--
+--      Fixed in src/ui/promos.tsx in the same change as this part: the screen
+--      now compares on `upper(trim())`, the same key this index uses, and
+--      `addPromo` reports whether the duplicate check actually ran rather than
+--      implying it did.
+--
+--   2. NOTHING STOPS IT AT THE DATABASE. `promos` (part 02) is:
+--
+--          create table if not exists promos (
+--            id uuid primary key default gen_random_uuid(),
+--            tenant_id uuid references tenants(id) on delete cascade,
+--            code text not null, discount int not null, active boolean default true,
+--            redemptions int default 0, created_at timestamptz not null default now()
+--          );
+--
+--      `code` carries `not null` and nothing else. No primary key covers it, no
+--      unique constraint, no unique index — confirmed by reading every part
+--      that names `promos` (02, 104, 105, 2612). The only unique index anywhere
+--      near this feature is `promo_redeemed_once` on
+--      `promo_redemptions (promo_id, member_id)`, which is a different
+--      question: it stops one member redeeming one code twice, and says
+--      nothing about one code existing twice.
+--
+--      This part is that missing half.
+--
+--   3. THE READ THAT PICKS THE WINNER PICKS ARBITRARILY. `redeem_promo`
+--      (part 104) is:
+--
+--          select * into v_promo
+--            from public.promos
+--           where tenant_id = v_tenant
+--             and upper(btrim(code)) = upper(btrim(p_code))
+--           limit 1;
+--
+--      `limit 1` with no `order by`. SQL guarantees nothing about which row
+--      that is. In practice it is whichever the executor reaches first, which
+--      moves with the plan, the physical row order, an autovacuum, an index
+--      being created — including, note, THIS ONE. So a gym holding a live 20%
+--      `SUMMER` and a switched-off 50% `SUMMER` hands a member 20% off, or
+--      nothing at all with the word "inactive", and the same member tapping
+--      twice can get a different answer each time.
+--
+--      THIS PART DOES NOT FIX THAT, DELIBERATELY. `redeem_promo` is SECURITY
+--      DEFINER and writes `promo_redemptions`; changing it belongs in its own
+--      part with its own review. The exact change it needs is written out in
+--      "What this part does NOT do" at the foot of this file, so that whoever
+--      takes it does not have to re-derive it.
+--
+-- ── What this part adds, and why it is this shape ─────────────────────────
+--
+--     create unique index promos_code_per_tenant
+--       on public.promos (tenant_id, upper(btrim(code)));
+--
+-- THE EXPRESSION IS THE POINT. A plain `unique (tenant_id, code)` — the shape
+-- this reaches for by reflex — would compare the text as stored, and would
+-- therefore permit `Summer` and `SUMMER` as two rows. `redeem_promo` matches a
+-- member's typing against `upper(btrim(code))`, so both of those rows answer
+-- one member's `summer`, and the coin flip this part exists to end would still
+-- be there with a unique constraint sitting on the table looking like it had
+-- been dealt with. A constraint that permits the exact collision it was added
+-- for is worse than no constraint, because it stops anyone looking again.
+--
+-- So the index key is the function `redeem_promo` actually applies, character
+-- for character. The rule the database enforces and the rule the redeem path
+-- reads by are then the same sentence, and they cannot drift into disagreeing.
+--
+-- AN INDEX RATHER THAN A TABLE CONSTRAINT, and not by preference: PostgreSQL
+-- has no expression form of `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE`. The
+-- column list of a unique constraint may name columns only. A unique index is
+-- the only way to say this, it enforces identically, and `ON CONFLICT` and the
+-- 23505 error code work against it exactly as against a constraint — which
+-- matters, because `addPromo` now reads that code to tell a duplicate apart
+-- from a transport failure. The one thing an index cannot be is the target of
+-- a foreign key, and nothing references `promos (tenant_id, code)`.
+--
+-- `upper(btrim(code))` is a legal index expression: both functions are
+-- IMMUTABLE for `text`. Nothing here depends on a collation or a locale, so the
+-- index cannot go stale under one.
+--
+-- NULLS: LEFT DISTINCT, ON PURPOSE. `promos.tenant_id` is nullable (part 02 —
+-- it is a plain reference with no `not null`), and under PostgreSQL's default
+-- two NULLs are distinct, so this index does NOT stop two same-code rows that
+-- both have no tenant. That is correct rather than overlooked. A promo with no
+-- tenant is reachable by nothing: `redeem_promo` requires
+-- `tenant_id = v_tenant` and `v_tenant` is checked non-null a few lines above
+-- it, and the owner screen reads `.eq('tenant_id', tenantId)`. Such a row can
+-- never be handed to a member, so it cannot produce the ambiguity this part is
+-- about. `NULLS NOT DISTINCT` would instead make this part fail to apply over
+-- rows that hurt nobody, on a gym that has a data problem of a different kind —
+-- and the pre-flight below reports those rows separately so that problem is
+-- seen rather than converted into a failed migration.
+--
+-- IT IS NOT PARTIAL. `where active` was considered and rejected. A switched-off
+-- code is still matched by `redeem_promo`'s select — the `active` test happens
+-- AFTER the row is chosen — so an inactive duplicate is one of the two rows the
+-- coin is flipped between, and the outcome "your code is switched off" when a
+-- live row exists is the worst of the available answers, not an exempt one. The
+-- uniqueness has to hold over every row, live or not.
+--
+-- ── WHAT HAPPENS IF A COLLIDING ROW EXISTS. READ THIS FIRST. ─────────────
+--
+-- **This part FAILS, LOUDLY, AND CHANGES NOTHING.**
+--
+-- `CREATE UNIQUE INDEX` scans the table and raises 23505 on the first pair that
+-- shares a key. The statement is atomic, so the index is not created; and
+-- because setup.sql is pasted and run as one multi-statement query, Postgres
+-- wraps the bundle in a single implicit transaction and rolls ALL of it back. A
+-- failure here leaves the database exactly as it was and applies no part after
+-- this one.
+--
+-- That is the intended behaviour, for the same reason part 3090 gives. There is
+-- no correct row for a migration to pick. Two `SUMMER`s at 20% and 50% are a
+-- gym's two decisions and only that gym knows which one it is still standing
+-- behind; and by the time this is applied, members may have redeemed BOTH. A
+-- migration that deleted one would be deciding, on a gym's behalf, which of its
+-- customers were given a discount — and see the FK hazard below for what that
+-- deletion actually destroys. So: no dedupe, no backfill, no coercion, no
+-- `delete from promos` anywhere in this file. The part refuses and a person
+-- decides.
+--
+-- ── Run this BEFORE applying. It is not optional. ────────────────────────
+--
+-- One row per colliding promo, with everything needed to decide, including how
+-- many members have already used each one. Read-only. Expect zero rows.
+--
+--     select p.tenant_id,
+--            upper(btrim(p.code)) as code_key,
+--            p.id,
+--            p.code               as code_as_typed,
+--            p.discount,
+--            p.active,
+--            p.created_at,
+--            (select count(*) from public.promo_redemptions r
+--              where r.promo_id = p.id) as redemptions
+--       from public.promos p
+--      where p.tenant_id is not null
+--        and exists (
+--          select 1 from public.promos q
+--           where q.tenant_id = p.tenant_id
+--             and q.id <> p.id
+--             and upper(btrim(q.code)) = upper(btrim(p.code))
+--        )
+--      order by p.tenant_id, code_key, p.created_at;
+--
+-- The `exists` correlates on the same expression the index keys on, so the
+-- query and the index cannot disagree about what a collision is. `code` is NOT
+-- NULL, so no row hides behind a NULL key.
+--
+-- And the rows this index deliberately leaves alone, so they are seen rather
+-- than discovered later. These do NOT block applying:
+--
+--     select id, code, discount, active, created_at
+--       from public.promos
+--      where tenant_id is null
+--      order by created_at;
+--
+-- ── IF THE FIRST QUERY RETURNS ROWS: what to do, and what NOT to do ──────
+--
+-- Read the `redemptions` column first. It decides which of two remedies is
+-- available, and getting this the wrong way round destroys records.
+--
+--   · redemptions = 0 on the row you do not want — DELETE IT.
+--     Nothing is lost. No member was ever given it.
+--
+--         delete from public.promos where id = '…';
+--
+--   · redemptions > 0 on the row you do not want — DO NOT DELETE IT.
+--     RENAME IT.
+--
+--         update public.promos set code = 'SUMMER-2025-OLD' where id = '…';
+--
+--     `promo_redemptions.promo_id` is `references public.promos(id) ON DELETE
+--     CASCADE` (part 104). Deleting the loser therefore deletes every
+--     redemption row hanging off it, silently and in the same statement. Those
+--     rows are not bookkeeping: they are the only record anywhere that a
+--     specific member was given a specific discount, they are what
+--     `my_promo_redemptions()` shows that member on their own offers screen,
+--     and they are the numerator of every figure the owner runs a promotion to
+--     read. A gym tidying up a duplicate would be erasing its own campaign
+--     results and its members' entitlements at the same time, with no error and
+--     nothing to undo it from.
+--
+--     Renaming keeps every redemption attached to the row it was actually made
+--     against, and keeps the discount that was given visible next to it. It is
+--     honest about one thing: a member who redeemed the loser will now see the
+--     new spelling on their offers screen, because `my_promo_redemptions()`
+--     returns `p.code` live rather than a copy taken at redemption. That is a
+--     changed label on a real event. A deletion is the event itself gone.
+--
+--   · The two rows agree on everything but case or spacing, and both have
+--     redemptions. Still rename — this is the same rule, and the fact that they
+--     "mean the same thing" is exactly why there is no information in choosing
+--     between them and no reason to lose either.
+--
+--   · Switching the loser off does NOT help. The index covers every row
+--     regardless of `active`; see "IT IS NOT PARTIAL" above.
+--
+-- ── Why NOT a NOT-VALID-style escape, and why not CONCURRENTLY ───────────
+--
+-- There is no `NOT VALID` for a unique index, and the nearest equivalent —
+-- `CREATE UNIQUE INDEX CONCURRENTLY`, which builds without an ACCESS EXCLUSIVE
+-- lock and leaves the index INVALID if it hits a duplicate — is wrong here on
+-- all three counts part 3090 makes against NOT VALID:
+--
+--   1. An INVALID unique index is not enforced at all, and is one word apart
+--      from a working one in `\d`. The colliding rows stay, the coin flip stays,
+--      and the file that was supposed to have ended it is present and looks
+--      applied.
+--   2. CONCURRENTLY cannot run inside a transaction block, and setup.sql is a
+--      single pasted multi-statement query wrapped in one implicit transaction.
+--      It would fail on syntax grounds before it failed on anything else.
+--   3. The lock argument buys nothing. `promos` holds a gym's discount codes —
+--      tens of rows, not millions. The scan is milliseconds.
+--
+-- The point of this part is that a gym with two SUMMERs finds out and fixes it.
+-- A mechanism whose success condition is "the ambiguous rows are still there
+-- and now look handled" is the opposite of the goal.
+--
+-- ── Applying this ────────────────────────────────────────────────────────
+--
+-- Idempotent by `if not exists`, matching the house form for indexes in parts
+-- 104 and 2612. Re-running the bundle is a no-op. No table is created, no
+-- column added or altered, no row read or written, no policy, grant, trigger or
+-- function touched. The only thing this part can do to a database is add one
+-- unique index — or refuse.
+--
+-- `if not exists` has one edge worth stating rather than discovering: it
+-- matches on NAME, so an index already called `promos_code_per_tenant` with a
+-- different definition would be left in place and this part would report
+-- success over it. No such index exists today — `promos` carries only its
+-- primary key — and the verification block at the foot of this file asserts the
+-- shape rather than the name, so that edge is closed rather than trusted.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. the pre-flight ───────────────────────────────────────────────────────
+--
+-- The query lives in the header rather than here, because a statement in this
+-- file RUNS and that one is for a person to run and READ. Applying this part
+-- without having run it is the one mistake it is possible to make.
+
+-- ── 2. one code, one meaning, per gym ───────────────────────────────────────
+--
+-- The key is `redeem_promo`'s own comparison. See the header for why a plain
+-- `unique (tenant_id, code)` would not have closed this.
+create unique index if not exists promos_code_per_tenant
+  on public.promos (tenant_id, upper(btrim(code)));
+
+-- ── 3. verify the SHAPE, not the name ───────────────────────────────────────
+--
+-- `create unique index if not exists` is satisfied by any index of that name.
+-- This asserts what the index actually is: unique, on `promos`, two key
+-- columns, and an expression among them. If a differently-shaped index had
+-- squatted the name, this raises and the whole bundle rolls back — which is the
+-- outcome to want, because the alternative is a schema that reports a rule it
+-- is not keeping.
+do $$
+declare
+  v_unique  boolean;
+  v_natts   int;  -- indnkeyatts: KEY columns only, so an INCLUDE would not be miscounted
+  v_hasexpr boolean;
+begin
+  select i.indisunique, i.indnkeyatts, i.indexprs is not null
+    into v_unique, v_natts, v_hasexpr
+    from pg_index i
+    join pg_class c on c.oid = i.indexrelid
+    join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relname = 'promos_code_per_tenant';
+
+  if not found then
+    raise exception 'promos_code_per_tenant is missing after part 3190';
+  end if;
+  if not v_unique then
+    raise exception 'promos_code_per_tenant exists but is not UNIQUE — it enforces nothing';
+  end if;
+  if v_natts <> 2 then
+    raise exception 'promos_code_per_tenant has % key columns, expected 2 (tenant_id, upper(btrim(code)))', v_natts;
+  end if;
+  if not v_hasexpr then
+    raise exception 'promos_code_per_tenant keys on plain columns — a raw code column permits Summer and SUMMER as two rows, which is the collision this part exists to stop';
+  end if;
+end $$;
+
+-- ── 4. what this part deliberately does NOT do ──────────────────────────────
+--
+--   · IT DOES NOT FIX `redeem_promo`, and that function is where the coin flip
+--     is actually spent. Once this index is applied there can be no two rows to
+--     choose between, so the missing `order by` stops having an effect — but it
+--     is still missing, it is still the only thing standing between a member and
+--     an arbitrary answer on any database this part has not reached yet, and it
+--     would come straight back if this index were ever dropped. A correct
+--     `limit 1` names its own winner. The change, for whoever takes the part
+--     that owns it:
+--
+--         select * into v_promo
+--           from public.promos
+--          where tenant_id = v_tenant
+--            and upper(btrim(code)) = upper(btrim(p_code))
+--          order by coalesce(active, false) desc, created_at desc, id desc
+--          limit 1;
+--
+--     `active desc` first because the row is chosen BEFORE `active` is tested,
+--     so without it a member holding a code the gym is currently running can be
+--     told it is switched off while the live row sits unread. `created_at desc`
+--     second because among live rows the newest is the gym's most recent
+--     statement of what that code means. `id desc` last because `created_at`
+--     defaults to `now()` and two rows written in one transaction share it
+--     exactly — without a unique column at the end the order is still not total,
+--     and "deterministic" has to mean deterministic rather than usually.
+--
+--     Note it does NOT order by `discount desc`. Handing the member the most
+--     generous of two rows reads as kindness and is a rule that quietly spends
+--     a gym's money on an offer they may have retired precisely by superseding
+--     it. Newest-wins matches what the gym last did.
+--
+--   · It does not drop `promos.redemptions`, the unused `int default 0` counter
+--     part 104 left in place. Still unread, still not this part's business.
+--   · It does not add `not null` to `tenant_id`. That is a real question about
+--     rows no reader can reach, and it is a different part with a different
+--     pre-flight.
+--   · It writes no row. No dedupe, no `upper(code)` normalisation pass, no
+--     merge of two codes' redemptions. Every one of those is Repple deciding
+--     which of a gym's offers was the real one, and which of its members were
+--     given a discount, from evidence it does not have.

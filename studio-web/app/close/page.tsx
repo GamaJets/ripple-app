@@ -40,6 +40,12 @@ import {
 } from '@lib/closeCosts';
 import { readByIds } from '@lib/idLookup';
 import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+// A figure quoted per currency, side by side. `MIXED_CURRENCY_NOTE` below says
+// why two moneys are not one total; this is what to print INSTEAD of the dash
+// that sentence used to sit under. `incomeOf` already groups its lines by
+// method AND currency, so the pots are read off the lines this screen holds
+// rather than summed a second time from the rows.
+import { quotedOfLines, quotedText, quotedNote, type Quoted } from '@lib/quotedTotal';
 // The sentence for a figure whose own rows hold two moneys. Imported rather
 // than worded here for the reason sumCurrency.ts gives at length: it is a
 // different missing thing from `NO_CURRENCY_NOTE` above, and a screen that
@@ -1023,7 +1029,23 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
   bankedErr: string | null;
   onChange: () => void;
 }) {
-  const m = (cents: number | null | undefined) => money(cents, currency);
+  /*
+   * What the month took, per currency.
+   *
+   * The tile below printed a dash for a gym trading in two moneys, with "more
+   * than one currency — not summed" under it. That sentence is true and it is
+   * not the figure: a gym that took AED 6,000 and GBP 400 in August has two
+   * real totals of like things and this screen quoted neither, on the page
+   * whose figures are written into `gym_month_closes` and handed to an
+   * accountant. The table three sections down has printed both, honestly, one
+   * line per method per currency, since the wave that split `incomeOf`'s
+   * grouping — so the pots were already in the room.
+   *
+   * Read off `byMethod` rather than re-summed from `rec.payments.rows`: those
+   * rows are not narrowed to the month, and a second grouping is a second
+   * implementation of a rule that has to stay one.
+   */
+  const takenPots: Quoted | null = c.income ? quotedOfLines(c.income.byMethod) : null;
 
   /*
    * What the INVOICES agree on — asked TWICE, because they are two sets.
@@ -1115,17 +1137,15 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
       >
         <Kpi
           label="Taken"
-          text={c.income ? m(c.income.takenCents) : null}
+          text={takenPots ? quotedText(takenPots, money) : null}
           note={
-            !c.income ? stateNote(rec.payments, 'payments')
-              : c.income.currencies.length > 1 ? 'more than one currency — not summed'
-              : c.income.count === 0 ? 'nothing recorded this month'
-              : `${c.income.count} payment${c.income.count === 1 ? '' : 's'}`
+            !takenPots ? stateNote(rec.payments, 'payments')
+              : quotedNote(takenPots, { one: 'payment', many: 'payments' }, 'Nothing recorded this month.')
           }
         />
         {/* ── the three tiles that wore the payments' currency ─────────────
-            `m()` is `money(cents, currency)` and `currency` is what the month's
-            PAYMENTS agree on — its own prop doc, twenty lines up, says "only
+            The tile above used to be `money(cents, currency)`, where `currency`
+            is what the month's PAYMENTS agree on — its own prop doc, twenty lines up, says "only
             figures the payments produced may wear it". These three are not
             figures the payments produced. Billed and Still owed come off
             `gym_invoices`; Payroll comes off `sessions.rate_cents` and

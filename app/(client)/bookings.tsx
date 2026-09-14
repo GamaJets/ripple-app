@@ -946,14 +946,18 @@ export default function Bookings() {
                           {!q.stillTaken
                             ? 'This slot is open again and did not come to you — book it from the Book screen if you still want it.'
                             : q.position == null
-                              /* `MyWaitlistRow.position` is still settled with
-                                 `toNum(r.queue_position) ?? 0` in
-                                 src/ui/sessions.tsx, and 0 is the value
-                                 `waitlistLine` reads as "not on this queue" —
-                                 about a row that exists BECAUSE this member is
-                                 on that queue. This arm is what lets that field
-                                 be widened to `number | null`; it is dead until
-                                 it is. */
+                              /* `MyWaitlistRow.position` is `number | null` in
+                                 src/ui/sessions.tsx now, and the mapper there
+                                 reads it with `toNum(r.queue_position)` and no
+                                 `?? 0`. The settled 0 was a contradiction on
+                                 this row in particular — the row exists BECAUSE
+                                 this member is on that queue, and 0 is the
+                                 value `waitlistLine` reads as "not on this
+                                 queue" — which is why this field was widened
+                                 ahead of the others. This arm is what carries
+                                 the unknown, and it is reachable today: it is
+                                 what a member sees when the row came back and
+                                 the place in it did not. */
                               ? 'You’re on the waitlist for this hour. Your place in the queue didn’t come back, so we can’t say where in it you are — it still stands, in the order you joined.'
                               : waitlistLine(q.position, q.waiting)}
                         </Text>

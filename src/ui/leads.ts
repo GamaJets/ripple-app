@@ -24,6 +24,17 @@
 //    failed read. So the two statuses are folded with worstStatus and the
 //    screen refuses to attribute anything unless both landed whole.
 //
+//    THE FOLD IS NOT THE WHOLE ANSWER, and treating it as one is a defect this
+//    file has now caused twice. `worstStatus` makes a failed CODES read
+//    indistinguishable from a failed ENQUIRY read, and a consumer branching on
+//    it took a coach's entire list of strangers off the screen for the sake of
+//    a label lookup; the same fold turned a 'partial' enquiry read into the
+//    sentence "your enquiries could not be read" printed over enquiries that
+//    had been read. The fold decides what may be SAID as a whole. It never
+//    decides who is listed, and it never speaks for one read on the other's
+//    behalf — so `leadsStatus` and `codesStatus` are both published unfolded,
+//    and `note` is built from the enquiry read's own status.
+//
 // 3. THE FOLLOW-UPS. What the coach already did. A failure here is the mildest
 //    of the three — it hides history rather than inventing it — and it still
 //    matters, because an enquiry whose notes did not load looks like one nobody
@@ -59,6 +70,29 @@ export type LeadWrite = { ok: true } | { ok: false; reason: string };
 export interface LeadBook {
   /** The worst of the enquiry read and the code read. */
   status: LoadStatus;
+  /**
+   * The ENQUIRY read's own status, unfolded.
+   *
+   * `status` above is `worstStatus(leadsStatus, codesStatus)`, and the fold is
+   * right for deciding what may be said. It is wrong for deciding what may be
+   * SHOWN, and the difference cost a real screen: a failed codes read — a
+   * lookup that only ever decides whether "Gym flyer" can be printed beside a
+   * code — arrives in `status` as 'error' indistinguishably from a failed
+   * enquiry read, and `app/(trainer)/leads.tsx` branched on it and took the
+   * coach's entire list off the screen, replacing strangers who had left phone
+   * numbers with "the read did not come back".
+   *
+   * That screen now reads `status === 'error' && rows.length === 0`, which is
+   * true for the right reason — the hook clears the rows when the enquiry read
+   * fails — but it is a proxy, and a proxy is a thing the next consumer has to
+   * re-derive correctly. This is the fact itself, so nobody has to. 'partial'
+   * here is the other half of it: the enquiries were read and there are more of
+   * them, which is not something `status` can still say once the codes read has
+   * folded 'error' over the top of it.
+   */
+  leadsStatus: LoadStatus;
+  /** The CODES read's own status. `codesRead` is this being 'ready'. */
+  codesStatus: LoadStatus;
   rows: LeadRow[];
   /** The line under the heading, true in all four states. */
   note: string;
@@ -213,12 +247,46 @@ export function useLeads(): LeadBook {
     [loaded.leads, loaded.codes, codesStatus],
   );
 
+  /**
+   * The line under the heading.
+   *
+   * Built from the ENQUIRY read's own status and never from the fold. The fold
+   * is `worstStatus`, so a failed codes read turns 'partial' into 'error' and
+   * this line fell through to `leadCountLine('error', rows)` — "Your enquiries
+   * could not be read, so nothing here is a count. This is not an empty inbox."
+   * — printed above a list of enquiries that HAD been read and were on screen
+   * underneath it. The codes read is a lookup for campaign names; it cannot
+   * make a statement about whether the enquiries came back, and it must not be
+   * allowed to write one.
+   *
+   * So the two facts are said as two facts. `leadCountLine` says what is known
+   * about the enquiries, under their own status — which keeps 'partial' saying
+   * "there are more of them" rather than losing it — and the codes sentence is
+   * added after it when the codes did not land. Neither sentence states a
+   * figure the other one makes false: `leadCountLine` already refuses a total
+   * under 'partial', and the campaign half is about attribution, not counts.
+   */
   const note = useMemo(() => {
-    if (codesStatus !== 'ready' && status === 'ready') {
-      return 'Your enquiries were read, but your codes were not — so none of them can be put against a campaign. The people below are real; where they came from is unknown until this reads again.';
-    }
-    return leadCountLine(combined, rows);
-  }, [combined, status, codesStatus, rows]);
+    const own = leadCountLine(status, rows);
+    // Nothing to add while the enquiry read is still in flight or has failed:
+    // under 'loading' there is no list to attribute yet, and under 'error'
+    // `leadCountLine` has already said the enquiries are unknown, which is the
+    // larger fact and the one a coach acts on.
+    //
+    // whole-ok: this line is the "did not land" half and it is right to stop at
+    // two. 'partial' goes on through DELIBERATELY, and is the reason this memo
+    // was rewritten: a truncated enquiry read still put real strangers on the
+    // screen, and the sentence after this one is about ATTRIBUTION — whether
+    // the rows that are there can be named against a campaign — not about
+    // whether they are all of the rows. `leadCountLine` is what answers the
+    // "all of them" question and it refuses a total under 'partial' on its own,
+    // one line above. Swapping this for `isWhole(status)` would drop the codes
+    // caveat exactly when the coach is already looking at an incomplete list,
+    // which is the one case where an unnamed campaign is most likely to be read
+    // as broken attribution rather than as a failed read.
+    if (codesStatus === 'ready' || status === 'loading' || status === 'error') return own;
+    return `${own} Your codes were not read, so none of these can be put against a campaign — the people below are real; where they came from is unknown until this reads again.`;
+  }, [status, codesStatus, rows]);
 
   const followUpsFor = useCallback(
     (leadId: string): FollowUp[] => loaded.notes[leadId] ?? [],
@@ -288,6 +356,8 @@ export function useLeads(): LeadBook {
 
   return {
     status: combined,
+    leadsStatus: status,
+    codesStatus,
     rows,
     note,
     codesRead: codesStatus === 'ready',

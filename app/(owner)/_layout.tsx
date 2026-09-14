@@ -36,7 +36,7 @@ export default function OwnerLayout() {
   // What this owner missed, filtered to the Studio app. A release whose only
   // changes were a client's or a coach's is skipped entirely rather than
   // opening an empty sheet at them.
-  const { user } = useAuth();
+  const { user, authed, loading } = useAuth();
   const whatsNew = useWhatsNew(user?.id ?? null);
 
   // The bar sat under the home indicator, and this was the only one of the
@@ -66,6 +66,21 @@ export default function OwnerLayout() {
   // notification pointing into it goes home instead of rendering a portal
   // this user's app is not supposed to have.
   if (!groupAllowed('owner')) return <Redirect href="/" />;
+
+  // And nobody reads this portal without a session. There was no auth gate in
+  // any of the three groups — the variant gate above was the only Redirect in
+  // app/(client), app/(trainer) or app/(owner). app/index.tsx is where `authed`
+  // is checked, and a deep link or a tapped notification lands on this layout
+  // without going through it. The path that makes it matter is the lock screen:
+  // its Sign Out (src/ui/LockScreen.tsx) ends the session and navigates
+  // nowhere, and the lock drops as soon as `signedIn` goes false
+  // (src/ui/appLock.tsx:130), so whoever is holding the handset was left inside
+  // the previous owner's Studio — revenue, payroll, deletion requests — rather
+  // than at sign-in. `!loading` because redirecting while auth is still
+  // resolving would bounce a signed-in owner to welcome on every cold start;
+  // '/' because app/index.tsx is what knows where a signed-out reader belongs.
+  // The same gate is in app/(client)/_layout.tsx and app/(trainer)/_layout.tsx.
+  if (!loading && !authed) return <Redirect href="/" />;
 
   return (
     <>

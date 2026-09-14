@@ -106,7 +106,17 @@ const SYSTEM =
   + 'sessions booked. sessionsStillUnmarked are sessions that happened and have no outcome recorded: they are neither '
   + 'delivered nor missed, so never add them to the delivered figure, and if there are any, say they are waiting to be '
   + 'marked. revenueAtOwnRate is those delivered sessions multiplied by the coach own session rate and is the coach own '
-  + 'arithmetic, not a payout. Be short and specific.';
+  + 'arithmetic, not a payout. '
+  // The denominators, said once. `clients` is the whole book; every other count
+  // is taken over a subset of it, and a model handed "clients: 4, onTrack: 1"
+  // with nothing else to go on subtracts and writes about three clients it has
+  // been told nothing about. The subtraction is not a fourth band — it is the
+  // clients whose training record this app is not entitled to read at all,
+  // because they were typed into Add Client and have no Repple account.
+  + 'clients is the whole book. avgAdherence, onTrack, watch, atRiskLow and atRiskClients are each counted over '
+  + 'only part of it and say so when they are; never subtract one of them from clients, never treat the '
+  + 'difference as a group of clients who are fine, and never describe a client nobody could assess as being '
+  + 'on track or not at risk. Be short and specific.';
 
 export default function TrainerAssistant() {
   const t = useTheme();
@@ -251,9 +261,43 @@ export default function TrainerAssistant() {
    *  month with nine unmarked sessions writes a sentence about a quiet month. */
   const unmarkedMo = month.unmarked;
   const clients = figuresWhole ? roster.length : null;
+  /**
+   * How much of the book each roster-derived figure below actually covers.
+   *
+   * Every count under this line is taken over a SUBSET of the roster, and until
+   * now not one of them said so. `driftSubjects` drops the hand-added clients
+   * because nothing of theirs can be read; the three adherence bands and the
+   * average are narrower still, because they need a check-in on record and a
+   * linked client who has never done one has `adherence: null` (src/ui/roster.tsx
+   * :377). In the live database 2 of 4 clients are hand-added, so these are not
+   * edge cases — they are the ordinary shape of a coach's book.
+   *
+   * The figures were handed to the model beside `clients: 4` with nothing to
+   * say they were counted over 2, or over 1, or over none. A model given
+   * "clients: 4, onTrack: 0, watch: 0, atRiskLow: 0, atRiskClients: 0" writes
+   * that nobody is drifting and everything is fine, which is a confident
+   * all-clear assembled entirely out of rows we were never entitled to read.
+   * That is the same defect as "0 meals in the last 7 days" about a client with
+   * no account, one level up: an absence summarised as a fact.
+   */
+  const noRecord = figuresWhole ? roster.length - driftSubjects.length : null;
   const adhKnown = roster.map((c) => c.adherence).filter((a): a is number => a != null);
   const avgAdh = figuresWhole && adhKnown.length
     ? Math.round(adhKnown.reduce((a, x) => a + x, 0) / adhKnown.length) : null;
+  /**
+   * The reason there is no adherence figure, or null when there is one.
+   *
+   * Worded once and used by all four adherence fields, so the average and the
+   * three bands cannot drift into describing the same gap differently. Begins
+   * with the word `unknown` because the system prompt above is written to scan
+   * for exactly that.
+   */
+  const adhGap = !figuresWhole || adhKnown.length ? null
+    : roster.length === 0
+      ? 'unknown — there is nobody on this roster to have an adherence figure'
+      : 'unknown — not one of the ' + roster.length + ' clients on this roster has a check-in on record'
+        + (noRecord ? ' (' + noRecord + ' of them were added by hand and have no Repple account to record one with)' : '')
+        + ', so state no adherence figure and do not say anyone is on track or at risk';
   const revenue = deliveredValue(month, sessionFee);
 
   // Kept between visits, on this phone, under this account and under this side
@@ -291,7 +335,25 @@ export default function TrainerAssistant() {
       // person, and every one of them still ends in "state no amount".
       currency: currencyForModel(cur),
       clients,
-      avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet',
+      // Was `avgAdh + '%' : 'no check-ins yet'`. Both halves were wrong.
+      //
+      // The fallback is the sharper one: `avgAdh` is null when NOT ONE client
+      // has an adherence on record, and the commonest way for that to happen is
+      // a book of hand-added clients, who have no Repple account and no
+      // check-in screen to have been silent on. "No check-ins yet" is an
+      // assertion about people who have not failed to do anything — the same
+      // sentence as "0 meals in the last 7 days" about somebody with no app,
+      // and it reads to the model as a fact it may then advise on.
+      //
+      // And the figure itself was an average over whoever happened to have one,
+      // handed over beside `clients: 4` with no denominator, so a model reads
+      // it as the book's adherence. It carries its own coverage now.
+      avgAdherence: avgAdh != null
+        ? adhKnown.length === roster.length
+          ? avgAdh + '%'
+          : avgAdh + '% — averaged over the ' + adhKnown.length + ' of ' + roster.length
+            + ' clients who have a check-in on record, so it is not the whole book'
+        : adhGap,
       // Was `roster.filter(atRiskClient).length`. `atRiskClient` is
       // src/lib/trainerMock.ts — `adherence < 80 || staleDays(lastActive) >= 2`
       // — where `staleDays` recovers a number by regexing a DISPLAY STRING
@@ -314,16 +376,90 @@ export default function TrainerAssistant() {
       // three fields that never arrived. `drift.note` is the provider's
       // sentence, prefixed so it meets the system prompt's "null or says
       // unknown" rule word for word.
-      atRiskClients: figuresWhole && drift.drift && !drift.error && driftCovered
-        ? driftSubjects.filter((c) => { const d = drift.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; }).length
-        : drift.note
-          ? 'unknown — ' + drift.note
-          : null,
-      onTrack: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 85).length : null,
-      watch: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length : null,
-      atRiskLow: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence < 70).length : null,
-      unreadThreads: figuresWhole && !roster.some((c) => c.unread == null)
-        ? roster.filter((c) => (c.unread ?? 0) > 0).length : null,
+      //
+      // The gate had one hole left, and it is the emptiest possible read. When
+      // EVERY client was added by hand, `driftSubjects` is empty,
+      // `useClientDrift` short-circuits on `!ids.length` and sets `drift` to
+      // `{}` with a clean coverage (src/ui/clientDrift.ts:126) — so `drift.drift`
+      // is truthy, `driftCovered` is true, the filter runs over nothing and this
+      // field left as `0`. Nobody was assessed and the model was told nobody is
+      // at risk. `drift.note` is null in that state too, so the coach saw no
+      // flag either: filtering the hand-added clients out before the hook sees
+      // them also suppressed the hook's own sentence explaining the gap.
+      //
+      // Said here instead, because this screen is the one that did the
+      // filtering and is therefore the only one that knows what it removed.
+      atRiskClients: !figuresWhole ? null
+        : driftSubjects.length === 0
+          ? (roster.length
+            ? 'unknown — all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
+              + 'account, so there is no training record to judge any of them by and nobody has been assessed'
+            : null)
+          : drift.drift && !drift.error && driftCovered
+            ? (() => {
+              const n = driftSubjects.filter((c) => { const d = drift.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; }).length;
+              // The denominator travels with the number whenever it is not the
+              // whole book, for the same reason `avgAdherence` now carries one.
+              return noRecord
+                ? n + ' of the ' + driftSubjects.length + ' clients with a Repple account; the other ' + noRecord
+                  + ' were added by hand and have no training record, so they are in no count here'
+                : n;
+            })()
+            : drift.note
+              ? 'unknown — ' + drift.note
+              : null,
+      // The three bands are counted over the clients who have an adherence on
+      // record, which is narrower than the roster and narrower than
+      // `driftSubjects`. `avgAdherence` above carries that denominator; what
+      // these must not do is report `0` when the set is empty, which is three
+      // more all-clears out of an absence.
+      onTrack: figuresWhole ? (adhKnown.length ? roster.filter((c) => c.adherence != null && c.adherence >= 85).length : adhGap) : null,
+      watch: figuresWhole ? (adhKnown.length ? roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length : adhGap) : null,
+      atRiskLow: figuresWhole ? (adhKnown.length ? roster.filter((c) => c.adherence != null && c.adherence < 70).length : adhGap) : null,
+      // Was `figuresWhole && !roster.some((c) => c.unread == null)`, a
+      // whole-roster guard on a per-client figure, so this field was null for
+      // the life of any account with one hand-added client — and the live
+      // database has 2 of 4. `app/(trainer)/dashboard.tsx:1327-1344` states the
+      // argument in full and this is the same repair.
+      //
+      // `coach_unread_counts()` (supabase/parts/88-message-read-state.sql:33)
+      // selects `from clients c where c.trainer_id = auth.uid()` and returns
+      // `count(*)::int` — one row per LINKED client, zeros included, never
+      // null. A hand-added row lives in `coach_clients`, is in no thread, and
+      // has never been counted: its null is the absence of a thread and not an
+      // unknown count, and no retry changes it. So the unknown is real for the
+      // linked rows and only for them.
+      //
+      // `driftSubjects` is `roster.filter((c) => c.handAdded !== true)` — the
+      // same set, reused rather than re-derived so that `noRecord` stays its
+      // exact complement.
+      //
+      // And when it is narrower than the roster the count carries its
+      // denominator INSIDE the value, for the reason `avgAdherence` and
+      // `atRiskClients` above already do it that way: `COACH_BUSINESS_KEYS` in
+      // src/lib/coachShare.ts is an allowlist and a companion field explaining
+      // the coverage would be dropped on the way out.
+      //
+      // The empty case is the one that has to be a sentence rather than a
+      // number: with every client hand-added, `driftSubjects` is empty, the
+      // filter runs over nothing and a bare `0` tells the model nobody is
+      // waiting on this coach — an all-clear out of an absence, the same hole
+      // `atRiskClients` had.
+      unreadThreads: !figuresWhole ? null
+        : driftSubjects.length === 0
+          ? (roster.length
+            ? 'unknown — all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
+              + 'account, so none of them is in a message thread and nobody has been counted'
+            : null)
+          : driftSubjects.some((c) => c.unread == null)
+            ? null
+            : (() => {
+              const n = driftSubjects.filter((c) => (c.unread ?? 0) > 0).length;
+              return noRecord
+                ? n + ' of the ' + driftSubjects.length + ' clients with a Repple account; the other ' + noRecord
+                  + ' were added by hand and are in no message thread, so they are in no count here'
+                : n;
+            })(),
     };
     const answer = await askAboutMyBusiness([{ role: 'user', content: SYSTEM }, ...next], ctx);
     setBusy(false);
@@ -385,6 +521,20 @@ export default function TrainerAssistant() {
               rather than finding out inside a paragraph, or not at all. */}
           {figuresWhole && drift.note ? (
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>{drift.note}</Flag>
+          ) : null}
+
+          {/* And the exclusion this screen makes itself.
+              `useClientDrift` writes the sentence above about ids IT could not
+              ask about; the hand-added clients never reach it, because
+              `driftSubjects` removes them first. So the one gap that is always
+              present went unmentioned on screen — the coach read an answer
+              about half their book with nothing saying it was half. */}
+          {figuresWhole && !drift.note && noRecord ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+              {noRecord === 1
+                ? 'One of your clients was added by hand and has no Repple account. There is no training record to read for them, so they are in none of the figures the assistant is answering from.'
+                : `${noRecord} of your clients were added by hand and have no Repple account. There is no training record to read for them, so they are in none of the figures the assistant is answering from.`}
+            </Flag>
           ) : null}
 
           {!coachAvailable() ? (

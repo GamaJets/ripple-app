@@ -213,11 +213,25 @@ export function codesToHandOut(rows: readonly JoinCodeRow[] | null | undefined):
  * are three different facts. Loading is not failed, failed is not empty, and
  * empty is the only one of them that is a claim about the coach.
  *
- * 'partial' cannot arise from my_join_codes() today — at most twenty-one rows,
- * counted server-side, well inside PostgREST's cap — and it is handled anyway,
- * for the reason src/lib/joinCodes.ts gives: the status is the provider's claim
+ * 'partial' IS produced by `fetchMyJoinCodes`, and this paragraph used to say
+ * it was not — "it resolves 'ready' or 'error' and nothing else". That was true
+ * when it was written and it was true for the wrong reason: the read never
+ * looked for truncation, so it reported every page as whole, including one
+ * PostgREST had cut at its own ceiling. Being handled anyway is what made the
+ * repair a three-line one. The reason for handling it was never the row count
+ * and is the one src/lib/joinCodes.ts gives: the status is the provider's claim
  * about whether it holds all of it, and this screen is a list of things to hand
  * to a human being.
+ *
+ * This paragraph used to justify that with a row count — "at most twenty-one
+ * rows" — and the figure was wrong. Twenty is the cap on LIVE codes
+ * (`create_join_code` counts `revoked_at is null`, setup.sql), and
+ * `my_join_codes()` returns the default row plus EVERY named code the coach
+ * has ever made, live and revoked, because the counts on a withdrawn code are
+ * the history of what worked. A coach who has turned twenty codes off and made
+ * twenty more has forty-one rows, and nothing bounds that but their own
+ * patience. The reason above is about the provider and needs no figure;
+ * `codesToHandOut` is what keeps the revoked ones off this screen.
  */
 export function namedCodesLine(status: LoadStatus, rows: readonly JoinCodeRow[]): string {
   if (status === 'loading') return 'Looking for the other codes you have made…';

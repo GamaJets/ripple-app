@@ -72,6 +72,15 @@ import type { Program } from '../../src/lib/programs';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { notifySuccess } from '../../src/ui/haptics';
+// ── the day the block begins, for everybody in the group at once ──────────
+//
+// Both already existed and neither was reachable from here: `DateSheet` is the
+// month sheet builder.tsx and templates.tsx pick a start date in, and
+// `assignProgramTo`'s third argument is the column it writes. No new table, no
+// new component and no new dependency — see the section above the Assign
+// button for what was missing.
+import { DateSheet } from '../../src/ui/DateSheet';
+import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 /** What a member's chip says. Never "not assigned yet" off an unread
@@ -88,7 +97,32 @@ export default function Groups() {
   const router = useRouter();
   const { groups, status: groupStatus, createGroup, deleteGroup, setGroupProgram, addMembers, removeMember, refresh: refreshGroups } = useProgramGroups();
   const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
-  const { getProgram, assignProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
+  /**
+   * `assignProgramTo`, not `assignProgram`.
+   *
+   * They do the same write. `assignProgram` is the convenience wrapper that
+   * throws the REASON away — `(await assignProgramTo(…)).ok` — and this screen
+   * was the last caller of it left in the app: builder.tsx:366,
+   * dashboard.tsx:606 and templates.tsx:95 all moved to the pair, and
+   * dashboard.tsx carries the note saying why.
+   *
+   * It mattered most here and was fixed here last. A fan-out writes to eight
+   * people in one press and their failures are NOT the same failure:
+   *
+   *   · `is_my_client` looks in `clients`, so a hand-added member is refused
+   *     42501 — the server was reached and said no;
+   *   · an upsert that matched no rows is the server accepting the request and
+   *     changing nothing, which is a different thing again;
+   *   · a dropped connection genuinely did not reach the server;
+   *   · and a lost session was never sent at all.
+   *
+   * All four were being reported with one sentence — "did not reach the server,
+   * so they cannot see it yet. Clients you added by hand have no Train tab until
+   * they join" — which is false of three of them, and hangs the hand-added
+   * explanation on every coach whose wifi dropped. The group below now names
+   * each cause with the people it actually happened to.
+   */
+  const { getProgram, assignProgramTo, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
   const { templates, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
   const acks = useInjuryAcks();
   // Five reads, and a fan-out to a group crosses every one of them: who is in
@@ -118,6 +152,35 @@ export default function Groups() {
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [writeNote, setWriteNote] = useState<string | null>(null);
+  /**
+   * The day this group's block begins — one date, sent to all of them.
+   *
+   * ── what a group assign was writing before ────────────────────────────
+   *
+   * Nothing. `assignProgramTo` takes a start date as its third argument,
+   * builder.tsx:1963 and templates.tsx:256 both pass one, and this screen
+   * called the wrapper that has no third argument at all. So an
+   * `assigned_programs` row fanned out to a group had `starts_on` null, and
+   * null is not a small omission on a BLOCK: `blockPosition` answers 'no-date',
+   * `clientWeek` resolves index 0, and week one is what every member's Train
+   * tab shows them for the whole of a twelve-week bootcamp. The coach's own
+   * copy of that is app/(trainer)/client-week.tsx printing "compared against
+   * week 1, because no start date is set on this block" against somebody in
+   * week seven.
+   *
+   * A group is the place this matters most and the only place it was missing.
+   * Eight people doing one block start it on ONE day — that is what makes it a
+   * bootcamp rather than eight programmes — and it is one date to choose rather
+   * than eight, which is why it belongs on the fan-out and not on each of them.
+   *
+   * Blank is the ordinary case and stays the default: "assign it now" is what
+   * this has always meant, `isStartDate` is what decides whether a value is
+   * sendable, and `undefined` rather than null is passed when it is not — so a
+   * re-assign from here cannot silently clear a date somebody set in the
+   * builder.
+   */
+  const [startsOn, setStartsOn] = useState('');
+  const [startPick, setStartPick] = useState(false);
 
   const open: ProgramGroup | null = groups.find((g) => g.id === openId) ?? null;
 
@@ -188,6 +251,52 @@ export default function Groups() {
     [versionRows, groupStatus, programStatus, currentVersion],
   );
   const nameOfClient = (id: string) => roster.find((c) => c.id === id)?.name ?? 'One client';
+
+  /**
+   * When each member was last seen at all — the half of a group this screen
+   * could not answer.
+   *
+   * A group screen said which PROGRAMME each of eight people was on and nothing
+   * whatever about whether any of them was doing it, which is the question a
+   * coach opens a bootcamp for. Trainerize and Everfit both lead their group
+   * view with it.
+   *
+   * NO NEW READ, and that is the point rather than a saving. `RosterClient.
+   * lastActive` is already on every row in `roster` above — it is the string
+   * the Clients tab prints and orders itself by, built in src/ui/roster.tsx
+   * from `check_ins`, `workouts`, `sessions` and `gym_visits`. A second read
+   * here, over a different window, would let this screen and the Clients tab
+   * show a coach two different answers about the same person on the same
+   * morning, which is the failure src/lib/clientBlock.ts and
+   * src/lib/clientValue.ts are both written about.
+   *
+   * Four answers, never two:
+   *
+   *   · the roster read failed — unknown, and NOT a member who has gone quiet;
+   *   · it came back short and this member is not in the part that did;
+   *   · '—', which is roster.tsx's own mark for a stats read that was truncated;
+   *   · and the string itself, which for somebody typed in by hand is already
+   *     'added by you' rather than a silence about a person with no app.
+   */
+  const lastSeenLineFor = (id: string): string | null => {
+    if (rosterStatus === 'loading') return null;
+    if (rosterStatus === 'error') {
+      return 'whether they have been training could not be read — this is not a statement that they have not';
+    }
+    const c = roster.find((x) => x.id === id);
+    if (!c) {
+      return rosterStatus === 'partial'
+        ? 'not in the part of your book that came back, so nothing here is about their training'
+        : 'not on your book, so there is nothing of theirs to read';
+    }
+    // roster.tsx writes '—' when the activity read hit its row ceiling. A dash
+    // beside "last active" reads as a broken screen; it is a read that did not
+    // finish, and it says so.
+    if (!c.lastActive || c.lastActive === '—') {
+      return 'when they were last active could not be established';
+    }
+    return `last active ${c.lastActive}`;
+  };
   const behind = behindNote(versionRows, nameOfClient, spread);
   const bespoke = bespokeNote(versionRows, nameOfClient, spread);
 
@@ -268,7 +377,10 @@ export default function Groups() {
       }
 
       const norecord: string[] = [];
-      const failed: string[] = [];
+      /** Each refusal with the reason the server actually gave for it, kept
+       *  per person: one press can fail four different ways across eight
+       *  clients, and a coach can only act on the one that is theirs. */
+      const failed: { name: string; why: string }[] = [];
       const done: string[] = [];
       for (const m of sending) {
         const movements = loadsFor(m);
@@ -278,14 +390,28 @@ export default function Groups() {
           // are unaffected: this is one client's record, not the group's.
           if (!recorded) { norecord.push(m.name); continue; }
         }
-        const saved = await assignProgram(m.clientId, program);
-        if (saved) done.push(m.name); else failed.push(m.name);
+        // The same date for every member, and only when `isStartDate` can read
+        // it. `undefined` and never null where it cannot: null is how a caller
+        // says "take the date off", and a group re-assign must not wipe a date
+        // a coach set on one person's copy in the builder.
+        const r = await assignProgramTo(m.clientId, program, isStartDate(startsOn) ? startsOn : undefined);
+        if (r.ok) done.push(m.name);
+        // `why` is null only on an `ok`, so this fallback is unreachable — it is
+        // here because a silent empty string in a report about somebody's
+        // training is worse than a sentence saying the reason is missing.
+        else failed.push({ name: m.name, why: r.why ?? 'No reason came back, so what happened to their copy is unknown.' });
       }
 
       if (done.length) notifySuccess();
       const parts: string[] = [];
       parts.push(done.length
         ? `${listNames(done)} ${done.length === 1 ? 'is' : 'are'} now on “${program.title}” and will see it on their Train tab.`
+          + (isStartDate(startsOn)
+            // Said in the confirmation as well as beside the field, because
+            // this is the sentence a coach reads at the moment they would
+            // otherwise assume the block is being held back until the date.
+            ? ` The block is dated ${startsOn}, which is what counts their week number from then on — it is on their plan now.`
+            : ' No start date was set, so week one is what they are on until you date the block.')
         : 'Nobody was assigned.');
       if (plan.blocked.length) {
         parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} NOT assigned — read what they have disclosed first.`);
@@ -294,7 +420,14 @@ export default function Groups() {
         parts.push(`${listNames(norecord)} ${norecord.length === 1 ? 'was' : 'were'} NOT assigned: the record of your decision to load a disclosed injury could not be saved, and sending it without that record would leave no sign you knew.`);
       }
       if (failed.length) {
-        parts.push(`${listNames(failed)} did not reach the server, so ${failed.length === 1 ? 'they cannot' : 'they cannot'} see it yet. Clients you added by hand have no Train tab until they join.`);
+        // Grouped by the reason rather than listed by name, because the reason
+        // is the part the coach does something about — and the same reason
+        // twice under two names reads as two problems.
+        const byReason = new Map<string, string[]>();
+        for (const f of failed) byReason.set(f.why, [...(byReason.get(f.why) ?? []), f.name]);
+        for (const [why, names] of byReason) {
+          parts.push(`${listNames(names)} ${names.length === 1 ? 'was' : 'were'} NOT assigned. ${why}`);
+        }
       }
       setWriteNote(parts.length > 1 ? parts.slice(1).join(' ') : null);
       Alert.alert(
@@ -377,7 +510,7 @@ export default function Groups() {
           {groups.map((g, i) => {
             const isOpen = g.id === openId;
             return (
-              <Pressable key={g.id} onPress={() => { setOpenId(isOpen ? null : g.id); setWriteNote(null); }}
+              <Pressable key={g.id} onPress={() => { setOpenId(isOpen ? null : g.id); setWriteNote(null); setStartsOn(''); }}
                 accessibilityRole="button"
                 // Including whether the membership was READ. "3 clients" and
                 // "membership not read" are different answers and the label was
@@ -500,6 +633,8 @@ export default function Groups() {
                 // be a fact invented out of a failure.
                 const mv = versionRows[i];
                 const held = plan.blocked.find((b) => b.clientId === id);
+                // Read once, not once per branch: this walks the roster.
+                const lastSeen = lastSeenLineFor(id);
                 const tone = held ? t.warn : st === 'on' ? t.good : st === 'unknown' ? t.ink3 : t.ink3;
                 return (
                   <View key={id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -515,6 +650,16 @@ export default function Groups() {
                             read would be a fact invented out of a failure, and
                             "on a different programme" is not "on version 2" —
                             it is the client whose copy was edited for them. */}
+                        {/* Whether they are actually training it, from the
+                            roster row this screen already holds. Directly under
+                            the programme state because the two together are the
+                            whole question: somebody on the current version who
+                            has not been seen in three weeks is the person this
+                            group exists to catch, and neither line alone says
+                            so. */}
+                        {lastSeen ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{lastSeen}</Text>
+                        ) : null}
                         {mv?.behind && mv.version != null ? (
                           <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
                             on version {num(mv.version)} of this programme — send it again to move them onto the current one
@@ -557,6 +702,52 @@ export default function Groups() {
                 <Notice tone={t.warn} kicker="Last assign" title="Not everybody got it" note={writeNote} />
               ) : null}
 
+              {/* ── the day the block begins ────────────────────────────
+                  ABOVE the button, for the reason builder.tsx gives about its
+                  own copy: a coach decides when a block starts before they send
+                  it, and a control discovered after the press is a control
+                  discovered by having got it wrong.
+
+                  The field IS the button. Nothing here raises a keyboard —
+                  `DateSheet` carries its own "Type a Date" for coaches pasting a
+                  date out of a client's message — and dismissing it writes
+                  nothing, because a picker that committed whatever was under the
+                  highlight would date a block the coach never chose. */}
+              {open.program ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Starts on</Text>
+                  <Pressable onPress={() => setStartPick(true)} accessibilityRole="button"
+                    accessibilityLabel={startsOn
+                      ? `The day this group's block begins. Currently ${startsOn}. Opens a calendar.`
+                      : "The day this group's block begins. Not set, so it begins now. Opens a calendar."}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 4, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 }}>
+                    <Icon name="calendar" size={16} color={t.ink3} />
+                    <Text style={{ ...ty.body, color: startsOn ? t.ink : t.ink3, flex: 1 }}>
+                      {startsOn || 'Not set — begins now'}
+                    </Text>
+                  </Pressable>
+                  {startsOn ? (
+                    <View style={{ alignItems: 'flex-start', marginTop: sp.sm }}>
+                      <Ghost label="Clear the Date" a11yLabel="Clear the start date, so the block begins now"
+                        onPress={() => setStartsOn('')} />
+                    </View>
+                  ) : null}
+                  {/* A value the sheet cannot produce can still arrive by
+                      typing, and a date that will not be sent must say so
+                      before the press rather than after it. */}
+                  {startsOn && !isStartDate(startsOn) ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                      {`“${startsOn}” is not a date this app will store, so it will not be sent. The programme would still go out, dated nothing.`}
+                    </Flag>
+                  ) : null}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    One date for everybody in this group — it is what counts the week number on each
+                    of their Train tabs, which is what makes a twelve-week block advance rather than
+                    sitting on week one. {CLIENT_STARTS_NOW}
+                  </Text>
+                </View>
+              ) : null}
+
               <View style={{ marginTop: sp.lg }}>
                 <Cta wide disabled={!plan.allowed || busy}
                   label={busy ? 'Assigning…' : (plan.label ?? `Assign to ${plan.send.length} ${plan.send.length === 1 ? 'client' : 'clients'}`)}
@@ -577,6 +768,19 @@ export default function Groups() {
           </>
         ) : null}
       </ScrollView>
+
+      {/* ── the day this group's block begins ───────────────────────────
+          The same sheet builder.tsx and templates.tsx pick a start date in, so
+          a date is entered the same way wherever a coach sets one and no screen
+          grows its own parser. Cancelling leaves the field exactly as it was. */}
+      <DateSheet
+        visible={startPick}
+        value={startsOn}
+        heading="Starts On"
+        note={open ? `The day “${open.name}” begins. Leave it unset to start now.` : 'Leave it unset to start now.'}
+        onCancel={() => setStartPick(false)}
+        onPick={(iso) => { setStartsOn(iso); setStartPick(false); }}
+      />
 
       {/* ── pick the group's programme ──────────────────────────────────── */}
       <Modal visible={pickTpl} transparent animationType="slide" onRequestClose={() => setPickTpl(false)}>
@@ -651,7 +855,12 @@ export default function Groups() {
               );
             })}
             <View style={{ marginTop: sp.lg }}>
-              <Cta wide label={`Add ${Object.keys(picked).filter((k) => picked[k]).length || 0}`}
+              {/* No `|| 0` behind the length. An array length is already a
+                  number and never null, so the fallback could only ever rewrite
+                  a real 0 as 0 — dead code in the exact shape
+                  scripts/check-invented-zero.mjs exists to find, on a screen
+                  where the next figure along is a count of people. */}
+              <Cta wide label={`Add ${Object.keys(picked).filter((k) => picked[k]).length}`}
                 disabled={!Object.keys(picked).some((k) => picked[k])} onPress={doAddMembers} />
             </View>
           </ScrollView>

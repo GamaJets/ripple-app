@@ -28,7 +28,11 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { generatePlaylist, spotifyQuerySeeds, CURATED_POOL_SIZE, type Service, type GenParams, type Playlist } from '../../src/lib/music';
+import {
+  generatePlaylist, spotifyQuerySeeds, CURATED_POOL_SIZE,
+  linkState, canReachSpotify, linkActionLabel, linkStatusNote, type LinkFacts,
+  type Service, type GenParams, type Playlist,
+} from '../../src/lib/music';
 import {
   connectSpotify, spotifyStatus, spotifyDisconnect, createSpotifyPlaylist, spotifySearchTracks,
   spotifyMyPlaylists, spotifyPlay, spotifyDevices, spotifyTransfer, SpotifyError,
@@ -105,6 +109,39 @@ export default function Music() {
  const [spotifyName, setSpotifyName] = useState<string | undefined>(undefined);
  const [needsReconnect, setNeedsReconnect] = useState(false);
 
+ // ── The badge and the read disagreed, and only the badge was on screen ─────
+ //
+ // `conn.spotify` comes from `spotifyStatus()`, which reads AsyncStorage and
+ // never asks Spotify. It means "this device remembers a token" — a memory, not
+ // a proof. Spotify's own verdict lands somewhere else: any call through
+ // `tokenOrThrow`/`api` raises a SpotifyError of kind 'signed_out' once the
+ // token is dead, and whichever handler happened to make that call kept the
+ // sentence to itself.
+ //
+ // So the two facts were written by different call sites and only the first was
+ // ever asked. A member whose refresh token had lapsed saw "Connected · Tim",
+ // a "Your Playlists" section its own gate held open with a Try Again that
+ // could never work, and a Generate that fell back to the built-in list with
+ // the failure sent to reportError instead of to them. That is the wearables
+ // defect again: a badge claiming a link the reads were quietly skipping.
+ //
+ // `refusal` is that second fact, recorded rather than substituted — the
+ // remembered token is still remembered, and `linkState` decides which fact
+ // wins. Only a successful Spotify read clears it, because only Spotify
+ // answering is evidence the token is alive; an absent error is not.
+ const [refusal, setRefusal] = useState<string | null>(null);
+
+ const noteSpotify = useCallback((e: unknown) => {
+   if (e instanceof SpotifyError && e.kind === 'signed_out') setRefusal(e.message);
+ }, []);
+
+ // Expired and never-granted are different facts and stay different: `absent`
+ // is "nothing was granted", `refused` is "Spotify rejected what we hold", and
+ // the refusal carries Spotify's own wording, which already distinguishes a
+ // session that expired from a token that was never there.
+ const link: LinkFacts = { remembersToken: conn.spotify, scopesStale: needsReconnect, refusal };
+ const spotifyUsable = canReachSpotify(link);
+
  // The account's own playlists. `mine === null` means "not read yet"; an empty
  // array means Spotify answered and this account genuinely has none. The two
  // are different sentences and are never merged into one.
@@ -114,10 +151,16 @@ export default function Music() {
 
  const loadMine = useCallback(async () => {
    setMineBusy(true); setMineProblem(null);
-   try { setMine(await spotifyMyPlaylists()); }
-   catch (e) { setMine(null); setMineProblem(spotifyMessage(e, 'Could not read your playlists.')); }
+   try {
+     setMine(await spotifyMyPlaylists());
+     // Spotify answered. That is the only evidence on this screen that the
+     // stored token is alive, so it is the only thing allowed to withdraw a
+     // refusal — never the mere absence of a new error.
+     setRefusal(null);
+   }
+   catch (e) { setMine(null); setMineProblem(spotifyMessage(e, 'Could not read your playlists.')); noteSpotify(e); }
    finally { setMineBusy(false); }
- }, []);
+ }, [noteSpotify]);
 
  // ── What is actually IN one of these playlists ───────────────────────────
  //
@@ -145,25 +188,40 @@ export default function Music() {
    setOpenPl(p.id); setOpenTracks(null); setOpenProblem(null); setOpenBusy(true);
    try {
      const rows = await spotifyPlaylistTracks(p.id);
+     setRefusal(null); // Spotify answered; see `loadMine`.
      // Guarded against the member opening a second playlist while the first is
      // still in flight: without it the slower read lands last and fills the
      // wrong list. Read off the state setter so this does not need `openPl` in
      // its dependencies, which would rebuild the callback on every open.
      setOpenPl((cur) => { if (cur === p.id) { setOpenTracks(rows); } return cur; });
    } catch (e) {
+     noteSpotify(e);
      setOpenPl((cur) => {
        if (cur === p.id) setOpenProblem(spotifyMessage(e, 'Could not read what is in that playlist.'));
        return cur;
      });
    } finally { setOpenBusy(false); }
- }, [openPl]);
+ }, [openPl, noteSpotify]);
 
  // The connection itself is a read, and so is the account's playlist list
  // behind it. Split out of the effect so the gesture and the mount run the
  // same thing rather than two versions of it.
  const readSpotify = useCallback(async () => {
    const st = await spotifyStatus();
-   if (!st.connected) return;
+   if (!st.connected) {
+     // "No token" is an ANSWER, not the absence of news. Returning early left
+     // every field standing: signing out clears `repple.spotify.token` (it is
+     // in signOutState's PERSONAL_DEVICE_KEYS), so a pull-to-refresh after that
+     // re-read the store, was told there was nothing, and went on showing
+     // "Connected · Tim" over the previous account's playlists.
+     // Same object back when nothing changed, so the ordinary "still not
+     // connected" mount does not churn a render for a fact that did not move.
+     setConn((p) => (p.spotify ? { ...p, spotify: false } : p));
+     setSpotifyName(undefined); setNeedsReconnect(false); setRefusal(null);
+     setMine(null); setMineProblem(null);
+     setOpenPl(null); setOpenTracks(null); setOpenProblem(null);
+     return;
+   }
    setConn((p) => ({ ...p, spotify: true }));
    setSpotifyName(st.name);
    setNeedsReconnect(st.needsReconnect);
@@ -183,26 +241,34 @@ export default function Music() {
    // track-opening code uses them, and a silent no-op would be worse than a
    // guard that can no longer be reached from the UI.
    if (id !== 'spotify') return;
-   if (conn.spotify) {
+   // Disconnect only when there is a live link to give up. When Spotify has
+   // refused the token this device holds there is nothing left to disconnect
+   // FROM, and the tap means "fix it" — a fresh grant, which overwrites the
+   // dead token. Nothing is cleared first, so cancelling the sign-in leaves the
+   // refusal on screen instead of quietly reverting to "Connect".
+   if (linkState(link) !== 'refused' && conn.spotify) {
      await spotifyDisconnect();
      setConn((p) => ({ ...p, spotify: false })); setSpotifyName(undefined);
-     setNeedsReconnect(false); setMine(null); setMineProblem(null);
+     setNeedsReconnect(false); setRefusal(null); setMine(null); setMineProblem(null);
+     setOpenPl(null); setOpenTracks(null); setOpenProblem(null);
      return;
    }
    setSpotifyBusy(true);
    try {
      const r = await connectSpotify();
      setConn((p) => ({ ...p, spotify: true })); setSpotifyName(r.name); setNeedsReconnect(false);
+     // A fresh grant is Spotify answering, so the old refusal is answered too.
+     setRefusal(null);
      loadMine();
    }
    catch (e) { Alert.alert('Spotify', spotifyMessage(e, 'Could not connect.')); }
    finally { setSpotifyBusy(false); }
  };
 
- // Apple Music was counted here, and `conn.apple` can never become true — it
- // had no linking code to set it. Spotify is the only thing that can be
- // connected, so it is the only thing that can make this true.
- const anyConnected = conn.spotify;
+ // Apple Music was counted in a screen-level `anyConnected` here, and
+ // `conn.apple` can never become true — there was never any linking code to set
+ // it. The whole flag is gone: the section's status word now comes from
+ // `linkStatusNote(link)`, which is Spotify's state and nothing else's.
  const openInSpotify = (q: string) => { Linking.openURL('https://open.spotify.com/search/' + encodeURIComponent(q)).catch(() => Alert.alert('Open Spotify', 'Install the Spotify app, then search "' + q + '".')); };
 
  /**
@@ -226,7 +292,7 @@ export default function Music() {
  const recoverNoDevice = async (title: string, retry: () => Promise<void>) => {
    let devices: SpotifyDevice[] = [];
    try { devices = await spotifyDevices(); }
-   catch (e) { Alert.alert(title, spotifyMessage(e, 'Your Spotify devices could not be read.')); return; }
+   catch (e) { noteSpotify(e); Alert.alert(title, spotifyMessage(e, 'Your Spotify devices could not be read.')); return; }
    const usable = devices.filter((d): d is SpotifyDevice & { id: string } => !!d.id);
    if (!usable.length) {
      Alert.alert(
@@ -246,6 +312,7 @@ export default function Music() {
              await spotifyTransfer(d.id, true);
              await retry();
            } catch (e) {
+             noteSpotify(e);
              // The transfer or the retry. Either way nothing is playing, and
              // saying "playing on your laptop" over a refusal is the failure
              // this whole screen keeps being fixed for.
@@ -264,6 +331,7 @@ export default function Music() {
    if (!p.uri) { if (p.url) Linking.openURL(p.url).catch(() => {}); return; }
    try { await spotifyPlay({ contextUri: p.uri }); }
    catch (e) {
+     noteSpotify(e);
      // The one failure this app can actually fix, fixed rather than reported.
      if (e instanceof SpotifyError && e.kind === 'no_device') {
        await recoverNoDevice(p.name, async () => { await spotifyPlay({ contextUri: p.uri as string }); });
@@ -292,7 +360,7 @@ export default function Music() {
  const generate = async (nextSalt = salt, nextIntensity = intensity) => {
    setSalt(nextSalt);
    const base = generatePlaylist({ mode, intensity: nextIntensity, minutes }, nextSalt);
-   if (!conn.spotify || needsReconnect) { setPl(base); return; }
+   if (!spotifyUsable) { setPl(base); return; }
 
    setGenBusy(true);
    try {
@@ -324,6 +392,11 @@ export default function Music() {
      // Spotify was tried. That is the whole of what they can act on. The detail
      // goes to reportError, where it is useful to us and not to them.
      reportError('music.spotifySearch', e);
+     // Except when the reason is that Spotify has signed this account out. That
+     // one is NOT "Spotify was tried and it did not work out" — it is the link
+     // being dead, it changes what the rest of the screen may claim, and a
+     // subtitle nobody connects to the header is where it used to end.
+     noteSpotify(e);
      setPl({ ...base, subtitle: base.subtitle + ' · built-in list; Spotify search failed' });
    } finally {
      setGenBusy(false);
@@ -332,7 +405,7 @@ export default function Music() {
 
  const push = async () => {
    if (!pl) return;
-   if (conn.spotify && !needsReconnect) {
+   if (spotifyUsable) {
      setSpotifyBusy(true);
      try {
        // `tr.uri` is passed rather than dropped. A Spotify-sourced playlist
@@ -343,7 +416,7 @@ export default function Music() {
        const saved = await createSpotifyPlaylist(pl.title, pl.tracks.map((tr) => ({ title: tr.title, artist: tr.artist, uri: tr.uri })));
        Alert.alert('Saved to Spotify', playlistSavedLine(pl.title, saved), [{ text: 'Open', onPress: () => Linking.openURL(saved.url).catch(() => {}) }, { text: 'Done' }]);
        loadMine();
-     } catch (e) { Alert.alert('Spotify', spotifyMessage(e, 'Could not save the playlist.')); }
+     } catch (e) { noteSpotify(e); Alert.alert('Spotify', spotifyMessage(e, 'Could not save the playlist.')); }
      finally { setSpotifyBusy(false); }
      return;
    }
@@ -426,8 +499,13 @@ export default function Music() {
  <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{genBusy ? 'Finding songs…' : pl ? 'Regenerate Playlist' : 'Generate Workout Playlist'}</Text>
  </Pressable>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
- {conn.spotify && !needsReconnect
+ {/* Three sentences, because there are three situations and the old two
+     flattened the middle one into "Without Spotify connected" — read by
+     somebody whose Spotify was connected and whose token had simply died. */}
+ {spotifyUsable
  ? 'Searches Spotify’s catalogue. If that fails, you get the built-in list of ' + CURATED_POOL_SIZE + ' songs and it says so.'
+ : linkState(link) === 'refused'
+ ? 'Spotify has signed this account out, so this uses the built-in list of ' + CURATED_POOL_SIZE + ' songs — not your library. Reconnect below and it searches Spotify again.'
  : 'Without Spotify connected this uses the built-in list of ' + CURATED_POOL_SIZE + ' songs — not your library.'}
  </Text>
  </Section>
@@ -462,9 +540,10 @@ export default function Music() {
    const uris = pl.tracks.map((tr) => tr.uri).filter((u): u is string => !!u);
    // Real URIs mean the whole list can start on the person's own device.
    // Without them all we can honestly do is open a search for track one.
-   if (uris.length && conn.spotify && !needsReconnect) {
+   if (uris.length && spotifyUsable) {
      try { await spotifyPlay({ uris }); return; }
      catch (e) {
+       noteSpotify(e);
        if (e instanceof SpotifyError && e.kind === 'no_device') {
          await recoverNoDevice('Spotify', async () => { await spotifyPlay({ uris }); });
          return;
@@ -499,12 +578,31 @@ export default function Music() {
 
  {/* ── services ───────────────────────────────────────────────────── */}
  <Section>
- <SectionHead title="Your Music" note={anyConnected ? 'Connected' : undefined} />
- {needsReconnect ? (
+ <SectionHead title="Your Music" note={linkStatusNote(link)} />
+ {/* A refusal outranks the scope gap, and says it in Spotify's own words.
+     Asking somebody to re-grant permissions when the real answer is "sign in
+     again" sends them round a loop; and the sentence Spotify sent is the one
+     that separates a session that EXPIRED from a token that was never there. */}
+ {linkState(link) === 'refused' ? (
+ <Notice kicker="Spotify" title="Spotify Signed You Out"
+ note={(refusal ?? '') + ' Until it is reconnected, this screen cannot read your playlists or control playback, and Generate uses the built-in list.'} />
+ ) : needsReconnect ? (
  <Notice kicker="Spotify" title="Reconnect to Finish This"
  note="Your Spotify sign-in predates playlist and playback permission, and Spotify cannot add permissions to a token that already exists. Disconnect and connect again — it takes one tap each." />
  ) : null}
- {SERVICES.map((s, i) => (
+ {SERVICES.map((s, i) => {
+ // Spotify is the only member of SERVICES, and this row asks the state
+ // machine rather than `conn[s.id]`: a token Spotify has refused reads
+ // "Reconnect" and takes the call-to-action colour, because there IS
+ // something to do. It is never labelled with the account name — that label,
+ // standing over a dead token, is the claim this screen keeps being fixed
+ // for. A service added back here without its own state falls through to
+ // "Not yet" rather than borrowing Spotify's word for it.
+ const label = s.id === 'spotify' ? linkActionLabel(link, spotifyName) : conn[s.id] ? 'Connected' : 'Not yet';
+ const held = s.id === 'spotify' ? spotifyUsable || needsReconnect : conn[s.id];
+ const verb = label === 'Reconnect' ? 'Reconnect ' : held ? 'Disconnect ' : 'Connect ';
+ const busy = s.id === 'spotify' && spotifyBusy;
+ return (
  <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
  <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
  <Icon name="play" size={17} color={t.brand} />
@@ -513,24 +611,23 @@ export default function Music() {
  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.name}</Text>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
  </View>
- <Pressable onPress={() => toggleService(s.id)} disabled={s.id === 'spotify' && spotifyBusy} accessibilityState={{ disabled: !!(s.id === 'spotify' && spotifyBusy), busy: !!(s.id === 'spotify' && spotifyBusy) }}
- accessibilityRole="button" accessibilityLabel={(conn[s.id] ? 'Disconnect ' : 'Connect ') + s.name}
- style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, minWidth: 92, alignItems: 'center', backgroundColor: conn[s.id] ? t.surface2 : (s.id === 'spotify' ? t.brand : t.surface2) }}>
- {s.id === 'spotify' && spotifyBusy
+ <Pressable onPress={() => toggleService(s.id)} disabled={busy} accessibilityState={{ disabled: busy, busy }}
+ accessibilityRole="button" accessibilityLabel={verb + s.name}
+ style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, minWidth: 92, alignItems: 'center', backgroundColor: held ? t.surface2 : t.brand }}>
+ {busy
  ? <ActivityIndicator color={t.brandInk} size="small" />
- : <Text numberOfLines={1} style={{ ...ty.label, fontWeight: '500', color: conn[s.id] || s.id !== 'spotify' ? t.ink : t.brandInk }}>
- {conn[s.id] ? ((s.id === 'spotify' && spotifyName) ? spotifyName : 'Connected') : (s.id === 'spotify' ? 'Connect' : 'Not yet')}
- </Text>}
+ : <Text numberOfLines={1} style={{ ...ty.label, fontWeight: '500', color: held ? t.ink : t.brandInk }}>{label}</Text>}
  </Pressable>
  </View>
- ))}
+ );
+ })}
  </Section>
 
 
  <Rule />
 
  {/* ── the account's own playlists ────────────────────────────────── */}
- {conn.spotify && !needsReconnect ? (
+ {spotifyUsable ? (
  <>
  <Rule />
  <Section>

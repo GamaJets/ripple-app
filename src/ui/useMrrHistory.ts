@@ -54,13 +54,38 @@
 // to be saved to one device; it is now saved to the account, shows on every
 // device, and nothing later can tell it from a month that really was that
 // quiet. The caller must pass null rather than a zero it is not sure of.
+//
+// ── Two strings, where there used to be one ────────────────────────────────
+//
+// The paragraph above says the months go to the server "keyed by the same
+// storage key so there is no translation table". That was the defect, and it
+// is corrected here: the DEVICE key and the `metric_key` are two different
+// compositions now, and only one of them carries an account.
+//
+//   metric_key   'repple.owner.mrrHistory.GBP'            — what the row is
+//   device key   'repple.owner.mrrHistory.GBP:<uid>'      — whose phone shelf
+//
+// The server row is already scoped by `user_id`, so putting the account into
+// `metric_key` would split one coach's history across every handset they use.
+// AsyncStorage has no `user_id` at all, so leaving the account OUT of the
+// device key made one shelf that everybody who ever signed in on the phone
+// shared — and because `missingOnServer` is "months the server has never heard
+// of" and `saveMetricHistory` resolves the uid fresh at save time, the next
+// coach to sign in published the previous coach's revenue under their own
+// `user_id`, permanently. src/lib/monthlyHistory.ts walks the five steps.
+//
+// The legacy unqualified value is REMOVED rather than migrated, and that is a
+// deliberate loss. See `useMonthlyHistory` below.
 import { useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthRevision } from './authRevision';
+import { useAuth } from './auth';
 import type { LoadStatus } from './loadStatus';
 import {
   monthKey, monthWindow, seriesFor, recordedCount, historyDelta,
-  sanitiseSnapshots, mergeSnapshots, missingOnServer, moneyHistoryKey, type Snapshots,
+  sanitiseSnapshots, moneyHistoryKey, deviceHistoryKey,
+  historyPass, beginHistoryPass, applyHistoryPass, NO_HISTORY_SESSION,
+  type Snapshots,
 } from '../lib/monthlyHistory';
 import { fetchMetricHistory, saveMetricHistory } from '../lib/metricHistoryStore';
 
@@ -105,110 +130,183 @@ export interface MonthlyHistory {
  * Generic: record `currentValue` under `storageKey` for this month, return the
  * six-month series.
  *
+ * `storageKey` is the SERVER's `metric_key` and nothing else. What the device
+ * stores under is `deviceHistoryKey(storageKey, uid)`, which the caller never
+ * sees and must never be sent as a metric key. The parameter kept its name
+ * because every call site passes the same string it always did; what changed is
+ * that the string no longer reaches AsyncStorage.
+ *
  * **A null `currentValue` is not recorded.** See the header — this hook WRITES,
  * and now writes to the account rather than to one phone.
+ *
+ * ── The uid is resolved here rather than taken as an argument ─────────────
+ *
+ * It has to be a RENDER value, not something a `getUser()` inside the effect
+ * finds: the effect is keyed on the device key, and that is what makes an
+ * account switch a re-read rather than a chart left standing from the previous
+ * session. `useAuth()` is where src/ui/exerciseVideos.ts gets it for the same
+ * reason and for the same class of defect.
+ *
+ * Taking it as a parameter instead would have been the same fix with one more
+ * thing for a call site to get wrong — app/(trainer)/analytics.tsx passes a
+ * literal key and has no uid of its own — and a hook whose account can be
+ * supplied by its caller is a hook whose account can be supplied WRONG.
  */
 export function useMonthlyHistory(storageKey: string, currentValue: number | null, window: number = WINDOW): MonthlyHistory {
-  const [hist, setHist] = useState<Snapshots>({});
-  const [status, setStatus] = useState<LoadStatus>('loading');
   const rev = useAuthRevision();
+  const { user, loading: authLoading } = useAuth();
+  const uid = user?.id ?? null;
+  // The two strings. `storageKey` goes to the server; `deviceKey` goes to the
+  // phone. Null means nobody is signed in, and a null device key means DO NOT
+  // PERSIST — not "fall back to the bare key", which is the defect itself.
+  const deviceKey = deviceHistoryKey(storageKey, uid);
 
-  // What the server said, cached for this key and this sign-in. Without it the
-  // effect below re-reads the whole history every time `currentValue` changes —
-  // and it changes at least once on every screen, as the reads it is derived
-  // from land.
-  const server = useRef<{ key: string; rev: number; snapshots: Snapshots } | null>(null);
-  // The month/value pair last confirmed sent, so an unchanged figure arriving
-  // again does not re-upsert the same row on every render.
-  const sent = useRef<string>('');
+  // Everything the provider holds, and whose it is. One object rather than two
+  // pieces of state and two refs, because the thing that has to be true is that
+  // they are cleared TOGETHER when the account changes — see `beginHistoryPass`
+  // in src/lib/monthlyHistory.ts, which is where that is stated and tested.
+  const [session, setSession] = useState(NO_HISTORY_SESSION);
+  // A mirror the async pass can read without a stale closure. It is written
+  // beside every setSession and never on its own.
+  const live = useRef(session);
+  const put = (next: typeof session) => { live.current = next; setSession(next); };
+
+  // Cleared BEFORE the read, not left at whatever the last key's pass set it
+  // to. A provider mounted at the root outlives a sign-out — nothing unmounts
+  // it — so without this the departing coach's months stay on screen under the
+  // next coach's name, and the `hydrated` flag stays armed for a write over the
+  // new account's stored bytes.
+  useEffect(() => { put(beginHistoryPass(live.current, deviceKey)); }, [deviceKey]);
+
+  // The unqualified key this replaces, removed unread.
+  //
+  // NOT migrated into the signed-in account, and that is a deliberate loss of
+  // whatever is in it. The blob carries no account: nothing on the device
+  // distinguishes a single-owner handset's own old months from a shared
+  // handset's previous coach's, so a migration is a guess whose wrong answer is
+  // one coach's revenue permanently attributed to another — the exact outcome
+  // this change exists to end, performed once, on purpose, by the code that
+  // fixes it. Losing a few months of a chart is recoverable by waiting; a
+  // figure filed under the wrong person is not recoverable at all. Lane 4 made
+  // this call for `repple.mealOverride` and src/lib/handsetClips.ts made it for
+  // the coach's clips; this is the third and it is the same call.
+  useEffect(() => { AsyncStorage.removeItem(storageKey).catch(() => {}); }, [storageKey]);
 
   useEffect(() => {
+    // No account is no store. The months are not read, not kept, and — this is
+    // the half that matters — nothing is published, because there is nobody to
+    // publish them as.
+    if (!deviceKey) return;
     let cancelled = false;
     (async () => {
-      // ── the device cache: what makes the first paint right ───────────────
-      let local: Snapshots = {};
-      try {
-        const raw = await AsyncStorage.getItem(storageKey);
-        if (raw) local = sanitiseSnapshots(JSON.parse(raw));
-      } catch { /* a cache that cannot be read is an empty cache, not an error */ }
-      if (cancelled) return;
-
-      // ── the account's own months ─────────────────────────────────────────
-      let read: { snapshots: Snapshots; status: LoadStatus };
-      if (server.current && server.current.key === storageKey && server.current.rev === rev) {
-        read = { snapshots: server.current.snapshots, status: 'ready' };
+      // ── the device shelf: what makes the first paint right ───────────────
+      //
+      // `hydrated` is the arming flag, and it is armed by a read of THIS key
+      // and by nothing else. Armed, the months already in hand are the shelf —
+      // this pass wrote them there itself — and the store is not read again for
+      // a `currentValue` that has merely landed. Unarmed, the shelf is read.
+      //
+      // Which is why `beginHistoryPass` clears it before the key changes hands.
+      // A flag left standing from the PREVIOUS account's read makes the line
+      // below hand the departing coach's months to this pass as though they
+      // were this coach's own — to be written under their device key and
+      // offered to their server row as a backfill. That is the whole defect,
+      // reachable through a boolean.
+      //
+      // `null` means the read FAILED, and it is not the same answer as `{}`. A
+      // shelf we could not read is one whose contents we do not know, and
+      // `historyPass` refuses to write over it. The version before this treated
+      // an unreadable store as an empty one and wrote its own idea of the
+      // history straight back on top.
+      const held = live.current;
+      let cached: Snapshots | null = null;
+      if (held.key === deviceKey && held.hydrated) {
+        cached = held.hist;
       } else {
-        read = await fetchMetricHistory(storageKey);
+        try {
+          const raw = await AsyncStorage.getItem(deviceKey);
+          cached = raw ? sanitiseSnapshots(JSON.parse(raw)) : {};
+        } catch { cached = null; }
         if (cancelled) return;
-        if (read.status === 'ready') server.current = { key: storageKey, rev, snapshots: read.snapshots };
       }
 
-      // Under 'error' the account's months are unknown, so the merge is skipped
-      // entirely and the cache stands alone. Merging with `{}` would produce the
-      // same object here, but it would say something different — and the next
-      // person to add a fallback to this line would be adding it to a merge that
-      // looked authoritative.
-      const merged: Snapshots = read.status === 'ready' ? mergeSnapshots(local, read.snapshots) : { ...local };
+      // ── the account's own months ─────────────────────────────────────────
+      //
+      // Cached against the DEVICE key, which carries the account. Cached
+      // against the metric key alone — as it was — it hands coach B the rows
+      // read for coach A whenever the auth revision happens not to have moved.
+      let read: { snapshots: Snapshots; status: LoadStatus };
+      if (held.key === deviceKey && held.server) {
+        read = { snapshots: held.server, status: 'ready' };
+      } else {
+        read = await fetchMetricHistory(uid, storageKey);
+        if (cancelled) return;
+      }
 
-      // ── this month ───────────────────────────────────────────────────────
-      const thisMonth = monthKey(new Date());
-      if (currentValue != null) merged[thisMonth] = currentValue;
+      const pass = historyPass({ cached, server: read, currentValue, thisMonth: monthKey(new Date()) });
 
-      // The cache is written whatever happened above: it is the store that
+      // The shelf is written whatever the server said — it is the store that
       // works with no signal, and a month recorded offline is uploaded by the
-      // backfill on the next launch that can reach the server.
-      try { await AsyncStorage.setItem(storageKey, JSON.stringify(merged)); } catch { /* best-effort */ }
-      if (cancelled) return;
+      // backfill on the next launch that can reach the server. But only when
+      // the read of it came back: see `writeCache`.
+      if (pass.writeCache) {
+        try { await AsyncStorage.setItem(deviceKey, JSON.stringify(pass.merged)); } catch { /* best-effort */ }
+        if (cancelled) return;
+      }
 
       // ── the upload ───────────────────────────────────────────────────────
       //
-      // Only on a read that succeeded (guard 1), and only the current month
-      // plus what the server has never heard of (guard 2). `missingOnServer`
-      // deliberately leaves a month the server already holds alone even where
-      // the cache disagrees — a handset that has been in a drawer for a month
-      // does not get to publish its stale figure over the account.
-      if (read.status === 'ready') {
-        const upload: Snapshots = missingOnServer(local, read.snapshots);
-        if (currentValue != null) upload[thisMonth] = currentValue;
-        const stamp = `${storageKey}|${rev}|${thisMonth}|${currentValue}|${Object.keys(upload).sort().join(',')}`;
-        if (Object.keys(upload).length && stamp !== sent.current) {
-          const written = await saveMetricHistory(storageKey, upload);
-          if (cancelled) return;
-          // Only remembered as sent when the server confirmed rows. A refused
-          // write retried next render is the behaviour we want; a refused write
-          // recorded as done is how a month goes missing quietly.
-          if (written > 0) {
-            sent.current = stamp;
-            // Fold the uploaded months into the cached server view so the next
-            // pass does not offer them again.
-            if (server.current && server.current.key === storageKey) {
-              server.current = { key: storageKey, rev, snapshots: { ...server.current.snapshots, ...upload } };
-            }
-          }
+      // `historyPass` has already decided what may be sent: nothing at all
+      // unless the server read succeeded, and otherwise this month plus only
+      // the months the server has never heard of. Those months are now this
+      // account's own by construction — the shelf they came off has the account
+      // in its key — which is the whole of the fix.
+      let server: Snapshots | null = read.status === 'ready' ? read.snapshots : null;
+      let sent = held.key === deviceKey ? held.sent : '';
+      const months = Object.keys(pass.upload).sort().join(',');
+      const stamp = `${deviceKey}|${rev}|${currentValue}|${months}`;
+      if (months && stamp !== sent) {
+        const written = await saveMetricHistory(uid, storageKey, pass.upload);
+        if (cancelled) return;
+        // Only remembered as sent when the server confirmed rows. A refused
+        // write retried next render is the behaviour we want; a refused write
+        // recorded as done is how a month goes missing quietly.
+        if (written > 0) {
+          sent = stamp;
+          // Fold the uploaded months into the cached server view so the next
+          // pass does not offer them again.
+          if (server) server = { ...server, ...pass.upload };
         }
       }
 
-      setHist(merged);
-      setStatus(read.status);
+      // Discarded outright if the account changed while any of the above was in
+      // flight. `cancelled` catches the ordinary case; the key check catches a
+      // pass whose cleanup has not run yet, and costs one comparison.
+      put(applyHistoryPass(live.current, deviceKey, pass, server, read.status, sent));
     })();
     return () => { cancelled = true; };
-  }, [storageKey, currentValue, rev]);
+  }, [deviceKey, storageKey, currentValue, rev]);
 
   const cols = monthWindow(new Date(), window);
-  const series = seriesFor(cols, hist);
+  const series = seriesFor(cols, session.hist);
   return {
     series,
     labels: cols.map((m) => m.label),
     // No previous month recorded, or nothing to compare it against.
     delta: historyDelta(series, currentValue),
     months: recordedCount(series),
-    status,
+    // Signed out is 'ready' with nothing — there is genuinely no history for
+    // nobody, and no absent server being misreported. Still RESTORING a session
+    // is 'loading', because at that moment we do not yet know whose phone this
+    // is, and a screen that said "no history yet" there would be asserting
+    // something it cannot know. src/ui/loadStatus.ts states the distinction.
+    status: deviceKey ? session.status : (authLoading ? 'loading' : 'ready'),
     // The whole map, not the window. A year-on-year read needs a month that
     // may sit outside whatever window the chart happens to be drawing, and a
     // caller that had to widen the chart to reach it would be changing what is
     // on screen in order to compute something that is not. Additive: every
     // existing caller ignores it and behaves exactly as before.
-    snapshots: hist,
+    snapshots: session.hist,
   };
 }
 

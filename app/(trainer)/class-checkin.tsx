@@ -132,7 +132,7 @@ export default function ClassCheckin() {
   const loadRate = useCallback(async () => {
     setRateStatus('loading');
     try {
-      const { prefs, status } = await fetchCoachPrefs();
+      const { prefs, status } = await fetchCoachPrefs(auth.user?.id ?? null);
       setRateStatus(status);
       if (status === 'ready') {
         rateRead.current = true;
@@ -141,7 +141,12 @@ export default function ClassCheckin() {
         if (!touched.current) setRate(rateText(prefs.classRate));
       }
     } catch { setRateStatus('error'); }
-  }, []);
+    // The account is in the deps deliberately. `fetchCoachPrefs` no longer
+    // resolves its own uid — it is handed one — and an empty dep array here
+    // would close over the mount-time value, which is null before auth lands.
+    // That would pass null forever and the rate box would read empty for every
+    // coach, silently, with no error anywhere to notice.
+  }, [auth.user?.id]);
   useEffect(() => { void loadRate(); }, [loadRate]);
 
   // Saved as the coach stops typing rather than on every keystroke, and the
@@ -170,7 +175,7 @@ export default function ClassCheckin() {
     const parsed = parseRate(text);
     if (parsed.kind === 'invalid') return;
     if (parsed.kind === 'empty' && !rateRead.current) return;
-    void saveCoachPrefs({ classRate: parsed.kind === 'empty' ? null : parsed.value });
+    void saveCoachPrefs(auth.user?.id ?? null, { classRate: parsed.kind === 'empty' ? null : parsed.value });
   };
 
   const onRateChange = (text: string) => {

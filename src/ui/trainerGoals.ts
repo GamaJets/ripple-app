@@ -20,6 +20,20 @@
 // targets a coach set before there was anywhere to put them. Those are
 // backfilled to the account on the first successful read.
 //
+// ── Under a key that names the account ─────────────────────────────────────
+//
+// The cache key was `'repple.trainer.goals'` with no account in it and nothing
+// ever removed it, so on a gym's shared handset the next coach to sign in
+// opened Analytics on the previous coach's revenue and client targets — and the
+// backfill below then wrote them into THIS coach's `coach_prefs` row, where
+// they render under "Your goals" with a progress arc as though they had set
+// them. The key now carries the account (src/lib/coachPrefs.ts), the flag that
+// arms the device write is reset with it, the numbers in memory are cleared on
+// an account change because this hook outlives a sign-out, and the backfill is
+// gated on the blob having been read under the account the write will be made
+// as. The old unqualified key is removed UNREAD rather than migrated; the
+// argument is in src/lib/deviceAccountCache.ts.
+//
 // ── Nothing is written until the account has been read ─────────────────────
 //
 // The bug documented at length in src/ui/clientData.tsx: a provider that
@@ -41,13 +55,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthRevision } from './authRevision';
+import { useAuth } from './auth';
 import type { LoadStatus } from './loadStatus';
 import { fetchCoachPrefs, saveCoachPrefs } from '../lib/coachPrefsStore';
-// The three things that can become of a target, and the sentence for each.
-import type { GoalSaveOutcome } from '../lib/coachPrefs';
+// The three things that can become of a target, and the sentence for each, and
+// — since the cache under this hook is one person's numbers — where on the
+// device this account's copy lives.
+import {
+  type GoalSaveOutcome, trainerGoalsCache, LEGACY_TRAINER_GOALS_KEY,
+} from '../lib/coachPrefs';
+import { cacheHydrated, mayWriteCache, pushUpDecision, type DeviceCache } from '../lib/deviceAccountCache';
 
 export interface TrainerGoals { revenue: number; clients: number }
-const KEY = 'repple.trainer.goals';
 // Zero means "not set" — see the header.
 const DEFAULT: TrainerGoals = { revenue: 0, clients: 0 };
 
@@ -67,6 +86,25 @@ export function useTrainerGoals() {
   // path that forgot to set it would publish {0,0} over the coach's targets.
   const [nonce, setNonce] = useState(0);
 
+  // ── whose targets ────────────────────────────────────────────────────────
+  //
+  // A render value, from the session. The cache key is built from it, so the
+  // effect below is keyed on the account: an account change re-reads under the
+  // new account's key instead of leaving the previous coach's numbers standing
+  // on the Analytics screen. `fetchCoachPrefs` resolves its own uid for the
+  // ROW, which is correct and untouched; this is about the blob on the device.
+  const { user } = useAuth();
+  const uid = user?.id ?? null;
+  // Which account's cached targets this hook is reading and writing, and
+  // whether a read of THAT key has come back. A ref because `save` is called
+  // from a modal's onPress — a callback created in an earlier render — and a
+  // stale flag there would drop the write.
+  const cache = useRef<DeviceCache>(trainerGoalsCache(uid));
+  // Whose targets are on screen. An account change clears them; a reload of the
+  // same account does not. `undefined` to start, because signed out at mount is
+  // itself an account change.
+  const shownFor = useRef<string | null | undefined>(undefined);
+
   // Whether this session may write to the account. False until a read has
   // landed; never set by a read that failed. See the header.
   const writable = useRef(false);
@@ -77,27 +115,58 @@ export function useTrainerGoals() {
   useEffect(() => {
     let cancelled = false;
     writable.current = false;
+    // ── the account changed, so nothing from the last one may stand ────────
+    //
+    //  · The cache record, carrying the flag that arms the device write. A flag
+    //    that survived a key change would let an account switch whose read then
+    //    FAILED write this session's numbers over the NEW account's stored
+    //    ones. `trainerGoalsCache` can only produce hydrated:false, so the reset
+    //    and the key change are one statement.
+    //  · The numbers themselves. This provider is mounted under a tree that
+    //    outlives a sign-out, and without this line the departing coach's
+    //    revenue target stayed on the Analytics hero — drawn as an arc, with
+    //    the new coach's own revenue measured against it — until somebody
+    //    else's read came back, which for a refused read is never.
+    cache.current = trainerGoalsCache(uid);
+    // The numbers go only when the ACCOUNT changed, never on a reload: `reload`
+    // comes back through this effect, and blanking the targets under a
+    // pull-to-refresh would draw the hero arc against {0,0} for a round trip
+    // and print "No targets set" over targets that are set.
+    if (shownFor.current !== uid) {
+      shownFor.current = uid;
+      latest.current = DEFAULT;
+      setGoals(DEFAULT);
+      setLoaded(false);
+      setStatus('loading');
+    }
     (async () => {
       // ── the cache, first, so the section is not empty for a round trip ────
       let cached: TrainerGoals | null = null;
-      try {
-        const raw = await AsyncStorage.getItem(KEY);
-        if (raw) {
-          const c = JSON.parse(raw) as Record<string, unknown>;
-          // Key by key rather than a spread of the parsed blob: an older build's
-          // extra fields would otherwise be carried into state and written
-          // straight back to storage, for good.
-          cached = {
-            revenue: typeof c.revenue === 'number' ? asGoal(c.revenue) : 0,
-            clients: typeof c.clients === 'number' ? asGoal(c.clients) : 0,
-          };
-        }
-      } catch { /* an unreadable cache is an empty cache, not an error */ }
+      const key = cache.current.key;
+      if (key) {
+        try {
+          const raw = await AsyncStorage.getItem(key);
+          if (cancelled) return;
+          if (raw) {
+            const c = JSON.parse(raw) as Record<string, unknown>;
+            // Key by key rather than a spread of the parsed blob: an older build's
+            // extra fields would otherwise be carried into state and written
+            // straight back to storage, for good.
+            cached = {
+              revenue: typeof c.revenue === 'number' ? asGoal(c.revenue) : 0,
+              clients: typeof c.clients === 'number' ? asGoal(c.clients) : 0,
+            };
+          }
+          // An empty store is a read that LANDED. A read that threw is not, and
+          // lands in the catch with the flag left false.
+          cache.current = cacheHydrated(cache.current);
+        } catch { /* an unreadable cache is an empty cache, not an error */ }
+      }
       if (cancelled) return;
       if (cached) { latest.current = cached; setGoals(cached); }
 
       // ── the account, which wins where it has an answer ───────────────────
-      const { prefs, status: st } = await fetchCoachPrefs();
+      const { prefs, status: st } = await fetchCoachPrefs(uid);
       if (cancelled) return;
       if (st !== 'ready') {
         // Nothing is published for the rest of this session. The coach may well
@@ -124,13 +193,44 @@ export function useTrainerGoals() {
       setStatus('ready');
       setLoaded(true);
 
-      // The backfill: targets this device holds that the account does not.
-      if (!hasServer && (effective.revenue > 0 || effective.clients > 0)) {
-        void saveCoachPrefs({ goalRevenue: effective.revenue, goalClients: effective.clients });
+      // ── the backfill, and whose numbers it publishes ────────────────────
+      //
+      // Targets this device holds that the account does not. It used to read
+      // them out of a device-wide key and write them straight into
+      // `coach_prefs` for whoever was signed in, so on a gym's shared handset
+      // the previous coach's revenue and client targets were published into
+      // this coach's account — where they render under "Your goals" with a
+      // progress arc, as though this coach had set them.
+      //
+      // `pushUpDecision` is the same gate the weekly availability push-up uses,
+      // and it is a pure function so the sign-in → sign-out → sign-in sequence
+      // is tested rather than reasoned about: the blob must have been read
+      // under a key carrying an account, that read must have landed, and the
+      // account must be the one the write will be made as.
+      const verdict = pushUpDecision({
+        cache: cache.current,
+        writeUid: uid,
+        hasCached: effective.revenue > 0 || effective.clients > 0,
+        serverHas: hasServer,
+      });
+      if (verdict === 'push') {
+        void saveCoachPrefs(uid, { goalRevenue: effective.revenue, goalClients: effective.clients });
       }
     })();
     return () => { cancelled = true; };
-  }, [rev, nonce]);
+    // `uid` is in here and that is the point: an account change re-reads under
+    // the new account's key, with the previous account's numbers already
+    // cleared above.
+  }, [rev, nonce, uid]);
+
+  // The legacy unqualified key, removed UNREAD.
+  //
+  // Not migrated into the signed-in account: the blob names no account, so
+  // nothing on the device tells this coach's own old targets from the previous
+  // coach's on a shared handset, and the wrong guess publishes a stranger's
+  // revenue target into this coach's `coach_prefs` row as their own. Losing it
+  // costs a coach typing two numbers again.
+  useEffect(() => { AsyncStorage.removeItem(LEGACY_TRAINER_GOALS_KEY).catch(() => { /* it will be removed on the next launch */ }); }, []);
 
   /** Ask the account again. A refused read left `status` at 'error' and the
    *  targets unwritable for the whole session; this is the way back without
@@ -157,7 +257,14 @@ export function useTrainerGoals() {
     };
     latest.current = merged;
     setGoals(merged);
-    AsyncStorage.setItem(KEY, JSON.stringify(merged)).catch(() => { /* best-effort */ });
+    // Kept on the device only where this device may keep it: an account in the
+    // key, and a read of that key already back. Signed out there is no account
+    // to file it under, and the unqualified key it used to fall back to is what
+    // the next coach on a shared handset inherited.
+    const c = cache.current;
+    if (mayWriteCache(c)) {
+      AsyncStorage.setItem(c.key, JSON.stringify(merged)).catch(() => { /* best-effort */ });
+    }
     // ── the two ways a target ends up on one handset for good ──────────────
     //
     // Both used to be silent. `writable` is false for the rest of the session
@@ -170,7 +277,7 @@ export function useTrainerGoals() {
     // hands that answer up rather than dropping it, and the caller has a
     // sentence for each in src/lib/coachPrefs.ts.
     if (!writable.current) return 'device-only';
-    const ok = await saveCoachPrefs({
+    const ok = await saveCoachPrefs(cache.current.uid, {
       goalRevenue: merged.revenue > 0 ? merged.revenue : null,
       goalClients: merged.clients > 0 ? merged.clients : null,
     });

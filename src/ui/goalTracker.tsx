@@ -36,12 +36,22 @@
 // src/ui/recordOutbox.ts explains why they are together and where they would
 // rather live.
 //
-// ── The device key is a migration, not a fallback ──────────────────────────
+// ── The device key is DROPPED, not migrated ────────────────────────────────
 //
-// Clients who set a target before this shipped have it on their phone and
-// nowhere else. `migrateLegacyTarget` below moves it up exactly once, and only
-// when the server has no weight goal to contradict it. After that the row is
-// the record and the key is never read again.
+// There used to be a `migrateLegacyTarget` here that moved that pre-server blob
+// up exactly once, and the line that did it was an insert of
+// `{ client_id: who, kind: 'weight', target_value: kg }` where `who` was
+// whichever uid `supabase.auth.getUser()` had just resolved. The key carries no
+// account. So on a shared handset it wrote one member's target weight into
+// another member's `goal_targets` — the one key in this class that reached a
+// SERVER table, and the denominator `progressOf` divides by, so the coach read a
+// correct percentage of a target their client never set.
+//
+// It is gone. The two keys are removed unread on the first load of a session,
+// and src/lib/legacyGoalTarget.ts holds the reasoning, what it costs a
+// single-owner handset, and why scoping the key by account — the repair the rest
+// of this class gets — does not apply to a key that has had no writer since
+// goals moved to the server.
 import { createContext, useMemo, useRef, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
@@ -56,9 +66,8 @@ import { isPending } from '../lib/wellnessSync';
 import { useOutbox } from './outbox';
 import { useRecordOutboxHandlers } from './recordOutbox';
 import { useRecoverRead } from './readRefresh';
+import { LEGACY_GOAL_TARGET_KEYS } from '../lib/legacyGoalTarget';
 
-const LEGACY_KEY = 'repple.goalTarget';
-const MIGRATED_KEY = 'repple.goalTarget.migrated';
 
 /**
  * What happened to a goal somebody set.
@@ -194,11 +203,17 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
         // the same as failing to look.
         setGoals([]); setStatus('ready'); return;
       }
+      // Unread, and before anything else touches them. The blob carries no
+      // account, so reading it is a guess about whose target it is — and the
+      // only place that guess could land is somebody's `goal_targets` row. See
+      // src/lib/legacyGoalTarget.ts. Best-effort: a phone that will not let go of
+      // them is a phone where they sit inert, because nothing reads them now.
+      AsyncStorage.multiRemove([...LEGACY_GOAL_TARGET_KEYS])
+        .catch((e) => reportError('goalTracker.dropLegacy', e));
       const mine = await load(who);
       if (cancelled) return;
       if (mine == null) { setStatus('error'); return; }
-      const after = await migrateLegacyTarget(who, mine.goals);
-      if (cancelled) return;
+      const after = mine.goals;
       // Anything still on this phone is kept in front of the server's answer.
       // A re-read that dropped it would take a goal off the member's list while
       // the outbox is still holding it, and the home screen would go on counting
@@ -208,36 +223,6 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     })();
     return () => { cancelled = true; };
   }, [authRev, load, rev]);
-
-  // Move a pre-server target weight up, once. Deliberately conservative: if the
-  // server already holds a weight goal it wins, because it is the one the coach
-  // can see and the one another device may have written more recently.
-  const migrateLegacyTarget = async (who: string, current: GoalTarget[]): Promise<GoalTarget[]> => {
-    try {
-      if (await AsyncStorage.getItem(MIGRATED_KEY)) return current;
-      const raw = await AsyncStorage.getItem(LEGACY_KEY);
-      if (!raw) { await AsyncStorage.setItem(MIGRATED_KEY, '1'); return current; }
-      const old = JSON.parse(raw) as { targetWeightKg?: number; targetDateISO?: string };
-      const kg = Number(old?.targetWeightKg);
-      // 0 was the provider's "not set" sentinel, so it migrates to nothing.
-      if (!Number.isFinite(kg) || kg <= 0 || current.some((g) => g.kind === 'weight')) {
-        await AsyncStorage.setItem(MIGRATED_KEY, '1');
-        return current;
-      }
-      const { data, error } = await supabase.from('goal_targets').insert({
-        client_id: who, kind: 'weight', target_value: kg,
-        target_date: old.targetDateISO ? String(old.targetDateISO).slice(0, 10) : null,
-      }).select('id, kind, target_value, title, target_date, achieved_at, created_at').single();
-      // A failed migration is retried on the next launch rather than marked
-      // done — the key is the only copy, and losing it loses the goal.
-      if (error || !data) { reportError('goalTracker.migrate', error); return current; }
-      await AsyncStorage.setItem(MIGRATED_KEY, '1');
-      return sortGoals([...current, rowToGoal(data as unknown as Row)]);
-    } catch (e) {
-      reportError('goalTracker.migrate', e);
-      return current;
-    }
-  };
 
   /**
    * Keep this goal on the phone and show it while it waits.

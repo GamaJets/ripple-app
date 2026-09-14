@@ -78,6 +78,10 @@ if (!url || !key) {
 import { withRequestTimeout } from '@lib/requestTimeout';
 import { failedWriteNote, writeFate, mayRetryWrite, type WriteSubject } from '@lib/failedWrite';
 import { refused, type Said } from '@lib/consoleSay';
+// Which `supabase.auth.*` errors are a verdict about the credential and which
+// are the question going unasked. The distinction is the reason ME_UNREADABLE
+// below is reachable at all; its header records what the library actually does.
+import { authReadUnreadable } from '@lib/authReadFate';
 
 export const supabase = createClient(url, key, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
@@ -146,14 +150,14 @@ export interface Me {
 /**
  * "We could not tell." The fourth answer, and the one that was missing.
  *
- * `loadMe` opens with `supabase.auth.getUser()`, a NETWORK call. It rejects on
- * a dropped connection, and thirty of the console's thirty-one callers awaited
- * it inside an async IIFE with no `try` around it: the IIFE rejected unhandled,
- * `setMe` never ran, `me` stayed `undefined` for ever, and twenty-nine routes
- * sat on the word "Loading…" in a bare `<div>` — no rail, no gym name, no
- * heading, nothing announced and nothing to press. A front desk on a dropping
- * connection got nine characters and no way to tell whether the gym was down,
- * they were signed out, or the tab was broken.
+ * `loadMe` opens with `supabase.auth.getUser()`, a NETWORK call. Thirty of the
+ * console's thirty-one callers awaited it inside an async IIFE with no `try`
+ * around it: if it rejected the IIFE rejected unhandled, `setMe` never ran,
+ * `me` stayed `undefined` for ever, and twenty-nine routes sat on the word
+ * "Loading…" in a bare `<div>` — no rail, no gym name, no heading, nothing
+ * announced and nothing to press. A front desk on a dropping connection got
+ * nine characters and no way to tell whether the gym was down, they were
+ * signed out, or the tab was broken.
  *
  * Reported as a value rather than left as a rejection, and NOT collapsed into
  * `null`. Null means "nobody is signed in", which is a statement about the
@@ -162,6 +166,33 @@ export interface Me {
  * timed out sends them to re-enter a password that was never the problem —
  * exactly the substitution `roleUnknown` was added to this file to stop one
  * layer down.
+ *
+ * ── a correction, and the one that made this sentinel reachable ───────────
+ *
+ * This paragraph used to open: "It rejects on a dropped connection." That is
+ * FALSE, and it was false the day it was written. It is left recorded here
+ * rather than quietly deleted, because the whole apparatus below — the
+ * sentinel, the `authUnread` state on every dashboard that consumes it — was
+ * built on it and was unreachable for the exact failure it was written for.
+ *
+ * What `supabase.auth.getUser()` actually does, read in the installed package
+ * (`@supabase/auth-js` v2.112.3 under studio-web/node_modules, `GoTrueClient.js`,
+ * the `catch` at the end of `_getUser`; the v2.110.2 copy at the repo root is
+ * identical): it catches, and for ANY error carrying the library's
+ * `__isAuthError` brand it RESOLVES with `{ data: { user: null }, error }`.
+ * Only a non-AuthError is rethrown. And `lib/fetch.js` `_handleRequest` turns
+ * a failed `fetch` — offline, DNS, CORS, captive portal, aborted navigation —
+ * into `new AuthRetryableFetchError(message, 0)`, which IS an AuthError.
+ *
+ * So a dropped connection was the one case that never threw. The `catch` below
+ * did not fire, `user` was `null`, `loadMe` returned `null`, and the console
+ * read that as "signed out": an auth outage put the sign-in form in front of a
+ * signed-in owner and asked them for a password that was working fine. The
+ * substitution this file argues against twice, performed by this file.
+ *
+ * The `error` half is now read, and classified — see `@lib/authReadFate`, and
+ * see its header for why an expired session and an unreachable server are
+ * separable and which way an unrecognised error is made to fall.
  */
 export const ME_UNREADABLE = 'unreadable' as const;
 
@@ -172,12 +203,29 @@ export type MeRead = Me | null | typeof ME_UNREADABLE;
 export async function loadMe(): Promise<MeRead> {
   let user: { id: string; email?: string | null } | null | undefined;
   try {
-    const { data: auth } = await supabase.auth.getUser();
+    // `error`, not the absence of a user. `getUser()` resolves rather than
+    // rejects for every AuthError including the network ones, so `user` is
+    // `null` both when nobody is signed in and when nobody could be asked —
+    // see the correction in ME_UNREADABLE above for what that cost.
+    const { data: auth, error: authErr } = await supabase.auth.getUser();
+    if (authErr && authReadUnreadable(authErr)) return ME_UNREADABLE;
+    // An error the classifier calls 'signed-out' falls through to the `!user`
+    // line below and answers `null`, which is the true answer for it.
     user = auth?.user;
   } catch {
-    // The one thing that must not happen here is a silent `null`. See
-    // ME_UNREADABLE above: signed out and unreachable are different facts and
-    // they send a person to two different places.
+    // Still reachable, and still ME_UNREADABLE — but not for the reason the
+    // corrected sentence gave. `_getUser` rethrows anything WITHOUT the
+    // `__isAuthError` brand, and `__loadSession` guards its storage reads with
+    // `finally` rather than `catch`: a blocked `localStorage` (Safari private
+    // browsing, a locked-down profile) or a failing Web Locks acquisition
+    // escapes as a plain DOMException. The ceiling wrapper at the top of this
+    // file does NOT land here — its rejection happens inside auth-js's own
+    // `fetch` call and comes back branded as an AuthRetryableFetchError, which
+    // is exactly why the line above had to exist.
+    //
+    // The one thing that must not happen here is a silent `null` — signed out
+    // and unreachable are different facts and they send a person to two
+    // different places.
     return ME_UNREADABLE;
   }
   if (!user) return null;

@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { View, Text } from 'react-native';
 import Svg, { Rect, Line, Circle } from 'react-native-svg';
 import { useTheme } from './components';
+import type { Theme } from '../theme/tokens';
 import { sp, radius, hairline, type as ty, numeric, value } from '../theme/scale';
 import {
   type HrSample, hrStats, zoneBands, timeInZones, zoneOf, zoneColor, maxHr, hrScaleNote,
@@ -50,6 +51,42 @@ const mmss = (sec: number) => {
   const m = Math.round(sec / 60);
   return m >= 1 ? `${m} min` : `${Math.round(sec)}s`;
 };
+
+/**
+ * One of the three figures above the chart — low, average, high.
+ *
+ * The figure stays ink; the zone it belongs to is carried by a dot beside the
+ * label, never by colouring the number itself.
+ *
+ * A module-scope PLAIN FUNCTION, called as `{stat('Low', showLow, t)}`, and not
+ * a component written as `<Stat label="Low" …/>`. Declared inside the render
+ * body it was a new function object on every render, so React saw a different
+ * element TYPE each time and unmounted and remounted all three figures rather
+ * than updating them.
+ *
+ * This one is NOT a screen. `HrZoneChart` is shared: it is rendered directly by
+ * app/(client)/recovery.tsx and by src/ui/SessionHrSheet.tsx, which in turn is
+ * mounted by app/(client)/activity.tsx and app/(client)/workouts.tsx — so the
+ * teardown happened on four separate screens, and on `workouts.tsx`, which
+ * re-renders while a session is being logged. The chart also holds its own
+ * `setW` from `onLayout`, so a remount is not free of consequences even for
+ * static text. Nothing in `stat` holds a TextInput or an accessibility prop —
+ * the `accessible` label belongs to the `<Svg>` below and is untouched — so
+ * what this cost was work, not a member's caret and not a wrong figure.
+ *
+ * At module scope because it closes over nothing from the render body: `value`
+ * and `ty` are module imports and the theme is passed. No `key`: the three
+ * calls are written out, not mapped.
+ */
+const stat = (label: string, v: number, t: Theme, tone?: string) => (
+  <View style={{ alignItems: 'center', flex: 1 }}>
+    <Text style={{ ...value(19), color: t.ink }}>{v}</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+      {tone ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: tone }} /> : null}
+      <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{label}</Text>
+    </View>
+  </View>
+);
 
 export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, subtitle, height = 172 }: {
   samples: HrSample[];
@@ -102,18 +139,6 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
   const showAvg = hasSeries ? stats!.avg : (typeof avgBpm === 'number' ? avgBpm : null);
   const showHigh = hasSeries ? stats!.high : (typeof maxBpm === 'number' ? maxBpm : null);
 
-  // The figure stays ink; the zone it belongs to is carried by a dot beside the
-  // label, never by colouring the number itself.
-  const Stat = ({ label, value: v, tone }: { label: string; value: number; tone?: string }) => (
-    <View style={{ alignItems: 'center', flex: 1 }}>
-      <Text style={{ ...value(19), color: t.ink }}>{v}</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
-        {tone ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: tone }} /> : null}
-        <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{label}</Text>
-      </View>
-    </View>
-  );
-
   return (
     <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg }}>
       {title ? <Text style={{ ...ty.head, color: t.ink }}>{title}</Text> : null}
@@ -121,9 +146,9 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
 
       {(showLow != null || showAvg != null || showHigh != null) ? (
         <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 12 }}>
-          {showLow != null ? <Stat label="Low" value={showLow} /> : null}
-          {showAvg != null ? <Stat label="Avg" value={showAvg} tone={t.brand} /> : null}
-          {showHigh != null ? <Stat label={hasSeries ? 'High' : 'Max'} value={showHigh} tone={t.crit} /> : null}
+          {showLow != null ? stat('Low', showLow, t) : null}
+          {showAvg != null ? stat('Avg', showAvg, t, t.brand) : null}
+          {showHigh != null ? stat(hasSeries ? 'High' : 'Max', showHigh, t, t.crit) : null}
         </View>
       ) : <View style={{ height: 12 }} />}
 

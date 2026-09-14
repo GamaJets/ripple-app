@@ -3,7 +3,9 @@
 // ── The defect this closes ────────────────────────────────────────────────
 //
 // app/(trainer)/documents.tsx could already answer "who has accepted this" —
-// `coach_document_standing` (supabase/parts/135) returns every current client
+// `coach_document_standing` (supabase/parts/137-a-coachs-own-paperwork.sql — the
+// comments on this feature all say "part 135", which is a different file about
+// standing appointments) returns every current client
 // of the coach with the date they accepted, or null, and `standingLine` in
 // src/lib/coachDocs.ts turns that into "4 of 9 of your clients have accepted
 // this". All of it is behind a Who's Accepted control, one document at a time.
@@ -17,7 +19,7 @@
 // ── Where the number comes from, and the line it does not cross ───────────
 //
 // `coach_document_acceptances`, read directly and filtered to the COACH'S OWN
-// document ids. That is not a widening: `coach_doc_accept_own_r` in part 135
+// document ids. That is not a widening: `coach_doc_accept_own_r` in part 137
 // already admits a coach to the acceptance rows of their own documents — the
 // policy's second arm is an `exists` on `coach_documents.coach_id = auth.uid()`
 // — and `authenticated` holds `select` on the table. This module counts rows

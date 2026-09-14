@@ -120,6 +120,11 @@ import {
 } from '../../src/lib/bulkActions';
 import { seedDecision, stillListed, pruneSelection, assignCtaLabel } from '../../src/lib/assignPicker';
 import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDays';
+import {
+  LEGACY_BUILDER_DRAFT_KEY, builderDraftKey, draftHasContent, draftStepFor,
+  readBuilderDraft, restoreDraftDecision, writeBuilderDraft,
+} from '../../src/lib/builderDraft';
+import { useAuth } from '../../src/ui/auth';
 import { notifySuccess } from '../../src/ui/haptics';
 import { WEEK_DAYS } from '../../src/lib/weekStart';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
@@ -1309,52 +1314,129 @@ export default function Builder() {
   const [foldedDays, setFoldedDays] = useState<Record<number, boolean>>({});
   const toggleDay = (di: number) => setFoldedDays((p) => ({ ...p, [di]: !p[di] }));
 
-  const DRAFT_KEY = 'repple.builder.draft.v1';
+  /**
+   * ── Whose draft this is ───────────────────────────────────────────────────
+   *
+   * It used to be nobody's. The key was the literal `'repple.builder.draft.v1'`
+   * with no account in it, the read had `[]` dependencies, and nothing on the
+   * sign-out path removed it — so on a shared gym handset coach B signed in,
+   * opened Programs, and coach A's entire block was restored into their builder
+   * with `seededFor` set to null, which is this screen saying "this is your own
+   * work". The Assign control below then sends it to B's clients under B's
+   * name, with A's loads and A's notes about A's clients on it.
+   *
+   * The account is in the key now. src/lib/builderDraft.ts holds the key
+   * composition, the restore decision and — at length — why the old unqualified
+   * key is DELETED UNREAD rather than migrated: the blob names no coach, so
+   * reading it into whoever is signed in is a guess, and the cost of guessing
+   * wrong is the defect above performed once deliberately.
+   */
+  const { user: draftUser } = useAuth();
+  const draftUid = draftUser?.id ?? null;
+  const draftKey = builderDraftKey(draftUid);
+  /** The account the builder's React state belongs to. A ref, because it is
+   *  written from inside the effect that reads it and must not schedule a
+   *  render of its own. */
+  const draftFor = useRef<string | null>(null);
+  /** `draftLoaded` again, readable from inside the effect without being a
+   *  dependency of it. The two are set together and never apart. */
+  const draftArmed = useRef(false);
+  /** Whether the builder is holding work RIGHT NOW, for the restore decision.
+   *  Refreshed every render so the async read below tests what is on screen
+   *  when it lands rather than what was there when it started. */
+  const builderHasWork = useRef(false);
+  builderHasWork.current = draftHasContent<BDay>({
+    title, note, days: blockWeeks[0]?.days ?? [], weeks: blockWeeks,
+  });
 
   useEffect(() => {
+    const step = draftStepFor({
+      uid: draftUid, onScreenKey: draftFor.current, onScreenSaved: draftArmed.current,
+    });
+    // Cleared BEFORE the read, and before anything else in this effect — never
+    // left at whatever the LAST key's read set it to. A flag that survived the
+    // key changing would let an account switch whose read then FAILED write
+    // this coach's empty builder straight over the other coach's stored
+    // programme, which is the one way to lose a block rather than merely show
+    // the wrong one. src/ui/exerciseVideos.ts and src/ui/clientData.tsx carry
+    // the same note; it is the same trap here.
+    draftArmed.current = false;
+    setDraftLoaded(false);
+    // No account and nothing of this account's on the device: hold. A null uid
+    // is not a sign-out — auth-js emits a null session when a token refresh
+    // fails on a basement wifi and restores the coach on the next tick — and
+    // blanking a builder full of unsaved work on that is worse than the bug
+    // this effect fixes. Read nothing, write nothing, leave it alone.
+    if (step.do === 'hold') return;
+    // The account is gone and the device already has what is on screen. Take it
+    // off the screen: this is a TAB, expo-router keeps tab screens mounted, and
+    // an `href: null` screen mounts once and is never torn down — so a
+    // screen-local `useState` outlives a sign-out with no storage read involved
+    // at all. The STORED bytes stay: they are the departing coach's work under
+    // the departing coach's key, unreadable to whoever signs in next.
+    if (step.do === 'forget') { draftFor.current = null; clearBuilder(); return; }
+    // A different coach. Wiped before the read lands rather than left for the
+    // restore to overwrite, because the restore is allowed to REFUSE — and a
+    // refusal that left the previous coach's programme sitting in this coach's
+    // builder is the defect wearing a fix.
+    const wiped = step.forget;
+    if (wiped) clearBuilder();
+    draftFor.current = step.key;
     let live = true;
     (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(DRAFT_KEY);
-        if (!live || !raw) return;
-        const d = JSON.parse(raw) as { title?: string; note?: string; days?: BDay[]; weeks?: BWeek[] };
-        // Only restore a draft with something IN it. An empty one is not worth
-        // resurrecting over whatever the screen has already been given.
-        if ((Array.isArray(d.days) && d.days.length) || (typeof d.title === 'string' && d.title.trim())) {
-          setTitle(typeof d.title === 'string' ? d.title : '');
-          setNote(typeof d.note === 'string' ? d.note : '');
-          // Whole `BDay[]`, so every field on the exercise comes back with it —
-          // the weight, the unit the coach typed it in, and the note they wrote
-          // on the movement. A draft that silently dropped one of those would
-          // be worse than one that dropped everything: the coach would come
-          // back to what looks like their week with the cues gone.
-          // `weeks` when the draft has one, and `days` — which is week one —
-          // when it does not. Every draft written before blocks existed is the
-          // second case, and restoring it as a one-week block is what it is.
-          // The two are written together below for the same reason
-          // `Program.days` and `Program.weeks` are: a draft carrying only
-          // `weeks` would come back empty on a build that had been rolled back.
-          setBlockWeeks(Array.isArray(d.weeks) && d.weeks.length
-            ? d.weeks.map((w) => ({ days: Array.isArray(w?.days) ? w.days : [], label: w?.label, deload: w?.deload }))
-            : [{ days: Array.isArray(d.days) ? d.days : [] }]);
-          setWeekIdx(0);
-          // The draft carries the days; it does not carry which of them were
-          // folded, so nothing may claim to know. Reset rather than left at
-          // whatever the empty builder happened to be holding.
-          setFoldedDays(foldsForNewProgramme());
-          // A restored draft is the coach's OWN work, whoever happens to be
-          // selected — so it is seeded from nobody, and the builder says so
-          // rather than presenting it as somebody's current programme.
-          setSeededFor(null);
-        }
-      } catch { /* a draft that cannot be parsed is not a draft */ }
-      finally { if (live) setDraftLoaded(true); }
+      let raw: string | null;
+      try { raw = await AsyncStorage.getItem(step.key); } catch {
+        // Learning nothing is not learning that there is nothing. `draftArmed`
+        // stays false, so the autosave never writes over bytes we failed to
+        // read. The coach's typing is unaffected on screen; it is simply not
+        // kept, and the next launch reads the real bytes again.
+        return;
+      }
+      if (!live) return;
+      const { draft } = readBuilderDraft<BDay>(raw);
+      const decided = restoreDraftDecision<BDay>({
+        stored: draft, builderHasContent: wiped ? false : builderHasWork.current,
+      });
+      if (decided.restore) {
+        setTitle(decided.restore.title);
+        setNote(decided.restore.note);
+        // Whole `BDay[]`, so every field on the exercise comes back with it —
+        // the weight, the unit the coach typed it in, and the note they wrote
+        // on the movement. A draft that silently dropped one of those would be
+        // worse than one that dropped everything: the coach would come back to
+        // what looks like their week with the cues gone.
+        setBlockWeeks(decided.restore.weeks);
+        setWeekIdx(0);
+        // The draft carries the days; it does not carry which of them were
+        // folded, so nothing may claim to know. Reset rather than left at
+        // whatever the empty builder happened to be holding.
+        setFoldedDays(foldsForNewProgramme());
+        // A restored draft is the coach's OWN work, whoever happens to be
+        // selected — so it is seeded from nobody, and the builder says so
+        // rather than presenting it as somebody's current programme.
+        setSeededFor(null);
+      }
+      draftArmed.current = true;
+      setDraftLoaded(true);
     })();
     return () => { live = false; };
-  }, []);
+    // `draftUid` as well as the key it composes to: two different non-accounts
+    // — null and the 'unknown' literal — share the single key `null`, and the
+    // step is the thing that must see the difference in what the screen holds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, draftUid]);
+
+  // The unqualified key this replaces, removed rather than migrated, and never
+  // parsed on the way out. Nothing on the device distinguishes a single-owner
+  // handset's own old draft from the previous coach's on a shared one, and an
+  // unsaved draft is one evening's typing its author still remembers — where
+  // restoring it to the wrong coach is that coach assigning somebody else's
+  // programme to their own clients under their own name. The cheap loss is the
+  // one taken on purpose. See the header of src/lib/builderDraft.ts.
+  useEffect(() => { AsyncStorage.removeItem(LEGACY_BUILDER_DRAFT_KEY).catch(() => {}); }, []);
 
   useEffect(() => {
-    if (!draftLoaded) return;
+    if (!draftLoaded || !draftKey) return;
     // An EMPTY builder does not clear the stored draft, and that asymmetry is
     // the whole point.
     //
@@ -1378,16 +1460,20 @@ export default function Builder() {
     // `days` is still written, and it is still week one. A build rolled back to
     // before blocks existed reads that key and finds a whole week, rather than
     // finding nothing and presenting a coach with an empty builder.
-    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({
+    AsyncStorage.setItem(draftKey, writeBuilderDraft<BDay>({
       title, note, days: blockWeeks[0]?.days ?? [], weeks: blockWeeks,
     })).catch(() => {});
-  }, [title, note, blockWeeks, draftLoaded]);
+  }, [title, note, blockWeeks, draftLoaded, draftKey]);
 
   /** Called once the work is somewhere durable, and only then — a saved
    *  template that the server counted, or an assignment that landed on every
    *  client it was sent to. Never on a partial one: the draft is the only copy
-   *  of anything that did not make it. */
-  const clearDraft = () => { AsyncStorage.removeItem(DRAFT_KEY).catch(() => {}); };
+   *  of anything that did not make it.
+   *
+   *  Scoped, so it clears THIS coach's draft and cannot reach another's. With
+   *  no account there is no key and nothing to clear, which is the same answer
+   *  as "nothing was ever written". */
+  const clearDraft = () => { if (draftKey) AsyncStorage.removeItem(draftKey).catch(() => {}); };
 
   const patchEx = (di: number, key: string, patch: Partial<BEx>) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.map((e) => (e.key === key ? { ...e, ...patch } : e)) } : d)));

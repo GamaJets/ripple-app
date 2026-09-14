@@ -12,6 +12,7 @@ import {
   askMoment, askMomentNote, reviewAskDraft, askListNote,
   SETTLED_DAYS, GOAL_FRESH_DAYS, ASK_IS_UNFILTERED, WHO_REVIEWED_IS_HIDDEN,
   type AskCandidate,
+  ratingOf, ratingTally, reviewScoreLabel, reviewScorePhrase, ownRatingLine,
   MIN_FOR_AVERAGE, MIN_RATING, MAX_RATING, MAX_BODY,
   IDENTITY_NOTE, EDIT_NOTE, WITHDRAW_NOTE, REPLY_NOTE,
   type Review, type WriteResult,
@@ -74,6 +75,75 @@ eq(ratingLine({ kind: 'few', count: 1 }), '1 review', 'singular');
 eq(ratingLine({ kind: 'few', count: 2 }), '2 reviews', 'plural');
 eq(ratingLine({ kind: 'average', average: 4.5, count: 8 }), '4.5 from 8 reviews',
   'an average is always shown with the count it came from');
+
+// ── A figure nobody sent is not a figure ──────────────────────────────────
+//
+// `Number(r.rating) || 0` was the form in src/ui/reviews.ts, three times over.
+// Every one of the five ways of not being told arrives as the same 0, and 0 is
+// below the lowest rating a client is allowed to give.
+eq(ratingOf(4), 4, 'a rating in range is itself');
+eq(ratingOf(MIN_RATING), MIN_RATING, 'the lowest allowed rating survives');
+eq(ratingOf(MAX_RATING), MAX_RATING, 'so does the highest');
+eq(ratingOf('3'), 3, 'a string of digits is read');
+eq(ratingOf(null), null, 'a null column is not a zero-star review');
+eq(ratingOf(undefined), null, 'nor is an absent key');
+eq(ratingOf(''), null, 'nor is an empty string, which Number() makes 0');
+eq(ratingOf('good'), null, 'nor is a word, which Number() makes NaN');
+eq(ratingOf(0), null, 'a literal 0 is not a rating anybody can give');
+eq(ratingOf(6), null, 'and neither is one past the top of the scale');
+eq(ratingOf(4.5), null, 'half a star is not a rating this schema holds');
+
+// The tally reader is separate because a SUM has no range: forty fives are 200.
+eq(ratingTally(0), 0, 'a real zero count is a real answer');
+eq(ratingTally(200), 200, 'and a sum far past MAX_RATING is a real sum');
+eq(ratingTally(null), null, 'an unread count is not a count of none');
+eq(ratingTally(''), null, 'nor is an empty string');
+eq(ratingTally(-1), null, 'and a negative count is not a reading at all');
+
+// ── The null is tested BEFORE anything compares it ────────────────────────
+//
+// `null <= 0` is false and `null < 3` is true, so an unread count tested after
+// the comparisons falls into `{ kind: 'few', count: null }` and a directory row
+// prints "null reviews". Both figures get their own arm, ahead of the arithmetic.
+eq(ratingDisplay({ count: null, sum: null }, 'ready').kind, 'unknown',
+  'a summary row with no readable count says nothing about the coach');
+eq(ratingDisplay({ count: null, sum: 40 }, 'ready').kind, 'unknown',
+  'and a sum without a count cannot be averaged by anything');
+{
+  // A real count, no readable sum. The count is a reading and is shown; the
+  // score is not invented from `0 / count`, which renders as a one-star coach.
+  const d = ratingDisplay({ count: 9, sum: null }, 'ready');
+  eq(d.kind, 'count-only', 'an unread sum leaves the count standing and claims no score');
+  ok(!('average' in d), 'and carries no average for a screen to print');
+  eq(ratingLine(d), '9 reviews', 'the line states the count and stops there');
+}
+eq(ratingDisplay({ count: 0, sum: 0 }, 'ready').kind, 'none',
+  'a genuinely counted zero is still "no reviews yet"');
+
+/* ── one row's score, and the row that has none ──────────────────────────── */
+
+eq(reviewScoreLabel(rev({ rating: 4 })), `4 / ${MAX_RATING}`, 'a read rating prints as the score');
+{
+  const unread = reviewScoreLabel(rev({ rating: null }));
+  ok(!/\b0\b/.test(unread), 'an unread rating is never printed as 0 / 5');
+  ok(!/null|undefined|NaN/.test(unread), 'and never as a variable printed raw');
+  ok(/unreadable/i.test(unread), 'it says the rating could not be read');
+  const phrase = reviewScorePhrase(rev({ rating: null }));
+  eq(phrase, 'review', 'inside a sentence the figure is dropped and the review is not');
+  eq(reviewScorePhrase(rev({ rating: 2 })), `2 of ${MAX_RATING} review`, 'a read one keeps its figure');
+}
+
+/* ── the caller's own rating, above the editor ───────────────────────────── */
+
+eq(ownRatingLine(4, 'Sam Turner'), 'You rated Sam Turner 4 out of 5.', 'named, and read');
+eq(ownRatingLine(4, null), 'You rated them 4 out of 5.', 'no name in the record, no hole in the sentence');
+{
+  const unread = ownRatingLine(null, 'Sam Turner');
+  ok(!/\b0\b/.test(unread), 'an unread own-rating never prints as a zero');
+  ok(!/null|undefined/.test(unread), 'and never raw');
+  ok(/couldn’t read/.test(unread), 'it says so in words');
+  ok(/replace/.test(unread), 'and warns that rating again replaces what is on record');
+}
 
 // ── Who may write one, and what we may say when we do not know ────────────
 eq(reviewGate({ status: 'ready', canReview: true,  isSelf: false }), 'allowed', 'a client may write one');

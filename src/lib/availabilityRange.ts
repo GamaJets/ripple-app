@@ -32,6 +32,11 @@
 // expect: they can delete the one 11:15 they changed their mind about without
 // the other forty-seven moving.
 import { WEEK_DAYS } from './weekStart';
+// The account-scoping rule for a blob kept on the handset, and the two traps
+// that come with it. See the section at the foot of this file.
+import {
+  accountCacheKey, cacheForAccount, isAccountCacheKey, type DeviceCache,
+} from './deviceAccountCache';
 
 /** One slot, in the shape `addSlot` takes. */
 export interface RangeSlot {
@@ -275,3 +280,46 @@ export function addOutcome(saved: number, attempted: number, duplicates: number)
   const lost = attempted - saved;
   return `${head}${tail} ${lost} could not be saved and ${lost === 1 ? 'is' : 'are'} not offered to anybody — try again.`;
 }
+
+/* ── whose week this is ─────────────────────────────────────────────────────
+ *
+ * `useAvailability` kept the coach's weekly template on the handset under
+ * `'repple.trainer.availability'` — one key, no account in it, cleared by
+ * nothing. On a gym's shared handset the next coach to sign in read the
+ * previous coach's week; and the hook's "the server has none, this phone has
+ * some" branch then INSERTED it with `trainer_id` set to whoever was signed in.
+ * `run_open_slot_extension` (part 650) turns those rows into `sessions` with
+ * status 'available' every night, so a stranger's Tuesday morning became
+ * bookable time under the wrong coach's name and clients filled it.
+ *
+ * The rule, the two traps and the argument for deleting the old key rather than
+ * migrating it are all in src/lib/deviceAccountCache.ts. This is only the
+ * naming, kept beside the rest of the availability arithmetic so that the
+ * screen's module and its key cannot drift apart.
+ */
+
+/** Every per-account availability key starts with this. */
+export const AVAILABILITY_CACHE_PREFIX = 'repple.trainer.availability:';
+
+/** The unqualified key this replaces. Removed on sight and never read — the
+ *  blob names no account, so reading it into the signed-in one is a guess
+ *  whose wrong answer is a stranger's hours opened for booking. Re-entering a
+ *  week that never reached the server is the whole cost of losing it, and the
+ *  range sheet in this file is what makes that one gesture rather than
+ *  forty-eight. */
+export const LEGACY_AVAILABILITY_KEY = 'repple.trainer.availability';
+
+/** Where this coach's cached week lives, or null when there is no account to
+ *  scope it to — which means DO NOT PERSIST. */
+export const availabilityCacheKey = (uid: string | null | undefined): string | null =>
+  accountCacheKey(AVAILABILITY_CACHE_PREFIX, uid);
+
+/** The cache state for an account, hydrated:false, as the hook must set it
+ *  BEFORE reading — see the trap in src/lib/deviceAccountCache.ts. */
+export const availabilityCache = (uid: string | null | undefined): DeviceCache =>
+  cacheForAccount(AVAILABILITY_CACHE_PREFIX, uid);
+
+/** Whether a stored key holds somebody's weekly template. The legacy key is
+ *  deliberately not one of these. */
+export const isAvailabilityCacheKey = (k: string): boolean =>
+  isAccountCacheKey(AVAILABILITY_CACHE_PREFIX, k);

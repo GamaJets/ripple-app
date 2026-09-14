@@ -28,6 +28,7 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
 import { sortMyReviews, type MyCoachReview } from '../lib/myReviews';
+import { ratingOf } from '../lib/reviews';
 
 /** A read that says which of the two empties it is. */
 export interface MyReviewsRead { rows: MyCoachReview[]; status: LoadStatus }
@@ -45,7 +46,11 @@ function toMine(r: any): MyCoachReview {
     // claims a public profile, and claiming one that is not there tells somebody
     // strangers are reading their words when nobody is.
     coachListed: r.coach_listed === true,
-    rating: Number(r.rating) || 0,
+    // `Number(r.rating) || 0` printed "You gave 0 out of 5" — a rating below
+    // the lowest one this app lets anybody give, about their own coach, built
+    // out of a column that did not come back. `ratingOf` carries the unknown
+    // and src/lib/myReviews.ts has a sentence for it.
+    rating: ratingOf(r.rating),
     body: typeof r.body === 'string' ? r.body : null,
     createdAt: typeof r.created_at === 'string' ? r.created_at : '',
     edited: r.edited === true,

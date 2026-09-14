@@ -87,7 +87,19 @@ function shortDay(day: string): string {
   return p ? fmtAxisDay(p[0], p[1], p[2]) : day;
 }
 
-/** What the record says happened, in words nobody has to interpret. */
+/**
+ * What the record says happened, in words nobody has to interpret.
+ *
+ * ── Why the three newest states are all `'quiet'` ─────────────────────────
+ *
+ * The palette here is three tones and only three: `good` is `t.good`, `quiet`
+ * is `t.ink3`, and `ahead` is `t.brand` — the colour this app uses for a thing
+ * that is COMING, and the colour a member reads as approval. A cancellation
+ * drawn in `ahead` would put the same dot beside "you gave this up" that sits
+ * beside "you are booked in", and `missed` in `ahead` would be the brand
+ * colour beside the one sentence on this screen that is a statement about the
+ * member rather than about the record. All three are `quiet`.
+ */
 function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' | 'ahead' } {
   switch (o.kind) {
     case 'attended':
@@ -102,6 +114,30 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
       };
     case 'unmarked':
       return { label: 'Not recorded — your gym did not mark this either way', tone: 'quiet' };
+    case 'missed':
+      // Names the REGISTER, because that is the thing a member who disputes
+      // this has to ask their gym about. `unmarked` above and this are the same
+      // absence of a tick, and the only thing separating them is
+      // `gym_classes.register_taken_at` — so a sentence that said only "you
+      // were not marked in" would be true of both and would leave somebody
+      // arguing with reception about the wrong fact.
+      return { label: 'Your gym took the register for this class and you were not on it.', tone: 'quiet' };
+    case 'cancelled':
+      // Past tense, and it says the place is gone. "You are not booked" is also
+      // true of a class they have never heard of; what stops somebody turning
+      // up is being told they had this and gave it up. Same sentence shape as
+      // `seatNote` in src/lib/classSeat.ts, which says it about a class that
+      // has not run yet.
+      return { label: 'You cancelled this. Your place was given up.', tone: 'quiet' };
+    case 'late_cancelled':
+      // NO FEE, NO AMOUNT, NO CURRENCY, and that is not brevity. The fee owed
+      // on a late cancellation is the one stored beside the row in
+      // `class_booking_cancellations` at the moment of cancelling, so quoting
+      // today's policy over last month's cancellation bills a member a price
+      // nobody ever showed them. `seatNote` in src/lib/classSeat.ts makes the
+      // argument in full; src/lib/classCancel.ts is where a fee is worded, from
+      // the row that holds it.
+      return { label: 'You cancelled this inside your gym’s notice period.', tone: 'quiet' };
     case 'upcoming':
       return { label: 'Booked — still to come', tone: 'ahead' };
     case 'waitlisted':
@@ -274,7 +310,7 @@ export default function Attendance() {
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Every time your gym recorded you coming in — classes and the door.
+          Your classes and every time your gym recorded you coming through the door.
         </Text>
 
         <Rule />
@@ -295,7 +331,13 @@ export default function Attendance() {
         ) : null}
 
         {status === 'partial' ? (
-          <Section><PartialRead what="visits" shown={events.length} onPress={() => { void reload(); }} /></Section>
+          // `shown` is RIGHT as `events.length` and stays: `PartialRead` means
+          // "showing the first N", where N is how many rows arrived and are on
+          // the screen under it — a statement about the READ, not about how
+          // many of them were visits. `what` was wrong for the same reason the
+          // heading below was: the truncated lists are `class_bookings` and
+          // `gym_visits`, and cancellations come back in the first of them.
+          <Section><PartialRead what="bookings and visits" shown={events.length} onPress={() => { void reload(); }} /></Section>
         ) : null}
 
         {/* ── how often, and only where the record supports saying ────────── */}
@@ -378,7 +420,20 @@ export default function Attendance() {
 
         {/* ── the record itself ───────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Every visit" note={countable && events.length ? num(events.length) : undefined} />
+          {/* RENAMED, and the number left alone. `events` is the whole
+              timeline — an upcoming booking is in it, and since part 3060 a
+              cancelled and a late-cancelled one are too. "Every visit · 10"
+              over a member who cancelled ten classes and attended none is the
+              screen counting the opposite of what it names.
+
+              Renamed rather than filtered, because the number sits directly
+              above the list it describes: filtering it to `attended` would
+              print 0 over ten visible rows, which reads as a broken screen
+              rather than as a truer figure. The attended count already has a
+              home and a correct source — "Days on record" above, off
+              `attendedDays`, which counts DAYS and not rows for its own
+              reasons. So the heading is made to say what the number counts. */}
+          <SectionHead title="Everything on record" note={countable && events.length ? num(events.length) : undefined} />
 
           {/* Why a class would not open, CHECKED rather than guessed.
               This said "usually because they were run by a gym you are no

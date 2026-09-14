@@ -17,6 +17,19 @@ import { useSubmitOnce } from '../../src/ui/submitOnce';
 // screen read no status at all: a class the gym had cancelled kept its spaces
 // count and its Book button, and members turned up to it.
 import { classFillState, isCancelled, classesThatRan } from '../../src/lib/gymSchedule';
+// The member's own row against a class, read as the four words it can now hold
+// rather than as a truthy string. supabase/parts/3060 stopped a cancellation
+// being a DELETE, so the member's row survives a cancellation with status
+// 'cancelled' — and this screen read every truthy status as a held seat. Part
+// 3180 §8 names this file and says what that does: the class the member just
+// cancelled renders as one they still hold, with a Cancel button on it and the
+// Book button gone, so there is no way back in. `placesFree` and `isFull` are
+// in the same module because they answer the other half of the same row: a
+// class nobody sized has an UNKNOWN number of places and this screen was
+// calling it full.
+import {
+  holdsPlace, seatControl, seatNote, waitlistNote, placesFree, isFull,
+} from '../../src/lib/classSeat';
 import { classCancelBody, fetchClassCancelPolicy } from '../../src/lib/classCancel';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
@@ -44,7 +57,13 @@ const dayLabel = (iso: string) => fmtRelativeDay(iso);
 export default function Classes() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, status: classStatus, book, cancel, countsKnown, cachedNote, refresh } = useClasses();
+  // `myStanding` and not `myStatus`. The provider interprets the member's own
+  // `class_bookings.status` once, through `seatStanding`, and publishes two
+  // maps: `myStatus` is the places still HELD, for the screens that only ask
+  // that, and `myStanding` carries every word the column can hold — including
+  // the two that say the member gave the place up, which is what this screen
+  // has to say out loud. Absent means 'none'; see src/ui/classes.tsx.
+  const { classes, myStanding, status: classStatus, book, cancel, countsKnown, cachedNote, refresh } = useClasses();
   // When the timetable last came off the server. Distinct from `cachedNote`
   // below and complementary to it: that says the copy on screen came off this
   // phone, and this says how old it is even when it did not. A member reads a
@@ -155,7 +174,7 @@ export default function Classes() {
     // no-show. app/(client)/calendar.tsx has awaited its release and said so
     // since the re-offer fix; this now does the same.
     const doCancel = async () => {
-      const wasWaitlist = myStatus[c.id] === 'waitlist';
+      const wasWaitlist = (myStanding[c.id] ?? 'none') === 'queued';
       if (await cancel(c.id)) return;
       // The second half of each sentence used to be "Check your connection and
       // try again" whatever had happened. Half the time it is wrong: the server
@@ -285,7 +304,12 @@ export default function Classes() {
                   ? `${classesThatRan(g.items).length} class${classesThatRan(g.items).length === 1 ? '' : 'es'}`
                   : classStatus === 'partial' ? 'Not all read' : undefined} />
               {g.items.map((c, i) => {
-                const mine = myStatus[c.id];
+                // The member's own standing, read as a WORD and never as the
+                // truthiness of a status string. 'cancelled' and
+                // 'late_cancelled' are both truthy and neither is a seat; see
+                // src/lib/classSeat.ts and supabase/parts/3180 §8.
+                const seat = myStanding[c.id] ?? 'none';
+                const holds = holdsPlace(seat);
                 // Called off by the gym. Everything below branches on it: there
                 // are no spaces in a class that is not running, and there is
                 // nothing to book.
@@ -293,9 +317,25 @@ export default function Classes() {
                 // `booked` is 0 for every class until the count RPC fills it
                 // in. When that failed, subtracting it would advertise a full
                 // class as completely empty, so no claim is made about spaces.
-                const spotsLeft = countsKnown ? Math.max(0, c.capacity - c.booked) : null;
-                const fill = countsKnown ? classFillState(c.capacity, c.booked) : null;
-                const full = fill === 'full';
+                //
+                // `placesFree`, not `capacity - booked`: a class whose capacity
+                // is zero or missing has an UNKNOWN number of places and this
+                // line used to report it as none, under the words "Class full",
+                // over a button that said Join Waitlist. `classFillState` is
+                // still what decides URGENCY, and it is asked only about a
+                // class that has a size — its own contract returns 'full' for
+                // `cap <= 0`, which is right for the question it answers and
+                // wrong as an answer to this one.
+                const spotsLeft = placesFree(c.capacity, c.booked, countsKnown);
+                const full = isFull(c.capacity, c.booked, countsKnown);
+                const fill = spotsLeft == null ? null : classFillState(c.capacity, c.booked);
+                // How many are queueing. Null FIRST — `null > 0` is false, so a
+                // null tested after a `> 0` falls into the "nobody was waiting"
+                // arm and a class whose demand nobody could read is reported as
+                // one nobody wants. Withheld entirely while the counts read has
+                // not landed: a queue length off an earlier read is not one now.
+                const queue = waitlistNote(c.waiting, countsKnown, full === true);
+                const control = off ? 'none' : seatControl(seat);
                 return (
                   <View key={c.id}>
                     {i > 0 ? <Rule /> : null}
@@ -310,25 +350,66 @@ export default function Classes() {
                               with twelve were the same grey dot, so the one
                               about to go looked like the one nobody wants. */}
                           <View style={{ width: 6, height: 6, borderRadius: 3,
-                            backgroundColor: off ? t.crit : mine ? t.brand : full ? t.s3 : fill === 'nearly' ? t.warn : t.ink3 }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>{off
-                            ? (mine ? 'Cancelled by the gym — you were booked in' : 'Cancelled by the gym')
-                            : mine === 'waitlist' ? 'On the waitlist' : mine ? 'Booked' : spotsLeft == null ? 'Spaces unknown' : full ? 'Class full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</Text>
+                            backgroundColor: off ? t.crit : holds ? t.brand : full === true ? t.s3 : fill === 'nearly' ? t.warn : t.ink3 }} />
+                          <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{off
+                            // `holds`, not the truthiness of a status: a member
+                            // who cancelled and then had the class called off
+                            // was being told they were booked in on it.
+                            ? (holds ? 'Cancelled by the gym — you were booked in' : 'Cancelled by the gym')
+                            // The member's own standing comes first and wins,
+                            // because "you cancelled this" is what stops a
+                            // wasted journey and "4 spots left" is not about
+                            // them. `seatNote` returns null only for 'none',
+                            // which is where the class speaks for itself.
+                            : seatNote(seat) ?? (spotsLeft == null ? 'Spaces unknown'
+                              : full === true ? 'Class full'
+                              : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`)}</Text>
                         </View>
+                        {/* How deep the queue is. Never drawn as a zero over an
+                            unread count — `waitlistNote` returns the sentence
+                            for each of the three nothings and null where there
+                            is nothing worth saying. Mindbody and ClassPass both
+                            show this and it is the figure that decides whether
+                            somebody joins a waitlist or books elsewhere. */}
+                        {queue ? (
+                          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{queue}</Text>
+                        ) : null}
                       </View>
                       {/* No control at all on a class that is not running.
                           Booking one is not a thing the gym can honour, and
                           "Cancel" on a class the gym has already called off
                           offers to undo something that has already happened. */}
-                      {off ? null : mine ? (
-                        <Ghost label={mine === 'waitlist' ? 'Leave Waitlist' : 'Cancel'} onPress={() => { void onCancel(c); }} />
+                      {/* One decision, in `seatControl`, and four answers where
+                          this was a two-way truthiness test. 'none' is a class
+                          the gym called off AND a standing this build cannot
+                          read: neither may arm a write, and the difference
+                          between them is already said in the line above.
+
+                          'book' on a CANCELLED booking is the half of this that
+                          was missing entirely. The Book control used to be
+                          drawn only where there was no booking row, and a
+                          cancellation now leaves one — so a member who cancelled
+                          and changed their mind had no way back into the class
+                          from the screen the timetable is on. Part 3180 §5
+                          changed `book_class` to allow the re-book for exactly
+                          this reason, and nothing in the app was asking. */}
+                      {control === 'none' ? null : control === 'cancel' || control === 'leave' ? (
+                        <Ghost label={control === 'leave' ? 'Leave Waitlist' : 'Cancel'} onPress={() => { void onCancel(c); }} />
                       ) : (
                         // Guarded. A seat is a scarce thing and `book` is a
                         // server round trip with no feedback on the button
                         // while it runs, so a member who taps again puts a
                         // second registration in — and at most gyms an unused
                         // seat is a no-show charge. See src/lib/submitOnce.ts.
-                        <Cta label={booking === c.id ? (full ? 'Joining…' : 'Booking…') : full ? 'Join Waitlist' : 'Book'}
+                        //
+                        // `full === true`, not `full`: null is "we could not
+                        // tell", and a button reading Join Waitlist over a class
+                        // whose size nobody recorded offers a queue that does
+                        // not exist. Unknown falls to Book, which is what the
+                        // server will decide anyway.
+                        <Cta label={booking === c.id ? (full === true ? 'Joining…' : 'Booking…')
+                          : seat === 'cancelled' || seat === 'late_cancelled' ? 'Book Again'
+                          : full === true ? 'Join Waitlist' : 'Book'}
                           disabled={send.busy}
                           onPress={() => send.run(async () => {
                             setBooking(c.id);

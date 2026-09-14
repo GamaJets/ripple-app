@@ -69,6 +69,32 @@
 // handset is answered by the wrong person, and a record cleared on sign-out is
 // gone for the right one.
 //
+// ── A third answer the sweep turned up: DROP IT UNREAD ────────────────────
+//
+// Neither branch above fits a key that has no writer left. 'repple.goalTarget'
+// is one: goals moved to `goal_targets`, nothing has written that blob since,
+// and the only code that touched it read it and INSERTED it into the server
+// under a freshly-resolved uid — so on a shared handset one member's target
+// weight became another's, and a target weight is the denominator every progress
+// figure a coach reads is computed from. Scoping it by account would leave a key
+// that can never be filled; clearing it here would imply somebody is still
+// writing it. It is removed unread on sight instead, and src/lib/legacyGoalTarget.ts
+// states that as a decision with its cost attached.
+//
+// ── And a fourth: a key that holds one of each ────────────────────────────
+//
+// 'repple.settings' cannot go on the list below even though two of its four
+// fields plainly qualify. `multiRemove` is all-or-nothing about a whole key, and
+// that blob holds `notifPush` and `restSound` — this person's answers, with no
+// server column anywhere — beside the CACHE of the units, which belong to the
+// account (clients.weight_unit / profiles.weight_unit). Removing the key would
+// take the leaver's only surviving copy of a unit chosen before those columns
+// existed, which is the record-destroying mistake the rule above is about.
+//
+// So the two fields are stripped out of the blob and the cache is left. The
+// transform, the field list and the argument are in src/lib/personalSettings.ts,
+// and src/ui/signOutState.ts applies it in the same pass as the sweep below.
+//
 // ── One that is NOT here, on purpose ──────────────────────────────────────
 //
 // `repple.motivation.armed` (src/ui/motivationNudges.tsx) holds the OS

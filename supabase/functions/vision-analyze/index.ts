@@ -11,9 +11,55 @@
 // this function's image and then silently discards it.
 // The app calls it via supabase.functions.invoke('vision-analyze', { body }).
 //
-// Request  JSON: { mode: 'meal' | 'inbody', imageBase64: string, mediaType?: string }
-// Response JSON (meal):   { name, kcal, protein, carbs, fat, confidence }
-//          JSON (inbody): { weightKg, bodyFatPct, skeletalMuscleKg, takenAt? }
+// Request  JSON: { mode?: 'meal' | 'physique' | 'machine' | 'inbody',
+//                 imageBase64: string, mediaType?: string }
+//
+// Response JSON (read, 200):
+//   { mode, result, notGiven: string[], estimated: true, note: string }
+//   `result` holds every figure the prompt for that mode asked for, each one a
+//   number or NULL. Never 0 for an absent figure. `notGiven` names the ones the
+//   reader did not give, so a caller can ask a person instead of assuming.
+// Response JSON (not read):
+//   { error, why } — 502 when the reader did not answer or the answer did not
+//   parse, 422 when it answered and named none of the figures asked for.
+//
+// ── the three answer-failures that used to be one ─────────────────────────
+//
+// The header above USED to describe a response shape this function has not
+// returned for some time (it returns `{ mode, result }`), which is its own
+// small version of the problem below: a description of a figure that is not the
+// figure. What matters more is what happened underneath it.
+//
+// Every way an answer could come to nothing arrived at one `catch` and left as
+// `{ error: 'Analysis failed' }`:
+//
+//   the reader answered in words   "I can't see any food in this image." TRUE,
+//                                  useful, and the only one of the three a
+//                                  member can act on. It holds no `{`, so the
+//                                  old `extractJson` threw on it.
+//   the reader did not answer      truncated / empty / unreadable — already
+//                                  named by `readReply`, and kept named here.
+//   the answer did not parse       half an object, or a shape that is not a
+//                                  set of figures at all.
+//
+// A member told "Analysis failed" about the first retakes a photograph of a
+// plate the reader was right about. A member told nothing about the third is
+// handed a blank sheet and fills it in believing the reader found nothing.
+//
+// ── and the figures themselves ────────────────────────────────────────────
+//
+// `result` was the parsed object, passed through whole and unread. Two things
+// followed from that. A field the model omitted arrived as `undefined` and left
+// this function unremarked, so nothing downstream could tell "the sheet does
+// not print visceral fat" from "the reader did not read it". And `confidence`
+// was whatever the model happened to say, with no record of whether it said
+// anything at all — src/lib/vision.ts still turns an absent one into 0.6, a
+// figure no model produced.
+//
+// So every figure the prompt asks for is now read as a number or NULL, and the
+// gaps are NAMED on the payload rather than left as holes in an object. Nothing
+// is defaulted to 0: src/lib/modelAnswer.ts carries that argument, and
+// src/lib/foodAI.ts carries what the zero cost when it was allowed.
 //
 // Signed-in users only, for the reason written out at length in
 // supabase/functions/coach-chat: `verify_jwt` proves the bearer token was
@@ -23,6 +69,7 @@
 // it did so for anybody holding a string that ships inside the app bundle.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { providerFor, modelFor, buildCall, readReply, replyProblem, mediaTypeOr } from '../../../src/lib/llmGateway.ts';
+import { readModelJson, answerProblem, numberOrNull, figuresAmong, notGivenAmong } from '../../../src/lib/modelAnswer.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -70,11 +117,71 @@ const PROMPTS: Record<string, string> = {
  *  different image parts out of it.
  */
 
-function extractJson(text: string): any {
-  const a = text.indexOf('{'), b = text.lastIndexOf('}');
-  if (a === -1 || b === -1) throw new Error('No JSON in model response');
-  return JSON.parse(text.slice(a, b + 1));
-}
+/** The modes this function has a prompt for. An unrecognised one is refused
+ *  rather than quietly read as a meal — `mode` used to fall back to 'meal' for
+ *  any value it did not recognise, so a misspelled 'inbdoy' sent somebody's
+ *  body-composition sheet to the meal prompt and came back with macros for it. */
+const MODES = ['meal', 'physique', 'machine', 'inbody'] as const;
+type Mode = typeof MODES[number];
+
+/**
+ * The numeric fields each prompt above asks the reader for, in its own words.
+ *
+ * This list IS the set the gaps are measured against: a figure absent from the
+ * answer is a gap in something that was asked for, which is what makes naming
+ * it honest rather than speculative.
+ */
+const FIGURES: Record<Mode, readonly string[]> = {
+  meal: ['kcal', 'protein', 'carbs', 'fat', 'confidence'],
+  physique: ['bodyFatPct'],
+  machine: ['confidence'],
+  inbody: [
+    'weightKg', 'bodyFatPct', 'skeletalMuscleKg', 'visceralFat', 'inbodyScore', 'bmr',
+    'fatMassKg', 'leanMassKg', 'bodyWaterL', 'proteinKg', 'mineralsKg',
+    'leanArmLKg', 'leanArmRKg', 'leanTrunkKg', 'leanLegLKg', 'leanLegRKg',
+  ],
+};
+
+/**
+ * The figure whose absence means nothing usable came back for that mode.
+ *
+ * Not "all figures are null": a meal the reader priced at 600 kcal and gave no
+ * macros for is a read that worked and a sheet to fill the rest of in. A meal
+ * with no calorie figure is not — src/lib/vision.ts returns null for exactly
+ * that — and saying WHICH of the three happened is the whole of this change.
+ * `null` here means the mode has no single load-bearing figure and the check
+ * below falls back to asking whether anything at all was read.
+ */
+const LOAD_BEARING: Record<Mode, string | null> = {
+  meal: 'kcal',
+  physique: 'bodyFatPct',
+  machine: null,
+  inbody: null,
+};
+
+/** What the member is told when the reader answered and named nothing.
+ *
+ *  A report about the READ, opening with its subject. "There is no food in this
+ *  photo" is a claim about the plate and the reader is not entitled to it;
+ *  "the reader did not give a calorie figure for it" is what actually happened,
+ *  and it is the sentence that leaves the member in charge of the decision. */
+const NOTHING_READ: Record<Mode, string> = {
+  meal: 'The reader looked at this photo and did not give a calorie figure for it. Nothing has been filled in — type the meal in, or try a clearer photo.',
+  physique: 'The reader looked at this photo and did not return an estimate from it. Nothing has been filled in.',
+  machine: 'The reader looked at this photo and did not name a machine in it. Nothing has been filled in — pick the exercise yourself.',
+  inbody: 'The reader looked at this sheet and did not read a single figure off it. Nothing has been filled in — type the numbers in, or try a straighter, brighter photo.',
+};
+
+/** Said on every read, because every one of these figures is an ESTIMATE from
+ *  a photograph rather than a measurement this app made. The inbody sheet is
+ *  the one exception worth naming: the MACHINE measured it, and the reader is
+ *  transcribing — which can still be misread, so it is still checked. */
+const ESTIMATE_NOTE: Record<Mode, string> = {
+  meal: 'These are estimates of the portion shown, read from your photo by a model. Check every figure before logging it.',
+  physique: 'This is a visual estimate read from a photo by a model, not a measurement. It is not medical or diagnostic advice.',
+  machine: 'This is the reader’s best guess at the machine in the photo. Check it before you log against it.',
+  inbody: 'These figures were read off your scan sheet by a model, not typed in by a person. Check each one against the printout before saving it.',
+};
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -97,15 +204,23 @@ Deno.serve(async (req: Request) => {
   } catch { /* stays empty, and the refusal below is the answer */ }
   if (!userId) return json({ error: 'Sign in to Repple to read a photo this way.' }, 401);
 
-  let mode = 'meal', imageBase64 = '', mediaType = 'image/jpeg';
+  let mode: Mode = 'meal';
+  let imageBase64 = '', mediaType = 'image/jpeg';
+  let badMode = '';
   try {
     const b = await req.json();
-    mode = (b.mode === 'inbody' || b.mode === 'physique' || b.mode === 'machine') ? b.mode : 'meal';
+    // An absent mode is still a meal, which is what every caller that sends
+    // none means. A mode that was SENT and is not one of the four is refused
+    // below rather than read as a meal — see the note on MODES.
+    const asked = b.mode == null || b.mode === '' ? 'meal' : String(b.mode);
+    if ((MODES as readonly string[]).indexOf(asked) === -1) badMode = asked;
+    else mode = asked as Mode;
     imageBase64 = String(b.imageBase64 || '').replace(/^data:image\/\w+;base64,/, '');
     // Named, not passed through. Anything the vision API does not take is
     // 'image/jpeg', which is what every caller in this repo sends anyway.
     mediaType = mediaTypeOr(b.mediaType);
   } catch { return json({ error: 'Invalid JSON body' }, 400); }
+  if (badMode) return json({ error: `Unknown mode '${badMode.slice(0, 32)}'`, why: 'unknown-mode' }, 400);
   if (!imageBase64) return json({ error: 'imageBase64 required' }, 400);
 
   try {
@@ -125,9 +240,55 @@ Deno.serve(async (req: Request) => {
     // lands in a member's health record looking like a scan that simply did not
     // print those rows.
     const reply = readReply(provider, await res.json());
-    if (!reply.ok) return json({ error: replyProblem(reply.why) }, 502);
-    return json({ mode, result: extractJson(reply.text) });
+    // (2) The reader did not answer. Three named reasons, kept as three.
+    if (!reply.ok) return json({ error: replyProblem(reply.why), why: reply.why }, 502);
+
+    // (3) It answered, and there is no readable object in the answer. `no-json`
+    // is the case that used to be lost: for a vision ask the prose usually IS
+    // the answer, and it is now reported as such rather than as a crash.
+    const answer = readModelJson(reply.text);
+    if (!answer.ok) return json({ error: answerProblem(answer.why), why: answer.why }, 502);
+
+    const keys = FIGURES[mode];
+    const figures = figuresAmong(answer.value, keys);
+    const notGiven = notGivenAmong(answer.value, keys);
+    // The non-numeric fields each prompt asks for, carried as they came. A
+    // string is either there or it is '', and neither can be mistaken for a
+    // measurement the way a 0 can.
+    const name = typeof answer.value.name === 'string' ? answer.value.name.trim() : '';
+    const result: Record<string, unknown> = {
+      ...figures,
+      // Only when the reader actually named one. Left ABSENT rather than sent
+      // as '' so that the callers' own fallbacks ('Meal', '') still decide what
+      // an unnamed thing is called — this function does not name a member's
+      // food for them.
+      ...(name ? { name } : {}),
+      muscleGroup: typeof answer.value.muscleGroup === 'string' ? answer.value.muscleGroup.trim() : '',
+      isCardio: answer.value.isCardio === true,
+      notes: typeof answer.value.notes === 'string' ? answer.value.notes : '',
+      focusAreas: Array.isArray(answer.value.focusAreas) ? answer.value.focusAreas.map(String).slice(0, 4) : [],
+      takenAt: typeof answer.value.takenAt === 'string' && answer.value.takenAt.trim() ? answer.value.takenAt.trim() : null,
+      // REPORTED, not asserted. A reader that offered no confidence is not a
+      // reader that was 0.6 sure, and a caller that fills the gap with a figure
+      // is inventing the one number whose whole job is to say how much to trust
+      // the others. src/lib/vision.ts still does `?? 0.6` at its end of this
+      // wire; this flag is what lets that be fixed without guessing.
+      confidenceGiven: numberOrNull(answer.value.confidence) !== null,
+    };
+
+    // (1) It answered, and named nothing this mode can be built from. A real
+    // answer about the photograph, and a 422 rather than a 502 because nothing
+    // failed — there is simply nothing in it to fill a sheet with.
+    const bearer = LOAD_BEARING[mode];
+    const nothing = bearer
+      ? figures[bearer] === null
+      : keys.every((k) => figures[k] === null) && !name && !result.notes && !(result.focusAreas as string[]).length;
+    if (nothing) return json({ error: NOTHING_READ[mode], why: 'nothing-read', mode, notGiven }, 422);
+
+    return json({ mode, result, notGiven, estimated: true, note: ESTIMATE_NOTE[mode] });
   } catch (e) {
-    return json({ error: 'Analysis failed', detail: String(e) }, 500);
+    // What is left is this function failing, not the reader — kept distinct
+    // from the four above rather than being the bucket they all fell into.
+    return json({ error: 'The photo reader could not be reached. Try again, or type the figures in.', why: 'function-failed', detail: String(e) }, 500);
   }
 });

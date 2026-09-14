@@ -130,6 +130,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // In live mode we don't know the persisted session until we've checked storage.
   const [loading, setLoading] = useState<boolean>(USE_SUPABASE);
 
+  // ── Who is leaving, kept for the one path that cannot ask ────────────────
+  //
+  // `onAuthStateChange` fires with no session, and there is nothing in that
+  // event to say whose session it was. The sweep needs a name for exactly one
+  // purpose — to recognise that the push token for THIS account was already
+  // revoked a moment ago by `signOut`, rather than filing a false alarm about a
+  // registration nobody left behind.
+  //
+  // A ref rather than the `user` state because the listener is registered once,
+  // from an effect with no dependencies, and closes over the first render's
+  // state forever. Written wherever a session is actually read, and deliberately
+  // NOT cleared on sign-out: the account whose session has just ended is the
+  // whole of what the remote sweep needs to know.
+  const leavingUid = useRef<string | null>(null);
+
   // Build an AuthUser from the current Supabase session (+ profile row if present).
   //
   // Every way into this app converges here — email, phone, a rehydrated session
@@ -139,6 +154,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: auth } = await supabase.auth.getUser();
     const u = auth.user;
     if (!u) { setUser(null); return { user: null, refused: null }; }
+    // Before the brand guard, because the mismatch branch below ends this very
+    // session and the sweep that follows it has to be attributable.
+    leavingUid.current = u.id;
 
     // Asked BEFORE the user is published to the tree. A provider that set
     // `user` first and signed out a moment later would flash the wrong brand's
@@ -149,6 +167,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Sign out rather than merely refuse: leaving the session alive would
       // have the next launch rehydrate it and refuse again forever, and the
       // token would still be a valid token for another brand's data.
+      //
+      // ── And take their things off the handset, which this did not ─────────
+      //
+      // This branch ended the session and swept NOTHING, so a white-label
+      // mismatch left all seven personal keys on the phone — including
+      // `repple.spotify.token`, which is not a preference at all but a live
+      // access and refresh token for an account outside Repple entirely, with
+      // scopes that let this app rewrite that person's playlists and control
+      // playback on their devices. A member who signs in to the wrong gym's
+      // build and is bounced has not consented to leaving any of that behind.
+      //
+      // BEFORE `sbSignOut()`, and that ordering is the same one `signOut` keeps
+      // for the same reason: `getUser()` above has just answered with a user, so
+      // the session is alive here and the `push_tokens` delete — which is only
+      // possible from inside the session being ended — can still be made and
+      // still be proven. After the sign-out it could only be attempted.
+      try { await clearPersonalDeviceState({ cause: 'brand-mismatch', uid: u.id }); }
+      catch (e) { reportError('auth.brandGuard.clear', e); }
       try { await sbSignOut(); } catch (e) { reportError('auth.brandGuard.signOut', e); }
       setUser(null);
       setBrandNotice(verdict.message);
@@ -202,8 +238,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (!active) return;
-      if (!session) setUser(null);
-      else refreshFromSession().catch((e) => reportError('auth.onAuthStateChange', e));
+      if (!session) {
+        setUser(null);
+        // ── A session that ended somewhere else ────────────────────────────
+        //
+        // This used to be `setUser(null)` and nothing more, so a session ended
+        // remotely — a revoked token, an expiry, or a member signing this
+        // handset out FROM A LAPTOP BECAUSE THEY HAVE LOST IT — swept nothing
+        // off the device. That is the case the sweep matters most in and the
+        // one it was missing from entirely.
+        //
+        // The LOCAL half is all this path can do, and it does all of it: the
+        // keys, the scheduled reminders cancelled by id first, the two consents
+        // out of `repple.settings`, the in-process latches. The half it CANNOT
+        // do is the `push_tokens` delete, because `pt_self` is
+        // `user_id = auth.uid()` and there is no session here to be that uid —
+        // so it is not attempted and pretended about. `clearPersonalDeviceState`
+        // files the disposition as 'no-session', reports it, and names the
+        // reconciler in src/ui/settings.tsx that removes the row at the next
+        // launch on which somebody is signed in on this handset with
+        // notifications off. Until then this phone is still on that account's
+        // delivery list, and the record says so rather than looking done.
+        //
+        // Floating on purpose — nothing here can wait on it, and the listener
+        // must not become async. The `.catch` is belt and braces: the sweep's
+        // contract is that it never throws.
+        void clearPersonalDeviceState({ cause: 'remote', uid: leavingUid.current })
+          .catch((e) => reportError('auth.sessionEnded.clear', e));
+      } else refreshFromSession().catch((e) => reportError('auth.onAuthStateChange', e));
     });
     return () => { active = false; sub.subscription.unsubscribe(); };
   }, []);
@@ -551,7 +613,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // succeed. app/(client)/settings.tsx had `revokePushToken` a scroll away
     // from its own Sign Out and did not call it; now every sign-out in every
     // one of the three apps does, because there is one of these.
-    try { await clearPersonalDeviceState({ revokePush: true }); }
+    //
+    // `cause` rather than a `revokePush` boolean: the flag said WHAT to do and
+    // left every caller to work out whether it could, which is how the other two
+    // exits came to do nothing at all. The cause says where this is being called
+    // from and src/lib/signOutSweep.ts decides the rest.
+    try { await clearPersonalDeviceState({ cause: 'deliberate', uid: leavingUid.current }); }
     catch (e) { reportError('auth.signOut.clear', e); }
     try { await sbSignOut(); } catch (e) { reportError('auth.signOut', e); }
   };

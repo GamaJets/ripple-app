@@ -13,6 +13,15 @@ import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
+// The same repair as the block at the top of src/lib/connect.ts, over the four
+// auth reads in this file. `supabase.auth.getUser()` resolves rather than
+// rejects when the auth server is down, so the discarded `error` was the only
+// thing that could have told an outage from a sign-out — and on this file that
+// is the difference between "we could not check" and telling somebody their
+// recurring payment to their coach does not exist. See src/lib/authReadFate.ts
+// for the library source and src/lib/authedUid.ts for the classification.
+import { signedInUid } from './signedInUid';
+import { authGateMessage } from './authedUid';
 import { capLimit, capped } from './rowCap';
 import { readByIds } from './idLookup';
 import { minorMoney } from './coachMoney';
@@ -196,9 +205,15 @@ const PORTAL_DID_NOT_OPEN = 'Your browser did not open, so your billing page cou
  */
 export async function myCoachId(): Promise<{ coachId: string | null; error: string | null }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { coachId: null, error: 'Not signed in.' };
+    const who = await signedInUid('subscriptions.myCoachId');
+    // The one caller renders the same flag for either fate, so this string is
+    // not what the member reads today — but it is what the NEXT caller reads,
+    // and 'Not signed in.' was a claim about a person that an outage had said
+    // nothing about.
+    //
+    // Guarded on `fate`, not on `!uid` — see the note in src/lib/signedInUid.ts.
+    if (who.fate !== null) return { coachId: null, error: authGateMessage(who.fate) };
+    const uid = who.uid;
     const { data, error } = await supabase.from('clients').select('trainer_id').eq('id', uid).maybeSingle();
     if (error) { reportError('subscriptions.myCoachId', error); return { coachId: null, error: error.message }; }
     return { coachId: (data as { trainer_id: string | null } | null)?.trainer_id ?? null, error: null };
@@ -215,8 +230,7 @@ export async function myCoachId(): Promise<{ coachId: string | null; error: stri
  */
 export async function fetchMySubscriptions(): Promise<ClientSubscription[] | null> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
+    const { uid } = await signedInUid('subscriptions.fetchMySubscriptions'); if (!uid) return null;
     const { data, error } = await supabase.from('client_subscriptions').select('*')
       .eq('client_id', uid).order('created_at', { ascending: false });
     if (error) { reportError('subscriptions.fetchMySubscriptions', error); return null; }
@@ -241,8 +255,7 @@ export interface Subscriber extends ClientSubscription {
  */
 export async function fetchMySubscribers(): Promise<{ rows: Subscriber[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('subscriptions.fetchMySubscribers'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('client_subscriptions').select('*')
       .eq('trainer_id', uid).order('created_at', { ascending: false }).limit(capLimit());
     if (error) { reportError('subscriptions.fetchMySubscribers', error); return { rows: [], status: 'error' }; }
@@ -356,8 +369,7 @@ export interface SubscriptionPayment {
  */
 export async function fetchMySubscriptionPayments(): Promise<{ rows: SubscriptionPayment[]; status: LoadStatus }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { uid } = await signedInUid('subscriptions.fetchMySubscriptionPayments'); if (!uid) return { rows: [], status: 'error' };
     const { data, error } = await supabase.from('client_subscription_payments').select('*')
       .eq('trainer_id', uid).order('paid_at', { ascending: false }).limit(capLimit());
     if (error) { reportError('subscriptions.fetchMySubscriptionPayments', error); return { rows: [], status: 'error' }; }

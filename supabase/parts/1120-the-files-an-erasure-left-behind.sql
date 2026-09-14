@@ -31,12 +31,16 @@
 -- ── WHAT IT DOES TO A REAL PERSON ────────────────────────────────────────
 --
 -- A member photographs an oncology letter so the app can read an injury off
--- it. Months later they leave the gym and delete their account. Every row goes
--- — 26 tables directly, 39 down the chain (part 41). The letter does not. It
--- sits in `injury-docs` under the uid of an account that no longer exists,
--- with no row anywhere pointing at it, indefinitely, and the only person who
--- could ever have deleted it is the one whose credentials were destroyed by
--- the deletion.
+-- it. Months later they leave the gym and delete their account. Nearly every
+-- row goes with it — 118 tables in `public` and 11 more in Supabase's own
+-- `auth` schema, counted from the live catalogue on 14 Sep 2026, the query and
+-- the provenance being in part 41. (This line said "26 tables directly, 39
+-- down the chain" until that date, and the financial record is the deliberate
+-- exception: part 184 detaches it rather than deleting it.) The letter is not
+-- one of them. It sits in `injury-docs` under the uid of an account that no
+-- longer exists, with no row anywhere pointing at it, indefinitely, and the
+-- only person who could ever have deleted it is the one whose credentials were
+-- destroyed by the deletion.
 --
 -- The public deletion page is currently honest about this and that is the
 -- problem: web/delete-account.html says injury documents, message attachments

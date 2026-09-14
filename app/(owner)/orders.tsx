@@ -376,13 +376,44 @@ export default function OwnerOrders() {
 
         <Rule />
 
+        {/* ── four tiles that add up to the book ──────────────────────────
+            The Paid tile was `status === 'paid'` and the Not Granted tile is
+            `failed + paidWithNothing`, and `paidWithNothing` is a subset of
+            the first: a row marked paid with neither a membership nor a pass
+            behind it was counted in BOTH. So a gym with 45 orders read
+            40 + 2 + 3 + 2 and could add the row of tiles to 47 — under a
+            heading reading "By State", beside a section head reading
+            "Orders · 45".
+
+            Which of the two tiles was wrong is not a matter of taste. Part 281
+            defines 'paid' as "checkout.session.completed arrived AND the
+            entitlement below was written", so a paid row with nothing behind
+            it does not meet the column's own definition and is not one of the
+            gym's completed sales. It belongs to Not Granted alone, and Paid is
+            now the orders that produced what they were for. The four are then
+            a partition of the book, which is what a row of tiles under this
+            heading claims to be. */}
         <Section>
-          <SectionHead title="By State" />
+          <SectionHead title="By State" note={loaded ? `${list.length} in ${WINDOW_DAYS} days` : undefined} />
           <KpiRow items={[
-            { label: 'Paid', value: fig(loaded ? list.filter((o) => o.status === 'paid').length : null) },
+            {
+              label: 'Paid',
+              value: fig(loaded ? list.filter((o) => o.status === 'paid').length - trouble.paidWithNothing.length : null),
+              delta: loaded ? 'and granted' : undefined,
+            },
             { label: 'Awaiting', value: fig(loaded ? list.filter((o) => o.status === 'pending').length : null) },
             { label: 'Abandoned', value: fig(loaded ? list.filter((o) => o.status === 'abandoned').length : null) },
-            { label: 'Not Granted', value: fig(loaded ? needsAPerson : null) },
+            {
+              label: 'Not Granted',
+              value: fig(loaded ? needsAPerson : null),
+              // The two doors the same harm arrives through, kept apart: the
+              // webhook recorded 'failed' and said why in `failure_note`, or it
+              // wrote 'paid' and left both entitlement columns empty, which
+              // says nothing at all. The second is the one no column reports.
+              delta: loaded && needsAPerson > 0
+                ? `${trouble.failed.length} recorded, ${trouble.paidWithNothing.length} silent`
+                : undefined,
+            },
           ]} />
         </Section>
 

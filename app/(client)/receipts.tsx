@@ -64,7 +64,7 @@ import { reportError } from '../../src/lib/reportError';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
 import {
   amount, fetchMyPayments, fetchMyPasses, fetchMyCoachSales, fetchMyCoachRenewals,
-  methodLabel, totalsByCurrency,
+  methodLabel, totalsByCurrency, passUsesLine,
   type MemberPayment, type MemberPass, type MemberCoachSale, type MemberCoachRenewal,
 } from '../../src/lib/memberRecord';
 import {
@@ -97,6 +97,10 @@ function dayOn(iso: string | null): string {
  *  anything that is not a pack, which is a fact rather than a zero. */
 function saleLabel(p: MemberCoachSale): string {
   if (p.sessionsTotal == null) return 'Bought from your trainer';
+  // The null before the count, not after it. `sessions_used` used to arrive as
+  // a settled 0, so a pack half delivered read as one nobody had started —
+  // beside the price the member paid for it.
+  if (p.sessionsUsed == null) return `${num(p.sessionsTotal)}-session pack · we couldn’t read how many are used`;
   return `${num(p.sessionsTotal)}-session pack · ${num(p.sessionsUsed)} used`;
 }
 
@@ -424,7 +428,7 @@ export default function Receipts() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{dayOn(p.issuedOn)}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                    {p.usesSpent} of {p.usesTotal} used{p.expiresOn ? ` · expires ${dayOn(p.expiresOn)}` : ''}
+                    {passUsesLine(p)}{p.expiresOn ? ` · expires ${dayOn(p.expiresOn)}` : ''}
                   </Text>
                 </View>
                 {/* A pass with no price recorded is not a free pass, and a dash

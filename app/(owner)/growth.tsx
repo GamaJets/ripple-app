@@ -58,7 +58,7 @@ import { plainExact } from '../../src/lib/units';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
@@ -176,6 +176,13 @@ export default function OwnerGrowth() {
   const idlePct = trainersUnknown || !trainers.length ? null : Math.round((idle / trainers.length) * 100);
   const [code, setCode] = useState('');
   const [disc, setDisc] = useState(20);
+  /** The caveat carried back by the LAST creation, and the code it was about.
+   *
+   *  Null when the last creation's duplicate check actually ran — `addPromo`
+   *  sets `caveat` exactly when `duplicatesChecked` is false — so a clean
+   *  creation clears a stale one rather than leaving it standing over a code it
+   *  is not about. See `create` for why this outlives the alert. */
+  const [lastCaveat, setLastCaveat] = useState<{ code: string; note: string } | null>(null);
   // Trainer funnel, derived from the real roster. There is no analytics on
   // site visits, so the funnel starts at signup — a "Visited site 100% →
   // Paying 18%" curve was previously hardcoded here and was entirely invented.
@@ -190,16 +197,80 @@ export default function OwnerGrowth() {
   // Awaited now that a code is a row rather than a number in memory. The old
   // synchronous call told the owner "is now live" the instant they tapped,
   // which was true of nothing outside this process.
+  //
+  // ── the caveat this screen used to swallow ────────────────────────────────
+  //
+  // `addPromo` answers with `AddPromoResult` — `{ ok, reason?,
+  // duplicatesChecked, caveat? }`. This read `ok` and `reason` and nothing
+  // else, which is why it still compiled and why nothing looked wrong: the
+  // change was additive.
+  //
+  // What it dropped is the half of the answer that outlives the tap. When the
+  // gym's existing codes could not be read, `addPromo` creates the code anyway
+  // — deliberately, and rightly: a gym that cannot read its codes is not
+  // thereby forbidden from making one — and comes back with
+  // `duplicatesChecked: false` and one sentence naming the check that did not
+  // run. This screen said "is now live", full stop. The code IS live; what was
+  // not said is that nothing looked to see whether it was already in use.
+  //
+  // ── alert AND Flag, and why that is not belt-and-braces ───────────────────
+  //
+  // The alert has to carry it, because the tap is the moment the owner is
+  // looking, and an alert that says only "is now live" is where they learn that
+  // the check ran. The alert cannot be the only place, because it is gone a
+  // second later and the duplicate surfaces weeks later — when a member types
+  // the code and gets whichever of two identically spelled rows the database
+  // reaches first. So the sentence also stays on the screen as a `Flag`, which
+  // is the kit component app/(owner)/promotions.tsx already uses to say this
+  // same thing BEFORE creation. Same idiom, deliberately, rather than a second
+  // one invented here.
+  //
+  // It is not an error and is not dressed as one. `t.warn`, the tone the
+  // sibling screen uses, and copy that opens by saying the code is live.
   const create = async () => {
+    // Normalised the way `addPromo` normalises it, `.replace(/\s+/g, '')` and
+    // all. Both sentences below name a code back to the owner, and
+    // `code.trim().toUpperCase()` alone named one the gym does not have: a
+    // typed `SUM MER` is stored as `SUMMER` and was read back with the space
+    // still in it.
+    const c = code.trim().toUpperCase().replace(/\s+/g, '');
     const r = await addPromo(code, disc);
     if (!r.ok) { Alert.alert('Cannot create', r.reason ?? 'Try a different code.'); return; }
     setCode('');
-    Alert.alert('Code created', `${code.trim().toUpperCase()} · ${disc}% off is now live.`);
+    // Set exactly when the check did not run, and cleared when it did — so a
+    // caveat never stands over a later code it is not about.
+    setLastCaveat(r.caveat ? { code: c, note: r.caveat } : null);
+    Alert.alert('Code created',
+      // `plainExact` on the discount for the reason the promo rows below give:
+      // the separator in a printed figure is the reader's, not English's.
+      [`${c} · ${plainExact(disc)}% off is now live.`, r.caveat].filter(Boolean).join(' '));
   };
 
-  /** One labelled bar — the section's unit of comparison. */
-  const Bar = ({ label, right, pct, dim }: { label: string; right: string; pct: number; dim?: boolean }) => (
-    <View style={{ marginBottom: sp.lg }}>
+  /** One labelled bar — the section's unit of comparison.
+   *
+   *  A PLAIN FUNCTION, called as `bar(key, {…})`, and not a component rendered
+   *  as `<Bar …/>`. `Bar` was declared in this render body, so it was a new
+   *  function object on every render: React compares element types by identity,
+   *  saw a different type each time, and unmounted and remounted every bar in
+   *  all three sections below instead of reconciling them.
+   *
+   *  The harm here is smaller than the two failures scripts/check-remount.mjs
+   *  was written from, and worth stating at its real size. Nothing in this
+   *  subtree is a `TextInput`, so no caret is lost, and nothing is an
+   *  `accessible` group with a composed label, so VoiceOver is not sent back to
+   *  the top. What it cost is wasted work — a full teardown and rebuild of
+   *  every bar on the screen on each of the three background reads landing, and
+   *  on each `setCode` keystroke in the promo field below — and a subtree that
+   *  could never hold state across a redraw, which is why no bar here can be
+   *  animated to its width. Not a wrong figure.
+   *
+   *  `key` is the FIRST argument and lands on the returned View. All three call
+   *  sites are inside a `.map` and a plain call cannot take a `key`, so leaving
+   *  it on the call site is the one silent way to break this conversion. Same
+   *  edit, same reason, as app/(client)/injuries.tsx.
+   */
+  const bar = (key: string, { label, right, pct, dim }: { label: string; right: string; pct: number; dim?: boolean }) => (
+    <View key={key} style={{ marginBottom: sp.lg }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
         <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{right}</Text>
@@ -419,9 +490,10 @@ export default function OwnerGrowth() {
             {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
               : trainersUnread ? <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so their clients could not be counted.</Text>
               : ca.byTrainer.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on the roster yet.</Text> : null}
-            {trainersUnread ? null : ca.byTrainer.map((bt) => (
-              <Bar key={bt.id} label={bt.name} right={`${bt.clients} · ${bt.pct}%`} pct={bt.pct} />
-            ))}
+            {/* The key moved onto the View `bar` returns — see its header. */}
+            {trainersUnread ? null : ca.byTrainer.map((bt) => bar(bt.id, {
+              label: bt.name, right: `${num(bt.clients)} · ${bt.pct}%`, pct: bt.pct,
+            }))}
           </View>
         </Section>
 
@@ -436,9 +508,9 @@ export default function OwnerGrowth() {
           {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
             : trainersUnread ? <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so there was nothing to group into cohorts.</Text>
             : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No trainer signups to group yet.</Text> : null}
-          {coh.map((c) => (
-            <Bar key={c.label} label={c.label} right={`${c.pct}% · ${num(c.active)}/${num(c.total)}`} pct={c.pct} dim={c.pct < 60} />
-          ))}
+          {coh.map((c) => bar(c.label, {
+            label: c.label, right: `${c.pct}% · ${num(c.active)}/${num(c.total)}`, pct: c.pct, dim: c.pct < 60,
+          }))}
         </Section>
 
         <Rule />
@@ -452,9 +524,9 @@ export default function OwnerGrowth() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read — an empty funnel here would say nobody signed up, which is not something this screen found out.</Text>
           ) : roll.trainers === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No trainers at your gym yet — the funnel fills in as they join.</Text>
-          ) : funnel.map(([label, count, pct]) => (
-            <Bar key={label} label={label} right={`${num(count)} · ${pct}%`} pct={pct} />
-          ))}
+          ) : funnel.map(([label, count, pct]) => bar(label, {
+            label, right: `${num(count)} · ${pct}%`, pct,
+          }))}
         </Section>
 
         <Rule />
@@ -468,6 +540,22 @@ export default function OwnerGrowth() {
               named the wrong audience entirely, on the one screen an owner
               reads aloud when explaining a promotion to somebody. */}
           <SectionHead title="Promo & Referral Codes" note="Redeemed by members" />
+          {/* Before the field, the same standing warning Lane 93 put on
+              app/(owner)/promotions.tsx, because this screen offers the SAME
+              create path from the same provider and said nothing at all. The
+              duplicate check `addPromo` runs is against the array this screen
+              holds: under 'error' that is the last successful read or nothing,
+              under 'partial' it is the first page of a longer list, so on both
+              a code that already exists can pass it. Creating is still offered
+              — a gym past the read ceiling cannot make itself smaller — and
+              what changes is that the screen says which check cannot run. */}
+          {promoStatus === 'error' || (promoStatus !== 'loading' && !isWhole(promoStatus)) ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+              {promoStatus === 'error'
+                ? 'Your existing codes could not be read, so nothing here can tell you whether the code you are about to type is already in use.'
+                : 'Your existing codes did not all come back, so the ones below are part of the list rather than all of it, and nothing here can tell you whether the code you are about to type is further down it.'}
+            </Flag>
+          ) : null}
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
             {/* Named. `CODE` is a placeholder, and a placeholder is gone the
                 moment somebody types into it. */}
@@ -486,6 +574,22 @@ export default function OwnerGrowth() {
               </Pressable>); })}
           </View>
 
+          {/* The caveat from the creation just made, kept on the screen after
+              the alert carrying it has been dismissed. It opens by saying the
+              code is live, because it is: this is a check that did not run, not
+              a failure to create, and it must not read as one. It stays until
+              the next creation, because the fact it records — that this
+              particular code went in unchecked — does not stop being true when
+              the owner taps OK. */}
+          {lastCaveat ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.xl }}>
+              “{lastCaveat.code}” is live. {lastCaveat.note} Two codes spelled the same
+              way can both be saved, and a member typing one of them gets whichever the
+              database reaches first — so pull down to read your codes again and check
+              this one is the only one.
+            </Flag>
+          ) : null}
+
           {promoStatus === 'error' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Your codes could not be read just now — this is not a statement that you have none.</Text>
           ) : promos.length === 0 ? (
@@ -501,7 +605,12 @@ export default function OwnerGrowth() {
                       `Number(r.discount)`, straight off a numeric column, so a
                       12.5% offer is a shape this row can be handed and `{p.discountPct}`
                       wrote an English full stop into it. */}
-                  {fig(p.discountPct)}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
+                  {/* And `num` on the count, for the same reason one line up:
+                      a gym whose code has been redeemed four thousand times
+                      reads a grouped figure in its own locale. -1 is the
+                      provider's "could not be counted", which is a dash and
+                      never a zero. */}
+                  {fig(p.discountPct)}% off · {p.redeemed < 0 ? '—' : num(p.redeemed)} used
                 </Text>
               </View>
               {/* Awaited. `toggleActive` and `removePromo` became server calls

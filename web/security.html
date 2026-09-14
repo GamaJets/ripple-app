@@ -459,68 +459,158 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
+    <!-- THE FIGURES ON THIS CHART, AND THE ONLY PLACE THEY CAN COME FROM.
+         As of 14 September 2026 an erasure reaches 118 tables in `public`
+         plus 11 inside Supabase's own `auth` schema — 129 in all — measured
+         against the live database (project phgfwzpkkwdysftlgkoq) as the
+         transitive closure of `on delete cascade` from the row that
+         `action_account_deletion()` actually deletes, which is the
+         `auth.users` row and not the profile:
+
+           with recursive fk as (
+             select (conrelid::regclass)::text  as child,
+                    (confrelid::regclass)::text as parent
+               from pg_constraint
+              where contype = 'f' and confdeltype = 'c')
+           , rec as (
+             select 'auth.users'::text as tbl
+              union
+             select fk.child from fk join rec on fk.parent = rec.tbl)
+           select count(*) from rec where tbl <> 'auth.users';
+
+         The first two bars are the DIRECT fan-out from `profiles`, same
+         catalogue, same day — 76 columns across 68 tables `on delete cascade`,
+         81 columns across 59 tables `on delete set null`:
+
+           select confdeltype, count(*) as cols, count(distinct conrelid) as tables
+             from pg_constraint
+            where contype = 'f' and confrelid = 'public.profiles'::regclass
+            group by confdeltype;
+
+         SAY WHICH ROW A FIGURE IS COUNTED FROM. The closure from `profiles` is
+         109 including `profiles` itself; the closure from `auth.users` is 129.
+         Three lanes have now been caught by that difference. The bars above are
+         labelled accordingly and the aria-label says it in words.
+
+         COUNT IT AGAINST THE LIVE CATALOGUE, NEVER BY PARSING supabase/setup.sql:
+         a `create table` clause is not the last word on a foreign key, and part
+         184 drops and recreates memberships_member_id_fkey,
+         gym_invoices_member_id_fkey and gym_payments_member_id_fkey with
+         `on delete set null`. File parses have given 120, 122 and 125 against
+         the live 118.
+
+         WHAT THIS PAGE SAID UNTIL TODAY, and why it is worth recording. The
+         chart was stamped 3 September 2026 and read 66 tables / 74 columns
+         cascading, 50 tables / 69 columns kept, 106 reached. Every one of
+         those five numbers had drifted, and check F of
+         scripts/check-site-claims.mjs passed the chart on every run in between,
+         because check F checks the figures against EACH OTHER and the stamp
+         against being a parseable past date — never against a database. The
+         middle bar's label, "50 tables keep their rows with the person detached
+         from them", also carried on its own the reading Lane 99 removed from
+         web/studio.html: detached is not anonymous. The columns that keep the
+         name on purpose, all confirmed present on 14 September 2026, are
+         gym_invoices.billed_name, gym_payments.payer_name,
+         memberships.member_label (written by trg_profiles_retain_financial_record
+         in the moment before the profile goes), gym_passes.holder_name,
+         gym_agreement_signatures.signed_name and .guardian_name,
+         staff_grants.subject_name, .actor_name and .revoked_by_name, and
+         gym_events.summary, which is composed at write time so the feed does
+         not change when somebody is renamed or erased.
+
+         NO COUNT IS GIVEN FOR THAT SET, deliberately. "Seventeen name-bearing
+         columns" was carried into this lane's brief as an established figure
+         and is not one: nothing in this repo states it, and the nearest thing
+         that does — "17 columns / 13 tables" in part 41's header — is the OLD
+         direct `set null` fan-out from a much smaller schema, not a count of
+         names. Which text columns on a surviving row amount to "the person's
+         name" is a judgement (deletion_log.subject_label is deliberate;
+         exercises.name is not a person), so it is enumerated above rather than
+         totalled. A number nobody can re-derive is how 39 started.
+
+         WHEN THIS MOVES, EVERY SURFACE MOVES. The pin is the `do $$` block at
+         the foot of supabase/parts/41-account-deletion.sql, which re-runs the
+         closure against whatever database setup.sql is applied to and raises a
+         WARNING when it has grown. Check O of scripts/check-site-claims.mjs
+         reads 118 and 11 out of that block and requires every file stating the
+         figure — this page among them — to state the same pair, with the date
+         and the query beside it. -->
     <figure class="chart">
       <div class="chart-hd">
         <div>
-          <span class="chart-k">Counted from the live catalogue, 3 September 2026</span>
+          <span class="chart-k">Counted from the live catalogue, 14 September 2026</span>
           <h3 id="chart-what-deleting-an-account-reaches">What deleting an account reaches</h3>
         </div>
       </div>
       <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-what-deleting-an-account-reaches">
-        <svg viewBox="0 0 760 214" width="760" height="214" role="img" aria-label="Horizontal bar chart of how far account deletion reaches in the database. 66 tables are deleted along with the person, across 74 columns. 50 tables keep their rows with the person detached from them, across 69 columns. Following the cascade all the way down, 106 tables are reached in total.">
-          <line class="cx-grid" x1="372.8" y1="34" x2="372.8" y2="176"/>
-          <line class="cx-grid" x1="485.6" y1="34" x2="485.6" y2="176"/>
-          <line class="cx-grid" x1="598.4" y1="34" x2="598.4" y2="176"/>
+        <svg viewBox="0 0 760 214" width="760" height="214" role="img" aria-label="Horizontal bar chart of how far deleting an account reaches in the database, counted from the database&rsquo;s own foreign keys on 14 September 2026. Hanging straight off your profile row: 68 tables are deleted with it, across 76 columns, and 59 tables keep their rows, across 81 columns, with the link to you emptied but nothing else about the row changed, so several of them still hold your name in a column of their own. Following the chain all the way down from the sign-in account that is actually deleted, 129 tables are reached in total &mdash; 118 of them in the application schema and 11 inside the sign-in schema Supabase keeps for itself.">
+          <line class="cx-grid" x1="350.24" y1="34" x2="350.24" y2="176"/>
+          <line class="cx-grid" x1="440.48" y1="34" x2="440.48" y2="176"/>
+          <line class="cx-grid" x1="530.72" y1="34" x2="530.72" y2="176"/>
+          <line class="cx-grid" x1="620.96" y1="34" x2="620.96" y2="176"/>
           <line class="cx-grid" x1="711.2" y1="34" x2="711.2" y2="176"/>
           <line class="cx-base" x1="260" y1="34" x2="260" y2="176"/>
 
           <text class="cx-lab" x="250" y="56" text-anchor="end">Deleted with you</text>
-          <text class="cx-ax" x="250" y="72" text-anchor="end">74 columns</text>
-          <rect class="f-hi" x="260" y="40" width="248.2" height="26" rx="3"/>
-          <text class="cx-val" x="518.2" y="58">66 tables</text>
+          <text class="cx-ax" x="250" y="72" text-anchor="end">76 columns</text>
+          <rect class="f-hi" x="260" y="40" width="204.5" height="26" rx="3"/>
+          <text class="cx-val" x="474.5" y="58">68 tables</text>
 
-          <text class="cx-lab" x="250" y="104" text-anchor="end">Kept, with you detached</text>
-          <text class="cx-ax" x="250" y="120" text-anchor="end">69 columns</text>
-          <rect class="f-lo" x="260" y="88" width="188" height="26" rx="3"/>
-          <text class="cx-val" x="458" y="106">50 tables</text>
+          <!-- This row used to read "Kept, with you detached". Nothing beside it
+               was false, and the figcaption below already explained the name
+               snapshots &mdash; but the label is the part that gets read on its own,
+               quoted, and screenshotted, and on its own "detached" is heard as
+               "anonymised". It is not: the link goes, the name often does not.
+               The label now says so, in the same words the owner console uses. -->
+          <text class="cx-lab" x="250" y="104" text-anchor="end">Kept &mdash; unlinked, not anonymous</text>
+          <text class="cx-ax" x="250" y="120" text-anchor="end">81 columns</text>
+          <rect class="f-lo" x="260" y="88" width="177.5" height="26" rx="3"/>
+          <text class="cx-val" x="447.5" y="106">59 tables</text>
 
           <text class="cx-lab" x="250" y="152" text-anchor="end">Reached in total</text>
           <text class="cx-ax" x="250" y="168" text-anchor="end">following the chain down</text>
-          <rect class="ch-c" x="260" y="136" width="398.6" height="26" rx="3"/>
+          <rect class="ch-c" x="260" y="136" width="388" height="26" rx="3"/>
           <!-- Outside the bar, like the two above it. This one was drawn back
                INTO its own fill with text-anchor="end", so the only value label on
-               the chart sitting on tinted accent was this one — inconsistent to
-               look at and the only one whose contrast depended on the tint. The
-               viewBox is 20 units wider than it was to make room for it. -->
-          <text class="cx-val" x="668.6" y="154">106 tables</text>
+               the chart sitting on tinted accent was this one &mdash; inconsistent to
+               look at and the only one whose contrast depended on the tint. -->
+          <text class="cx-val" x="658" y="154">129 tables</text>
 
           <line class="cx-base" x1="260" y1="176" x2="711.2" y2="176"/>
           <g class="cx-ax">
             <text x="260" y="196" text-anchor="middle">0</text>
-            <text x="372.8" y="196" text-anchor="middle">30</text>
-            <text x="485.6" y="196" text-anchor="middle">60</text>
-            <text x="598.4" y="196" text-anchor="middle">90</text>
-            <text x="711.2" y="196" text-anchor="middle">120</text>
+            <text x="350.24" y="196" text-anchor="middle">30</text>
+            <text x="440.48" y="196" text-anchor="middle">60</text>
+            <text x="530.72" y="196" text-anchor="middle">90</text>
+            <text x="620.96" y="196" text-anchor="middle">120</text>
+            <text x="711.2" y="196" text-anchor="middle">150</text>
           </g>
         </svg>
       </div>
       <figcaption class="chart-note">
-        <strong>The middle bar is the one to read carefully.</strong> Those rows survive with you
-        detached from them &mdash; payments taken, door visits and guest passes, which a gym has
-        tax and legal reasons to keep. <strong>Invoices and memberships are in that set too</strong>,
+        <strong>The middle bar is the one to read carefully, and its label is the part that used to
+        mislead.</strong> Those rows survive &mdash; payments taken, door visits and guest passes, which a
+        gym has tax and legal reasons to keep. <strong>Invoices and memberships are in that set too</strong>,
         and this page said the opposite until the schema was read again: all three of
         <span class="mono">memberships</span>, <span class="mono">gym_invoices</span> and
         <span class="mono">gym_payments</span> point at a person with <em>set null</em> rather than
-        <em>cascade</em>, so the row outlives the account. What goes with the account is the link to
-        it. One thing does not: immediately before the profile is deleted, the name the invoice was
-        billed to, the name a payment was taken from and the name on a membership are copied onto
-        those rows, because an invoice for an unnamed party does not balance anybody's books. A gym
-        with a retention obligation needs to know both halves of that before it presses the button,
+        <em>cascade</em>, so the row outlives the account. What goes is the link to it, and only the
+        link. <strong>Detached is not anonymous.</strong> Several of those tables keep your name in a
+        column of their own, on purpose: the name an invoice was billed to, the name a payment was
+        taken from and the name on a membership are copied onto the row in the moment before the
+        profile goes, because an invoice for an unnamed party does not balance anybody&rsquo;s books; the
+        name written at the desk stays on a guest pass; and the name that signed a waiver stays on the
+        waiver, because a waiver nobody signed is not evidence of anything. A gym with a retention
+        obligation, and a member deciding whether to press the button, each need both halves of that,
         so both are stated rather than assumed.
         These are not estimates: they come from one query over the database&rsquo;s own foreign keys &mdash;
-        every table whose rows are deleted when the account is, then every table reached by following
-        those deletions down. That means they move whenever a table is added, and they have moved
-        before, so they are re-counted rather than remembered.
+        every table whose rows go when the account does, then every table reached by following those
+        deletions down. Say which row a figure is counted from, because the two answers differ: the
+        first two bars are counted from your profile row, the third from the sign-in account that the
+        erasure deletes, which reaches the profile and 128 other tables. The figures move whenever a
+        cascading key is added, and they have moved &mdash; every number on this chart was re-counted on
+        14 September 2026 and every one of them had grown &mdash; so they are re-measured rather than
+        remembered.
       </figcaption>
     </figure>
 
@@ -695,7 +785,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Does deleting my account delete my gym's records of me?</summary>
-        <div class="a"><p>Partly, and the split matters. Your membership and your invoices go with you. Payments taken, door visits and passes stay as rows with you detached from them, because a gym has tax and legal reasons to keep the fact that money moved. <a href="/delete-account">Deleting your account</a> lists both sides.</p></div>
+        <div class="a"><p>Partly, and the split matters &mdash; and this answer had it backwards until the schema was read again. Your membership, your invoices and the payments a gym recorded do <em>not</em> go with you: those are the gym&rsquo;s financial record and it has tax and legal reasons to keep them, so the row stays and the link to your account is emptied. Door visits and guest passes stay the same way. Emptying the link is not the same as anonymising the row: on an invoice, a payment, a membership, a guest pass and a signed waiver the name is deliberately kept, because an invoice made out to nobody balances nothing and a waiver nobody signed is evidence of nothing. What goes is everything that was yours &mdash; the profile, the training, the body data, the messages. <a href="/delete-account">Deleting your account</a> lists both sides, and <a href="#deletion">the chart above</a> counts them.</p></div>
       </details>
       <details>
         <summary>Do people at Repple look at my data?</summary>

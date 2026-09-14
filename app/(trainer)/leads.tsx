@@ -34,8 +34,13 @@
 // count wrong costs either a lost enquiry or a phone call to somebody who was
 // already rung.
 //
-//   error    the read did not come back. NOTHING is listed and the banner says
-//            so out loud. An empty list here is not an empty inbox.
+//   error    a read did not come back, and `book.status` is the worst of two of
+//            them. When it is the ENQUIRY read, the hook has cleared the rows,
+//            nothing is listed and the banner says so out loud — an empty list
+//            here is not an empty inbox. When it is only the CODES read, the
+//            enquiries are drawn anyway: status decides what may be SAID, never
+//            who is listed, and a label lookup must not take a coach's list of
+//            strangers off the screen.
 //   partial  more enquiries exist than came back. The rows are real and are
 //            shown; no figure on the screen is a total, and PartialRead says
 //            which is which.
@@ -531,9 +536,28 @@ export default function TrainerLeads() {
           <SectionHead title="Your enquiries" />
           <Text style={{ ...ty.label, color: t.ink2 }}>{book.note}</Text>
 
+          {/* ── what "error" is allowed to hide ────────────────────────────
+              `book.status` is the WORST of two reads (worstStatus in
+              src/ui/leads.ts), so a failed CODES read — a label lookup, which
+              only ever decides whether "Gym flyer" can be printed beside a code
+              — arrives here as 'error' exactly like a failed enquiry read. This
+              branch used to be `book.status === 'error'`, and under it a coach
+              whose codes read dropped was shown NO enquiries and the sentence
+              "nothing is listed because the read did not come back", four
+              inches under `book.note` telling them "the people below are real"
+              and under a Waiting Longest section naming those same people by
+              hand. Their real list — strangers who left a phone number — was
+              hidden by a read about labels.
+
+              So the rows that came back are drawn whenever there are rows, the
+              same rule src/lib/leadWait.ts states for its own queue: status
+              decides what may be SAID, never who is listed. The banner is for
+              the case it describes — nothing to list. When the enquiry read
+              itself fails the hook clears the rows, so an empty list under
+              'error' is that case and this branch still catches it. */}
           {book.status === 'loading' ? (
             <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your enquiries…" />
-          ) : book.status === 'error' ? (
+          ) : book.status === 'error' && book.rows.length === 0 ? (
             <View style={{ marginTop: sp.lg }}>
               <Flag tone={t.crit}>
                 Nothing is listed because the read did not come back — not because nobody has been in touch. Close this
@@ -545,6 +569,24 @@ export default function TrainerLeads() {
             </View>
           ) : (
             <View>
+              {/* Rows, under a status that failed. The only way to be here is a
+                  codes read that did not land while the enquiries did: the hook
+                  clears `rows` when the enquiry read fails, and a codes read
+                  that DID land cannot make the fold 'error'. So the missing
+                  half is named, and nothing is called a count. */}
+              {book.status === 'error' ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Flag tone={t.warn}>
+                    Your codes could not be read, so nothing below is put against a campaign and no figure on this
+                    screen is a count. The enquiries themselves came back and are listed — they are the ones this read
+                    saw, and they are real people.
+                  </Flag>
+                  <View style={{ marginTop: sp.lg }}>
+                    <Ghost label="Try Again" onPress={() => { void book.reload(); }} />
+                  </View>
+                </View>
+              ) : null}
+
               {book.status === 'partial' ? (
                 <View style={{ marginTop: sp.lg }}>
                   <PartialRead what="enquiries" shown={book.rows.length} onPress={() => { void book.reload(); }} />
@@ -647,7 +689,7 @@ export default function TrainerLeads() {
             <Rule />
           </View>
           {/* This paragraph used to read "an enquiry is never joined to an
-              account", and part 204 made that false: an account created with
+              account", and part 211 made that false: an account created with
               the enquiry's exact email address on the enquiry's exact code
               stamps the row, and the card above says so. What is still true is
               the half that matters — the match is exact, so its absence is

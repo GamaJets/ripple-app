@@ -29,6 +29,11 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
+import { coachingModeKey, LEGACY_COACHING_MODE_KEY } from '../lib/coachingModeStore';
+import {
+  scanMetricsKey, readScanMetrics, writeScanMetrics, mergeStoredMetrics,
+  LEGACY_SCAN_METRICS_KEY,
+} from '../lib/scanMetricsStore';
 import { manualBeatsScan } from '../lib/bodyFigures';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -44,6 +49,7 @@ import { registerFlush } from '../lib/offlineQueue';
 import { writeFailure } from '../lib/wroteRows';
 import { useRecoverRead } from './readRefresh';
 import { readMyProfileRow, readMyClientRow, forgetMyRows } from './myProfile';
+import { sexFromColumn } from '../lib/hrKcal';
 
 // Declared in src/lib/types.ts alongside the labels and the two predicates the
 // screens branch on; re-exported because every client screen imports it from
@@ -62,7 +68,10 @@ interface Value {
   /** null until the client tells us. Defaulted to 170 and rendered on their
    *  profile as their own height. */
   heightCm: number | null; setHeightCm: (v: number) => void;
-  /** null unless the stored value is one of the two the calorie equations have. */
+  /** null unless `clients.sex` holds one of the two letters the calorie
+   *  equations have. Nothing in this product writes that column, so today it
+   *  is null for every member — app/(client)/workouts.tsx says so on the
+   *  screen rather than leaving a blank where the figure would be. */
   sex: 'male' | 'female' | null;
   goal: Goal; setGoal: (v: Goal) => void;
   coachingMode: CoachingMode; setCoachingMode: (v: CoachingMode) => void;
@@ -216,7 +225,14 @@ const KEY = 'repple.profile';
 //
 // It never overrides the server, it only fills in what the server cannot say —
 // and only where the server does not contradict it.
-const MODE_KEY = 'repple.coachingMode';
+//
+// Every word of that is about ONE PERSON, and the key used to say which person
+// nowhere: it was the unqualified `repple.coachingMode`, so on a shared gym
+// handset the reconcile below read the PREVIOUS member's answer, switched this
+// one to it, and promoted it onto this one's server row — where their coach
+// reads it, and behind which `soloHide` removes five screens from their app.
+// src/lib/coachingModeStore.ts is the whole argument, including why the old
+// unqualified key is removed rather than migrated.
 
 // No name yet means no initial. The old fallback was a hardcoded 'Y' — a
 // letter belonging to nobody, shown in the avatar of every user whose name
@@ -234,7 +250,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
    *  sex-specific — the two published equations differ enough that the weight
    *  term changes sign, so there is no defensible default and this stays null
    *  until the column says otherwise. The column has existed on `clients` all
-   *  along and nothing had ever read it. */
+   *  along and nothing has ever WRITTEN it: no screen in the app, no importer,
+   *  no edge function. Reading it correctly is therefore all this can do, and
+   *  the screen that wanted the figure names the gap instead of printing one.
+   *  Adding the field is a product decision about labelling, not a code one. */
   const [sex, setSex] = useState<'male' | 'female' | null>(null);
   const [goal, setGoal] = useState<Goal>('muscle');
   const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
@@ -471,11 +490,15 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           const r = c as any;
           if (typeof r.dob === 'string' && r.dob) setDob(r.dob);
           if (r.height_cm != null && !Number.isNaN(Number(r.height_cm))) setHeightCm(Number(r.height_cm));
-          // Only the two values the equations have. Anything else — an empty
-          // string, a spelling this app does not know — leaves it null, and a
-          // null means the model declines to produce a figure rather than
-          // guessing at a body.
-          if (r.sex === 'male' || r.sex === 'female') setSex(r.sex);
+          // Through `sexFromColumn`, because the column and this union do not
+          // speak the same language. `clients.sex` is checked `in ('f','m')`;
+          // this compared it against 'male' and 'female', which that
+          // constraint cannot hold, so the answer here was null for every
+          // member however the column read. Anything outside the two letters
+          // still leaves it null, and a null means the model declines to
+          // produce a figure rather than guessing at a body.
+          const readSex = sexFromColumn(r.sex);
+          if (readSex) setSex(readSex);
           if (typeof r.goal === 'string' && r.goal) setGoal(r.goal as Goal);
           // `readDiet`, not `as Diet`. The column is plain text; the union is
           // five values; and a value outside it reaches `mealAt`, whose pools
@@ -484,7 +507,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof r.diet === 'string' && r.diet) setDiet(readDiet(r.diet));
           if (Array.isArray(r.avoid)) setAvoid(r.avoid);
           // Reconcile the server's two-value answer with the four-value one
-          // the client actually gave (MODE_KEY above). The device is read
+          // the client actually gave (src/lib/coachingModeStore.ts). The device is read
           // inline rather than from state because this effect is keyed on the
           // signed-in uid and can land before a separately-loaded flag has —
           // and a restore that loses that race reverts the setting silently,
@@ -500,7 +523,16 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           setTrainerId(typeof r.trainer_id === 'string' && r.trainer_id ? r.trainer_id : null);
           if (r.mode != null) {
             const stored = readCoachingMode(r.mode);
-            const mine = readCoachingMode(await AsyncStorage.getItem(MODE_KEY).catch(() => null));
+            // Under THIS account's key, not the handset's. `sbUid` is the id
+            // this effect is keyed on and the id the promotion below writes to,
+            // so the answer being read and the row being written are the same
+            // person by construction — which is the one thing the unqualified
+            // key could not say. A null key, or a read that will not answer,
+            // both come back as a value outside the union and `readCoachingMode`
+            // falls to 'online', which satisfies neither branch below: the
+            // server's answer stands untouched, which is the safe end.
+            const modeKey = coachingModeKey(sbUid);
+            const mine = readCoachingMode(modeKey ? await AsyncStorage.getItem(modeKey).catch(() => null) : null);
             const agreed =
               // 'hybrid' was written to the server as 'inperson'. Still true of
               // them while the server still says so; a coach who has since
@@ -513,7 +545,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               : mine === 'solo' && r.trainer_id == null ? 'solo'
               : stored;
             setCoachingMode(agreed);
-            if (agreed !== mine) AsyncStorage.setItem(MODE_KEY, agreed).catch(() => {});
+            if (agreed !== mine && modeKey) AsyncStorage.setItem(modeKey, agreed).catch(() => {});
             // Promote it. The column can hold the fuller answer now, and until
             // it does this device is the only thing that knows: the coach's
             // roster and the console both read the server, so a hybrid client
@@ -614,7 +646,14 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // come back — and would overwrite this with a default while the
         // reconcile above was still reading it. This effect is gated on
         // nameSynced, so both reads have already landed and both succeeded.
-        try { await AsyncStorage.setItem(MODE_KEY, coachingMode); } catch { /* the mode still applies this session; only the restore across launches is lost */ }
+        // Under this account's own key. The effect is already gated on `sbUid`,
+        // so the guard below can only be false if `coachingModeKey` refuses the
+        // id — and refusing to write is right when there is no account to write
+        // it for: a mode kept on the handset for nobody is the defect.
+        const modeKey = coachingModeKey(sbUid);
+        if (modeKey) {
+          try { await AsyncStorage.setItem(modeKey, coachingMode); } catch { /* the mode still applies this session; only the restore across launches is lost */ }
+        }
         // Both results are now inspected. Refusing to look was what let a
         // client's edited goal, diet or allergen list disappear at the next
         // launch with the screen having said nothing.
@@ -695,8 +734,60 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     if (saveFailed) setPushTick((n) => n + 1);
   }), [saveFailed]);
 
-  // Load locally-cached InBody composition metrics (keyed by scan date).
-  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
+  // ── The locally-cached InBody composition breakdowns ─────────────────────
+  //
+  // This used to be one unqualified key, `repple.scanMetrics`, read once with
+  // `[]` dependencies and merged back into every scan BY DAY. On the gym's
+  // shared handset that attached the previous member's visceral fat, BMR, fat
+  // and lean mass and five segmental lean figures to the next member's own scan
+  // of the same date, under their own name, on every screen that draws a
+  // composition breakdown. src/lib/scanMetricsStore.ts is the whole argument,
+  // including why the old key is removed rather than migrated.
+  //
+  // Null when nobody is signed in, which means no read and no write — not a
+  // fallback to a shared key.
+  const metricsKey = scanMetricsKey(sbUid);
+  // False until a read of THIS key has come back. It arms the write in
+  // `addScan`, and it is reset before every read — see the effect.
+  const [metricsHydrated, setMetricsHydrated] = useState(false);
+  useEffect(() => {
+    // Cleared BEFORE the read, not left at whatever the last key's read set it
+    // to. A flag that survived the key changing would let an account switch
+    // whose read then FAILED write this member's empty map straight over the
+    // other one's stored breakdowns — the one way to lose a measurement rather
+    // than merely show the wrong one. Lane 4 caught this in its own fix and
+    // src/ui/exerciseVideos.ts carries the same note; it is the same trap here.
+    setMetricsHydrated(false);
+    // No account is no store, and an empty map is the honest starting point for
+    // a session that has nobody in it. Every scan then shows the breakdown its
+    // own row carries and no other.
+    if (!metricsKey) { setScanMetrics({}); return; }
+    let live = true;
+    AsyncStorage.getItem(metricsKey)
+      .then((raw) => { if (live) { setScanMetrics(readScanMetrics(raw)); setMetricsHydrated(true); } })
+      // A store that would not answer is no cached breakdowns on screen, and
+      // `metricsHydrated` stays false, so nothing is written over bytes we
+      // never managed to read. The scans themselves are unaffected: their own
+      // `metrics` come from the server.
+      .catch(() => { if (live) setScanMetrics({}); });
+    return () => { live = false; };
+  }, [metricsKey]);
+  // The unqualified key this replaces, removed rather than migrated: nothing on
+  // the device distinguishes a single-owner handset's own old breakdowns from
+  // the previous member's on a shared one, and `scans.metrics` on the server is
+  // the record this was only ever a cache in front of. See the header of
+  // src/lib/scanMetricsStore.ts.
+  // The same, for the coaching mode. Removed rather than migrated for the
+  // reason src/lib/coachingModeStore.ts gives: the answer under it belongs to
+  // whoever last used this handset, the server already holds an answer for the
+  // person signing in now, and inheriting it writes a stranger's mode onto
+  // their row. Both removals run once per mount and are best-effort; a phone
+  // that will not let go of them still cannot hand them to anybody, because
+  // nothing reads either key any more.
+  useEffect(() => {
+    AsyncStorage.removeItem(LEGACY_SCAN_METRICS_KEY).catch(() => {});
+    AsyncStorage.removeItem(LEGACY_COACHING_MODE_KEY).catch(() => {});
+  }, []);
   // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
   // Also re-runs on every auth state change (not just once at mount) — if the
   // Supabase session hasn't finished restoring yet at the exact moment this
@@ -812,6 +903,16 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       setCoachLinked(null); setTrainerId(null);
       setStepGoal(null); setSleepGoalHours(null); setWaterGoalGlasses(null);
       setScans([]); setManualWeight(null); setManualBodyFat(null); setManualAt(null);
+      // The cached composition breakdowns go with the scans they belong to.
+      // They used not to: this block cleared `scans` and left `scanMetrics`
+      // standing, and the read that filled it had `[]` dependencies so it never
+      // ran again — so the departing member's visceral fat, BMR and segmental
+      // lean stayed in memory for the life of the process and merged onto the
+      // next member's scan of the same date. The key effect above would reach
+      // the same state a render later, off `sbUid` going null; it is done here
+      // as well so that clearing a person's body record does not depend on the
+      // ordering of two effects.
+      setScanMetrics({});
       setSaveFailed(false);
       // 'ready', not 'error': there is genuinely no profile and no scan history
       // to read for nobody, which is what the signed-out branch above says too.
@@ -861,7 +962,15 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const sorted = useMemo(() => {
     const byDay: Record<string, ScanRec> = {};
     for (const s of scans) byDay[s.takenAt.slice(0, 10)] = s; // one InBody scan per day, latest added wins
-    return Object.values(byDay).sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((s) => (s.metrics ? s : (scanMetrics[s.takenAt.slice(0, 10)] ? { ...s, metrics: scanMetrics[s.takenAt.slice(0, 10)] } : s)));
+    // `mergeStoredMetrics` is this expression lifted out unchanged, so the one
+    // place the device cache reaches the rest of the app can be RUN by a test
+    // rather than read by a reviewer. Same rule as before: the row's own
+    // `metrics` always wins, a scan with one is returned by identity, and an
+    // empty cache returns the list element for element.
+    return mergeStoredMetrics(
+      Object.values(byDay).sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)),
+      scanMetrics,
+    );
   }, [scans, scanMetrics]);
   // No placeholder body. When there is no scan, weight/body fat come from a
   // manual entry if there is one and are null otherwise - callers decide what
@@ -900,7 +1009,27 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const addScan: Value['addScan'] = async (s: ScanRec): Promise<boolean> => {
     setScans((p) => [...p, s]);
     if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
-      setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; });
+      setScanMetrics((prev) => {
+        const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! };
+        // Two guards, and neither is an "ignore":
+        //
+        //   · no key — nobody is signed in, so there is no account to keep this
+        //     under, and a shared key is the defect this provider was changed
+        //     to end. The breakdown is on screen for this session and the scan
+        //     itself has not reached the server either, because `addScan`
+        //     refuses without `sbUid`.
+        //   · not hydrated — the read of this key has not come back, or came
+        //     back refused. Writing now would put this session's map on top of
+        //     bytes we never managed to read, which is how a member loses a
+        //     breakdown rather than merely fails to gain one.
+        //
+        // `writeScanMetrics` rather than a bare stringify, so what goes to the
+        // store is exactly what `readScanMetrics` will accept back.
+        if (metricsKey && metricsHydrated) {
+          AsyncStorage.setItem(metricsKey, writeScanMetrics(nm)).catch(() => { /* on screen this session either way */ });
+        }
+        return nm;
+      });
     }
     setManualWeight(null); setManualBodyFat(null);
     if (!USE_SUPABASE || !sbUid) return false;

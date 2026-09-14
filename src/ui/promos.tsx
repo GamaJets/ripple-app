@@ -27,6 +27,32 @@
 // 'ready'; under 'error' it means the read did not answer, and the Growth
 // screen must not offer to create the first code to somebody who may already
 // have six.
+//
+// ── The duplicate check, which was checking the wrong list the wrong way ───
+//
+// `addPromo` refused a code already present in `promos` and reported that as
+// "this code is free" when it found nothing. It is the same LoadStatus mistake
+// one level in: under 'error' that array is the last successful read or
+// nothing, under 'partial' it is the first page, so a miss meant "not in the
+// part we hold" and was returned as though it meant "not in use". It also
+// compared raw stored text against an upper-cased input, so a stored `Summer`
+// did not match a typed `SUMMER` — while `redeem_promo` (part 104) matches a
+// member's typing on `upper(btrim(code))` and hands those two rows to the same
+// person.
+//
+// Both are fixed below, and the return type now carries `duplicatesChecked` so
+// a caller cannot mistake "we looked and it is free" for "we could not look".
+// Creating is still allowed when the check could not run: a gym that cannot
+// read its codes is not thereby forbidden from making one.
+//
+// The half that could not be fixed from here is the half that matters most,
+// and it is not in TypeScript. `promos` had no unique constraint on the code at
+// all, so two rows could hold one code and `redeem_promo`'s `limit 1` — with no
+// `order by` — picked between them arbitrarily. supabase/parts/3190 adds
+// `promos_code_per_tenant`, unique on `(tenant_id, upper(btrim(code)))`, which
+// is the same key this file and `redeem_promo` compare on. Until that part is
+// applied, the 23505 branch in `addPromo` is unreachable and the check above is
+// the only one there is.
 import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -45,13 +71,46 @@ export interface Promo {
   active: boolean;
 }
 
+/**
+ * What `addPromo` answers, and the reason it is no longer just `{ ok, reason }`.
+ *
+ * The duplicate check `addPromo` runs is a check against `promos` — the array
+ * THIS PROVIDER holds. Under 'error' that is whatever the last successful read
+ * left behind, or nothing at all; under 'partial' it is the first `capLimit()`
+ * page of a longer list. On both, a MISS means "not in the part we have", which
+ * is not the same sentence as "not in use" — and the old signature had no way
+ * to say which of the two it had established, so it said neither and the caller
+ * was left to assume the stronger one.
+ *
+ * `duplicatesChecked` is that missing fact. `ok: true, duplicatesChecked: false`
+ * is a code that was saved without anything having been able to look.
+ */
+export interface AddPromoResult {
+  ok: boolean;
+  /** Why not, when `ok` is false. */
+  reason?: string;
+  /**
+   * True only when the answer above rests on the gym's WHOLE list of codes —
+   * either because `status` was 'ready' when the check ran, or because the
+   * database itself refused the insert as a duplicate. False means the code may
+   * or may not already exist and nothing here knows which.
+   */
+  duplicatesChecked: boolean;
+  /**
+   * Set exactly when `duplicatesChecked` is false: one sentence naming the
+   * check that did not happen, safe to show a gym owner verbatim.
+   */
+  caveat?: string;
+}
+
 interface PromosValue {
   promos: Promo[];
   /** Whether `promos` is what the server holds. An empty list under 'error'
    *  means unknown, not "no codes". */
   status: LoadStatus;
-  /** Resolves once the code is on the server. `ok: false` carries the reason. */
-  addPromo: (code: string, discountPct: number) => Promise<{ ok: boolean; reason?: string }>;
+  /** Resolves once the code is on the server. `ok: false` carries the reason,
+   *  and either answer carries whether the duplicate check actually ran. */
+  addPromo: (code: string, discountPct: number) => Promise<AddPromoResult>;
   toggleActive: (id: string) => Promise<boolean>;
   removePromo: (id: string) => Promise<boolean>;
   refresh: () => Promise<void>;
@@ -148,18 +207,79 @@ export function PromosProvider({ children }: { children: ReactNode }) {
 
   const addPromo: PromosValue['addPromo'] = useCallback(async (code, discountPct) => {
     const c = code.trim().toUpperCase().replace(/\s+/g, '');
-    if (!c) return { ok: false, reason: 'Enter a code' };
-    if (promos.some((p) => p.code === c)) return { ok: false, reason: 'Code already exists' };
-    if (!USE_SUPABASE || !tenantId) return { ok: false, reason: 'No gym to attach this code to.' };
+    if (!c) return { ok: false, reason: 'Enter a code', duplicatesChecked: false };
+
+    // ── the key, and why it is not `===` ─────────────────────────────────────
+    //
+    // This used to compare a stored `code` against `c` directly. `c` is already
+    // upper-cased; the stored value is whatever was written. So a gym holding
+    // `Summer` was told `SUMMER` was free — while `redeem_promo` (part 104)
+    // matches a member's typing with `upper(btrim(code)) = upper(btrim($1))`
+    // and considers those two THE SAME CODE. The one comparison in the product
+    // that could have caught the collision was the only one not using the
+    // collision's own definition of what a collision is.
+    //
+    // `trim().toUpperCase()` is `upper(btrim())`. Same rule, same three places:
+    // here, in `redeem_promo`, and in the unique index added by
+    // supabase/parts/3190 — which is what finally makes it true.
+    const key = (s: string) => s.trim().toUpperCase();
+
+    // A HIT is worth something under every status: these are rows the server
+    // really sent, so a match is a code this gym really has — the list may be a
+    // prefix or stale, but it is not invented. A MISS is the half that is only
+    // worth something under 'ready'.
+    if (promos.some((p) => key(p.code) === c)) {
+      return {
+        ok: false,
+        duplicatesChecked: status === 'ready',
+        reason: status === 'ready'
+          ? `“${c}” is already one of this gym’s codes.`
+          : `“${c}” is in the list of codes this screen last read. That list may be out of date — pull down to read them again if you think this code was removed.`,
+      };
+    }
+
+    // ── what the miss above did and did not establish ────────────────────────
+    //
+    // 'ready' is the only status under which `promos` is the gym's whole list.
+    // Creating is still allowed on the others: a gym past the read ceiling
+    // cannot make itself smaller, and a gym whose read failed is not thereby
+    // forbidden from running a promotion. What changes is that the answer now
+    // says so instead of implying a check it could not run.
+    const duplicatesChecked = status === 'ready';
+    const caveat = duplicatesChecked ? undefined
+      : status === 'error'
+        ? 'Your existing codes could not be read, so nothing checked whether this code was already in use.'
+        : status === 'partial'
+          ? 'Your existing codes did not all come back, so nothing could check the ones further down the list.'
+          : 'Your existing codes had not finished loading, so nothing checked whether this code was already in use.';
+
+    if (!USE_SUPABASE || !tenantId) return { ok: false, reason: 'No gym to attach this code to.', duplicatesChecked, caveat };
     const { error } = await supabase.from('promos').insert({
       tenant_id: tenantId, code: c, discount: Math.round(discountPct), active: true,
     });
-    // A code that exists at another gym is fine; one that exists at this one is
-    // caught above and by the read below.
-    if (error) return { ok: false, reason: 'That code could not be saved. Try again in a moment.' };
+    if (error) {
+      // A code that exists at ANOTHER gym is fine — the index is per tenant.
+      // One that exists at THIS one raises 23505 against
+      // `promos_code_per_tenant` (supabase/parts/3190), and that is the only
+      // duplicate check in this function that is true regardless of what the
+      // provider managed to read. Reported as checked, because the database did
+      // the checking.
+      //
+      // It says nothing until part 3190 is applied. Until then a duplicate
+      // inserts successfully and `duplicatesChecked: false` above is the whole
+      // of the honest answer.
+      if ((error as { code?: string }).code === '23505') {
+        return {
+          ok: false,
+          duplicatesChecked: true,
+          reason: `“${c}” is already one of this gym’s codes. Codes match however they are typed, so this is the same code as an existing one even if the capitals differ.`,
+        };
+      }
+      return { ok: false, reason: 'That code could not be saved. Try again in a moment.', duplicatesChecked, caveat };
+    }
     await refresh();
-    return { ok: true };
-  }, [promos, tenantId, refresh]);
+    return { ok: true, duplicatesChecked, caveat };
+  }, [promos, status, tenantId, refresh]);
 
   const toggleActive = useCallback(async (id: string): Promise<boolean> => {
     const cur = promos.find((p) => p.id === id);

@@ -202,7 +202,11 @@ import { reportError } from '../../src/lib/reportError';
 // picker's own truncation flag, and two different meanings under one name in
 // one component is a bug waiting for whoever reads it next.
 import { capLimit, capped as cappedRows } from '../../src/lib/rowCap';
-import { clientIsQueryable } from '../../src/lib/clientRecord';
+// Whether this session may be sent at all, and the one part of that which a
+// press beating the button still has to get past. Both live in src/lib so that
+// deleting either of the two guards below fails a test rather than a client's
+// hour of training — see sessionSend.test.ts.
+import { maySendSession, sessionClientBlocked } from '../../src/lib/sessionSend';
 import { rowToEntry, WORKOUT_COLS, type WorkoutRow } from '../../src/lib/workoutRow';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { dayLabel as historyDayLabel } from '../../src/lib/adherence';
@@ -699,7 +703,8 @@ export default function LogSession() {
    * `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so a hand-added
    * client's id is indistinguishable from a real one's downstream; `handAdded`
    * is marked in src/ui/roster.tsx at the only place that knows which table the
-   * row came out of, and `clientIsQueryable` is the one reader of it. The same
+   * row came out of, and `clientIsQueryable` — reached through
+   * `sessionClientBlocked` — is the one reader of it. The same
    * similarity once told coaches that people with no account had disclosed no
    * injuries and not filled in their intake.
    */
@@ -734,7 +739,10 @@ export default function LogSession() {
    * refused here, before anything is sent and while the sheet is still on
    * screen.
    */
-  const clientLoggable = clientIsQueryable(picked, pickedRow?.handAdded);
+  // Asked through `sessionSendBlock`'s own predicate rather than re-derived
+  // here, so the sentences below and the two guards further down cannot come
+  // to different conclusions about the same person.
+  const clientLoggable = !sessionClientBlocked({ clientId: picked, handAdded: pickedRow?.handAdded });
   const historyAskable = USE_SUPABASE && clientLoggable;
 
   useEffect(() => {
@@ -968,7 +976,15 @@ export default function LogSession() {
   // decision and its docstring is the reason; held HERE it costs the coach the
   // banner above the button instead of the session, which is what it cost when
   // the check happened at the insert.
-  const ready = picked != null && clientLoggable && hasSets && loadProblem() == null && whenProblem == null;
+  //
+  // The whole of it is `maySendSession` in src/lib/sessionSend.ts, which is
+  // where each of the five refusals is asserted. `handAdded` is a required
+  // field of what it is handed, so the account question cannot leave this call
+  // without the compiler saying so.
+  const ready = maySendSession({
+    clientId: picked, handAdded: pickedRow?.handAdded,
+    hasSets, loadProblem: loadProblem(), whenProblem,
+  });
 
   const save = async () => {
     // Synchronous, before the first await — see `saving`. This is the whole of
@@ -1003,7 +1019,7 @@ export default function LogSession() {
       setFailure('Nobody is chosen yet, so there is nobody to log this against. Pick a client at the top of this screen.');
       return;
     }
-    if (!clientLoggable) {
+    if (sessionClientBlocked({ clientId: picked, handAdded: pickedRow?.handAdded })) {
       // The same belt as the line above, for the same reason and with more at
       // stake: `ready` already withholds the button, and this is what stands
       // between a press that beat it and a write nothing on the other side can

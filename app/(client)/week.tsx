@@ -40,7 +40,7 @@ import { scheduledDay } from '../../src/lib/checklist';
 import { useClientWeek } from '../../src/ui/clientWeek';
 import { clientWeekLine } from '../../src/lib/clientBlock';
 import { weekLabel } from '../../src/lib/programBlock';
-import { WEEK_DAYS, jsDayForIndex, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
+import { WEEK_DAYS, isoDay, jsDayForIndex, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 // Which of the movements the plan names have actually appeared in the log.
 // `planVsActual` has done this arithmetic since it was written and its only
@@ -94,7 +94,27 @@ export default function ThisWeek() {
   // 'partial' is the third: the page came back at the row cap, so their
   // assignment may have been on the part we never read. Anything that is not
   // 'ready' is a null we cannot read as "no coach plan".
-  const programUnknown = coachProgram == null && programStatus !== 'ready';
+  //
+  // And there is a fourth, which the three above missed because it is not a
+  // status at all: WHO IS ASKING. `getProgram(c.id)` is a lookup by the
+  // member's own id, and `useClientData` hands out 'unknown' until its auth
+  // read resolves (src/ui/clientData.tsx:1031). That is a placeholder, not an
+  // id, and it matches no assignment — so a lookup under it returns null for
+  // exactly the same reason a member with no coach plan does.
+  //
+  // Those two providers resolve auth independently, and this one does not wait
+  // for the other: src/ui/assignedPrograms.tsx:191 and :198 set 'ready' the
+  // moment there is no session or no uid to read for. So on a cold launch
+  // `programStatus === 'ready'` and `c.id === 'unknown'` arrive together, and
+  // the screen drew seven days of a generated programme under "The Plan" with
+  // no banner and no "· coach plan" suffix — the silent substitution the whole
+  // note above exists to stop, reached from a read that succeeded.
+  const idKnown = c.id !== 'unknown';
+  const programUnknown = coachProgram == null && (programStatus !== 'ready' || !idKnown);
+  // Which of the two banners. An id we have not established yet is a check
+  // still running, not a check that failed: nothing has gone wrong and there is
+  // nothing for the member to do about it.
+  const stillChecking = programStatus === 'loading' || !idKnown;
   const program = coachProgram ?? buildProgram(c.goal, c.bodyFatPct);
   // The timeline, built from the SAME module the coach's screen builds theirs
   // from, so the two cannot come to disagree about what somebody was training
@@ -134,9 +154,14 @@ export default function ThisWeek() {
   const now = useNow();
   const todayIdx = weekIndexOf(now);
   const weekOpened = startOfWeek(now);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const dstr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const logged = new Set(log.map((l) => dstr(new Date(l.t))));
+  // `isoDay`, not a local copy of it. This screen carried its own
+  // `${getFullYear()}-${pad(getMonth()+1)}-${pad(getDate())}`, which is the
+  // fifteenth hand-written copy of a rule src/lib/weekStart.ts states once and
+  // whose header says in as many words what happens next: somebody changes
+  // fourteen of them. Every day key below — the log's days, the seven row
+  // dates, and the `todayISO` the plan comparison is judged against — now comes
+  // out of the same function, so they cannot come to disagree about a boundary.
+  const logged = new Set(log.map((l) => isoDay(new Date(l.t))));
 
   // What each of the seven rows is actually going to say, decided ONCE so the
   // count in the heading and the list underneath it cannot disagree.
@@ -188,7 +213,7 @@ export default function ThisWeek() {
     // be able to arrive there meaning both "nothing logged" and "not read".
     log: logStatus === 'error' ? null : log,
     logStatus,
-    todayISO: dstr(now),
+    todayISO: isoDay(now),
     // Only consulted under a truncated read — a whole one covers the window by
     // definition. `readBoundary` is the existing reader for "how far back does
     // this screen honestly see", and it is given `truncated` rather than a
@@ -227,7 +252,7 @@ export default function ThisWeek() {
 
         {programUnknown ? (
           <View style={{ marginTop: sp.lg }}>
-            {programStatus === 'loading' ? (
+            {stillChecking ? (
               <Notice tone={t.ink3} kicker="This week" title="Still checking for a coach plan"
                 note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as it lands.`} />
             ) : (
@@ -281,7 +306,7 @@ export default function ThisWeek() {
           {rows.map(({ label, i, day: workout }) => {
             const date = new Date(weekOpened); date.setDate(weekOpened.getDate() + i);
             const isToday = i === todayIdx;
-            const done = logged.has(dstr(date));
+            const done = logged.has(isoDay(date));
             // A rest day says so and stays tappable — somebody who trains on a
             // day off still wants Train, and the log below still marks it.
             const focus = workout ? workout.focus : 'Rest day';
@@ -398,7 +423,11 @@ export default function ThisWeek() {
               read the rest rather than a second sentence about the same cap. */}
           {history.status === 'partial' ? (
             <View style={{ marginTop: sp.md }}>
-              <PartialRead what="earlier programmes" shown={hist.entries.filter((e) => !e.current).length}
+              {/* `undefined` rather than a zero, for the reason set out on the
+                  same call in app/(client)/notices.tsx: "Showing the first 0"
+                  is not a sentence, and a capped page whose only entry is the
+                  current block is exactly the case that produces it. */}
+              <PartialRead what="earlier programmes" shown={hist.entries.filter((e) => !e.current).length || undefined}
                 onPress={history.reload} />
             </View>
           ) : null}

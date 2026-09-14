@@ -74,10 +74,10 @@ import { keptOnPhoneNote, notKeptNote } from '../lib/recordQueue';
 // The member's own food log, as this device holds it. See the note above: the
 // `owed` rows and the pending entries are meals the fortnight read below cannot
 // return, and `pastRevision` is what says a past day has changed.
-import { useFoodLog, type FoodEntry } from './foodLog';
-// A `local:` id is a row that has never been accepted by the server, which is
-// what makes merging one impossible to double-count against the read.
-import { isPending } from '../lib/wellnessSync';
+import { useFoodLog } from './foodLog';
+// The merge itself, and the rule that a coach's own food log never drives a
+// client's chart. Both are pure, both are asserted in glucoseMeals.test.ts.
+import { mealsForPairing, mealReadRevision } from '../lib/glucoseMeals';
 import { useOutbox } from './outbox';
 import { useToast } from './toast';
 
@@ -189,7 +189,8 @@ export function useGlucose(personId?: string): GlucoseData {
   const food = useFoodLog();
   // Zero for a coach, so a coach's own back-dated dinner cannot re-read a
   // client's meals. The value itself is never shown; only its CHANGE matters.
-  const mealRevision = readOnly ? 0 : food.pastRevision;
+  // The rule is in src/lib/glucoseMeals.ts, where it is asserted.
+  const mealRevision = mealReadRevision(readOnly, food.pastRevision);
   // The device's queue, for the one write here that is allowed to wait. Null
   // when there is no provider above the screen, which is a real state and not an
   // error — see `useOutbox`.
@@ -339,37 +340,21 @@ export function useGlucose(personId?: string): GlucoseData {
   useEffect(() => { void refreshReadings(); void refreshShared(); void refreshMeals(); }, [refreshReadings, refreshShared, refreshMeals]);
 
   /**
-   * The meals this device is holding that the server has not accepted.
+   * The meals the pairing actually runs over: what the server returned, plus
+   * what this device is still holding that the server has not accepted.
    *
-   * Both kinds, and neither can reach the read above however often it runs:
-   * `owed` is the back-dated and left-over rows, `entries` filtered to
-   * `isPending` is today's, logged with no signal. A row with a `local:` id has
-   * never been stored, so merging it cannot double-count against the server's
-   * copy — and the moment one IS stored `foodLog` drops it from the queue and
-   * bumps `pastRevision`, which re-reads.
+   * The judgement is `mealsForPairing` in src/lib/glucoseMeals.ts, which is
+   * where the reasoning is written down and where it is asserted — including
+   * the two failures this hook cannot show: a back-date that only the merge can
+   * supply, and a flushed meal that only the re-read can. This memo is the
+   * wiring, nothing else.
    *
-   * Empty for a coach. These are the signed-in account's meals.
-   *
-   * Held to the window the READ asked for — `mealsSince`, not a fortnight
-   * counted again from a clock read here. The food queue never expires a row
-   * for age (src/ui/foodLog.tsx says why, at length), so a meal owed from a
-   * month ago is a real row this device is still carrying, and it belongs in
-   * the food log rather than in a fortnight of glucose pairing.
+   * `food.entries` is handed over whole. The `local:` filter belongs with the
+   * rest of the rule rather than half here and half there.
    */
-  const deviceMeals = useMemo<MealRef[]>(() => {
-    if (readOnly || mealsSince == null) return [];
-    const held: FoodEntry[] = [...food.owed, ...food.entries.filter((e) => isPending(e.id))];
-    return held
-      .filter((e) => {
-        const t = Date.parse(e.at);
-        return Number.isFinite(t) && t >= mealsSince;
-      })
-      .map((e) => ({ id: e.id, name: e.name, loggedAt: e.at, carbs: e.carbs }));
-  }, [readOnly, mealsSince, food.owed, food.entries]);
-
   const meals = useMemo(
-    () => (deviceMeals.length ? [...deviceMeals, ...serverMeals] : serverMeals),
-    [deviceMeals, serverMeals],
+    () => mealsForPairing({ readOnly, windowSince: mealsSince, owed: food.owed, entries: food.entries, serverMeals }),
+    [readOnly, mealsSince, food.owed, food.entries, serverMeals],
   );
 
   const readings = useMemo(() => rows.map(toReading), [rows]);

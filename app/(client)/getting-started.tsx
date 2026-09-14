@@ -40,6 +40,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/ui/components';
+import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
@@ -53,6 +54,44 @@ import { checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, type
 import { ONBOARD_KEY } from './onboarding';
 import { GUIDE_SEEN_KEY } from '../guide';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+
+/**
+ * The mark against one checklist row — a filled tick, a hairline ring, or a
+ * dash for a state nothing could read.
+ *
+ * A module-scope PLAIN FUNCTION, called as `tick(r.state, t)`, and not a
+ * component written as `<Tick state={…} />`. Declared inside the screen body it
+ * was a new function object on every render, so React saw a different element
+ * TYPE each time and unmounted and remounted all six marks rather than updating
+ * them — on every focus re-read, every pull-to-refresh, every provider landing.
+ * Nothing here holds a TextInput or an accessibility label, so what that cost
+ * was work, not a member's caret; the rule is the same either way and is stated
+ * at app/(client)/report.tsx:475 and enforced by scripts/check-remount.mjs.
+ *
+ * At module scope rather than a local call because it closes over nothing from
+ * the render body: the sizes and the hairline are module imports and the theme
+ * is the one thing it needs, so the theme is passed.
+ *
+ * The coach's copy is app/(trainer)/getting-started.tsx. The two are NOT shared
+ * from here: these are route modules under two different route groups and
+ * importing one into the other would make a screen file an exported library.
+ * If they are ever to be one, the one belongs in src/ui/.
+ */
+const tick = (state: ChecklistRow['state'], t: Theme) => (
+  <View style={{
+    width: 24, height: 24, borderRadius: radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: state === 'done' ? t.brand : 'transparent',
+    borderWidth: state === 'done' ? 0 : hairline,
+    borderColor: t.ring,
+  }}>
+    {state === 'done' ? <Icon name="check" size={13} color={t.brandInk} /> : null}
+    {/* A dash, not an empty circle. An empty circle is a claim that this has
+        not been done, and under a failed read that is a claim we have not
+        earned. */}
+    {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
+  </View>
+);
 
 export default function GettingStarted() {
   const t = useTheme();
@@ -120,22 +159,6 @@ export default function GettingStarted() {
   const unknown = rows.length - done - left;
   const G = layout.gutter;
 
-  const Tick = ({ state }: { state: ChecklistRow['state'] }) => (
-    <View style={{
-      width: 24, height: 24, borderRadius: radius.pill,
-      alignItems: 'center', justifyContent: 'center',
-      backgroundColor: state === 'done' ? t.brand : 'transparent',
-      borderWidth: state === 'done' ? 0 : hairline,
-      borderColor: t.ring,
-    }}>
-      {state === 'done' ? <Icon name="check" size={13} color={t.brandInk} /> : null}
-      {/* A dash, not an empty circle. An empty circle is a claim that this has
-          not been done, and under a failed read that is a claim we have not
-          earned. */}
-      {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
-    </View>
-  );
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
@@ -176,7 +199,7 @@ export default function GettingStarted() {
               accessibilityLabel={`${r.item.title}. ${r.state === 'done' ? 'Done' : r.state === 'unknown' ? 'Not known' : 'Still to do'}. ${r.item.note}`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
             >
-              <Tick state={r.state} />
+              {tick(r.state, t)}
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' ? t.ink3 : t.ink }}>{r.item.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.item.note}</Text>

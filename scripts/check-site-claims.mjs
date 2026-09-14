@@ -100,6 +100,14 @@
 //                             caveat in the same <section>. The six store
 //                             addresses do not resolve yet; the caveat is what
 //                             stops a Download button being a false claim.
+//   O · The erasure figure   every file stating how far account deletion
+//                             reaches  vs  the `do $$` threshold in
+//                             supabase/parts/41-account-deletion.sql, which is
+//                             the one statement that can measure it. Not a site
+//                             check — it lives here because check F already
+//                             owns web/security.html's copy of that figure, and
+//                             a second gate would be a second thing to keep in
+//                             step with the first.
 //
 // ── what this deliberately does NOT check ─────────────────────────────────
 //
@@ -832,6 +840,38 @@ function checkWearables(vendors, seen) {
 //
 // If this fails after a re-count, the fix is to finish the edit — all three
 // places and the stamp — not to relax the check.
+//
+// ── WHAT THIS CHECK CANNOT SEE, MEASURED RATHER THAN ASSUMED ──────────────
+//
+// Read the list above again and notice what is missing from it: a database.
+// Check F compares the chart's figures WITH EACH OTHER, and the stamp with the
+// calendar. It has no way to ask whether any of them is true of anything, and
+// on 14 September 2026 that limit stopped being theoretical. The chart was
+// stamped 3 September 2026 and read 66 tables / 74 columns cascading, 50 tables
+// / 69 columns kept, 106 reached in total. Measured against the live catalogue
+// that same fortnight: 68 / 76, 59 / 81, and 129. ALL FIVE figures had drifted
+// — and the aria-label agreed with the chart, every bar was drawn to its own
+// value, and the stamp parsed and was in the past, so check F passed the chart
+// on every run in between.
+//
+// That is not a bug in check F. It is the whole of what a gate with no
+// credentials can do. It is written down here because a gate that is READ as
+// saying more than it checks is worse than no gate: the stamp LOOKS like
+// provenance, and a reader who sees this go green beside it concludes the
+// number was verified. It was not. Three things carry the part check F cannot:
+//
+//   · the `do $$` block at the foot of supabase/parts/41-account-deletion.sql,
+//     which re-runs the closure against whatever database setup.sql is applied
+//     to and raises a WARNING when it has grown. That is the only mechanism in
+//     this repo that can see the real number.
+//   · check O below, which does not know the number either, but makes every
+//     file that states it state the SAME one, with its date and its query.
+//   · a person with a psql prompt, which the chart's own comment names.
+//
+// Parsing supabase/setup.sql is not a fourth option and must not be offered as
+// one: a `create table` clause is not the last word on a foreign key, part 184
+// drops and recreates three of them as `on delete set null`, and file parses
+// have produced 120, 122 and 125 against a live 118.
 
 function checkDeletionFigure() {
   const page = 'web/security.html';
@@ -900,6 +940,157 @@ function checkDeletionFigure() {
         });
       }
     }
+  }
+}
+
+/* ── O · the erasure figure, everywhere this repo states it ─────────────── */
+//
+// Check F holds ONE copy of this figure — the chart on web/security.html — and
+// holds it only against itself. The figure lives on eight files. On
+// 14 September 2026 five surfaces were found saying 39 when the answer was 129,
+// a count taken when the schema was a quarter of its present size and never
+// re-taken; each of the five had been copied out of a different file's comment.
+// Nothing in that story could not happen again with 129: a ninth surface
+// appears, or one of the eight is updated and the rest are not.
+//
+// THIS CHECK DOES NOT KNOW THE NUMBER EITHER. It cannot — see check F's note.
+// What it does is make the repo have ONE of them. The pin is the `do $$` block
+// at the foot of supabase/parts/41-account-deletion.sql, chosen because it is
+// the only statement in this repo that can actually MEASURE the figure, against
+// whatever database setup.sql is applied to, and because a threshold in SQL is
+// machine-readable. This gate reads 118 and 11 out of that block's condition
+// and the measurement date out of the warning beside it, then requires:
+//
+//   1. Every file stating the figure states the SAME pair. A count beside
+//      `public` must equal the pinned public count, one beside `auth` the
+//      pinned auth count, and an "N in all" their sum. This is the drift that
+//      actually happens — the password minimum was corrected on four screens
+//      and missed on the fifth, and the 39 survived on five.
+//   2. Every such file carries the date the figure was measured, and a way to
+//      re-measure it: the token `pg_constraint`, or a citation of the pin. A
+//      number on an irreversible confirmation with no date cannot be told from
+//      a stale one, which is exactly how 39 lasted as long as it did.
+//   3. At least four such files exist. A run finding none has gone blind and
+//      would otherwise print the same "ok" as a clean repo.
+//
+// WHAT IT CANNOT DO, stated so nobody reads the green as more than it is:
+//
+//   · It cannot tell whether 118 is true. Nothing offline can.
+//   · It reads the CANONICAL PHRASING — "N tables in `public`", "N more inside
+//     … `auth`", "N in all", `CASCADE_TABLES = N`. A ninth surface inventing a
+//     new way to say it is invisible to this, and one phrasing already is: the
+//     118 in src/ui/notifications.tsx is written "118 tables of gym data" and is
+//     reached only through the 11 and the 129 beside it.
+//   · It does not read supabase/setup.sql. That file is generated from the
+//     parts this does read, so it would only double-count.
+//   · It says nothing about whether the sentence around the figure is right.
+//     Both halves of "their invoices and memberships go too" were wrong on four
+//     surfaces while every number beside them agreed.
+
+const FIG_PIN = 'supabase/parts/41-account-deletion.sql';
+const FIG_ROOTS = ['web', 'app', 'src', 'studio-web', 'supabase/parts', 'docs'];
+const FIG_EXT = /\.(tsx?|jsx?|mjs|sql|html|md)$/;
+const FIG_SKIP = /node_modules|[\\/](\.next|dist|build|\.expo|\.preflight-export)[\\/]/;
+
+// "118 tables in `public`", "11 more inside Supabase's own `auth` schema".
+// The span between the number and the schema name may not contain another
+// digit, so "118 tables … plus 11 more inside `auth`" reads as 11/auth rather
+// than pairing 118 with the wrong schema.
+const FIG_SCHEMA = /(\d{1,4})\s+(?:more\s+)?(?:tables?\s+)?(?:in|inside)\b[^.\n\d]{0,60}?[`'"]?(public|auth)\b/gi;
+const FIG_INALL = /\b(\d{1,4})\s+in all\b/gi;
+const FIG_CONST = /CASCADE_TABLES\s*=\s*(\d+)/g;
+// Both supabase/parts/2612 and docs/ROADMAP.md say "159 tables in `public`"
+// about the SIZE of the schema, which is a different claim. This cue window is
+// what tells them apart, and is the reason it is a window and not a whole-file
+// test — 2612 mentions deletion elsewhere in its own length.
+const FIG_CUE = /delet|erasure|cascad/i;
+const FIG_OK = /cascade-figure-ok:/;
+
+function erasurePin() {
+  if (!existsSync(join(ROOT, FIG_PIN))) {
+    fatal.push(`${FIG_PIN} does not exist, so the erasure figure has no pinned value and check O cannot run. Re-point it at the new home of the \`do $$\` block that re-measures the cascade.`);
+    return null;
+  }
+  const raw = read(FIG_PIN);
+  const cond = /n_public\s*>\s*(\d+)\s+or\s+n_auth\s*>\s*(\d+)/.exec(raw);
+  if (!cond) {
+    fatal.push(`${FIG_PIN} no longer carries a \`do $$\` block testing \`n_public > <N> or n_auth > <N>\`. That block is the pinned figure every other surface is checked against, and the only thing in this repo that can measure it. Either it moved — re-point check O — or it was deleted, in which case the figure is ungated on eight files and check O must go with it rather than be left passing.`);
+    return null;
+  }
+  const when = /measured (\d{1,2} [A-Z][a-z]+ \d{4})/.exec(raw);
+  if (!when) {
+    fatal.push(`${FIG_PIN}'s warning no longer names the date the figure was measured ("… measured <D Month YYYY>"). A pinned number with no date cannot be told from a stale one.`);
+    return null;
+  }
+  const [, dd, mon] = /^(\d{1,2}) ([A-Z][a-z]+) \d{4}$/.exec(when[1]);
+  return {
+    pub: Number(cond[1]),
+    auth: Number(cond[2]),
+    date: when[1],
+    // parts/1120 writes "14 Sep 2026"; everything else writes the month out.
+    // Both are the date, and a gate that accepted only one would be asking for
+    // a house style rather than for provenance.
+    dateRe: new RegExp(`\\b${dd} ${mon.slice(0, 3)}(?:${mon.slice(3)})? \\d{4}\\b`),
+  };
+}
+
+function figFiles(dir, out = []) {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (FIG_SKIP.test(p)) continue;
+    if (e.isDirectory()) figFiles(p, out);
+    else if (FIG_EXT.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
+function checkErasureFigure(pin, seen) {
+  if (!pin) return;
+  const expect = new Map([['public', pin.pub], ['auth', pin.auth], ['in all', pin.pub + pin.auth]]);
+
+  for (const abs of FIG_ROOTS.flatMap((r) => figFiles(join(ROOT, r)))) {
+    const rel = relative(ROOT, abs);
+    const raw = readFileSync(abs, 'utf8');
+    const lines = raw.split('\n');
+    const lineOf = (i) => raw.slice(0, i).split('\n').length;
+    const hits = [];
+
+    for (const [re, kind] of [[FIG_SCHEMA, null], [FIG_INALL, 'in all'], [FIG_CONST, 'public']]) {
+      re.lastIndex = 0;
+      for (const m of raw.matchAll(re)) {
+        if (re !== FIG_CONST && !FIG_CUE.test(raw.slice(Math.max(0, m.index - 700), m.index + 700))) continue;
+        const line = lineOf(m.index);
+        if (FIG_OK.test(lines.slice(Math.max(0, line - 3), line).join('\n'))) continue;
+        hits.push({ line, n: Number(m[1]), of: kind ?? m[2].toLowerCase(), said: m[0].trim() });
+      }
+    }
+    if (!hits.length) continue;
+    seen.erasure += 1;
+
+    for (const h of hits) {
+      const want = expect.get(h.of);
+      if (h.n !== want) {
+        note(rel, h.line, `it states the erasure reaches ${h.n} ${h.of === 'in all' ? 'tables in all' : 'tables in `' + h.of + '`'} ("${h.said}")`,
+          `${FIG_PIN} pins ${pin.pub} in \`public\` and ${pin.auth} in \`auth\`, ${pin.pub + pin.auth} in all, measured ${pin.date}. Eight files state this figure and they must state one number between them: five of them said 39 for however long it took a person to re-measure by hand. If the schema has grown, re-run the query in ${FIG_PIN}'s header, move the threshold in its \`do $$\` block, and bring every surface with it.`);
+      }
+    }
+    if (!pin.dateRe.test(raw)) {
+      note(rel, hits[0].line, 'it states the erasure figure without the date it was measured',
+        `Every other file carrying this number carries "${pin.date}" beside it. A figure on an irreversible confirmation with no date cannot be told from a stale one, and that is precisely how 39 survived on five surfaces. Copy the date from ${FIG_PIN}.`);
+    }
+    if (!/pg_constraint/.test(raw) && !/41-account-deletion|part 41/i.test(raw)) {
+      note(rel, hits[0].line, 'it states the erasure figure with no way to re-measure it',
+        `This number moves whenever a cascading foreign key is added, so a file stating it must also carry the catalogue query — the token \`pg_constraint\` — or cite ${FIG_PIN}, which holds it. Otherwise the next reader has a number and nothing to check it with.`);
+    }
+  }
+
+  // The empty-set guard, as on checks B, D, G and N. Eight files state this
+  // figure today. A run finding none has stopped matching the way the repo
+  // writes it, and a blind detector prints the same "ok" as a clean tree.
+  if (seen.erasure < 4) {
+    fatal.push(`check O found the erasure figure stated in only ${seen.erasure} file${seen.erasure === 1 ? '' : 's'}. Eight state it — web/security.html, web/studio.html, app/(owner)/deletions.tsx, src/ui/notifications.tsx, studio-web/app/deletions/page.tsx, and supabase/parts/41, 1120 and 2370. Either they stopped saying it, or the phrasing moved out from under FIG_SCHEMA / FIG_INALL / FIG_CONST and this check is now reading nothing.`);
   }
 }
 
@@ -1410,7 +1601,7 @@ function checkStoreBadges(seen) {
 
 /* ── run ─────────────────────────────────────────────────────────────────── */
 
-const seen = { count: 0, markers: 0, siteHosts: 0, csp: 0, catalogue: 0, links: 0, rail: 0, exportParts: 0, coachSteps: 0, storeBadges: 0 };
+const seen = { count: 0, markers: 0, siteHosts: 0, csp: 0, catalogue: 0, links: 0, rail: 0, exportParts: 0, coachSteps: 0, storeBadges: 0, erasure: 0 };
 if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
   for (const page of PAGES) {
     const raw = read(page);
@@ -1436,6 +1627,7 @@ if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
   checkExportParts(exportParts(), seen);
   checkCoachSteps(coachSetupSteps(), seen);
   checkStoreBadges(seen);
+  checkErasureFigure(erasurePin(), seen);
 }
 
 if (fatal.length) {
@@ -1492,4 +1684,5 @@ console.log(`check-site-claims — ok, ${PAGES.length} public pages; password mi
   + `${seen.links} internal links each resolving to a file and an id, `
   + `${seen.rail} console-rail claim and ${seen.exportParts} export-parts table matching studio-web, `
   + `${seen.coachSteps} coach setup list matching the app's own, `
-  + `${seen.storeBadges} store-badge cluster${seen.storeBadges === 1 ? '' : 's'} each caveated in its own section.`);
+  + `${seen.storeBadges} store-badge cluster${seen.storeBadges === 1 ? '' : 's'} each caveated in its own section, `
+  + `${seen.erasure} file${seen.erasure === 1 ? '' : 's'} stating the erasure figure, each agreeing with the pin in supabase/parts/41-account-deletion.sql and each dated and re-measurable.`);

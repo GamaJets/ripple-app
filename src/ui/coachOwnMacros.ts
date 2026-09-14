@@ -24,6 +24,7 @@ import { fetchOwnMacroInputs, saveCoachPrefs } from '../lib/coachPrefsStore';
 import type { OwnMacroInputs } from '../lib/coachMacros';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+import { useAuth } from './auth';
 
 export interface MyMacroInputs {
   inputs: OwnMacroInputs;
@@ -39,6 +40,10 @@ const NONE: OwnMacroInputs = { goal: null, diet: null, activity: null };
 
 export function useMyMacroInputs(): MyMacroInputs {
   const authRev = useAuthRevision();
+  // The account these three columns belong to, passed to the store rather than
+  // re-resolved inside it. Two independent answers to "who is signed in", with
+  // an await between them, is how one coach's targets get written as another's.
+  const uid = useAuth().user?.id ?? null;
   const [inputs, setInputs] = useState<OwnMacroInputs>(NONE);
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [nonce, setNonce] = useState(0);
@@ -51,7 +56,7 @@ export function useMyMacroInputs(): MyMacroInputs {
       // supabase/parts/1020, and a column PostgREST cannot find fails the whole
       // SELECT — so sharing a read would take the class rate and the monthly
       // targets down with this feature until that part is applied.
-      const r = await fetchOwnMacroInputs();
+      const r = await fetchOwnMacroInputs(uid);
       if (!live) return;
       // Under 'error' the three stay null and the STATUS is what says they are
       // unknown rather than unanswered. Assigning the nulls anyway would be
@@ -61,10 +66,10 @@ export function useMyMacroInputs(): MyMacroInputs {
       setStatus(r.status);
     })();
     return () => { live = false; };
-  }, [authRev, nonce]);
+  }, [authRev, nonce, uid]);
 
   const save = useCallback(async (patch: Partial<OwnMacroInputs>): Promise<boolean> => {
-    const ok = await saveCoachPrefs({
+    const ok = await saveCoachPrefs(uid, {
       ...('goal' in patch ? { ownGoal: patch.goal ?? null } : null),
       ...('diet' in patch ? { ownDiet: patch.diet ?? null } : null),
       ...('activity' in patch ? { ownActivity: patch.activity ?? null } : null),
@@ -74,7 +79,7 @@ export function useMyMacroInputs(): MyMacroInputs {
     // class of lie as the defaults this replaces.
     if (ok) setInputs((p) => ({ ...p, ...patch }));
     return ok;
-  }, []);
+  }, [uid]);
 
   return { inputs, status, save, reload: useCallback(() => setNonce((n) => n + 1), []) };
 }

@@ -79,6 +79,7 @@ import { scheduledFocus } from '../../src/lib/checklist';
 import { programWeeks, weekCount, weekLabel } from '../../src/lib/programBlock';
 import { blockPosition } from '../../src/lib/programStart';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useToday } from '../../src/ui/today';
 import { clientWeek } from '../../src/lib/clientBlock';
 import { isoToday, DAY_TYPE_LABEL, type PlannedDay, type PlannedDayType } from '../../src/lib/dayPlan';
 // ── the record, against the plan ──────────────────────────────────────────
@@ -159,9 +160,41 @@ export default function ClientWeek() {
   const [days, setDays] = useState<PlannedDay[] | null>(null);
   const [skipped, setSkipped] = useState(0);
   const [status, setStatus] = useState<LoadStatus>('ready');
-  // Fixed at the moment of the read rather than recomputed on every render, so
-  // a screen left open over midnight cannot re-sort itself under the coach's
-  // hands halfway through reading it. Reopening the client re-reads and moves.
+  /**
+   * The day every list, every window and the BLOCK WEEK on this screen is cut
+   * on — fixed at the moment of the read rather than recomputed on every
+   * render, so a screen left open over midnight cannot re-sort itself under the
+   * coach's hands halfway through reading it.
+   *
+   * ── and why "reopening the client re-reads and moves" was not true ───────
+   *
+   * That is what the comment here used to say, and it is the half of this the
+   * `useState` initialiser could not deliver. This screen is registered
+   * `href: null` in app/(trainer)/_layout.tsx, so it MOUNTS ONCE and is never
+   * torn down, and the effect that calls `load` depends on `[picked, askable,
+   * load]` — all three stable for one client. Coming back to the SAME client
+   * re-renders and re-reads nothing, so `todayISO` stayed at whatever day the
+   * screen was first opened on.
+   *
+   * That is not only a sort order. `blockPosition(startsOn, todayISO, …)` picks
+   * WHICH WEEK OF THE BLOCK the marked days and the logged movements are
+   * compared against. A coach who opened Amy's week on Sunday and came back on
+   * Monday — when the block had rolled to week 7 — read her marks against week
+   * 6 while her own Train tab showed her week 7, under a line saying "compared
+   * against week 6, which is the week Amy is on". Comparing a record against a
+   * week nobody was shown is the exact failure src/lib/clientBlock.ts exists to
+   * prevent, and this screen was committing it silently.
+   *
+   * `useToday` is the resolution and it gives up nothing: it is NOT a ticking
+   * clock — it moves at the next local midnight and when the app comes back to
+   * the foreground, and compares before it sets — so it cannot re-sort anything
+   * under a coach who is reading, because the only moment it moves is the
+   * moment the answer changed. It is in the dependency list of BOTH reads
+   * below, so the planned-day window, the four weeks of log and the day they
+   * are judged against are always cut on one instant rather than drifting
+   * apart. See src/ui/today.ts.
+   */
+  const today = useToday();
   const [todayISO, setTodayISO] = useState<string>(() => isoToday(new Date()));
 
   // The client whose read is allowed to reach the screen. Tapping through a
@@ -246,7 +279,10 @@ export default function ClientWeek() {
       return;
     }
     void load(picked, askable);
-  }, [picked, askable, load]);
+    // `today` in the list, not only `picked`: see the note on it above. The day
+    // turning is a new window and a possibly new week of the block, and this
+    // screen has no focus refresh to catch it.
+  }, [picked, askable, today, load]);
 
   /* ── what they actually logged ─────────────────────────────────────────
    *
@@ -299,7 +335,11 @@ export default function ClientWeek() {
   useEffect(() => {
     if (!USE_SUPABASE) return;
     void loadLog(picked, askable);
-  }, [picked, askable, loadLog]);
+    // Re-read on the day turning for the same reason as the planned days above,
+    // and in step with them: `planVsActual` compares this log against `todayISO`
+    // over a window ending now, so a log read on Sunday judged against Monday
+    // would answer "not logged" over a day the read never covered.
+  }, [picked, askable, today, loadLog]);
 
   // Four reads: the client's planned days, the roster the picker and the
   // header come off, the programme assignments — which decide which week of a

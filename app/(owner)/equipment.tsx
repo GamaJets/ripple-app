@@ -100,7 +100,35 @@ function Pill({ t, state }: { t: Theme; state: ServiceState }) {
 export default function OwnerEquipment() {
   const t = useTheme();
   const router = useRouter();
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
+
+  /**
+   * Which gym this is, and whether we know.
+   *
+   * `load` below opens `if (!tenant?.id) return;`, and that one test stood for
+   * three unrelated facts: the tenant read is still in flight, the tenant read
+   * FAILED, and this account is attached to no gym. In all three the loader
+   * returned in silence, `items` stayed null, `failed` stayed false — and the
+   * whole screen sat on `readState`'s 'loading' branch permanently, printing
+   * "Reading the register…" under a dash for a read that was never going to be
+   * attempted.
+   *
+   * The console version of this screen had the OPPOSITE failure — it rendered
+   * an account with no gym as a gym with no equipment, six confident claims
+   * about a building assembled out of a fact about the reader's profile. This
+   * app never made that claim, and the empty-register copy below is careful
+   * enough that it would not have. What it did instead was never answer at
+   * all, which is a smaller lie and still not the truth: an owner whose tenant
+   * read was refused in a plant room saw the same forever-loading screen as an
+   * account that has no gym to read.
+   *
+   * So the three are separated here and said in three sentences. `noGym` is
+   * the only one that is a fact about the account rather than about a read,
+   * and it is the only one gated on `tenantStatus === 'ready'`.
+   */
+  const noGym = tenantStatus === 'ready' && !tenant?.id;
+  /** Nothing about a register can be said until we know whose register it is. */
+  const gymKnown = !!tenant?.id;
 
   const [items, setItems] = useState<Equipment[] | null>(null);   // null = not loaded yet
   const [failed, setFailed] = useState(false);                    // the register read itself failed
@@ -338,7 +366,18 @@ export default function OwnerEquipment() {
         <Hero
           label="Needing Attention"
           figure={!loaded ? '—' : String(queue.length)}
-          note={readSt === 'failed'
+          // The gym comes BEFORE the register, because until we know whose
+          // register it is the loader has not run and `readSt` is describing a
+          // read that was never attempted rather than one that has not landed.
+          note={noGym
+            ? 'This account is not attached to a gym, so there is no register to read. '
+              + 'That is a fact about this account, not a gym with no equipment in it.'
+            : tenantStatus === 'error'
+            ? 'Your gym could not be read, so its register was not asked for. Pull down to try again — '
+              + 'this is a read that failed, not a gym with nothing on its register.'
+            : tenantStatus === 'loading'
+            ? 'Finding your gym…'
+            : readSt === 'failed'
             // Nothing has ever landed, so the figure above is a dash and this
             // is the only thing on the screen worth reading.
             ? 'The register could not be read, so nothing here is known — that is a failed read, not an all-clear.'
@@ -527,7 +566,21 @@ export default function OwnerEquipment() {
         </Section>
 
         <View style={{ marginTop: sp.lg }}>
-          <Cta label="Add Equipment" wide onPress={() => setAddOpen(true)} />
+          {/* Off unless we know which gym the kit would be added TO.
+              `commitAdd` opens `if (!n || !tenant?.id) return;`, so without
+              this an owner filled in four fields, pressed Add, and the sheet
+              closed on a write that never happened. Disabled with the reason
+              under it beats a button that answers nothing. */}
+          <Cta label="Add Equipment" wide disabled={!gymKnown} onPress={() => setAddOpen(true)} />
+          {!gymKnown ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {noGym
+                ? 'This account is not attached to a gym, so there is nowhere to file a piece of kit.'
+                : tenantStatus === 'error'
+                  ? 'Your gym could not be read, so kit added now could not be filed against it. Pull down to try again.'
+                  : 'Finding your gym…'}
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
 

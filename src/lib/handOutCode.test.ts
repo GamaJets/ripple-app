@@ -28,6 +28,9 @@ import {
   codeUptakeLine, uptakeNeedsAnswering,
 } from './handOutCode';
 import { normaliseCode, joinLink, inviteMessage } from './joinCode';
+// The reading `fetchJoinCodeStats` puts in front of `codeUptakeLine`. See the
+// block below the uptake assertions for why it is asserted from this file.
+import { queueLength } from './reschedule';
 import type { JoinCodeRow } from './joinCodes';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -248,6 +251,36 @@ ok(/1 is waiting for you to accept them/.test(codeUptakeLine({ joined: 0, pendin
 // an unread count, not about a code nobody has used yet.
 ok(/0 people have joined/.test(codeUptakeLine({ joined: 0, pending: 0 })),
   'a read zero is stated, because it is true and it is what a new code looks like');
+
+/* ── the zero has to BE read, and that happens one layer up ──────────────────
+ *
+ * `codeUptakeLine` is right about both arms and always was. What made the line
+ * above dangerous is the step before it: `fetchJoinCodeStats` in
+ * src/ui/joinCode.ts ended `Number(row.joined) || 0`, twice, so an absent key,
+ * a null column, an empty string and a word all arrived here as a settled zero
+ * and printed "0 people have joined on your codes. Nobody is waiting on you."
+ * — a claim about who is in a coach's queue, built out of an unknown. It was
+ * safe only because both figures are `count(*)` server-side, which is a fact
+ * about the current function body and not a property of this boundary.
+ *
+ * That read now goes through `queueLength`, and these assertions are what the
+ * two files agree on across the seam: every way of not being told a count comes
+ * out null, and null is the input the failure sentence above is written for.
+ * Asserted here rather than only in reschedule.test.ts because it is THIS
+ * sentence that the coercion turned into a lie.
+ */
+for (const notTold of [null, undefined, '', ' ', 'seventeen', NaN, [], {}, -1, 1.5, true]) {
+  eq(queueLength(notTold), null,
+    `${JSON.stringify(notTold) ?? 'undefined'} is not a headcount and must not settle to one`);
+}
+eq(queueLength(0), 0, 'a real zero survives the reading — that is what a new code looks like');
+eq(queueLength(17), 17, 'and a real count comes through unchanged');
+eq(queueLength('3'), 3, 'bigint counts arrive from PostgREST as strings, and a digit string is a count');
+// The pair, not the halves. Half a queue is not a queue: a true `joined` beside
+// a fabricated `pending` of nothing is the sentence at the top of this block
+// with one honest clause in front of it, which is worse than saying nothing.
+ok(queueLength(4) != null && queueLength(null) == null,
+  'one half readable and the other not is not a readable pair, and the caller returns null for the whole');
 
 /* ── the figure is every code's, and may not be attributed to one ────────────
  *

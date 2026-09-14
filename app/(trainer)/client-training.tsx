@@ -1628,10 +1628,20 @@ export default function ClientTraining() {
                           {' \u00b7 '}a flat line is a month with no logged sessions, never a month of nothing lifted
                         </Text>
 
-                        {best && best.volumeKg != null ? (
+                        {/* `best.days != null` in the gate, and no `?? 0`
+                            behind it. `MonthCell.days` is null on an UNTRAINED
+                            month (src/lib/longView.ts `blankCell`), and a
+                            fallback of 0 would have printed "their biggest month
+                            was March: 12 t across 0 days" — a sentence that is
+                            wrong about a person and reads as a broken screen.
+                            `bestMonth` only ever returns a cell with a tonnage,
+                            which is only ever a trained one, so this gate takes
+                            nothing away; it states the invariant instead of
+                            papering a zero over the case where it fails. */}
+                        {best && best.volumeKg != null && best.days != null ? (
                           <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
                             Their biggest month was {monthLabel(best.key)}: {num(tonnes(best.volumeKg))} t
-                            across {best.days ?? 0} day{best.days === 1 ? '' : 's'}
+                            across {best.days} day{best.days === 1 ? '' : 's'}
                             {best.topLift ? `, most of it ${best.topLift}` : ''}.
                           </Text>
                         ) : null}
@@ -1712,7 +1722,14 @@ export default function ClientTraining() {
                     so a coach who is no longer theirs sees nothing here and
                     the signed URL below is refused by the same rule.
                     supabase/parts/2617. */}
-                {picked ? <FormChecks memberId={picked} /> : null}
+                {/* `askable` as well as `picked`, which is what every other
+                    read on this screen already asks. `form_clips_coach_read`
+                    resolves `is_my_client()`, an EXISTS over `clients`, so for
+                    somebody the coach typed in by hand it answers zero rows and
+                    NO error — a read that was never entitled to an answer,
+                    issued on every focus, for a person with no account to hang
+                    a clip off. */}
+                {picked && askable ? <FormChecks memberId={picked} /> : null}
 
                 {/* ── what they were on before ────────────────────────────
                     Until supabase/parts/176 there was no copy of it anywhere:
@@ -1723,6 +1740,28 @@ export default function ClientTraining() {
                     else. The record starts from that migration and the line
                     below says so rather than letting "none" read as "nothing
                     was ever worth keeping". */}
+                {/* ── the third answer, which this section was collapsing ──
+                    `history` is `useProgramHistory(askable ? picked : null)` —
+                    correctly gated at :630, where the comment explains that a
+                    hand-added client is asked for nothing. But the SECTION was
+                    drawn for them anyway, and `useProgramHistory(null)` returns
+                    `{ rows: null, status: 'ready' }`: `historyBoard` reads the
+                    null and answers 'unreadable', so the line printed was
+                    "The earlier programmes could not be read. That is not the
+                    same as Amy never having been on one."
+
+                    Two answers where there are three. It is the safe half of
+                    the pair — it does not accuse anybody of never having been
+                    on a programme — but it tells a coach their read failed when
+                    no read was issued, directly underneath a notice saying this
+                    person has no account, and the only thing it suggests doing
+                    is pulling to refresh, for ever.
+
+                    The `!askable` branch above says which of the three this is,
+                    in full. So this section, the form checks above it and the
+                    unit note below it are all withheld from it rather than each
+                    adding a sentence about a read nobody made. */}
+                {askable ? (<>
                 <Rule />
                 <Section>
                   <SectionHead title="Programme History" note={hist.earlierCount == null ? undefined : `${hist.earlierCount}`} />
@@ -1755,11 +1794,17 @@ export default function ClientTraining() {
                 {/* The unit note belongs on the page even when there is nothing
                     to print it against — a coach who reads pounds should not
                     have to see a figure first to learn whose unit this is. */}
+                {/* `unitFor` is handed `unitStatus`, which `load` sets to
+                    'error' for a hand-added client — so this printed "Amy's own
+                    unit could not be read ... That is a fact about the read" on
+                    a screen with no loads on it and no read behind it. Inside
+                    the same gate as the two sections above. */}
                 {board.state !== 'some' && pick.note ? (
                   <Section>
                     <Flag tone={t.ink3}>{pick.note}</Flag>
                   </Section>
                 ) : null}
+                </>) : null}
               </View>
             ) : null}
           </>

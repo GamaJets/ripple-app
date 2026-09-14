@@ -902,12 +902,47 @@ Deno.serve(async (req) => {
         const coachId = await trainerOfAccount(eventAccount);
         if (!coachId) console.warn('stripe-webhook: payout ' + payout.id + ' on ' + eventAccount + ' resolves to no coach');
 
-        // Upserted on Stripe's own payout id, so at-least-once delivery and a
-        // `payout.updated` following a `payout.paid` overwrite rather than
-        // double. `stripe_event_at` moves with it and is what a later-arriving
-        // OLDER event would be filtered on by anything that reads these in
-        // order — webhooks are retried and are not ordered.
-        const { error } = await service.from('coach_payouts').upsert({
+        // Keyed on Stripe's own payout id, so at-least-once delivery and a
+        // `payout.updated` following a `payout.paid` land on one row rather
+        // than two.
+        //
+        // ── AND ORDERED, WHICH IT WAS NOT ────────────────────────────────
+        //
+        // This was one plain upsert, last-writer-wins, under a comment saying
+        // `stripe_event_at` "is what a later-arriving OLDER event would be
+        // filtered on by anything that reads these in order". Nothing filtered
+        // on it. The column was written and never compared, here or in any
+        // reader — `fetchMyPayouts` in src/ui/coachPayouts.ts and the two
+        // statement reads in src/ui/coachStatement.ts are the only readers of
+        // this table, and all three order by `arrival_on` then `id`, which is
+        // a BANK DATE rather than a position in Stripe's event sequence and
+        // cannot rank two deliveries about one payout at all.
+        // Part 194's own column comment states the guard as
+        // if it existed: "the write is filtered on this rather than on arrival
+        // order — the same guard every other mirrored table in this schema
+        // uses." It was the one mirrored table that did not.
+        //
+        // What that costs is the same failure the three sets below this branch
+        // were written to stop, on the one table that is about money ARRIVING.
+        // Four of these five event types describe one payout and Stripe sends
+        // them in sequence: `payout.paid` at T, then the bank returns it and
+        // `payout.failed` at T+2 carries the reason. Webhooks are retried and
+        // are NOT ordered, so a retried `paid` delivered after `failed` — a
+        // 500 anywhere else in that same delivery is enough, because a 500'd
+        // event is deliberately never recorded in the replay ledger — rewrites
+        // `status` back to 'paid' and `failure_message` back to null, since
+        // Stripe's `paid` payload carries no failure string. The coach is then
+        // shown money as landed that their bank sent back, with the one line
+        // that would have told them why erased. No further payout event is
+        // coming to correct it.
+        //
+        // So: insert-if-absent, then the two guarded updates, exactly as
+        // `writeConnectSub`, the platform subscription, `client_disputes` and
+        // `invoices` all do. `.lte` and not `.lt` — a redelivery of the SAME
+        // event carries the same `event.created` and rewriting the identical
+        // row is the idempotency the replay ledger insures rather than
+        // replaces.
+        const payoutRow: Record<string, unknown> = {
           id: payout.id,
           coach_id: coachId,
           stripe_account_id: eventAccount,
@@ -924,8 +959,37 @@ Deno.serve(async (req) => {
           // and does not know it.
           failure_message: payout.failure_message ?? null,
           stripe_event_at: eventAt,
-        });
+        };
+
+        // no-count-ok: ON CONFLICT DO NOTHING, so zero rows is the row already
+        // existing — which is the ordinary case here and what the two guarded
+        // updates below are for.
+        const { error } = await service.from('coach_payouts')
+          .upsert(payoutRow, { onConflict: 'id', ignoreDuplicates: true });
         if (error) return fail('coach_payouts', error.message);
+
+        // Two plain filters rather than one `.or(...)`, for the reason spelled
+        // out in `writeConnectSub`: an ISO timestamp inside PostgREST's or()
+        // grammar is a value full of the punctuation that grammar parses on,
+        // and a filter that silently fails to apply here is a filter that lets
+        // a stale delivery overwrite a payout's real outcome.
+        //
+        // no-count-ok: zero rows here is a NEWER event having already written
+        // this payout, which is exactly what the filter is for.
+        const { error: updErr } = await service.from('coach_payouts').update(payoutRow)
+          .eq('id', payout.id).lte('stripe_event_at', eventAt);
+        if (updErr) return fail('coach_payouts', updErr.message);
+
+        // The row the ordering token cannot rank: one written before this
+        // column was filled, or by the unguarded upsert this replaced on a
+        // delivery that predates it.
+        //
+        // no-count-ok: zero rows here is the ordinary case — every row written
+        // since part 194 carries a `stripe_event_at`, so this matches only the
+        // ones that do not.
+        const { error: nullErr } = await service.from('coach_payouts').update(payoutRow)
+          .eq('id', payout.id).is('stripe_event_at', null);
+        if (nullErr) return fail('coach_payouts', nullErr.message);
       }
     } else if (event.type === 'checkout.session.completed') {
       // A client bought a trainer's package (Connect checkout).
@@ -1818,6 +1882,106 @@ Deno.serve(async (req) => {
             stripe_account_id: eventAccount,
           }, { onConflict: 'stripe_invoice_id' });
           if (payErr) return fail('client_subscription_payments', payErr.message);
+        }
+
+        // ── the money that did NOT arrive ────────────────────────────────
+        //
+        // The other half of the block above, and until now it was written
+        // nowhere at all. `client_subscription_payments` holds paid renewals;
+        // a DECLINED one left this database nothing but a `status` on
+        // `client_subscriptions` that the next event overwrites. A client's
+        // card fails four times across a fortnight and Stripe gives up: what
+        // this app could say afterwards was "canceled", with no date, no
+        // amount, no reason and no count — a coach whose income stopped and
+        // who could not be told when, or whether it was one card or four.
+        //
+        // supabase/parts/3000 declared `client_subscription_failures` for
+        // exactly this and named the writer it needed: "one new branch in the
+        // `event.type.startsWith('invoice.')` handler … gated on `event.type
+        // === 'invoice.payment_failed'`. That change is NOT in this part and
+        // has not been made." It had still not been made; the table was
+        // applied and empty, and an empty table there means "nothing has been
+        // written yet", never "no card has failed". This is that branch.
+        //
+        // KEYED ON THE EVENT, not the invoice. One invoice can fail four times
+        // and all four rows are the record — so `stripe_invoice_id` is
+        // deliberately not unique there, and `(invoice, attempt_count)` was
+        // refused because `attempt_count` is nullable and a unique index over a
+        // NULL does not collide, which would drop the guard in precisely the
+        // case where the data is weakest. Stripe redelivers an unacknowledged
+        // webhook under the SAME `event.id`, so every retry of one delivery
+        // lands on one row and each distinct attempt gets its own.
+        //
+        // WRITTEN BEFORE THE STATUS RE-READ BELOW, for the reason the paid
+        // block states about itself: the re-read is a network call to Stripe
+        // that can fail, and of the two this is the one that cannot be
+        // reconstructed afterwards from anything this database holds. Stripe's
+        // event history is the only other copy.
+        //
+        // NOTHING HERE SENDS ANYTHING. Stripe is already retrying and already
+        // emailing where the coach has that on; this is a record, and no
+        // notification is raised on the strength of one.
+        if (event.type === 'invoice.payment_failed' && inv.id) {
+          const failureRow: Record<string, unknown> = {
+            // The same three-step identity the paid row uses, in the same
+            // order: metadata, then the mirrored subscription, then the
+            // connected account the event arrived from.
+            client_id: subMeta.client_id || known?.client_id || null,
+            trainer_id: subMeta.trainer_id || known?.trainer_id || (await trainerOfAccount(eventAccount)) || null,
+            stripe_subscription_id: subId,
+            stripe_invoice_id: inv.id,
+            stripe_event_id: event.id,
+            // Which attempt Stripe counted this as. Null means Stripe stated
+            // none on this event — NOT that it was the first, which is 1.
+            attempt_count: inv.attempt_count ?? null,
+            // What went uncollected, in minor units: `amount_due`, not
+            // `amount_paid`, which is zero on a failure and would file every
+            // decline as a nil amount. GROSS, like every other figure this
+            // webhook writes. Null if Stripe stated none, and null is not zero.
+            amount_cents: inv.amount_due ?? null,
+            // The invoice's own currency, never defaulted — Repple is
+            // white-labelled and every default is wrong for somebody. A null
+            // here means the amount beside it joins no total.
+            currency: inv.currency ?? null,
+            billing_reason: inv.billing_reason ?? null,
+            // The EVENT's own instant. A Stripe invoice carries no failure
+            // timestamp — there is no `status_transitions.failed_at` — and a
+            // delivery retried three days later must not move a decline into a
+            // different week.
+            failed_at: eventAt,
+            // When Stripe says it will try again. Null is NOT evidence that
+            // Stripe has given up; see the column comment in part 3000.
+            next_attempt_at: inv.next_payment_attempt
+              ? new Date(inv.next_payment_attempt * 1000).toISOString()
+              : null,
+            stripe_account_id: eventAccount,
+          };
+
+          const { error: failErr } = await service.from('client_subscription_failures')
+            .upsert(failureRow, { onConflict: 'stripe_event_id' });
+          // A database that has not had part 3000 run. PostgREST answers a
+          // table it does not know with PGRST205, out of its schema cache and
+          // without ever asking Postgres — measured against this project's own
+          // API, where a real missing table answers PGRST205 and an existing
+          // one answers 42501. 42P01 is Postgres's own form and is kept
+          // because it is genuinely reachable: a warm cache over a table that
+          // has just gone, which is the window during a rollback.
+          //
+          // Logged and NOT 500'd, alone among the writes in this arm. A retry
+          // cannot conjure a table, so spending Stripe's retry budget on it
+          // ends with the delivery abandoned — and this branch is beside a
+          // MONEY path, so an unrunnable write here must not take the status
+          // re-read and the paid-renewal row down with it.
+          const failCode = String((failErr as { code?: string } | null)?.code ?? '');
+          if (failErr && (failCode === 'PGRST205' || failCode === '42P01')) {
+            console.error(
+              'stripe-webhook: invoice ' + inv.id + ' failed to collect and client_subscription_failures does not '
+              + 'exist in this database, so nothing recorded it. Run supabase/parts/3000. Event ' + event.id
+              + ', account ' + (eventAccount ?? 'platform') + '. Stripe is the only record of this decline.',
+            );
+          } else if (failErr) {
+            return fail('client_subscription_failures', failErr.message);
+          }
         }
 
         // ── the status ───────────────────────────────────────────────────

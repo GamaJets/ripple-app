@@ -339,6 +339,28 @@ export default function TrainerAnalytics() {
   // average over a roster that came back short is the same kind of lie one step
   // removed: it is a real average of a set nobody chose.
   const avgAdh = rosterWhole && _adhKnown.length ? Math.round(_adhKnown.reduce((a, x) => a + x, 0) / _adhKnown.length) : null;
+  /**
+   * The reason there is no adherence figure, or null when there is one.
+   *
+   * Worded once and used by the average and all three bands in the digest
+   * context below, so they cannot describe the same gap four different ways.
+   * Begins with the word `unknown` because the coach-side prompts scan for
+   * exactly that word and the edge function's own rule (coach-chat/index.ts)
+   * forbids reporting a figure it was not given as zero.
+   *
+   * This is the twin of `adhGap` in app/(trainer)/assistant.tsx, which is the
+   * screen this digest was copied from. A hand-added client has no Repple
+   * account and no check-in screen to have been silent on, so `adherence` is
+   * null for every one of them — and in the live database 2 of 4 clients are
+   * hand-added. "No check-ins yet" is a sentence about people who have not
+   * failed to do anything.
+   */
+  const adhGap = !rosterWhole || _adhKnown.length ? null
+    : roster.length === 0
+      ? 'unknown — there is nobody on this roster to have an adherence figure'
+      : 'unknown — not one of the ' + roster.length + ' clients on this roster has a check-in on record'
+        + (handAdded ? ' (' + handAdded + ' of them were added by hand and have no Repple account to record one with)' : '')
+        + ', so state no adherence figure and do not say anyone is on track or at risk';
   // Clients with no check-in are counted as unknown, not as on-track. Null when
   // the roster is not whole: these three are a distribution, and a distribution
   // over an unknown fraction of the book is drawn to full width and read as
@@ -613,20 +635,87 @@ export default function TrainerAnalytics() {
       sessionsDeliveredThisMonth: sessionsMo,
       sessionsStillUnmarked: unmarkedMo,
       revenueAtOwnRate: revenue ?? 'unknown — no session rate set',
-      takenThisMonth: takenOne ?? (takenMonth.reason ?? 'nothing recorded'),
+      // Was `takenOne ?? (takenMonth.reason ?? 'nothing recorded')`. The reason
+      // arm is honest and stays; the bare fallback behind it was reached in
+      // three different states and described one of them.
+      //
+      //   · TWO OR MORE CURRENCIES. `takenOne` is null whenever there is not
+      //     exactly one pot, so a coach who took AED 6,000 and GBP 400 was
+      //     telling the model nothing was recorded. The pots go over as they
+      //     are printed on the screen, never added — src/lib/coachMoney.ts
+      //     refuses that addition at the source and the prompt above repeats it.
+      //   · AMOUNTS WITH NO CURRENCY ON THEM. `unlabelled` and `unpriced` are
+      //     payments that are real and cannot be totalled (src/lib/coachLedger.ts
+      //     counts them rather than dropping them), so an empty pot list with
+      //     holes in it is a hole, not a quiet month.
+      //   · A GENUINELY EMPTY MONTH. `takenMonth.total` is non-null only when
+      //     every contributing read came back whole, so this one is a counted
+      //     zero and says so — a figure, with the evidence for it attached.
+      takenThisMonth: takenOne
+        ?? takenMonth.reason
+        ?? (takenPots.length > 1
+          ? 'taken in ' + takenPots.length + ' separate currencies this month, which are never added into one figure: '
+            + takenPots.map((pt) => minorMoney(pt.minorUnits, pt.currency)).filter(Boolean).join(', ')
+          : takenHoles > 0
+            ? 'unknown — ' + takenHoles + ' payment' + (takenHoles === 1 ? '' : 's') + ' recorded this month '
+              + 'carr' + (takenHoles === 1 ? 'ies' : 'y') + ' no currency or no amount, so nothing can be totalled: '
+              + 'state no takings figure and do not say they took nothing'
+            : '0 — every takings read for this month (packages, subscription renewals and payments recorded by hand) '
+              + 'came back whole and holds no payment, so this is a counted zero rather than a missing figure'),
       // Was `myCur ?? 'unknown — the gym has not set one'` — one string for six
       // states, four of which it describes wrongly, and after part 940 the
       // commonest of them is a coach who HAS no gym. See
       // src/lib/currencyForModel.ts.
       currency: currencyForModel(cur),
       clients,
-      avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet',
+      // Was `avgAdh != null ? avgAdh + '%' : 'no check-ins yet'` — the exact
+      // line lane 89 replaced in assistant.tsx, and both halves of it were
+      // wrong here for the same reasons. The fallback asserts a silence about
+      // people who may have no account to have been silent from; the figure
+      // itself is an average over whoever happens to have one, handed over
+      // beside `clients: 4` with no denominator, so a model reads it as the
+      // adherence of the whole book. It carries its own coverage now.
+      avgAdherence: avgAdh != null
+        ? _adhKnown.length === roster.length
+          ? avgAdh + '%'
+          : avgAdh + '% — averaged over the ' + _adhKnown.length + ' of ' + roster.length
+            + ' clients who have a check-in on record, so it is not the whole book'
+        : adhGap,
       // Null rather than a number when the training record did not come back.
       // The system prompt tells the model to say it was not given a figure
       // rather than guess at one; a zero here would have it write a paragraph
       // about a book where nobody is drifting.
-      atRiskClients: atRisk === null ? null : atRisk.length,
-      onTrack, watch, atRiskLow: riskCount,
+      //
+      // And `atRisk === null ? null : atRisk.length` left the emptiest read of
+      // all reporting 0. `driftSubjects` is the roster MINUS the hand-added
+      // clients, so a book that is entirely hand-added makes it empty;
+      // `useClientDrift` short-circuits on an empty subject list and returns a
+      // clean, empty map, `driftCovered` is true, the filter runs over nothing
+      // and the digest told the coach nobody is drifting. Nobody had been
+      // assessed. This screen did the filtering, so it is the only place that
+      // knows what it removed — the same repair as assistant.tsx:391.
+      atRiskClients: !rosterWhole ? null
+        : driftSubjects.length === 0
+          ? (roster.length
+            ? 'unknown — all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
+              + 'account, so there is no training record to judge any of them by and nobody has been assessed'
+            : null)
+          : atRisk === null
+            ? (dr.note ? 'unknown — ' + dr.note : null)
+            : handAdded
+              // The denominator travels with the number whenever it is not the
+              // whole book, for the same reason `avgAdherence` now carries one.
+              ? atRisk.length + ' of the ' + driftSubjects.length + ' clients with a Repple account; the other '
+                + handAdded + ' were added by hand and have no training record, so they are in no count here'
+              : atRisk.length,
+      // The three bands are counted over the clients who have an adherence on
+      // record, which is narrower than the roster — `noRecord` beside them on
+      // the roster-health bar is exactly the clients they cannot see. Reported
+      // as `0 / 0 / 0` when that set is empty they are three more all-clears
+      // made out of an absence, so they hand over `adhGap` instead.
+      onTrack: rosterWhole ? (_adhKnown.length ? onTrack : adhGap) : null,
+      watch: rosterWhole ? (_adhKnown.length ? watch : adhGap) : null,
+      atRiskLow: rosterWhole ? (_adhKnown.length ? riskCount : adhGap) : null,
       howTheyCoach: sessionsLead ? 'in person, or both in person and remotely' : 'entirely online',
     };
     // `askAboutMyBusiness`, not `askCoach`. Nothing in `ctx` above names a

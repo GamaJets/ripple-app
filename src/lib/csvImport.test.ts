@@ -18,7 +18,22 @@
 // The rest of the family is asserted beside its own function. What is asserted
 // here is the import's two REFUSALS, which are two refusals rather than one
 // because they have two different fixes and only one of them is in this app.
-import { parseMoneyCents } from './csvImport';
+//
+// ── and, since 14 Sep 2026, the third refusal: the payment METHOD ─────────
+//
+// `previewPayments` read the method column as `METHODS[raw] ?? 'other'`, the
+// one coercion left among this file's word parsers — status, delivery mode,
+// billing period and active all refuse a word they do not know. So "cheque",
+// "paypal", "efectivo" and the typo "cardd" became `other`, which is also what
+// a BLANK cell becomes, on an import screen that never displays the parsed
+// method. Nothing downstream could tell the two apart and nobody was shown the
+// difference, and the row is the gym's permanent record of how a member paid.
+//
+// The blank is deliberately still `other`, and the assertions below hold both
+// halves of that: an unreadable word is refused BY NAME, a blank (or a missing
+// column, which is the same thing on every row of a sheet that never had one)
+// imports as `other` in silence.
+import { parseMoneyCents, previewPayments } from './csvImport';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -101,9 +116,82 @@ const why = (r: ReturnType<typeof parseMoneyCents>) => (r.ok ? '' : r.reason);
   }
 }
 
+/* ── the payment method is read, or refused by name ───────────────────────
+ * Every row here is otherwise perfect — a name, a good amount in the gym's own
+ * currency, an unambiguous ISO date — so the only thing that can reject one is
+ * the method column, and a rejection therefore means exactly what it says.
+ */
+{
+  const sheet = (method: string) =>
+    `member,amount,date,method\nSam Patel,50.00,2026-09-01,${method}\n`;
+  const preview = (method: string) => previewPayments(sheet(method), undefined, 'GBP');
+  const first = (method: string) => preview(method).rows[0];
+
+  // The spellings that are read, including the four stored values themselves
+  // and `other`, which gymExport.ts writes into this column — a file this
+  // product exported has to re-import.
+  const reads: [string, string][] = [
+    ['Card', 'card'], ['visa', 'card'], ['Stripe', 'card'],
+    ['CASH', 'cash'],
+    ['Bank Transfer', 'transfer'], ['bacs', 'transfer'], ['transfer', 'transfer'],
+    ['Direct Debit', 'direct_debit'], ['direct_debit', 'direct_debit'],
+    ['GoCardless', 'direct_debit'],
+    ['other', 'other'],
+  ];
+  for (const [written, read] of reads) {
+    const r = first(written);
+    eq(r.errors.length, 0, `"${written}" is a method this reads, so the row is not rejected — ${r.errors.join('; ')}`);
+    eq(r.value?.method, read, `"${written}" reads as ${read}`);
+    eq(preview(written).ready.length, 1, `and "${written}" reaches ready[]`);
+  }
+
+  // The coercion this test exists for. Each of these was silently `other`.
+  for (const bad of ['cheque', 'check', 'paypal', 'efectivo', 'cardd', 'crypto', 'venmo', 'invoice']) {
+    const r = first(bad);
+    ok(r.errors.length > 0, `"${bad}" is refused rather than filed as other`);
+    ok(r.errors.some((e) => e.includes(`"${bad}"`)),
+      `and the refusal NAMES the value that could not be read — got ${JSON.stringify(r.errors)}`);
+    ok(r.errors.some((e) => e.includes('is not one this recognises')),
+      `in the same words as status, delivery and billing period — got ${JSON.stringify(r.errors)}`);
+    eq(preview(bad).ready.length, 0, `and "${bad}" does not reach ready[], where it would become a stored row`);
+    eq(preview(bad).rejected.length, 1, `it is in rejected[], where the gym is shown it`);
+  }
+
+  // The cell decides whether the file said anything, not the stripped key: "1"
+  // and "-" have no letters in them and would otherwise read as blank.
+  for (const noisy of ['1', '-', '???']) {
+    const r = first(noisy);
+    ok(r.errors.some((e) => e.includes(`"${noisy}"`)),
+      `"${noisy}" is the file saying something unreadable, not the file saying nothing — got ${JSON.stringify(r.errors)}`);
+  }
+
+  // A blank cell is the other case, and it is not the same case.
+  {
+    const r = first('');
+    eq(r.errors.length, 0, `a blank method is not an error — ${r.errors.join('; ')}`);
+    eq(r.value?.method, 'other', 'a blank method imports as other, which is the only value the not-null column has for "the file did not say"');
+  }
+
+  // A sheet with no method column at all is that blank on every row. Refusing
+  // it would make an optional column mandatory through the back door.
+  {
+    const p = previewPayments('member,amount,date\nSam Patel,50.00,2026-09-01\nAsha Khan,20.00,2026-09-02\n', undefined, 'GBP');
+    eq(p.rejected.length, 0, `a payments sheet with no method column imports whole — ${JSON.stringify(p.rejected.map((r) => r.errors))}`);
+    eq(p.ready.length, 2, 'both rows are ready');
+    eq(p.ready.every((v) => v.method === 'other'), true, 'each reading as other');
+  }
+
+  // The refusal is the method's alone: it does not swallow another column's
+  // reason, and it does not fire on a row that is wrong for another cause.
+  {
+    const r = previewPayments('member,amount,date,method\nSam Patel,50.00,2026-09-01,cheque\n', undefined, 'GBP').rows[0];
+    eq(r.errors.length, 1, `one row, one fault, one message — got ${JSON.stringify(r.errors)}`);
+  }
+}
+
 if (errors.length) {
   console.error(`csvImport: ${errors.length} failure(s)`);
   for (const e of errors) console.error('  · ' + e);
   process.exit(1);
 }
-console.log('csvImport: all assertions passed — a money column is scaled by a currency somebody stated, or it is refused');
+console.log('csvImport: all assertions passed — a money column is scaled by a currency somebody stated, or it is refused; and a payment method is one this reads, or it is refused by name');

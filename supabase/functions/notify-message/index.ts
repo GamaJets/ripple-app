@@ -62,14 +62,46 @@ Deno.serve(async (req: Request) => {
   let title = 'New message';
   let route = '/(client)/messages';
 
+  // ── A FAILED READ IS NOT "THIS MESSAGE HAS NOBODY TO GO TO" ──────────────
+  //
+  // Every read in this block was `const { data: c } = await …`, with the error
+  // thrown away, and the `catch` below does not see one: supabase-js RESOLVES
+  // with `{ data: null, error }` rather than throwing, so a PostgREST fault
+  // never reaches it.
+  //
+  // On the client→coach path that was the whole notification. A transient
+  // fault on `clients` left `recipient` null, and the line under this block
+  // read that as "there is no coach on this thread" and answered
+  // `{ ok: true, skipped: 'no recipient' }` — a 200, with no inbox row, no
+  // push and NOTHING IN THE LOG. The trigger in supabase/parts/1210 posts
+  // through pg_net and swallows its own exceptions, so nothing retries and
+  // nothing anywhere records that a client's message reached their coach by no
+  // route at all. Their own screen said "Sent".
+  //
+  // The two cases are now told apart, because they are not the same fact:
+  //
+  //   · the read SUCCEEDED and named nobody — a thread whose client has no
+  //     trainer. A real answer, and the existing `skipped` is right for it.
+  //   · the read FAILED — we do not know who this was for. Logged, and
+  //     answered with a 500 rather than an `ok`, so that the failure is in
+  //     `net._http_response` as well as in this function's log. Nothing
+  //     retries either way; what changes is that the loss is findable in two
+  //     places instead of none.
+  //
+  // The name reads are not the same class. They only decide the TITLE, and a
+  // message that arrives headed "Your coach" is a message that arrived — so a
+  // failure there is logged and the fallback stands.
+  let recipientUnreadable: string | null = null;
   try {
     if (sender === 'coach') {
       // Coach → client: notify the client; title = the coach's name.
       recipient = clientId;
       route = '/(client)/messages';
-      const { data: c } = await admin.from('clients').select('trainer_id').eq('id', clientId).maybeSingle();
+      const { data: c, error: cErr } = await admin.from('clients').select('trainer_id').eq('id', clientId).maybeSingle();
+      if (cErr) console.error('notify-message: could not read the trainer on thread ' + clientId + ', so this message is headed "Your coach" instead of the coach’s name:', cErr.message);
       if (c?.trainer_id) {
-        const { data: p } = await admin.from('profiles').select('full_name').eq('id', c.trainer_id).maybeSingle();
+        const { data: p, error: pErr } = await admin.from('profiles').select('full_name').eq('id', c.trainer_id).maybeSingle();
+        if (pErr) console.error('notify-message: could not read the name of coach ' + c.trainer_id + ', so this message is headed "Your coach":', pErr.message);
         title = p?.full_name || 'Your coach';
       } else { title = 'Your coach'; }
     } else {
@@ -82,12 +114,31 @@ Deno.serve(async (req: Request) => {
       // push for the same message; anybody removing that duplicate would have
       // been left with only this one.
       route = `/(trainer)/chat?clientId=${encodeURIComponent(clientId)}`;
-      const { data: c } = await admin.from('clients').select('trainer_id').eq('id', clientId).maybeSingle();
+      const { data: c, error: cErr } = await admin.from('clients').select('trainer_id').eq('id', clientId).maybeSingle();
+      // THE read this function turns on. A failure here is not an absent coach.
+      if (cErr) recipientUnreadable = cErr.message;
       recipient = c?.trainer_id ?? null;
-      const { data: p } = await admin.from('profiles').select('full_name').eq('id', clientId).maybeSingle();
+      const { data: p, error: pErr } = await admin.from('profiles').select('full_name').eq('id', clientId).maybeSingle();
+      if (pErr) console.error('notify-message: could not read the name of client ' + clientId + ', so this message is headed "Your client":', pErr.message);
       title = p?.full_name || 'Your client';
     }
-  } catch { /* fall through */ }
+  } catch (e) {
+    // A THROW, as opposed to the resolved `{ error }` handled above: the
+    // network under supabase-js rather than PostgREST's answer. Same loss, and
+    // it was reaching the same silent `skipped` — on the client→coach path it
+    // leaves `recipient` null having never been assigned.
+    if (!recipient) recipientUnreadable = (e as Error).message;
+    else console.error('notify-message: the name lookups for thread ' + clientId + ' threw, so this message keeps its fallback heading:', (e as Error).message);
+  }
+
+  if (recipientUnreadable) {
+    console.error(
+      'notify-message: could not read who thread ' + clientId + ' belongs to, so a message from '
+      + (sender || 'a client') + ' was notified to NOBODY — no inbox row and no push. '
+      + 'The trigger does not retry. Reason: ' + recipientUnreadable,
+    );
+    return json({ error: 'recipient unreadable' }, 500);
+  }
 
   if (!recipient) return json({ ok: true, skipped: 'no recipient' });
 
@@ -206,7 +257,26 @@ Deno.serve(async (req: Request) => {
     if (recorded && !quietErr && quiet) return json({ ok: true, muted: true });
   } catch { /* an hour we cannot read is not a quiet hour — fall through and send */ }
   try {
-    const { data: toks } = await admin.from('push_tokens').select('token').eq('user_id', recipient);
+    // ── A FAILED READ IS NOT "THIS PERSON HAS NO HANDSETS" ────────────────
+    //
+    // `const { data: toks } = await …`, with the error dropped. A transient
+    // fault on `push_tokens` came back `{ data: null, error }`, `toks ?? []`
+    // turned that into an empty list, `tokens.length` was 0, and the function
+    // returned `{ ok: true }` having sent nothing — indistinguishable from a
+    // recipient who has never opened the app on a phone.
+    //
+    // That is the same silence the Expo answer three lines below is read for,
+    // one step earlier in the same path and strictly worse: there the push was
+    // attempted and refused, here it was never attempted at all. Nothing here
+    // returns to a person and the trigger does not retry, so the log is again
+    // the only place it can be found.
+    //
+    // Not fatal, and not a 500. The inbox row is already written by this point
+    // and is what the recipient finds; the banner is what was lost.
+    const { data: toks, error: tokErr } = await admin.from('push_tokens').select('token').eq('user_id', recipient);
+    if (tokErr) {
+      console.error('notify-message: could not read the handsets for ' + recipient + ', so no push was sent for this message — this is NOT the same as them having none:', tokErr.message);
+    }
     const tokens: string[] = (toks ?? []).map((r: any) => r.token).filter(Boolean);
     if (tokens.length) {
       const msgs = tokens.map((to) => ({ to, title, body: text, sound: 'default', data: { route } }));

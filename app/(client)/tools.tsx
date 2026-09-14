@@ -45,14 +45,13 @@
 // anything is estimated or loaded, so this screen and the workout log cannot
 // disagree about what "225" was.
 import { useState, useEffect, useCallback } from 'react';
-import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
@@ -66,6 +65,9 @@ import {
 } from '../../src/lib/units';
 import { est1RM } from '../../src/lib/streaks';
 import { BARS, PLATES, loadBar } from '../../src/lib/plateMath';
+// The rep box, which was `parseInt(r, 10) || 0` and nothing else — see
+// src/lib/repEstimate.ts for the 3,430 kg hero figure that produced.
+import { readReps, epleyCaveat } from '../../src/lib/repEstimate';
 import { warmupRamp, warmupNote, warmupRefusal } from '../../src/lib/warmupRamp';
 import { BACK_ICON } from '../../src/ui/direction';
 
@@ -76,13 +78,19 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  // was taken as. Nothing is shown until something is typed into a labelled box.
  const [w, setW] = useState('');
  const [r, setR] = useState('5');
+ // The rep count gets the same treatment the load beside it has always had.
+ // `readLift` refuses a load "heavier than anyone has lifted"; this box took
+ // anything at all, so the screen refused an INPUT of 700 kg and then printed
+ // an estimated one-rep max of 3,430 kg from 100 kg x 999 reps as its hero,
+ // and 83 kg from a rep count of -5. See src/lib/repEstimate.ts.
+ const repRead = readReps(r);
  // The typed load makes the same trip to kilograms that a logged set makes, and
  // through the same reader — so "225" here and "225" in the workout log are the
  // same load, and text that is not a number is refused rather than quietly
  // becoming 0 and estimating a one-rep max from it.
  const read = readLift(w, wu);
  const kg = read.ok ? read.kg : null;
- const reps = parseInt(r, 10) || 0;
+ const reps = repRead.ok ? repRead.reps : null;
  // Epley, computed on the record's own kilograms and through the very function
  // History's personal records use. The formula does not care about units, but
  // WHICH figure it is applied to does: estimating in pounds and converting the
@@ -90,6 +98,12 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  // same set, and two screens disagreeing about one lift is how a client learns
  // not to trust either.
  const oneRmKg = kg && reps ? est1RM(kg, reps) : 0;
+ // Said BESIDE the figure rather than instead of it. A set of fifteen is a real
+ // set and the member gets their number; what they also get is the fact that
+ // Epley runs high out there, so the figure is a ceiling and not a load to go
+ // and put on a bar. Past thirty reps `readReps` refuses outright instead —
+ // a caveat under a number people will remember is not a refusal.
+ const caveat = oneRmKg ? epleyCaveat(reps) : null;
  // `?? 0` only for the empty case: est1RMIn returns null when it is handed
  // nothing, which is exactly when there is no estimate to show.
  const oneRm = est1RMIn(oneRmKg || null, wu) ?? 0;
@@ -118,7 +132,15 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
      leaving the last good estimate on screen next to a number it was not
      computed from. */}
  <Hero label="Estimated 1RM · Epley" figure={fig(oneRm || null)} unit={wu}
- note={!read.ok ? read.reason : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'} />
+ note={!read.ok ? read.reason
+ : !repRead.ok ? repRead.reason
+ : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'} />
+ {/* The caveat is its own line under the hero, in ink rather than in the
+     reserved warn colour — this screen already had that rule corrected once,
+     on "Closest loadable". */}
+ {caveat ? (
+ <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{caveat}</Text>
+ ) : null}
 
  {oneRm > 0 ? (<>
  <Rule />

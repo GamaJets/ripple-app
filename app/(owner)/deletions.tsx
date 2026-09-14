@@ -10,13 +10,24 @@
 //
 // Three things this screen is careful about:
 //
-//  · The delete is IRREVERSIBLE and cascades across 39 tables. It gets two
-//    confirmations naming the person, not one tap, and the wording says
-//    plainly what survives (payments, door-log visits, guest passes — kept
-//    but detached) and what does not. Invoices and memberships are in the
-//    second group: they CASCADE. Worth stating because it is the opposite of
-//    what you would assume of a financial record, and an earlier draft of
-//    41-account-deletion.sql asserted the reverse.
+//  · The delete is IRREVERSIBLE and cascades very widely — see
+//    CASCADE_TABLES below for the measured figure and how it was measured. It
+//    gets two confirmations naming the person, not one tap, and the wording
+//    says plainly what survives (payments, door-log visits, guest passes —
+//    kept but detached) and what does not.
+//
+//    This comment, and the confirmation itself, used to say "39 tables" and
+//    that invoices and memberships CASCADE. Both were wrong, and both were
+//    wrong in the direction that matters least and most respectively. The
+//    count understated the blast radius by a factor of three. The invoices
+//    sentence was not merely stale but INVERTED: the retention part of
+//    setup.sql (the one that adds `gym_invoices.billed_name`,
+//    `gym_payments.payer_name` and `memberships.member_label`) drops those
+//    three `_member_id_fkey` constraints and recreates them ON DELETE SET
+//    NULL, precisely so a gym's financial record outlives the erasure. The
+//    confirmation was therefore telling an owner their invoices would be
+//    destroyed at the moment they were deciding whether to press it.
+//    Verified against the live schema on 14 September 2026 — see below.
 //
 //  · The clock is the point. `days_remaining` counts down from 30; a row at
 //    zero is a broken promise already, so it reads as critical rather than as
@@ -52,6 +63,43 @@ import { capLimit, capped } from '../../src/lib/rowCap';
  *  ever offered the recent history — so a read that comes back at it is
  *  labelled as the most recent rather than counted as the whole. */
 const LOG_LIMIT = 50;
+
+/**
+ * How many tables of this gym's own data an erasure reaches.
+ *
+ * A figure in a sentence is a claim, and this one sits in the confirmation of
+ * an irreversible delete, so here is exactly what it is and how it was got.
+ *
+ * MEASURED 14 September 2026 against the LIVE schema (project phgfwzpkkwdysftlgkoq),
+ * as the transitive closure of `on delete cascade` foreign keys from the row
+ * `action_account_deletion()` actually deletes — `auth.users`:
+ *
+ *     with recursive fk as (
+ *       select (conrelid::regclass)::text  as child,
+ *              (confrelid::regclass)::text as parent
+ *         from pg_constraint
+ *        where contype = 'f' and confdeltype = 'c')
+ *     , rec as (
+ *       select 'auth.users'::text as tbl
+ *        union
+ *       select fk.child from fk join rec on fk.parent = rec.tbl)
+ *     select count(*) from rec;
+ *
+ * 130 rows including `auth.users` itself: 118 in `public` and 11 more inside
+ * Supabase's own `auth` schema (identities, sessions, refresh tokens, MFA
+ * factors — the sign-in account, not gym records). The confirmation names the
+ * 118 as gym data and the auth side in words, because "129" would be a figure
+ * an owner cannot check and half of it is not their gym's data anyway.
+ *
+ * The same closure computed from `supabase/setup.sql` gives 125 public tables.
+ * The live number is the one stated: setup.sql's extra rows are tables the
+ * file creates and later drops, or that never reached this project. Re-measure
+ * with the query above rather than by counting clauses in the file.
+ *
+ * If you add a cascading foreign key, this number is stale. It understating
+ * the blast radius is the worst copy in the product.
+ */
+const CASCADE_TABLES = 118;
 
 /** A row of `pending_deletions`. Nulls are kept as nulls — see `fig`. */
 interface Pending {
@@ -261,8 +309,8 @@ export default function OwnerDeletions() {
     const who = p.name || 'This account';
     Alert.alert(
       `Delete ${who}?`,
-      `This permanently erases ${who} and everything of theirs — their profile, workouts, logs, scans, messages and bookings, across 39 tables.\n\n` +
-      `Their invoices and memberships go too. Payments, door-log visits and guest passes stay, with the person detached from them.\n\n` +
+      `This permanently erases ${who} and everything of theirs — their profile, workouts, logs, scans, messages and bookings — across ${CASCADE_TABLES} tables of this gym's records, and their sign-in account with them.\n\n` +
+      `Your financial record survives. Invoices, memberships, payments, door-log visits and guest passes are all kept, with the person detached from them and their name copied onto the invoice so it can still be reconciled.\n\n` +
       `Requested ${day(p.requestedAt)}.`,
       [
         { text: 'Cancel', style: 'cancel' },

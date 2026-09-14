@@ -25,6 +25,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RosterClient } from '../lib/trainerMock';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
+import {
+  clientModesKey, readClientModes, writeClientModes, LEGACY_CLIENT_MODES_KEY,
+} from '../lib/clientModeOverrides';
+import { accountStateStep } from '../lib/accountScopedState';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
@@ -38,6 +42,9 @@ import { endCoaching, endCoachingWithReason, type EndReason } from '../lib/endCo
 import { reportError } from '../lib/reportError';
 import { activeInjuries, type Injury } from '../lib/injuries';
 import { mergeRoster } from '../lib/rosterMerge';
+// The rule for the `unread` column, from the module that owns it. See the
+// read below: this roster used to parse the same column beside it, laxly.
+import { rowToThread } from '../lib/coachThreads';
 
 /**
  * Whether a disclosure is new enough that a coach has probably not seen it.
@@ -54,7 +61,6 @@ const isRecent = (at: string | undefined): boolean => {
 };
 
 let SEQ = 900;
-const MODE_KEY = 'repple.clientModes';
 
 interface RosterValue {
   roster: RosterClient[];
@@ -88,8 +94,15 @@ interface RosterValue {
    * asked why must not be made to invent an answer.
    */
   removeClient: (id: string, reason?: EndReason | null, note?: string | null) => Promise<boolean>;
-  /** Resolves true only when the classification was stored server-side. It is
-   *  always kept on this device, so false means "this phone only", not "lost". */
+  /** Resolves true only when the classification was stored server-side.
+   *
+   *  False no longer means "kept on this phone" unconditionally. The device copy
+   *  is account-scoped now, and it is written only when there is a signed-in
+   *  coach to scope it to AND the read off their key landed — so a tap made
+   *  before the roster has hydrated, or after a refused read, applies for this
+   *  session and is not persisted. That is deliberate: the alternative is a
+   *  shared key, which is the defect, or an empty map written over the coach's
+   *  own classifications, which loses them. */
   setClientMode: (id: string, mode: CoachedMode) => Promise<boolean>;
   /** Re-read the roster from the server. Screens call this on focus, so an
    *  injury a client recorded a minute ago is on the coach's page by the time
@@ -114,7 +127,81 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   const [modeOverrides, setModeOverrides] = useState<Record<string, CoachedMode>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
-  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem(MODE_KEY); if (raw) setModeOverrides(JSON.parse(raw)); } catch { /* local classification only; the roster itself is unaffected */ } })(); }, []);
+  // ── Which coach's classifications these are ───────────────────────────────
+  //
+  // They used to live under one unqualified key, `repple.clientModes`, read once
+  // on mount and written by every tap. A key with no account in it is a key the
+  // next account inherits, and nothing cleared this one — so on a gym's shared
+  // handset the next coach to sign in read the previous coach's classification
+  // of any client the two of them share, in place of the server's own mode. The
+  // key is account-scoped now; src/lib/clientModeOverrides.ts holds the shape,
+  // the parsing, and why the old blob is dropped rather than migrated.
+  //
+  // Two refs rather than two pieces of state, because the writers below run from
+  // event handlers and must see the current values rather than the ones from the
+  // render that created them.
+  //
+  //   · `modesKey`      — the key this coach's overrides belong under. Null
+  //                       means there is no account to scope them to, and a null
+  //                       means DO NOT WRITE. There is no shared key to fall
+  //                       back to; falling back is the defect.
+  //   · `modesHydrated` — whether the read off that key LANDED. An empty map
+  //                       from a refused read is not "this coach has classified
+  //                       nobody", and writing it back would take their own
+  //                       classifications off the phone.
+  const modesKey = useRef<string | null>(null);
+  const modesHydrated = useRef(false);
+  /** Keep the map under the signed-in coach's key, if there is one and if what
+   *  is in memory came from it. Both guards are independent and both are
+   *  necessary — see the note above. */
+  const persistModes = (next: Record<string, CoachedMode>) => {
+    const key = modesKey.current;
+    if (!key || !modesHydrated.current) return;
+    AsyncStorage.setItem(key, writeClientModes(next))
+      .catch((e) => reportError('roster.writeModes', e));
+  };
+  /**
+   * Apply the account-change rule to the overrides, and answer with the key to
+   * read — null when there is nothing to read.
+   *
+   * `accountStateStep` (src/lib/accountScopedState.ts) is the rule, shared with
+   * every other screen holding account-scoped state, and it is used here rather
+   * than restated so the copies cannot drift. Its two halves both matter to this
+   * provider:
+   *
+   *   · A NULL SESSION IS NOT ALWAYS A SIGN-OUT. auth-js emits one whenever
+   *     `getSession()` errors — a token that could not be refreshed in a
+   *     basement weights room. `hold` is the answer there, and it changes
+   *     nothing: a coach on bad wifi keeps the classifications on screen.
+   *   · A DIFFERENT ACCOUNT IS NOT A RE-READ. The departing coach's map is
+   *     dropped on the way IN, before the new read lands and whatever it
+   *     decides, because this provider is mounted for the life of the app.
+   *
+   * The writer is disarmed on every path but `hold`, which is the trap on its
+   * own: a flag that survived the key changing would let a read that then failed
+   * write an empty map over the NEW coach's own classifications.
+   */
+  const stepModes = (who: string | null): string | null => {
+    const step = accountStateStep({
+      key: clientModesKey(who),
+      onScreenKey: modesKey.current,
+      onScreenSaved: modesHydrated.current,
+    });
+    if (step.do === 'hold') return null;
+    if (step.do === 'forget') {
+      setModeOverrides({});
+      modesHydrated.current = false;
+      modesKey.current = null;
+      return null;
+    }
+    // Only when the map on screen is somebody ELSE's. The same coach refreshing
+    // — which every screen does on focus — keeps what is already there while the
+    // read runs, so a focus does not blank the roster's chips for a frame.
+    if (step.forget) setModeOverrides({});
+    modesHydrated.current = false;
+    modesKey.current = null;
+    return step.key;
+  };
 
   // A signed-in coach sees ONLY their linked clients, and a clean slate if they
   // have none. With no session there is nothing to read and nothing to show —
@@ -134,13 +221,32 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // in — where it stayed, because the effect never ran a second time.
         const { data: sess } = await supabase.auth.getSession();
         if (cancelled()) return;
-        if (!sess?.session) { setStatus('ready'); return; }
+        if (!sess?.session) { stepModes(null); setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled()) return;
         if (authErr) { setStatus('error'); return; }
         const uid = auth?.user?.id;
-        if (!uid) { setRoster([]); setStatus('ready'); return; }
+        if (!uid) { stepModes(null); setRoster([]); setStatus('ready'); return; }
         setUid(uid);
+        // This coach's classifications, off a key with their account in it. The
+        // read is armed only once it has LANDED; a throw leaves the writer
+        // disarmed, which shows the server's own modes — the true fallback for
+        // "we could not read what this device remembered".
+        const mKey = stepModes(uid);
+        if (mKey) {
+          try {
+            const raw = await AsyncStorage.getItem(mKey);
+            if (cancelled()) return;
+            setModeOverrides(readClientModes(raw));
+            modesKey.current = mKey;
+            modesHydrated.current = true;
+          } catch (e) { reportError('roster.readModes', e); }
+          // The unqualified blob, removed UNREAD. It carries no account, so
+          // reading it into this coach is a guess — see the header of
+          // src/lib/clientModeOverrides.ts.
+          AsyncStorage.removeItem(LEGACY_CLIENT_MODES_KEY)
+            .catch((e) => reportError('roster.dropLegacyModes', e));
+        }
         // Both halves of the roster are load-bearing, so a failure in either one
         // means the list on screen is incomplete and must not be presented as
         // the whole roster.
@@ -399,12 +505,36 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // Unread counts, one read for the whole roster rather than one per
         // client. A failure leaves them null — the count is unknown, and the
         // row says so with a dash instead of asserting that nobody is waiting.
+        //
+        // Per CLIENT, and that is the whole of what this map says. A row that
+        // comes back carries a count for that client; a client with no row in
+        // it keeps whatever they had, which is null. Those are different facts
+        // and downstream they are told apart by `handAdded`, marked above at the
+        // only place that knows which table a row came out of:
+        // `coach_unread_counts()` enumerates `clients`, so every LINKED client
+        // gets a row here — zero included — and a hand-added `coach_clients`
+        // row never can, because there is no account and no thread behind one.
+        // Its null is the absence of a thread rather than an unknown count, and
+        // nothing about it changes with a retry.
         let unread: Record<string, number> | null = null;
         try {
           const { data: uc, error: ucErr } = await supabase.rpc('coach_unread_counts');
           if (!ucErr && Array.isArray(uc)) {
             unread = {};
-            for (const row of uc as any[]) unread[String(row.client_id)] = Number(row.unread) || 0;
+            for (const row of uc as any[]) {
+              // Parsed by the module that owns this column instead of beside
+              // it. `coach_threads()` left-joins the same `coach_unread_counts()`
+              // and src/lib/coachThreads.ts states the rule for the value: a
+              // count only where a real number came back, truncated, never
+              // negative. This loop read `Number(row.unread) || 0`, which turns
+              // a string, a null, a missing key and a NaN alike into 0 — and 0
+              // on this column is the sentence "nobody is waiting for you",
+              // said out of a value nobody could read. A row whose count does
+              // not parse is left OUT of the map, so that client keeps its null
+              // and draws a dash.
+              const t = rowToThread(row);
+              if (t.clientId && t.unread != null) unread[t.clientId] = t.unread;
+            }
           }
         } catch { /* stays null, and null prints as a dash */ }
         const withUnread = unread
@@ -420,10 +550,11 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     hydrate(() => cancelled);
     return () => { cancelled = true; };
   }, [authRev, hydrate]);
-  /** Keep the coach's answer on this device. Persisted, because the server can
-   *  only hold the narrowed one until the CHECK constraints are widened. */
+  /** Keep the coach's answer on this device, under their own key and only when
+   *  `persistModes` is armed. In memory either way, so the chip responds to the
+   *  tap whatever the store is doing. */
   const rememberMode = (id: string, mode: CoachedMode) => {
-    setModeOverrides((p) => { const next = { ...p, [id]: mode }; try { AsyncStorage.setItem(MODE_KEY, JSON.stringify(next)); } catch { /* the override still applies this session */ } return next; });
+    setModeOverrides((p) => { const next = { ...p, [id]: mode }; persistModes(next); return next; });
   };
   const addClient = async (name: string, goal: string, mode: CoachedMode = 'online'): Promise<boolean> => {
     const n = name.trim();
@@ -545,7 +676,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
       if (!(id in p)) return p;
       const next = { ...p };
       delete next[id];
-      try { AsyncStorage.setItem(MODE_KEY, JSON.stringify(next)); } catch { /* the in-memory drop still applies this session */ }
+      persistModes(next);
       return next;
     });
   };

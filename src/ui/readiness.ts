@@ -28,10 +28,11 @@ import { useWearables } from './wearables';
 import { useDeviceSleep } from './deviceSleep';
 import { useHabits } from './habits';
 import { useWorkoutLog } from './workoutLog';
-import { isWhole, type LoadStatus } from './loadStatus';
+import { isWhole, worstStatus, type LoadStatus } from './loadStatus';
 import { readinessScore, readinessSleep, type Readiness, type ReadinessSleep } from '../lib/readiness';
 import { todayISO } from '../lib/bodyFigures';
-import { readinessBreakdown, type ReadinessBreakdown, type ReadinessSource } from '../lib/readinessBreakdown';
+import { deviceSleepTrust, readinessBreakdown, type ReadinessBreakdown, type ReadinessSource } from '../lib/readinessBreakdown';
+import { readinessDirection, yesterdayOf, type ReadinessDirection, type ReadinessYesterday } from '../lib/readinessDirection';
 import { providerById } from '../lib/wearables/registry';
 import { hardwareFor, useLinkRevision } from '../lib/wearableLinkLedger';
 import type { ProviderId } from '../lib/wearables/types';
@@ -55,6 +56,17 @@ export interface ReadinessView {
   breakdown: ReadinessBreakdown;
   /** Sessions in the last two days, or null when the training log was unreadable. */
   workoutsLast2Days: number | null;
+  /**
+   * Which way the score has moved since yesterday, or which of the four reasons
+   * there is no saying — and **null when there is no score to give a direction
+   * to at all**, where `breakdown.absence` is the whole answer.
+   *
+   * A screen draws the figure only for `state === 'scored'`. The other three
+   * states are for a screen that would otherwise have to infer an absence from
+   * a missing number, which is how "no change" comes to be printed about a day
+   * nobody has any record of.
+   */
+  direction: ReadinessDirection | null;
 }
 
 export function useReadiness(): ReadinessView {
@@ -174,11 +186,95 @@ export function useReadiness(): ReadinessView {
       nights: r.readings.length,
     }));
 
+    // ── and what it was yesterday ─────────────────────────────────────────
+    //
+    // A score with no direction is half an answer: 62 on its own says nothing
+    // about whether this is a bad morning or the best of the week. See
+    // src/lib/readinessDirection.ts for the four ways of not having a yesterday
+    // and why the fourth one refuses to subtract.
+    //
+    // Yesterday is REBUILT from the same record rather than read back from a
+    // store, because this app keeps no daily readiness snapshot — nothing in
+    // the schema holds yesterday's score. Two of the four signals can be
+    // rebuilt and two cannot:
+    //
+    //   · sleep     yes. `useDeviceSleep` holds seven nights and the typed log
+    //               is the member's whole history, so yesterday's three-night
+    //               window is entirely inside what we already have.
+    //   · training  yes. The workout log is read newest-first to its page cap
+    //               and reaches days back, not hours.
+    //   · hydration NO. `useHabits` exposes today's glass count and today's
+    //               only; yesterday's is not kept anywhere this hook can see.
+    //   · recovery  NO. `metrics` is the latest roll-up a provider published,
+    //               with no per-day history behind it.
+    //
+    // So the rebuild is always sleep-and-training, and `readinessDirection`
+    // compares the SETS: for a member with no water goal and no strap — most of
+    // them — today's score is sleep-and-training too, the pair is out of the
+    // same 70, and they get a real direction every morning. For everybody else
+    // the pair is two different denominators and the answer is 'not-comparable',
+    // which is the honest one.
+    //
+    // The two-day training window hangs off `y.at`, which is the same clock time
+    // yesterday and not local midnight — measuring back from the start of
+    // yesterday would look at the two days BEFORE it and see none of yesterday
+    // at all. `t <= yMs` closes the far end, which the live window above does
+    // not need because nothing is logged in the future.
+    const y = yesterdayOf(new Date(nowMs));
+    const yMs = y ? y.at.getTime() : NaN;
+    const yHave = y != null && Number.isFinite(yMs);
+    const ySleep = y ? readinessSleep(nights, typed, READINESS_NIGHTS, y.at) : null;
+    const ySince = yMs - 2 * 86400000;
+    const yDays = new Set(
+      log.filter((e) => { const t = Date.parse(e.t); return t >= ySince && t <= yMs; })
+        .map((e) => todayISO(new Date(e.t))),
+    ).size;
+    // Null, never 0, for exactly the reason the live count above is: an unread
+    // log scores as maximally rested, and a fabricated yesterday would put a
+    // direction on the hero built out of a read that failed.
+    const yWorkouts = isWhole(logStatus) && yHave ? yDays : null;
+    const yScored = ySleep && yHave
+      ? readinessScore({ avgSleepHours: ySleep.avgHours, hydrationPct: null, recoveryPct: null, workoutsLast2Days: yWorkouts })
+      : null;
+    // No rebuilt score is TWO different things and they must not be folded. If
+    // every read behind the rebuild came back whole, yesterday genuinely has no
+    // readiness — a complete answer. If any of them was short or failed, the
+    // nights or the sessions we would have scored may be sitting behind it, and
+    // 'no-record' would be a claim about the member made out of our own failed
+    // read. `deviceSleepTrust` and not `deviceStatus`: the walk reports 'ready'
+    // the moment every provider has been ASKED, whatever each of them answered.
+    const yStatus: LoadStatus = yScored != null
+      ? 'ready'
+      : yHave && worstStatus(deviceSleepTrust(deviceStatus, sources), typedStatus, logStatus) === 'ready'
+        ? 'ready'
+        : 'error';
+    const yesterday: ReadinessYesterday = {
+      status: yStatus,
+      score: yScored && y ? { day: y.day, score: yScored.score, from: yScored.from } : null,
+    };
+    const direction = readinessDirection(readiness, yesterday, new Date(nowMs));
+
+    // An incomparable pair reaching the breakdown from THIS caller is always
+    // ours, never a fact about yesterday: the rebuild above cannot carry
+    // hydration or recovery, so every member with a water goal or a strap would
+    // be told their two days were built from different signals on every single
+    // day, for as long as that stayed true. A warn flag that prints every day is
+    // the flag people stop reading, which is the cost the breakdown's own note
+    // on `short` describes. The state is still exposed on the view, so a screen
+    // can quietly draw no direction and say why if asked — it simply does not
+    // become a standing caveat on the number.
+    //
+    // The other three states pass through untouched. A yesterday that FAILED to
+    // read is a real short read and earns its sentence.
+    const directionCaveat = direction?.state === 'not-comparable' ? null : direction;
+
     return {
       readiness,
       sleep,
       workoutsLast2Days,
+      direction,
       breakdown: readinessBreakdown({
+        direction: directionCaveat,
         readiness,
         sleep,
         windowNights: READINESS_NIGHTS,

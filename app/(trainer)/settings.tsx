@@ -342,7 +342,7 @@ export default function TrainerSettings() {
   useEffect(() => {
     let live = true;
     (async () => {
-      const { prefs, status } = await fetchCoachPrefs();
+      const { prefs, status } = await fetchCoachPrefs(auth.user?.id ?? null);
       if (!live) return;
       setCooldownStatus(status === 'ready' ? 'ready' : 'error');
       // Only fill the box from a read that ANSWERED. An empty box after a
@@ -364,7 +364,7 @@ export default function TrainerSettings() {
       return;
     }
     const value = parsed.kind === 'empty' ? null : parsed.value;
-    const ok = await saveCoachPrefs({ nudgeCooldownDays: value });
+    const ok = await saveCoachPrefs(auth.user?.id ?? null, { nudgeCooldownDays: value });
     if (!ok) {
       // Not "saved". The write is checked for a row count rather than for the
       // absence of an error, because a refused upsert comes back clean.

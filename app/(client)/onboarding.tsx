@@ -412,15 +412,34 @@ export default function Onboarding() {
   // from its first card is the complaint this work exists to answer.
   const skip = async () => { await leave(c.coachingMode); };
 
-  const Chip = ({ on, label, sub, onPress }: { on: boolean; label: string; sub?: string; onPress: () => void }) => (
-    <Pressable onPress={onPress} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={sub ? `${label}. ${sub}` : label}
+  /* ── the two controls this wizard is made of ─────────────────────────────
+     PLAIN FUNCTIONS, called as `chip(key, {…})` and `pill(key, {…})`, and not
+     components rendered as `<Chip …/>` and `<Pill …/>`. A function declared in
+     this body is a new object on every render, so React sees a different
+     element TYPE and unmounts and remounts the subtree instead of updating it.
+     Both of these are Pressables carrying an `accessibilityRole` and an
+     `accessibilityLabel`, and both are what the member is TAPPING: choosing a
+     coaching mode, a goal, a unit or an injury area sets state on this screen,
+     re-renders it, and would destroy the control under the reader's cursor at
+     the moment its new selected state is announced. Same rule as
+     app/(client)/injuries.tsx and app/(client)/report.tsx:475.
+
+     They close over `t`, `ty`, `sp` and `radius` from this body, so they stay
+     here as calls rather than being lifted to module scope. The `key` is now a
+     parameter and lands on the returned Pressable: `chip` is used inside two
+     `.map`s and `pill` inside one, and a call cannot carry a `key` of its own —
+     leaving it off would lose list identity silently, which is worse than the
+     remount. The four unit pills are static siblings that never needed one; they
+     pass a stable string so there is one signature rather than two. */
+  const chip = (k: string, { on, label, sub, onPress }: { on: boolean; label: string; sub?: string; onPress: () => void }) => (
+    <Pressable key={k} onPress={onPress} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={sub ? `${label}. ${sub}` : label}
       style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.sm, padding: sp.lg, marginBottom: sp.sm }}>
       <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>{label}</Text>
       {sub ? <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3, marginTop: 2, opacity: on ? 0.85 : 1 }}>{sub}</Text> : null}
     </Pressable>
   );
-  const Pill = ({ on, label, onPress }: { on: boolean; label: string; onPress: () => void }) => (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={label}
+  const pill = (k: string, { on, label, onPress }: { on: boolean; label: string; onPress: () => void }) => (
+    <Pressable key={k} onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={label}
       style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
       <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
@@ -434,16 +453,14 @@ export default function Onboarding() {
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>
           This decides what the rest of the app offers you. You can change it later under Me.
         </Text>
-        {MODES.map((m) => (
-          <Chip key={m} on={cmode === m} label={COACHING_MODE_LABEL[m]} sub={COACHING_MODE_NOTE[m]} onPress={() => setCmode(m)} />
-        ))}
+        {MODES.map((m) => chip(m, { on: cmode === m, label: COACHING_MODE_LABEL[m], sub: COACHING_MODE_NOTE[m], onPress: () => setCmode(m) }))}
       </View>
     ),
     goal: (
       <View>
         <Text style={{ ...ty.title, color: t.ink }}>What Are You After?</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>Your training plan and your macro split are both built from this.</Text>
-        {GOALS.map((g) => <Chip key={g.id} on={goal === g.id} label={g.label} sub={g.sub} onPress={() => setGoal(g.id)} />)}
+        {GOALS.map((g) => chip(g.id, { on: goal === g.id, label: g.label, sub: g.sub, onPress: () => setGoal(g.id) }))}
       </View>
     ),
     body: (
@@ -467,11 +484,11 @@ export default function Onboarding() {
             governs. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginBottom: unitsGuessed ? sp.sm : sp.lg }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Weight in</Text>
-          <Pill on={wu === 'kg'} label="kg" onPress={() => changeWeightUnit('kg')} />
-          <Pill on={wu === 'lb'} label="lb" onPress={() => changeWeightUnit('lb')} />
+          {pill('wu-kg', { on: wu === 'kg', label: 'kg', onPress: () => changeWeightUnit('kg') })}
+          {pill('wu-lb', { on: wu === 'lb', label: 'lb', onPress: () => changeWeightUnit('lb') })}
           <Text style={{ ...ty.micro, color: t.ink3 }}>· height in</Text>
-          <Pill on={lu === 'cm'} label="cm" onPress={() => changeLengthUnit('cm')} />
-          <Pill on={lu === 'in'} label="ft / in" onPress={() => changeLengthUnit('in')} />
+          {pill('lu-cm', { on: lu === 'cm', label: 'cm', onPress: () => changeLengthUnit('cm') })}
+          {pill('lu-in', { on: lu === 'in', label: 'ft / in', onPress: () => changeLengthUnit('in') })}
         </View>
         {unitsGuessed ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
@@ -531,7 +548,7 @@ export default function Onboarding() {
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Tap any that apply</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
           {INJURY_AREAS.filter((a) => a.id !== 'other').map((a) => { const on = injAreas.includes(a.id); return (
-            <Pill key={a.id} on={on} label={a.label} onPress={() => setInjAreas((prev) => (on ? prev.filter((x) => x !== a.id) : [...prev, a.id]))} />); })}
+            pill(a.id, { on, label: a.label, onPress: () => setInjAreas((prev) => (on ? prev.filter((x) => x !== a.id) : [...prev, a.id])) })); })}
         </View>
         {/* rtl-ok: a navigation PATH inside an English sentence — "the screen
             called X, and inside it the thing called Y". The separator belongs to

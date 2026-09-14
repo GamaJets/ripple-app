@@ -89,6 +89,12 @@ import { BACK_ICON } from '../../src/ui/direction';
 // the rail this app already has for an hour a coach has not opened.
 import {
   STANDING_ASK_RULE, NO_COACH_FOR_STANDING, standingAskNote, firstStandingDay, standingAskBlocker,
+  // Whose clock the weekly hour is on. The condition this replaces was
+  // `s.tz && devTz && s.tz !== devTz`, which is false three ways and only one
+  // of them means the clocks agree — so "your coach is in your zone" and "this
+  // phone could not say which zone it is in" were the same silent screen, over
+  // a wall-clock hour somebody turns up to. See its own header.
+  standingClockNote,
 } from '../../src/lib/standingAsk';
 import { askForSession } from '../../src/ui/sessionRequests';
 import { askBlocker, askRefusalNote, askedConfirmation, ownDiaryNote, NOT_A_BOOKING } from '../../src/lib/sessionRequests';
@@ -717,13 +723,17 @@ export default function StandingAppointments() {
                     ) : null}
                     {/* The hour on a series is a wall-clock hour in the zone it
                         was AGREED in, not the zone the reader is standing in.
-                        Said only when they differ — a member travelling — and
-                        that is exactly when "Every Tuesday at 7:00 am" would
-                        otherwise be read as seven o'clock where they are now,
-                        and a session missed by half a day. */}
-                    {s.tz && devTz && s.tz !== devTz ? (
+                        "Every Tuesday at 7:00 am" read as seven o'clock where
+                        they are now is a session missed by half a day.
+
+                        Withheld ONLY when both zones are known and are the same
+                        zone. An unreadable series zone and a handset that
+                        cannot name its own each get their own sentence, because
+                        printing nothing for them is printing the sentence that
+                        means "this is your hour". */}
+                    {standingClockNote(s.tz, devTz) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                        That time is {s.tz.split('/').pop()?.replace(/_/g, ' ')} time, where it was agreed.
+                        {standingClockNote(s.tz, devTz)}
                       </Text>
                     ) : null}
                   </View>

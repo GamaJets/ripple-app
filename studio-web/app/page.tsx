@@ -185,6 +185,15 @@ export default function Overview() {
       if (!live) return;
       setSites(owned);
 
+      // An account with no gym has no roster to wait for, and this is what
+      // stopped the table below sitting on "Loading…" for ever.
+      //
+      // It is still a fabricated fact — `[]` is a roster that was never read —
+      // and it is left here only because nothing consumes it any more: an
+      // account with no tenant now returns before `roll`, the tiles and the
+      // table. If that branch is ever removed, this line is what puts six
+      // zeros and "invite one from Staff" back in front of somebody with no
+      // gym, so remove the two together.
       if (!who?.tenantId) setTrainers([]);
     })();
     return () => { live = false; };
@@ -447,6 +456,41 @@ export default function Overview() {
     );
   }
 
+  /* ── an owner with no gym behind them ─────────────────────────────────────
+   *
+   * This was a Notice inside the page rather than a branch, so the sentence
+   * "there is nothing to show" was followed, on the same screen, by a page
+   * showing things. Three of them, none of which anything had established:
+   *
+   *  - Six zeros. The mount effect sets `setTrainers([])` when there is no
+   *    tenant, and an empty roster is a roster: `gymRollup` answers 0 trainers,
+   *    0 clients, 0 sessions, 0 awaiting an outcome and 0 needing a look. Those
+   *    are figures about a gym that does not exist, drawn in the same ink as
+   *    the real ones on every other account.
+   *  - "No trainers in this gym yet. Invite one from Staff" — an instruction to
+   *    populate a gym this account is not attached to.
+   *  - Engagement stuck on "Loading…" for ever. `refresh` returns early with no
+   *    tenant id, so `loadEngagement` never runs and `engage` never leaves
+   *    `undefined` — the one state that means "still reading". Nothing was
+   *    reading. That spinner had no end.
+   *
+   * The tenant id comes from `loadMe`, which distinguishes a profile it could
+   * not read (`roleUnknown`, handled above) from one that says there is no
+   * gym — so reaching here is a read that CAME BACK and said so. Which makes
+   * "nothing to show" a fact, and the honest rendering of it is nothing.
+   */
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!gymErr} sites={sites} current="/">
+        <h1>Overview</h1>
+        <Notice>
+          Your account is not linked to a gym yet, so there is nothing to show. Whoever set up the
+          gym needs to add you as its owner.
+        </Notice>
+      </Shell>
+    );
+  }
+
   const roll: GymRollup | null = trainers ? gymRollup(trainers, gym?.sessionFee ?? null) : null;
   const ccy: TenantCurrency = gym?.currency ?? null;
   // The currency each of the two money tiles is actually in. An empty set of
@@ -511,7 +555,24 @@ export default function Overview() {
   ];
 
   return (
-    <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!gymErr} current="/">
+    /* `sites` handed over, and why it matters that it is.
+     *
+     * This was the one Shell on this page that did not pass it. Shell's own
+     * comment (components/Shell.tsx, "sites had exactly ONE caller") names
+     * app/page.tsx as the caller that does — and it did, on the roleUnknown
+     * branch above only, which is the branch almost nobody reaches. The owner
+     * path, which is every owner every morning, left the prop undefined.
+     *
+     * So Shell ran `fetchOwnedSites()` a second time, off its own state, while
+     * this page already held the answer in `sites`. Two independent reads of
+     * one question, on one screen, at one moment — and they are allowed to
+     * disagree: either can be refused on its own, so the rail could say "1 of
+     * 2 sites" over a body whose site notice was rendering the failure case,
+     * or the body could warn that the site read failed while the rail beside
+     * it stated a count as fact. One read, one answer, and one fewer
+     * `my_sites()` RPC on the busiest page in the console.
+     */
+    <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!gymErr} sites={sites} current="/">
       <h1>Overview</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         {gym?.name ? `${gym.name} · last 30 days` : 'Last 30 days'}
@@ -530,12 +591,9 @@ export default function Overview() {
           otherwise read as the whole business. */}
       {siteNotice(sites) ? <Notice>{siteNotice(sites)}</Notice> : null}
 
-      {!me.tenantId ? (
-        <Notice>
-          Your account is not linked to a gym yet, so there is nothing to show. Whoever set up the
-          gym needs to add you as its owner.
-        </Notice>
-      ) : null}
+      {/* The "not linked to a gym" notice was here, above a page that then
+          went on to draw six zeros and a permanent spinner under it. It is a
+          branch of its own now — see `if (!me.tenantId)` above `roll`. */}
 
       {gymErr ? (
         <Notice tone="crit">
@@ -569,8 +627,13 @@ export default function Overview() {
           in flight, since an unsettled read makes every item 'unknown' rather
           than outstanding, which is what stops a set-up gym being told it has
           set nothing up for the second and a half its own record takes to
-          load. */}
-      {me.tenantId ? <SetUp items={setup} /> : null}
+          load.
+
+          The `me.tenantId` guard that used to be on this line is gone because
+          it cannot be false here any more — an account with no gym returns
+          above, rather than reading this page with the no-gym notice pinned to
+          the top of it. */}
+      <SetUp items={setup} />
 
       {/* The morning glance — the whole operation on one line, so departments
           can be read against each other rather than one screen at a time.
@@ -931,9 +994,41 @@ function SignIn() {
     const addr = email.trim();
     if (!addr) { setErr('Enter your email first, then tap Forgot password.'); return; }
     setErr(null); setSent(null);
-    await supabase.auth.resetPasswordForEmail(addr, {
+    // ── the result was thrown away ────────────────────────────────────────
+    //
+    // This line was a bare `await` with nothing read off it, and the sentence
+    // below it ran unconditionally. supabase-js RESOLVES with `{ error }`
+    // rather than throwing, so a rate limit, a refused send from the mail
+    // provider or a dropped connection all ended with the console telling
+    // somebody locked out of their own gym that a link was on its way — and
+    // they then wait for mail that no one ever tried to send, refresh, and
+    // wait again. Success claimed from the absence of a look, which is the one
+    // thing nothing in this console is allowed to do.
+    const { error } = await supabase.auth.resetPasswordForEmail(addr, {
       redirectTo: 'https://www.repplefitness.com/reset-password',
     });
+    // Naming the reason does not undo the paragraph below — with ONE exception,
+    // which is handled rather than assumed away.
+    //
+    // Nearly every error this call returns is about the REQUEST: the send was
+    // rate limited, the mail provider refused it, the browser could not reach
+    // the server. None of those says anything about whether the address has an
+    // account, and all of them are worth printing, because each is something
+    // the person can act on.
+    //
+    // The exception is "no such user". Whether GoTrue answers that at all
+    // depends on a project setting rather than on this code, so it is filtered
+    // here instead of being ruled out — and the neutral sentence is the honest
+    // rendering of it anyway: the address has no account, so no link is on its
+    // way to it, which is precisely what that sentence says.
+    if (error) {
+      const code = (error as { code?: string }).code ?? '';
+      const noSuchUser = code === 'user_not_found' || /user not found/i.test(error.message);
+      if (!noSuchUser) {
+        setErr(`That reset could not be requested: ${error.message}`);
+        return;
+      }
+    }
     // Same answer either way: telling a stranger which addresses have accounts
     // is a way of enumerating your members.
     setSent('If that address has an account, a reset link is on its way.');

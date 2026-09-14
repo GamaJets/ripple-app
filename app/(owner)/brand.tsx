@@ -60,6 +60,11 @@ export default function OwnerBrand() {
   const [draft, setDraft] = useState<string | null>(null);
   const nameField = draft ?? (tenant?.name ?? '');
   const [busy, setBusy] = useState(false);
+  /** A colour write is in flight. Separate from `busy` above, which is the name
+   *  field's — the two controls write different columns and neither should
+   *  disable the other. See `pickColor` for what two concurrent writes to
+   *  `tenants.brand_color` actually do. */
+  const [colorBusy, setColorBusy] = useState(false);
   const [msg, setMsg] = useState<{ bad: boolean; text: string } | null>(null);
   // The gym row is what this screen shows and writes back to: its name and its
   // brand colour. An owner who changed either in another session, or whose
@@ -119,16 +124,46 @@ export default function OwnerBrand() {
   };
 
   const pickColor = async (key: string, color: string) => {
+    // Two taps must not become two UPDATEs. Both writes below set the SAME
+    // column of the SAME row, so a second tap while the first is in flight is
+    // a race: whichever response the network happens to deliver last wins the
+    // row, and the accent set optimistically here is the LAST TAP. Lose the
+    // race and the device is drawn in the colour you chose while the gym holds
+    // the one you chose before it — both writes having reported success, so
+    // nothing says a word about it. The colour is per-gym and every owner's
+    // device reads it back, which is the whole point of the screen.
+    //
+    // `colorBusy` rather than `busy`: the name field's guard is its own, and
+    // sharing one would grey the palette out while a rename is saving.
+    if (colorBusy) return;
     // Locally first, so the tap is answered at once — then told the truth about
     // it if the write does not land.
     setPalette(key);
     setAccent(color);
-    if (!known) return;
-    const saved = await updateTenant({ brandColor: color });
-    if (!saved) {
-      Alert.alert('Colour not saved',
-        'The colour changed on this device only — your gym still has the colour it had, and other owners will not see this one.');
+    // `known` is `status === 'ready' && !!tenant`, so this is the loading read,
+    // the failed read AND the account with no gym. It used to return in
+    // silence, under a line promising "the gym keeps it" — the app rethemed,
+    // nothing was written, and the owner had no way to tell the difference
+    // from a save. The note under the swatches now states each of those four
+    // states for itself; this says so again at the moment of the tap, because
+    // the note is above the fold and the tap is what the owner remembers.
+    if (!known) {
+      Alert.alert('Changed on this phone only',
+        status === 'error'
+          ? 'Your gym could not be read, so the colour was not saved to it. This phone is drawn in the new colour; the gym still holds whatever it held.'
+          : status === 'loading'
+            ? 'Your gym is still being read, so the colour was not saved to it. Pull down to re-read, then pick again.'
+            : 'This account is not attached to a gym, so there is no gym record to save a colour to. This phone is drawn in the new colour and nothing else is.');
+      return;
     }
+    setColorBusy(true);
+    try {
+      const saved = await updateTenant({ brandColor: color });
+      if (!saved) {
+        Alert.alert('Colour not saved',
+          'The colour changed on this device only — your gym still has the colour it had, and other owners will not see this one.');
+      }
+    } finally { setColorBusy(false); }
   };
 
   // Clearing is not the same as choosing the default palette, and the button
@@ -137,14 +172,29 @@ export default function OwnerBrand() {
   // and it leaves the app drawn in its own accent rather than in a teal
   // somebody would later find in their gym's record and assume was picked.
   const clearColor = async () => {
+    // Same row, same column, same race — and this one is the worse half of it,
+    // because "clear" losing to a swatch tap leaves the gym holding a colour
+    // the owner has just asked it to stop holding. One guard covers both.
+    if (colorBusy) return;
     setPalette(DEFAULT_PALETTE);
     setAccent(null);
-    if (!known) return;
-    const saved = await updateTenant({ brandColor: null });
-    if (!saved) {
-      Alert.alert('Colour not cleared',
-        'This device is back to the app’s own colour, but your gym still holds the one it had.');
+    if (!known) {
+      Alert.alert('Changed on this phone only',
+        status === 'error'
+          ? 'Your gym could not be read, so its colour was not cleared. This phone is back to the app’s own colour; the gym still holds whatever it held.'
+          : status === 'loading'
+            ? 'Your gym is still being read, so its colour was not cleared. Pull down to re-read, then try again.'
+            : 'This account is not attached to a gym, so there is no gym colour to clear. This phone is back to the app’s own colour.');
+      return;
     }
+    setColorBusy(true);
+    try {
+      const saved = await updateTenant({ brandColor: null });
+      if (!saved) {
+        Alert.alert('Colour not cleared',
+          'This device is back to the app’s own colour, but your gym still holds the one it had.');
+      }
+    } finally { setColorBusy(false); }
   };
 
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md } as const;
@@ -198,19 +248,37 @@ export default function OwnerBrand() {
         {/* ── the colours are the content, not decoration ────────────────── */}
         <Section>
           <SectionHead title="Primary Palette" note={palettes.find((p) => p.key === palette)?.name} />
+          {/* Four states, four sentences — the Gym Name section above has
+              handled all four since it was written, and this one had two.
+              `status === 'error'` was stated; everything else fell through to
+              "the gym keeps it", which is true of exactly one of the remaining
+              three. A still-loading read and an account attached to no gym
+              both take the `!known` early return in `pickColor`: the app
+              rethemes, NOTHING is written, and this line had just promised the
+              gym would keep it. A sentence that claims a save the code does
+              not attempt is worse than no sentence. */}
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
             {status === 'error'
               ? 'Your gym could not be read, so a colour picked here would change this device and nothing else.'
-              : known && !gymColor
-                ? 'Your gym has not chosen a colour yet, so the app is drawn in its own. Tap one and it becomes the gym’s.'
-                : 'Tap a colour — the whole app rethemes instantly, and the gym keeps it.'}
+              : status === 'loading'
+                ? 'Your gym is still being read. A colour picked before it lands changes this device only.'
+                : !tenant
+                  ? 'This account is not attached to a gym, so there is no gym record to hold a colour. A colour picked here changes this device only.'
+                  : !gymColor
+                    ? 'Your gym has not chosen a colour yet, so the app is drawn in its own. Tap one and it becomes the gym’s.'
+                    : 'Tap a colour — the whole app rethemes instantly, and the gym keeps it.'}
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
             {palettes.map((p) => {
               const on = p.key === palette;
               return (
                 <Pressable key={p.key} onPress={() => { void pickColor(p.key, p.theme.brand); }} accessibilityRole="button" accessibilityLabel={p.name}
-                  style={{ width: 52, height: 52, borderRadius: radius.md, backgroundColor: p.theme.bg, borderWidth: on ? 2 : hairline, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>
+                  // The guard in `pickColor` makes a second tap a no-op; without
+                  // this it is a SILENT no-op, and a swatch that answers nothing
+                  // reads as a broken control rather than as a busy one.
+                  disabled={colorBusy}
+                  accessibilityState={{ selected: on, disabled: colorBusy, busy: colorBusy }}
+                  style={{ opacity: colorBusy && !on ? 0.5 : 1, width: 52, height: 52, borderRadius: radius.md, backgroundColor: p.theme.bg, borderWidth: on ? 2 : hairline, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>
                   <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: p.theme.brand }} />
                   {on ? <View style={{ position: 'absolute', bottom: 3, end: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
                 </Pressable>
@@ -244,7 +312,9 @@ export default function OwnerBrand() {
 
         <Section>
           <View style={{ alignSelf: 'flex-start' }}>
-            <Ghost label="Clear the Gym's Colour" onPress={() => { void clearColor(); }} />
+            {/* Off while a swatch write is in flight — this button and those
+                swatches write the same column of the same row. */}
+            <Ghost label="Clear the Gym's Colour" disabled={colorBusy} onPress={() => { void clearColor(); }} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Puts the gym back to having chosen no colour, and the app back to its own. Not the same as picking teal.

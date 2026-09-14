@@ -179,3 +179,100 @@ export function standingAskBlocker(
     ? 'You already have a standing appointment at that time. Pick another time, or pause the one you have if you need a break from it.'
     : null;
 }
+
+/* ── whose clock the weekly hour is on ─────────────────────────────────────
+ *
+ * `memberSeriesLabel` writes "Every Tuesday at 7:00 am" from `session_series`'
+ * own `hour` and `minute`. Those are a WALL CLOCK IN THE SERIES' OWN ZONE —
+ * part 135 stores `tz` alongside them and the materialiser computes
+ * `(date + time) at time zone tz`, so seven in the morning stays seven in the
+ * morning through a clocks change. What that sentence does not say is WHOSE
+ * seven o'clock it is.
+ *
+ * app/(client)/standing.tsx had a note for it and drew it under one condition:
+ *
+ *     s.tz && devTz && s.tz !== devTz
+ *
+ * which has three ways of being false and only ONE of them means the two clocks
+ * agree. The other two are "we could not find out", and both printed nothing at
+ * all — so the member who is standing in the same zone as their coach and the
+ * member whose phone could not say which zone it is in read the identical
+ * screen. That is the argument `zoneGapNote` in src/lib/gymZone.ts makes in its
+ * own header, in so many words: a screen that only asks "do they differ" gives
+ * the same silence to the reader who has nothing to worry about and the reader
+ * who has.
+ *
+ * It is not a cosmetic difference here. `deviceTimeZone` in
+ * src/ui/availability.ts returns null for any zone without a '/' in it, which
+ * includes a handset reporting plain 'UTC' — a real state on some Android
+ * builds — and null the moment `Intl` throws. A member in London on such a
+ * phone, holding a Dubai Tuesday at seven, was shown "Every Tuesday at 7:00 am"
+ * and nothing else. Their session is at three in the morning where they are.
+ *
+ * So: silent ONLY when both zones are known and they are the same zone.
+ */
+
+/**
+ * The place a zone names, for a sentence — "Dubai", "Los Angeles", "UTC".
+ *
+ * The last segment with its underscores opened out, which is what the screen
+ * was already doing inline. Null for anything that is not a zone-shaped string,
+ * so a caller cannot build a sentence around a hole.
+ *
+ * Deliberately NOT `isZone` from src/lib/gymZone.ts. That refuses a zone this
+ * runtime's IANA database does not hold, which is the right test for a value
+ * being STORED; this is the wrong place to apply it, because a series zone the
+ * database accepted and this handset has never heard of is still the zone the
+ * hour was agreed in, and naming it is more use to the member than refusing to.
+ */
+export function zonePlace(zone: string | null | undefined): string | null {
+  const z = String(zone ?? '').trim();
+  if (!z) return null;
+  const last = z.split('/').pop();
+  const name = (last ?? '').replace(/_/g, ' ').trim();
+  return name || null;
+}
+
+/**
+ * What to print under a weekly hour about whose clock it is, or null when there
+ * is genuinely nothing to say.
+ *
+ * Four answers, and three of them are sentences:
+ *
+ *   · both known and the same     null. The hour is the member's own hour.
+ *   · both known and different    name the series' zone. The wording the
+ *                                 screen already used, moved here unchanged.
+ *   · series zone known, device's not
+ *                                 name the series' zone and say we cannot tell
+ *                                 them whether it is theirs. Better than
+ *                                 silence and better than a comparison made
+ *                                 against a zone we do not have.
+ *   · series zone unknown         say so. `session_series.tz` is `not null` and
+ *                                 `create_session_series` checks it against
+ *                                 `pg_timezone_names`, so this is a read that
+ *                                 lost the column rather than a coach who never
+ *                                 set one — and an hour with no zone against it
+ *                                 is read as the reader's own by default, which
+ *                                 is the one thing it must not be.
+ */
+export function standingClockNote(
+  seriesTz: string | null | undefined,
+  deviceTz: string | null | undefined,
+): string | null {
+  const place = zonePlace(seriesTz);
+  if (!place) {
+    return 'We could not read which timezone this weekly time was agreed in, so the hour above may not be the hour where you are. Check it with your coach.';
+  }
+  const here = zonePlace(deviceTz);
+  if (!here) {
+    return `That time is ${place} time, where it was agreed. This phone could not say which timezone it is in, so we cannot tell you whether that is your hour too.`;
+  }
+  // Compared on the FULL zone names, never on the place names: 'America/Havana'
+  // and 'Europe/London' would both be their own place, but two zones sharing a
+  // last segment across regions would compare equal on `place` alone and the
+  // note would vanish for the one reader it is written for.
+  const a = String(seriesTz ?? '').trim();
+  const b = String(deviceTz ?? '').trim();
+  if (a === b) return null;
+  return `That time is ${place} time, where it was agreed.`;
+}

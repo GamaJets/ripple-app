@@ -49,8 +49,42 @@
 // annotations on the Supabase row callbacks throughout, which is a different
 // job from the one this gate is for.
 //
-// This is still narrower than `deno check`, and `deno check` remains the right
-// thing before a deploy that touches money. It is no longer the floor it was.
+// ── AND THE WORD "TYPE CHECKS" ABOVE IS NARROWER THAN IT READS ────────────
+//
+// Read the paragraph above again and notice what it does not say. The type
+// check covers the app's own modules. It does NOT reach through `npm:`, `jsr:`
+// or `https:`, because a SHORTHAND ambient module — the only declaration shape
+// that makes named imports resolve — types every binding out of it as `any`.
+//
+// That is not a caveat, it is most of stripe-webhook. Proved by mutation on
+// 4 Sep rather than argued: this was written into the `invoice.payment_failed`
+// branch and this gate printed its success line.
+//
+//     inv.attempt_count.toUpperCase()
+//
+// `attempt_count` is a `number`. `inv` is `any`, so `inv.attempt_count` is
+// `any`, so calling a string method on it is fine as far as this Program is
+// concerned. Every Stripe field access in the webhook — the highest-consequence
+// file in the product, the one that writes money records — is unverified here,
+// both its names and its types.
+//
+// So: passing this gate does NOT mean the edge functions type check. It means
+// they parse, their relative imports resolve, their calls into src/lib match
+// those signatures, and they hold the money rule. Say that, not the short
+// version, because the short version is what let the mutation above stand.
+//
+// `check:stripe-fields` (scripts/check-stripe-fields.mjs) closes the NAMES half
+// of this hole offline: it compares every first-hop field read on a
+// `Stripe.<Type>`-typed binding against field lists lifted from stripe@16.12.0's
+// own .d.ts, which catches a misspelled or invented field — silently `undefined`
+// at runtime, and a null in a money column. It does not close the TYPES half,
+// and it says so: the mutation above passes that gate too.
+//
+// `deno check` closes both, and nothing in this repo runs it, because deno is
+// not installed on this machine (established 14 Sep 2026: `command -v deno`
+// finds nothing, brew has no formula installed, and there is no ~/Library/
+// Caches/deno for it to work from). It remains the last word before a deploy
+// that touches money, and that is a manual step, not a gate.
 import { readdirSync, statSync, readFileSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -328,13 +362,22 @@ const program = ts.createProgram([shimPath, ...files], {
 // than reported twice.
 //
 // And anything whose complaint names one of the three wildcard specifiers.
-// `stripe-webhook` writes `Stripe.Checkout.Session` in type position sixty
-// times, and this gate has no copy of Stripe's object model to check those
-// against — a shorthand ambient module gives a namespace with no members, so
-// every one of them reads as an error about a type that is perfectly real. The
-// honest thing is to say the boundary is untyped rather than to hand-write a
-// fake Stripe namespace that would accept `Stripe.Chekout` just as happily.
-// This is exactly the gap `deno check` closes, and the closing message says so.
+// `stripe-webhook` writes `Stripe.Event`, `Stripe.Invoice`,
+// `Stripe.Checkout.Session` and six more in type position (16 occurrences in
+// that file on 14 Sep 2026 — an earlier version of this comment said "sixty",
+// which was never true of any file here), and this gate has no copy of Stripe's
+// object model to check those against — a shorthand ambient module gives a
+// namespace with no members, so every one of them reads as an error about a
+// type that is perfectly real. The honest thing is to say the boundary is
+// untyped rather than to hand-write a fake Stripe namespace that would accept
+// `Stripe.Chekout` just as happily.
+//
+// Dropping them is what makes this gate usable, and it is also what makes the
+// word "type checks" in its success line a half-truth. Those casts are the
+// entry point to every money field in the webhook, and everything downstream of
+// them is `any`. `check:stripe-fields` compares the field NAMES against the real
+// .d.ts; `deno check` is the only thing that types them; neither the closing
+// message nor the success line is allowed to imply this one does.
 const UNTYPED_EDGE = /"(?:npm:\*|jsr:\*|https:\/\/esm\.sh\/\*)"/;
 const typeDiags = [
   ...program.getSemanticDiagnostics(),
@@ -362,12 +405,24 @@ first request. For stripe-webhook that means payments quietly stop being
 recorded, with nothing on any screen to say so.
 
 This gate parses, resolves every relative import, type checks against the app's
-own modules, and holds the money rule. It still does not type the Deno standard
-library or npm:stripe — those three specifiers are typed as any here — so
-\`deno check\` remains the last word before a deploy that touches money.`);
+OWN modules, and holds the money rule.
+
+It does NOT type check anything reached through npm:, jsr: or https: — those
+three specifiers are \`any\` here, which means every Stripe field in
+stripe-webhook is unchecked by this gate, names and types alike.
+\`inv.attempt_count.toUpperCase()\` passes it. \`check:stripe-fields\` catches the
+wrong NAME; \`deno check\` catches the wrong TYPE and is the last word before a
+deploy that touches money. Deno is not installed here, so that is a manual step
+somebody has to take.`);
   process.exit(1);
 }
 
 console.log(
-  `check:functions — ${files.length} edge function file(s) parse and type check, every relative import resolves,`
-  + ` and no amount is divided by a hardcoded hundred (https:, jsr: and npm: specifiers are typed as any)`);
+  `check:functions — ${files.length} edge function file(s) parse, every relative import resolves,`
+  + ` every call into the app's own src/lib modules type checks, and no amount is divided by a hardcoded hundred.`);
+console.log(
+  '  NOT a type check of the edge functions. npm:, jsr: and https: are typed as `any`, so every Stripe');
+console.log(
+  '  field in stripe-webhook is unverified here — `inv.attempt_count.toUpperCase()` passes this gate.');
+console.log(
+  '  check:stripe-fields compares the field NAMES; only `deno check` types them, and deno is not installed.');

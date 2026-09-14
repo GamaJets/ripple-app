@@ -114,6 +114,7 @@ import {
 import {
   reviewGate, reviewGateNote, writeOutcome, validateReview, draftProblemText,
   IDENTITY_NOTE, EDIT_NOTE, WITHDRAW_NOTE, MAX_BODY, MIN_RATING, MAX_RATING,
+  ownRatingLine,
   type MyReview,
 } from '../../src/lib/reviews';
 import { fetchClientCoachBrand, brandInputFor, type ClientCoachBrand } from '../../src/ui/coachBrand';
@@ -720,8 +721,12 @@ export default function MyCoach() {
                 const live = mine && !mine.withdrawnAt ? mine : null;
                 return (<>
                   {live ? (<>
+                    {/* The sentence is in src/lib/reviews.ts because it has three
+                        states and one of them is new: a rating that did not come back
+                        used to arrive here as a 0 and print "You rated them 0 out of
+                        5" over somebody's own words. */}
                     <Text style={{ ...ty.body, color: t.ink }}>
-                      You rated {coach.name ?? 'them'} {live.rating} out of {MAX_RATING}.
+                      {ownRatingLine(live.rating, coach.name ?? null)}
                     </Text>
                     {live.body ? (
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: 6 }}>{live.body}</Text>

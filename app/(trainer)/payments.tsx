@@ -949,7 +949,13 @@ export default function TrainerPayments() {
       // Stripe's own figure, not the one asked for. They are the same today,
       // and a screen that echoed the request back would be reporting an
       // intention as a fact about somebody's card.
-      Alert.alert('Refunded', `${minorMoney(r.refundedCents ?? 0, r.currency ?? target.rule.currency) ?? 'The amount'} has gone back to ${who}. Stripe emails them a receipt for it; anything else you want to say is yours to say.`);
+      // `?? null`, not `?? 0`. `refundedCents` is `number | null` precisely so a
+      // refund whose figure did not come back can say so, and settling it here
+      // would put "0.00 has gone back to them" under the word Refunded — which
+      // is the one sentence a coach would read out to the client. `minorMoney`
+      // answers null for a null amount exactly as it does for a missing
+      // currency, and the fallback below names the amount without inventing it.
+      Alert.alert('Refunded', `${minorMoney(r.refundedCents ?? null, r.currency ?? target.rule.currency) ?? 'The amount'} has gone back to ${who}. Stripe emails them a receipt for it; anything else you want to say is yours to say.`);
     }
     load();
   };

@@ -559,25 +559,61 @@ export default function ClientScreen() {
 
   const [days, setDays] = useState<PlannedDay[] | null>(null);
   const [weekStatus, setWeekStatus] = useState<LoadStatus>('loading');
-  // Fixed at the read rather than recomputed every render, so a screen left
-  // open over midnight cannot re-sort itself under the coach's hands.
+  /**
+   * ONE local day for the whole screen.
+   *
+   * This hook was already here, three hundred lines down, judging whether a gym
+   * pass has expired and how long it is since the client was last through a
+   * door — and its own note there said the rule: "One read of the day for the
+   * whole screen, not one per feature." The screen was breaking it. A SECOND
+   * day lived in the `todayISO` state below, seeded from a `useState`
+   * initialiser and moved only when the planned-week read ran, and three things
+   * are judged against that one: the ahead/gone split of the marked week, the
+   * AGEING OF THIS CLIENT'S INVOICES (`ageingBook`), and how long ago they were
+   * last scanned (`bodyLine`).
+   *
+   * So a coach sitting on this screen as midnight passed was shown an
+   * attendance gap that had grown by a day beside an invoice book that had not,
+   * and a body-composition line a day behind the one above it. Two answers to
+   * "what day is it", a finger's width apart, on the screen a coach decides
+   * whether to chase somebody from.
+   *
+   * It is declared here rather than there because this is the first thing on
+   * the screen that needs it. `useToday` is not a ticking clock — it moves at
+   * the next local midnight and on the app coming back to the foreground, and
+   * compares before it sets — so nothing re-sorts under a coach who is reading:
+   * the only moment it moves is the moment the answer changed.
+   */
+  const today = useToday();
+  /**
+   * The day the WINDOW below was read for.
+   *
+   * Still its own value, because `planWindow` is a property of the read and not
+   * of the render, and `coachWeek` must split the days it was handed on the day
+   * they were asked for. What changed is that the day turning now re-runs the
+   * read — `today` is in the dependency list — so the two can no longer drift
+   * apart by three days on a screen that mounts once and is never torn down
+   * (app/(trainer)/_layout.tsx registers this one `href: null`).
+   */
   const [todayISO, setTodayISO] = useState<string>(() => isoToday(new Date()));
   useEffect(() => {
     if (!canRead || !id) return;
     let live = true;
     setDays(null); setWeekStatus('loading');
     (async () => {
-      const today = isoToday(new Date());
-      const w = planWindow(today);
+      // The read's own instant, named apart from the screen's `today` above so
+      // the window and the day it is split on are visibly the same one.
+      const readDay = isoToday(new Date());
+      const w = planWindow(readDay);
       if (!w) { if (live) setWeekStatus('error'); return; } // unreachable: isoToday always parses
       const read = await fetchClientPlannedDays(id, w.fromISO, w.toISO);
       if (!live) return;
-      setTodayISO(today);
+      setTodayISO(readDay);
       setDays(read.days);
       setWeekStatus(read.days == null ? 'error' : read.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id, readNonce]);
+  }, [canRead, id, today, readNonce]);
 
   // The programme is the coach's own row and null covers three situations —
   // none assigned, the read failed, and one assigned by a different coach,
@@ -813,20 +849,8 @@ export default function ClientScreen() {
     return () => { live = false; };
   }, [canRead, id, uid, uidStatus, readNonce]);
 
-  // The gym pass has to be live on a DATE, and the date is local: a pass
-  // expires at the gym, not at an instant in UTC.
-  //
-  // `useToday`, not a `useMemo` with an empty dependency array. The local-day
-  // reasoning above is right and freezing it undid it: a coach who left this
-  // client open last night and picked the phone up in the morning was shown a
-  // pass that expired at midnight as live, pulled to refresh — which re-reads
-  // the passes and never recomputed the date they are judged against — and
-  // trained a session nothing is paying for. See src/ui/today.ts.
-  //
-  // One read of the day for the whole screen, not one per feature: the gym pass
-  // and the attendance gap below are both judged against it, and two `useToday`
-  // subscriptions would be two midnight timers answering the same question.
-  const today = useToday();
+  // `today` — the screen's one local day — is read further up, above the
+  // planned-week effect that is the earliest thing on this screen to need it.
   const coachPacks: Entitlement[] | null = useMemo(
     () => (packRows === undefined ? null : coachPackLines(packBalance(packRows ?? null).lines)), [packRows]);
   const gymPtPasses: Entitlement[] | null = useMemo(
@@ -848,10 +872,18 @@ export default function ClientScreen() {
    * client at eight and looked again at ten was still being told that the nine
    * o'clock they had just taught was the next one coming. src/ui/today.ts.
    */
-  const creditNow = useNow();
+  /**
+   * ONE clock for the whole screen, for the reason `useToday` above it gives
+   * about one read of the day: two `useNow` subscriptions are two midnight
+   * timers, two AppState listeners and two focus effects answering the same
+   * question, and they can answer it a millisecond apart. Everything on this
+   * screen that is judged against "now" — the credit ledger below, and `nowMs`
+   * in the briefing — is judged against this one.
+   */
+  const now = useNow();
   const creditLedger: Ledger | null = useMemo(
-    () => (creditRows === undefined ? null : buildLedger(creditRows, creditRoute, creditNow.getTime())),
-    [creditRows, creditRoute, creditNow]);
+    () => (creditRows === undefined ? null : buildLedger(creditRows, creditRoute, now.getTime())),
+    [creditRows, creditRoute, now]);
   const creditShortfall = useMemo(() => shortfallLine(creditLedger), [creditLedger]);
   const creditsLoading = packRows === undefined || passRows === undefined || creditRows === undefined;
   const creditsUnread = !creditsLoading && (packRows === null || passRows === null || creditRows === null);
@@ -1240,7 +1272,37 @@ export default function ClientScreen() {
 
   /* ── the briefing ───────────────────────────────────────────────────────── */
 
-  const nowMs = Date.now();
+  /**
+   * The instant everything below is judged against — the goals past their
+   * target date, the age of the last check-in, how long ago each contact was,
+   * and the follow-up window.
+   *
+   * This was a bare `Date.now()` read in the render body, and that is wrong in
+   * both directions at once.
+   *
+   * Stale: src/ui/today.ts states it — "a bare `todayKey()` in the render body
+   * is correct and does not re-render: it is only right at the moment something
+   * else happens to redraw". app/(trainer)/_layout.tsx registers this screen
+   * with `href: null`, so it mounts once and is never torn down, and nothing
+   * here redraws on its own. A coach who opened a client last night and picked
+   * the phone up this morning read yesterday's answer to "3 goals past their
+   * target date" and yesterday's "rang them 2 days ago".
+   *
+   * And churning: `Date.now()` is a NEW VALUE ON EVERY RENDER, and it is in the
+   * dependency array of the `followUps` memo below — which runs
+   * `assessAllFollowUps` over every activity event this screen read, up to a
+   * thousand of them, once per contact. A memo whose dependency changes every
+   * render is not a memo. This screen re-renders on every keystroke in three
+   * TextInputs (the invite address, the injury ask, and the note in the contact
+   * sheet), so typing "rang, no answer" into the sheet re-ran that assessment
+   * fourteen times.
+   *
+   * `useNow()` is both halves: it is STATE, so it moves at local midnight, on
+   * the app coming back to the foreground and on this screen being focused —
+   * and it keeps ONE identity between those moments, so the memo below memoises.
+   * It is the same instant the credit ledger is split on, read once above.
+   */
+  const nowMs = now.getTime();
   const noAccount = noAccountNote(queryable, who);
   // Non-null when no read was issued at all. Every line below defers to it,
   // because the alternative is a screen full of "Reading their goals…" for a
@@ -2179,7 +2241,31 @@ export default function ClientScreen() {
               value: delta == null ? '—' : deltaLabel(delta, { since: null, noChange: 'No change' }),
               unit: deltaMoved(delta) ? wu : undefined,
             },
-            { label: 'In the App', value: fig(seen ? seen.seenDays : null), unit: seen ? `/ ${seen.windowDays} days` : undefined },
+            {
+              // `unasked` first, and it was the one figure on this screen that
+              // did not have it. The caption under this row already defers to
+              // `unasked`; the FIGURE did not, so a hand-added client could be
+              // shown "In the App 0 / 28 days" with "Nothing of theirs can be
+              // read until they join Repple" printed underneath it.
+              //
+              // It is reachable rather than theoretical: `handAdded` is
+              // three-valued and is `undefined` until the roster lands, which
+              // is the honest default (src/lib/clientRecord.ts) — so on a cold
+              // launch from Check In the thirteen reads all start, the ticks
+              // read comes back with zero rows and NO error because
+              // `is_my_client()` finds no `clients` row, and `summariseAdherence`
+              // over no ticks is a truthful 0 out of 28 about a set nobody was
+              // entitled to ask for. When the roster then says the person was
+              // typed in by hand, `canRead` goes false and every effect returns
+              // at its guard WITHOUT clearing what it already stored.
+              //
+              // Zero days in the app is the sentence a coach acts on. It must
+              // never be manufactured by a read that was never entitled to an
+              // answer — the third state, not the empty one.
+              label: 'In the App',
+              value: fig(unasked || !seen ? null : seen.seenDays),
+              unit: !unasked && seen ? `/ ${seen.windowDays} days` : undefined,
+            },
             { label: 'Unread', value: fig(client ? client.unread : null) },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

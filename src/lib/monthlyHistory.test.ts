@@ -26,8 +26,10 @@
 import {
   monthKey, isMonthKey, monthWindow, seriesFor, recordedCount, historyDelta,
   sanitiseSnapshots, mergeSnapshots, missingOnServer, MONTH_LABELS, moneyHistoryKey,
-  type Snapshots,
+  deviceHistoryKey, isDeviceHistoryKey, historyPass, beginHistoryPass, applyHistoryPass,
+  NO_HISTORY_SESSION, type HistorySession, type Snapshots,
 } from './monthlyHistory';
+import type { LoadStatus } from '../ui/loadStatus';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -228,6 +230,372 @@ for (const bad of [null, undefined, '', '  ', 'GB', 'GBPP', '£', 'G8P']) {
   if (moneyHistoryKey('k', bad as string | null) !== null) errors.push(`currency ${JSON.stringify(bad)} must produce no key`);
 }
 if (moneyHistoryKey('', 'GBP') !== null) errors.push('no base, no key');
+
+
+// ---------------------------------------------------------------------------
+// WHOSE MONTHS THESE ARE - the shared handset
+// ---------------------------------------------------------------------------
+//
+// The device key and the server's `metric_key` were ONE STRING, and that string
+// carried no account. On a gym's front-desk handset that made coach A's revenue
+// months into coach B's: B signs in, the provider reads the bare key and finds
+// A's months, `missingOnServer` calls every one of them "months the server has
+// never heard of" because B's row has not, and `saveMetricHistory` resolves the
+// uid fresh at save time and upserts them under B's `user_id`. Permanently.
+// Nothing later can tell those rows from B's own.
+//
+// This block is not a set of unit assertions about a key format. It drives ONE
+// long-lived session object through sign-in, sign-out and sign-in-as-somebody-
+// else against a fake handset and a fake server, calling the same four
+// functions the provider calls in the same order, because that sequence is the
+// only shape in which the defect appears at all. Each of the three mutations
+// named below has been run against it on a scratch copy and watched to fail:
+//
+//   M1  deviceHistoryKey ignores the uid and returns the metric key
+//   M2  beginHistoryPass carries `hydrated` (and `hist`) across a key change
+//   M3  deviceHistoryKey accepts a null / 'unknown' uid as an account
+
+// -- the two strings, before any of the above --------------------------------
+{
+  const MK = 'repple.owner.mrrHistory.GBP';
+  const a = deviceHistoryKey(MK, 'coach-a');
+  const b = deviceHistoryKey(MK, 'coach-b');
+  ok(a !== b, 'two accounts must not share a device history key');
+  ok(a !== MK, 'the device key must not BE the metric key - that is the defect');
+  eq(a, 'repple.owner.mrrHistory.GBP:coach-a', 'the account goes on the end of the metric key');
+  ok(isDeviceHistoryKey(a as string), 'a device key carries an account');
+  ok(!isDeviceHistoryKey(MK), 'a metric key carries none, and must not');
+  // The metric key is what the SERVER is sent, and it must stay free of the
+  // account or one coach's history splits across every handset they own.
+  ok(!(moneyHistoryKey('repple.owner.mrrHistory', 'GBP') as string).includes('coach-a'),
+    'the metric key must never carry an account');
+  eq(deviceHistoryKey(MK, ' coach-a '), a, 'a padded id is the same account');
+
+  // M3. Not an account, so not a key, so nothing is read and nothing is kept.
+  for (const bad of [null, undefined, '', '   ', 'unknown']) {
+    eq(deviceHistoryKey(MK, bad as string | null), null,
+      `uid ${JSON.stringify(bad)} is not an account and must produce no key`);
+  }
+  // A separator inside the id would let two different (metric, account) pairs
+  // spell one key.
+  eq(deviceHistoryKey(MK, 'a:b'), null, 'an id containing the separator is refused');
+  eq(deviceHistoryKey('', 'coach-a'), null, 'no metric key, no device key');
+}
+
+// -- the handset, the server, and the provider as a function -----------------
+
+/** One phone's AsyncStorage, plus the keys whose reads are failing. */
+interface Handset { shelf: Record<string, string>; unreadable: Set<string> }
+
+/** `metric_history`, which is keyed by (user_id, metric_key, month) - the
+ *  `user_id` being the thing the device key was missing. */
+type Server = Map<string, number>;
+const rowKey = (uid: string, mk: string, month: string) => `${uid} ${mk} ${month}`;
+function serverRows(srv: Server, uid: string, mk: string): Snapshots {
+  const out: Snapshots = {};
+  for (const [k, v] of srv) {
+    const [u, key, month] = k.split(' ');
+    if (u === uid && key === mk) out[month] = v;
+  }
+  return out;
+}
+
+/** Every string this pass handed to the server as a `metric_key`. */
+const metricKeysSent: string[] = [];
+/** Every string this pass handed to the device store. */
+const deviceKeysTouched: string[] = [];
+
+/**
+ * One pass of `useMonthlyHistory`, with the storage and the network faked and
+ * everything else being the real functions in the real order.
+ *
+ * `serverStatus` is what `fetchMetricHistory` came back with: 'error' is a gym
+ * with no signal, which is the case that fills the shelf with months the server
+ * has never heard of - the fuel the defect ran on.
+ */
+function runPass(
+  h: Handset, srv: Server, prev: HistorySession,
+  opts: {
+    metricKey: string; uid: string | null; value: number | null; month: string;
+    serverStatus?: LoadStatus;
+  },
+): HistorySession {
+  const deviceKey = deviceHistoryKey(opts.metricKey, opts.uid);
+  // The effect keyed on the device key. Everything belonging to the previous
+  // key goes here, before a byte is read.
+  const s = beginHistoryPass(prev, deviceKey);
+  // No account is no store: nothing read, nothing kept, nothing published.
+  if (!deviceKey) return s;
+
+  // The shelf - or the months already in hand, when a read of THIS key armed
+  // the flag. Null is a FAILED read and is not `{}`.
+  let cached: Snapshots | null;
+  if (s.key === deviceKey && s.hydrated) {
+    cached = s.hist;
+  } else {
+    deviceKeysTouched.push(deviceKey);
+    cached = h.unreadable.has(deviceKey)
+      ? null
+      : (h.shelf[deviceKey] ? sanitiseSnapshots(JSON.parse(h.shelf[deviceKey])) : {});
+  }
+
+  let read: { snapshots: Snapshots; status: LoadStatus };
+  if (s.key === deviceKey && s.server) {
+    read = { snapshots: s.server, status: 'ready' };
+  } else {
+    metricKeysSent.push(opts.metricKey);
+    read = (opts.serverStatus ?? 'ready') === 'ready'
+      ? { snapshots: serverRows(srv, opts.uid as string, opts.metricKey), status: 'ready' as LoadStatus }
+      : { snapshots: {}, status: opts.serverStatus as LoadStatus };
+  }
+
+  const pass = historyPass({ cached, server: read, currentValue: opts.value, thisMonth: opts.month });
+
+  if (pass.writeCache) { deviceKeysTouched.push(deviceKey); h.shelf[deviceKey] = JSON.stringify(pass.merged); }
+
+  let server: Snapshots | null = read.status === 'ready' ? read.snapshots : null;
+  let sent = s.sent;
+  const months = Object.keys(pass.upload).sort().join(',');
+  const stamp = `${deviceKey}|${opts.value}|${months}`;
+  if (months && stamp !== sent) {
+    metricKeysSent.push(opts.metricKey);
+    // The fifth step of the defect: the uid is resolved FRESH, here, at save
+    // time - so whatever `upload` holds is filed under whoever is signed in NOW.
+    for (const [m, v] of Object.entries(pass.upload)) srv.set(rowKey(opts.uid as string, opts.metricKey, m), v);
+    sent = stamp;
+    if (server) server = { ...server, ...pass.upload };
+  }
+  return applyHistoryPass(s, deviceKey, pass, server, read.status, sent);
+}
+
+// -- one session, three sign-ins ---------------------------------------------
+{
+  const MK = 'repple.owner.mrrHistory.GBP';
+  const A = 'coach-a-11111111';
+  const B = 'coach-b-22222222';
+  // Built with the same helper the code uses - `npm test` runs under three
+  // timezones and `monthKey` is a LOCAL boundary.
+  const now = new Date();
+  const M1 = monthKey(new Date(now.getFullYear(), now.getMonth() - 2, 15));
+  const M2 = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 15));
+  const M3 = monthKey(new Date(now.getFullYear(), now.getMonth(), 15));
+
+  const handset: Handset = { shelf: {}, unreadable: new Set() };
+  const server: Server = new Map();
+  // ONE object, carried across every sign-in below, because that is what a
+  // provider mounted at the root is: nothing unmounts it when a session ends.
+  let session = NO_HISTORY_SESSION;
+
+  // 1. The app launches with nobody signed in.
+  session = runPass(handset, server, session, { metricKey: MK, uid: null, value: 4100, month: M3 });
+  eqJson(handset.shelf, {}, 'nothing is written to a handset nobody is signed in to');
+  eq(server.size, 0, 'nothing is published for nobody');
+  eqJson(session.hist, {}, 'and nothing is on screen');
+
+  // 2. Coach A signs in at a gym with no signal, and records two months. The
+  //    server read fails, so these months exist ONLY on the handset - which is
+  //    exactly the backfill case the defect turned into a theft.
+  session = runPass(handset, server, session, { metricKey: MK, uid: A, value: 1000, month: M1, serverStatus: 'error' });
+  session = runPass(handset, server, session, { metricKey: MK, uid: A, value: 2000, month: M2, serverStatus: 'error' });
+  eqJson(session.hist, { [M1]: 1000, [M2]: 2000 }, "A's two months are on screen");
+  eq(session.status, 'error', 'and are reported as unconfirmed, not as the whole history');
+  eq(server.size, 0, 'a failed server read publishes NOTHING');
+  ok(handset.shelf[`${MK}:${A}`] != null, "A's months are on the shelf under A's key");
+  eq(handset.shelf[MK], undefined, 'and never under the bare metric key');
+
+  // 3. A signs out. Nothing unmounts the provider; the uid simply goes null.
+  session = runPass(handset, server, session, { metricKey: MK, uid: null, value: null, month: M3 });
+  eqJson(session.hist, {}, "A's months leave the screen the moment A does");
+  eq(session.hydrated, false, 'and the write is disarmed with them');
+  eq(session.server, null, "A's server view is not carried into the next session");
+  eq(session.sent, '', "nor is A's confirmed upload");
+  ok(handset.shelf[`${MK}:${A}`] != null, "but A's months are KEPT - signing out is not an erasure");
+
+  // 4. Coach B signs in on the same handset, with signal. B has no history.
+  const beforeB = handset.shelf[`${MK}:${A}`];
+  session = runPass(handset, server, session, { metricKey: MK, uid: B, value: 5000, month: M3 });
+
+  // THE ASSERTION THIS WHOLE BLOCK IS FOR.
+  eqJson(serverRows(server, B, MK), { [M3]: 5000 },
+    "B's row holds B's own month and NOTHING of A's");
+  ok(!Object.values(serverRows(server, B, MK)).includes(1000),
+    "A's first figure must never be filed under B");
+  ok(!Object.values(serverRows(server, B, MK)).includes(2000),
+    "A's second figure must never be filed under B");
+  eqJson(session.hist, { [M3]: 5000 }, "B's chart draws B's month and no month of A's");
+  eq(recordedCount(seriesFor(monthWindow(now, 6), session.hist)), 1,
+    "B has one real month, not three - tracking started, not somebody else's year");
+  eq(handset.shelf[`${MK}:${A}`], beforeB, "and A's shelf is untouched by B's session");
+
+  // 5. B's second pass, same month, same figure. Nothing is re-published.
+  const rowsAfterB = server.size;
+  session = runPass(handset, server, session, { metricKey: MK, uid: B, value: 5000, month: M3 });
+  eq(server.size, rowsAfterB, 'an unchanged figure does not re-upsert the row');
+
+  // 6. A signs back in. Their months are where they left them, and NOW they
+  //    backfill - to A's own row, which is what the backfill was always for.
+  session = runPass(handset, server, session, { metricKey: MK, uid: A, value: 3000, month: M3 });
+  eqJson(session.hist, { [M1]: 1000, [M2]: 2000, [M3]: 3000 }, "A gets A's history back");
+  eqJson(serverRows(server, A, MK), { [M1]: 1000, [M2]: 2000, [M3]: 3000 },
+    "and it reaches A's account, not anybody else's");
+  eqJson(serverRows(server, B, MK), { [M3]: 5000 }, "B's row is unchanged by A signing in");
+
+  // The two strings never swapped jobs anywhere in the sequence above.
+  ok(metricKeysSent.every((k) => k === MK),
+    `the server is only ever sent the bare metric key - got ${JSON.stringify([...new Set(metricKeysSent)])}`);
+  ok(deviceKeysTouched.every((k) => k !== MK),
+    `the device store is never touched at the bare metric key - got ${JSON.stringify([...new Set(deviceKeysTouched)])}`);
+  ok(deviceKeysTouched.every((k) => isDeviceHistoryKey(k)), 'every device key carries an account');
+}
+
+// -- an account switch whose own read fails ----------------------------------
+//
+// The other half of M2, and the expensive half: this is the way to LOSE months
+// rather than merely show the wrong ones. B's shelf cannot be read. Nothing of
+// B's may be written over, and nothing of A's may be published as B's.
+{
+  const MK = 'repple.owner.sessionsHistory';
+  const A = 'coach-a-11111111';
+  const B = 'coach-b-22222222';
+  const now = new Date();
+  const M1 = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 15));
+  const M2 = monthKey(new Date(now.getFullYear(), now.getMonth(), 15));
+
+  const handset: Handset = { shelf: {}, unreadable: new Set([`${MK}:${B}`]) };
+  const server: Server = new Map();
+  let session = NO_HISTORY_SESSION;
+
+  session = runPass(handset, server, session, { metricKey: MK, uid: A, value: 11, month: M1, serverStatus: 'error' });
+  ok(session.hydrated, "A's shelf was read, so A's session is armed");
+  // B's real months, put on the shelf by some earlier launch and now unreadable.
+  handset.shelf[`${MK}:${B}`] = JSON.stringify({ [M1]: 99 });
+
+  session = runPass(handset, server, session, { metricKey: MK, uid: B, value: 22, month: M2 });
+  eq(session.hydrated, false, 'a shelf that could not be read leaves the write disarmed');
+  eqJson(JSON.parse(handset.shelf[`${MK}:${B}`]), { [M1]: 99 },
+    "B's stored months survive a read that failed - nothing is written over bytes we never saw");
+  eqJson(serverRows(server, B, MK), { [M2]: 22 },
+    "only the figure the caller handed us is published, never A's month off A's shelf");
+  eqJson(session.hist, { [M2]: 22 }, "and A's month is not on B's screen");
+}
+
+// -- the reset, stated on its own --------------------------------------------
+{
+  const MK = 'repple.owner.sessionsHistory';
+  const A = deviceHistoryKey(MK, 'coach-a') as string;
+  const B = deviceHistoryKey(MK, 'coach-b') as string;
+  const held: HistorySession = {
+    key: A, hist: { '2026-03': 41 }, hydrated: true, status: 'ready',
+    server: { '2026-03': 41 }, sent: 'something',
+  };
+  const fresh = beginHistoryPass(held, B);
+  eq(fresh.key, B, 'the session belongs to the new key');
+  eq(fresh.hydrated, false, 'the arming flag does NOT survive the account changing');
+  eqJson(fresh.hist, {}, "nor do the previous account's months");
+  eq(fresh.server, null, 'nor their server view');
+  eq(fresh.sent, '', 'nor their confirmed upload');
+  eq(fresh.status, 'loading', 'and nothing is claimed about the new account yet');
+  // Same key, same object: a pass triggered by a new figure must not blank the
+  // chart it is only refreshing.
+  ok(beginHistoryPass(held, A) === held, 'an unchanged key changes nothing');
+  // Signing out is a key change like any other.
+  eq(beginHistoryPass(held, null).hydrated, false, 'signing out disarms the write');
+  eqJson(beginHistoryPass(held, null).hist, {}, 'and clears the screen');
+}
+
+// -- a read that failed is not an empty shelf --------------------------------
+{
+  const failed = historyPass({
+    cached: null,
+    server: { snapshots: { '2026-03': 7 }, status: 'ready' },
+    currentValue: 9, thisMonth: '2026-04',
+  });
+  eq(failed.writeCache, false, 'an unreadable shelf is NOT written over');
+  eqJson(failed.upload, { '2026-04': 9 },
+    'and nothing is backfilled off it - only the figure the caller handed us');
+
+  const empty = historyPass({
+    cached: {},
+    server: { snapshots: { '2026-03': 7 }, status: 'ready' },
+    currentValue: 9, thisMonth: '2026-04',
+  });
+  eq(empty.writeCache, true, 'a shelf that is genuinely empty IS written');
+  eqJson(empty.merged, { '2026-03': 7, '2026-04': 9 }, 'and holds the account plus this month');
+}
+
+// -- a failed SERVER read publishes nothing, and merges nothing --------------
+{
+  const p = historyPass({
+    cached: { '2026-01': 1 },
+    server: { snapshots: {}, status: 'error' },
+    currentValue: 2, thisMonth: '2026-02',
+  });
+  eqJson(p.upload, {}, 'an unread account is not an empty account, and is not written to');
+  eqJson(p.merged, { '2026-01': 1, '2026-02': 2 }, 'the shelf stands alone under error');
+  eq(p.writeCache, true, 'and is still kept - it is the store that works with no signal');
+  // 'partial' and 'loading' are not 'ready' either. Only 'ready' is.
+  for (const st of ['partial', 'loading', 'error'] as LoadStatus[]) {
+    const q = historyPass({
+      cached: { '2026-01': 1 }, server: { snapshots: { '2026-01': 99 }, status: st },
+      currentValue: null, thisMonth: '2026-02',
+    });
+    eqJson(q.upload, {}, `status ${st} must publish nothing`);
+    eqJson(q.merged, { '2026-01': 1 }, `status ${st} must not merge a server view it does not trust`);
+  }
+}
+
+// -- null is not zero, here as everywhere ------------------------------------
+{
+  const p = historyPass({
+    cached: { '2026-01': 1 }, server: { snapshots: {}, status: 'ready' },
+    currentValue: null, thisMonth: '2026-02',
+  });
+  ok(!('2026-02' in p.merged), 'a month whose figure is unknown is not recorded as anything');
+  eqJson(p.upload, { '2026-01': 1 }, 'the backfill still goes; the unknown month does not');
+  // A month key the server's CHECK constraint would refuse is not recorded here
+  // either, so a figure cannot be filed where nothing will look for it again.
+  const bad = historyPass({
+    cached: {}, server: { snapshots: {}, status: 'ready' },
+    currentValue: 5, thisMonth: '2026-13',
+  });
+  eqJson(bad.merged, {}, 'a malformed month is not a month');
+  eqJson(bad.upload, {}, 'and is certainly not published');
+}
+
+// -- a handset in a drawer does not get to publish over the account ----------
+//
+// Guard 3. `missingOnServer` is what keeps a stale shelf from overwriting a
+// month the account already holds - a coach who corrected a figure on their
+// other phone must not have the correction undone by this one being opened.
+{
+  const p = historyPass({
+    cached: { '2026-01': 111, '2026-02': 222 },
+    server: { snapshots: { '2026-01': 999 }, status: 'ready' },
+    currentValue: null, thisMonth: '2026-03',
+  });
+  eqJson(p.upload, { '2026-02': 222 },
+    'only the month the server has never heard of is offered');
+  ok(!('2026-01' in p.upload),
+    "a month the account already holds is left alone even where the shelf disagrees");
+  eq(p.merged['2026-01'], 999, 'and the account, not the shelf, is what is drawn');
+}
+
+// -- a pass that lands after the account changed is discarded ----------------
+{
+  const MK = 'repple.trainer.deliveredRevHistory';
+  const A = deviceHistoryKey(MK, 'coach-a') as string;
+  const B = deviceHistoryKey(MK, 'coach-b') as string;
+  const nowB: HistorySession = { ...NO_HISTORY_SESSION, key: B };
+  const late = historyPass({
+    cached: { '2026-01': 1 }, server: { snapshots: {}, status: 'ready' },
+    currentValue: 2, thisMonth: '2026-02',
+  });
+  const after = applyHistoryPass(nowB, A, late, {}, 'ready', 'stamp');
+  ok(after === nowB, "A's read landing late must not paint over B");
+  const onTime = applyHistoryPass(nowB, B, late, {}, 'ready', 'stamp');
+  eqJson(onTime.hist, { '2026-01': 1, '2026-02': 2 }, "B's own pass is applied");
+  eq(onTime.hydrated, true, 'and arms the write, because the shelf was read');
+}
 
 if (errors.length) {
   console.error(`monthlyHistory.test.ts — ${errors.length} failure(s):`);

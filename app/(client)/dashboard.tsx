@@ -37,7 +37,10 @@ import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
 import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaLabel';
-import { shortDayLabel, todayISO } from '../../src/lib/bodyFigures';
+// `agoLabel` — "today" / "yesterday" / "18 days ago", the same wording the
+// body figures are dated with, so a coach's note and a weigh-in are aged in one
+// vocabulary.
+import { agoLabel, shortDayLabel, todayISO } from '../../src/lib/bodyFigures';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -138,7 +141,7 @@ export default function Home() {
   // Recovery is now a third reader — it is where this hero's own tap lands —
   // and three hand copies of one derivation is three chances to disagree about
   // the same number. See src/ui/readiness.ts for what moved and why.
-  const { readiness, breakdown } = useReadiness();
+  const { readiness, breakdown, direction } = useReadiness();
   const readinessColor = readiness == null ? t.ink3 : readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
   // Two device-local marks. `null` on either is "we could not read it", which
   // the Getting Started list below draws as a dash rather than as undone —
@@ -169,7 +172,15 @@ export default function Home() {
   // re-render at midnight, so a member with Home open across a Sunday goes on
   // being shown last week's total under "This Week". `useNow` re-settles at the
   // next local midnight and on every return to the foreground.
-  const nowMs = useNow().getTime();
+  //
+  // ONE clock for the whole screen, and that is the point of holding the Date
+  // as well as the milliseconds. The date line in the header, the greeting, the
+  // day of the programme the card names and the week the KPI row counts were
+  // four separate reads of the clock, three of them `new Date()` in the render
+  // body — so they were not merely stale, they could disagree with each other
+  // across a midnight this tab sat open through.
+  const now = useNow();
+  const nowMs = now.getTime();
   const { sessions, status: sessionStatus, refresh: refreshSessions } = useSessions();
   // ── when the figures on this screen were last confirmed ───────────────
   //
@@ -299,8 +310,33 @@ export default function Home() {
   // src/lib/weekStart.ts owns — it was a hand-rolled Monday offset, and this
   // screen deciding for itself which day opens a week is how the three screens
   // that name today's session came to disagree about it.
-  const todayIdx = weekIndexOf(new Date());
+  //
+  // `nowMs`, not a bare `new Date()` in the render body. Home is a TAB: expo
+  // router mounts it once and nothing tears it down, so a clock read here is
+  // fixed at whatever moment the member first opened the app — and this one
+  // picks WHICH DAY OF THE PROGRAMME the card names. A member who left Home
+  // open on Monday evening and picked the phone up on Tuesday morning was shown
+  // "Today · Push" over Monday's session, tapped Start Workout, and trained the
+  // wrong day. It self-healed only when something else happened to re-render,
+  // which on a screen somebody is reading rather than touching is nothing.
+  // `useNow` re-settles at the next local midnight, on every foreground and on
+  // every return to this tab, which are the three moments the answer changes.
+  const todayIdx = weekIndexOf(new Date(nowMs));
   const workout = planDays[todayIdx % (planDays.length || 1)] || planDays[0] || { focus: 'Rest Day', exercises: [] };
+  /**
+   * How much work today's session is, counted off the plan itself.
+   *
+   * Null when there is no session to describe — the Rest Day fallback above, or
+   * a coach block with an empty day in it — so the caption under the card is
+   * absent rather than reading "0 exercises" over something somebody is about
+   * to train. `sets` is a number on every `ProgramExercise`, but a programme
+   * that came out of an import may not have one on every row, so an unreported
+   * set count contributes nothing to the total rather than a zero, and the
+   * caption drops the clause entirely when nothing reported.
+   */
+  const workoutSetCount = workout.exercises.length
+    ? workout.exercises.reduce((n, e) => n + (typeof e.sets === 'number' && Number.isFinite(e.sets) ? e.sets : 0), 0)
+    : null;
 
   // ── all three of these are totals over the WHOLE log ──────────────────
   //
@@ -515,7 +551,15 @@ export default function Home() {
   // lunchtime there — the whole day's training stopped counting as today's.
   // `todayISO` is the local calendar day and says in its own header that a
   // string slice is not it.
-  const _todayKey = todayISO();
+  //
+  // And it is read off `now`, not off the clock. `todayISO()` with no argument
+  // reads `new Date()`, which on a tab that mounts once is the day the member
+  // first opened the app — the third frozen clock on this screen and the one
+  // with the largest blast radius, because `trainedToday` is what decides which
+  // of the four cards the top of Home shows. A member who trained on Monday and
+  // left Home open woke up on Tuesday to "Session Done", with Start Workout
+  // nowhere on the screen, for the whole of a day they had not trained.
+  const _todayKey = todayISO(now);
   const trainedToday = log.some((e) => {
     const d = new Date(e.t || '');
     // An unparseable stamp is not evidence of a session today. It is dropped
@@ -527,16 +571,49 @@ export default function Home() {
   // movement, and clamped at zero so Home could never say a client was over.
   // One function now, the same one the Meals tab and the Food Log call.
   const dayCal = macros ? caloriesLeft(macros.kcal, consumed.kcal, burn?.burned ?? 0, burn?.budgeted ?? 0, burn?.kind) : null;
-  const kcalLeft = dayCal ? dayCal.net : 0;
   // Only claim somebody is under-recovered when there is a score saying so.
   // Unknown readiness falls through to the ordinary prompts, which assert
   // nothing about their body.
+  //
+  // ── the fourth branch, and the zero that hid it ───────────────────────
+  //
+  // This read `const kcalLeft = dayCal ? dayCal.net : 0` and then branched on
+  // `kcalLeft > 200`. `dayCal` is null whenever there is no target — no weight
+  // on record, no body fat, or, since the Fuel guard above, a profile or a
+  // coach adjustment we could not read — and a null target became the number
+  // zero, which is under 200, which fell through to "On Track · Session done
+  // and your macros are on point. Nice work."
+  //
+  // So the card at the top of the first screen of the app congratulated a
+  // member on hitting macros it had never worked out, on the strength of a
+  // figure it had invented. For a brand-new member that is a compliment about
+  // nothing. For a member whose profile read failed it is worse: Fuel Today
+  // twelve inches below is WITHHELD, with a notice saying we could not read
+  // what they are training for, while the card above it says their day is on
+  // point. Two blocks on one screen, one read, opposite claims.
+  //
+  // `kcalLeft` is gone rather than defaulted. The only thing it was used for is
+  // the comparison, and a comparison is exactly what a null cannot enter — see
+  // `dayCal.net` for the figure itself, which is only ever read where there is
+  // a target behind it.
   const today = readiness != null && readiness.tone === 'low'
     ? { headline: 'Recover Today', tip: 'Under-recovered — keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
     : !trainedToday
     ? { headline: 'Ready to Train', tip: readiness?.tip ?? 'Log tonight’s sleep and your readiness appears here.', cta: 'Start Workout', route: '/(client)/workouts', tone: t.brand }
-    : kcalLeft > 200
-    ? { headline: 'Fuel Up', tip: dayCal ? caloriesNote(dayCal) + '.' : num(kcalLeft) + ' kcal left today.', cta: 'Log a Meal', route: '/(client)/nutrition', tone: t.brand }
+    // Trained, and no target to judge the eating against. The session is a fact
+    // and is said; the macros are not mentioned, because there is nothing to
+    // mention. The route still opens Nutrition, which is where the missing
+    // answer is given.
+    : dayCal == null
+    ? {
+        headline: 'Session Done',
+        tip: targetInputsUnknown
+          ? 'Nice work. We couldn’t work out today’s calorie target, so there is nothing to say about your eating yet.'
+          : 'Nice work. Add your weight and a scan and your daily target appears here.',
+        cta: 'View Plan', route: '/(client)/nutrition', tone: t.brand,
+      }
+    : dayCal.net > 200
+    ? { headline: 'Fuel Up', tip: caloriesNote(dayCal) + '.', cta: 'Log a Meal', route: '/(client)/nutrition', tone: t.brand }
     : { headline: 'On Track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View Plan', route: '/(client)/nutrition', tone: t.brand };
 
   const ws = c.weightSeries.map((x) => x.v);
@@ -621,7 +698,20 @@ export default function Home() {
     .filter((sx) => sx.status === 'booked' && sx.clientId === c.id && isUpcoming(sx.startsAt, nowMs))
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
 
-  const d = new Date();
+  // The date printed at the top of the screen and the greeting under it, off
+  // the SAME clock as everything else — see `now` above. This was `new Date()`
+  // in the render body on a tab that mounts once, so both were frozen at the
+  // moment the app was opened: a member who opened Home on Sunday night and
+  // looked at it on Monday morning read "Sun 13 Sep" and "Good Evening" over a
+  // Monday screen, and the two are the first and second lines they see.
+  //
+  // A greeting is the one thing here that turns on the HOUR rather than the
+  // day, and `useNow` does not tick — it re-settles at midnight, on foreground
+  // and on focus. That is right for this: a phone in a pocket from afternoon to
+  // evening re-settles the moment it is picked up, and a screen somebody is
+  // looking at while 11:59 becomes 12:01 is not worth a timer that re-renders
+  // the whole tab every minute.
+  const d = now;
   const hi = d.getHours() < 12 ? 'Good Morning' : d.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
 
   const firstName = (c.name || '').trim().split(' ')[0] || '';
@@ -773,7 +863,21 @@ export default function Home() {
             // they tell a full-confidence 83 apart from either, if the only
             // score that explains itself is the incomplete one. The row-by-row
             // account is on Recovery, which is where this hero already taps to.
-            ? `${readiness.tip} ${readinessMadeOf(readiness)}.`
+            // The direction goes FIRST, and only in the 'scored' state. A score
+            // with no direction is half an answer — 62 says nothing on its own —
+            // but the other three states are deliberately not drawn here. Two of
+            // them ('unread', 'not-comparable') already reach the reader as Flags
+            // through breakdown.caveats below, and drawing them twice would make
+            // the hero shout about yesterday. The third ('no-record') is silent
+            // on purpose: a member with no score yesterday is owed nothing, and
+            // "no direction to show" under today's number reads as a fault.
+            //
+            // Never render direction.delta as a number here. It is null in every
+            // state but 'scored', and a null rendered beside a score is the
+            // invented zero this codebase refuses — `detail` is the figure.
+            ? `${direction?.state === 'scored'
+                ? direction.detail.charAt(0).toUpperCase() + direction.detail.slice(1) + '. '
+                : ''}${readiness.tip} ${readinessMadeOf(readiness)}.`
             // Six different reasons there is no score, and they ask the reader
             // for six different things. "Log a night of sleep" to somebody
             // whose watch is connected and syncing is the complaint this fixed
@@ -891,6 +995,35 @@ export default function Home() {
             tone={today.tone}
             onPress={() => router.push(trainIntent(today.route) as any)}
           />
+          {/* ── what you are actually in for ─────────────────────────────────
+              Nike Training Club, Strava and TrueCoach all put the SHAPE of a
+              session in front of the button that starts it — how many
+              movements, how much work — and this card said "Ready to Train"
+              over the word "Push" and nothing else. A member deciding at
+              21:40 whether they have time for this had no way to tell a
+              four-exercise accessory day from an eleven-exercise one without
+              opening it.
+
+              Counted, never estimated. There is no duration model in this
+              codebase and inventing one here would be exactly the fabricated
+              figure the rest of this screen refuses: "about 45 min" over a
+              session nobody has timed is a number with nothing behind it.
+              The exercise count and the set total ARE facts — they are the
+              plan, in hand, already being rendered on the Train tab — and a
+              reader can price their own evening from them.
+
+              Drawn only under the training card, because it describes the
+              thing that card starts; and only where there is a session, so the
+              Rest Day fallback and an empty coach block draw nothing. The
+              cardio line comes along when the day has one, since a 20-minute
+              interval finish is most of what somebody is deciding about. */}
+          {today.route.includes('workouts') && workoutSetCount != null ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {workout.exercises.length === 1 ? '1 exercise' : `${workout.exercises.length} exercises`}
+              {workoutSetCount > 0 ? ` · ${workoutSetCount === 1 ? '1 set' : `${workoutSetCount} sets`}` : ''}
+              {workout.cardio ? ` · ${workout.cardio}` : ''}
+            </Text>
+          ) : null}
         </Section>
 
         {/* ── body ─────────────────────────────────────────────────────────
@@ -1176,12 +1309,38 @@ export default function Home() {
           <Rule />
           <Section>
             <SectionHead title="From Your Coach" />
-            {coachNotes.length > 0 ? (
+            {/* ── when it was said ─────────────────────────────────────────
+                Both of these are the NEWEST of their kind and nothing more —
+                `latest` is whatever notice the coach posted last, with no
+                window on it at all. So a note written six weeks ago sat under
+                "From Your Coach" on the first screen of the app every morning
+                since, in the present tense, with nothing to date it. A member
+                read "Great session today, keep the protein up" as this
+                morning's, and a gym's "we are closed Monday" as being about the
+                Monday coming.
+                Both rows carry `at` and always have; the screen simply did not
+                draw it. `agoLabel` is the same wording the body figures use and
+                returns null on an unparseable stamp, which draws nothing rather
+                than a dash under a sentence. The day is `_todayKey`, which is
+                this screen's one clock — so the label re-settles at midnight
+                along with everything else rather than ageing a note by a day
+                only when something happens to re-render. */}
+            {coachNotes.length > 0 ? (<>
               <Text style={{ ...ty.body, color: t.ink2 }} numberOfLines={4}>{coachNotes[0].body}</Text>
-            ) : null}
-            {ann ? (
+              {agoLabel(coachNotes[0].at, _todayKey) ? (
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                  Your coach wrote this {agoLabel(coachNotes[0].at, _todayKey)}
+                </Text>
+              ) : null}
+            </>) : null}
+            {ann ? (<>
               <Text style={{ ...ty.body, color: t.ink2, marginTop: coachNotes.length > 0 ? sp.md : 0 }}>{ann.body}</Text>
-            ) : null}
+              {agoLabel(ann.at, _todayKey) ? (
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                  Posted {agoLabel(ann.at, _todayKey)}
+                </Text>
+              ) : null}
+            </>) : null}
           </Section>
         </>) : null}
 
@@ -1198,6 +1357,13 @@ export default function Home() {
           <Section>
             <SectionHead title="From Your Gym" note="All notices" onPress={() => router.push('/(client)/notices')} />
             <Text style={{ ...ty.body, color: t.ink2 }}>{gymAnn.body}</Text>
+            {/* Dated for the same reason the coach's note is, and it matters
+                more here: a gym notice is usually about a DATE — closed Monday,
+                new timetable from the 1st — and an undated one read weeks later
+                is read about the wrong week. */}
+            {agoLabel(gymAnn.at, _todayKey) ? (
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>Posted {agoLabel(gymAnn.at, _todayKey)}</Text>
+            ) : null}
           </Section>
         </>) : null}
 

@@ -157,8 +157,22 @@ export default function Reminders() {
 
   /** The day picker, used by hydration, all three fixed kinds and every custom
    *  reminder — one control, so seven abbreviations cannot come to mean seven
-   *  different things in four places. */
-  const DayPicker = ({ days, onToggle, label }: { days: readonly Weekday[]; onToggle: (d: Weekday) => void; label: string }) => (
+   *  different things in four places.
+   *
+   *  A PLAIN FUNCTION, called as `dayPicker(days, onToggle, label)`, and not a
+   *  component rendered as `<DayPicker …/>`. A component declared in this body
+   *  is a new function object on every render, so React sees a different
+   *  element TYPE and unmounts and remounts the whole picker instead of
+   *  updating it — and these are seven `accessibilityRole="checkbox"`
+   *  Pressables. Tapping a day sets state on this screen, which re-renders it,
+   *  which would destroy and rebuild the very checkbox the member just tapped
+   *  at the moment VoiceOver is announcing its new checked state. Same rule as
+   *  app/(client)/injuries.tsx and app/(client)/report.tsx:475. It closes over
+   *  `t`, `ty`, `sp` and `radius` from this body, so it stays a call here
+   *  rather than being lifted to module scope. Nothing maps over this picker
+   *  itself, so no `key` moves; the inner `key={d}` is on the Pressable the
+   *  inner `.map` already returns and is untouched. */
+  const dayPicker = (days: readonly Weekday[], onToggle: (d: Weekday) => void, label: string) => (
     <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
       {/* Drawn in the order src/lib/weekStart.ts opens a week. The underlying
           numbering starts at Sunday because that is what expo-notifications
@@ -373,7 +387,7 @@ export default function Reminders() {
                 </View>
               ) : null}
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>On these days · {daysLabel(hydrationDays)}</Text>
-              <DayPicker days={hydrationDays} label="Hydration nudges" onToggle={(d) => setHydrationDays((p) => toggleDay(p, d))} />
+              {dayPicker(hydrationDays, (d) => setHydrationDays((p) => toggleDay(p, d)), 'Hydration nudges')}
               {hydrationDays.length === 0 ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
@@ -436,7 +450,7 @@ export default function Reminders() {
                     {movedFor(f.hour, f.minute) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{movedFor(f.hour, f.minute)}</Text>
                     ) : null}
-                    <DayPicker days={f.days} label={label} onToggle={(d) => setFixedFor(k, { days: toggleDay(f.days, d) })} />
+                    {dayPicker(f.days, (d) => setFixedFor(k, { days: toggleDay(f.days, d) }), label)}
                     {f.days.length === 0 ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
                         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
@@ -474,7 +488,7 @@ export default function Reminders() {
                     left. */}
                 <Pressable accessibilityLabel={`Remove ${s.name}`} accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={hitSlopFor(16)}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
               </View>
-              <DayPicker days={s.days} label={s.name} onToggle={(d) => setSupps((p) => p.map((x) => (x.id === s.id ? { ...x, days: toggleDay(x.days, d) } : x)))} />
+              {dayPicker(s.days, (d) => setSupps((p) => p.map((x) => (x.id === s.id ? { ...x, days: toggleDay(x.days, d) } : x))), s.name)}
             </View>
           ))}
           {/* [08]:[00] beside a name, with nothing saying which clock. This is

@@ -223,6 +223,26 @@ export default function MyTraining() {
       .map((c) => ({ t: c.at, v: c.weightKg })),
     [ci.checkins],
   );
+  /* ── why this one `Date.now()` stays a `Date.now()` ──────────────────────
+   *
+   * It looks like the shape the two blocks above exist to remove, and a lane
+   * changed it to `nowMs` before checking. It is not that shape, and the note
+   * is here so the next reader does not spend the same hour on it.
+   *
+   * `useToday` and `useNow` are for values that go STALE: they are read once
+   * and then held, so on a route registered `href: null` they keep whatever
+   * they were given at mount. A bare `Date.now()` in the render body is held by
+   * nothing. It is re-read on every redraw, including the redraw `useNow`
+   * itself causes on focus, so it is never behind `nowMs` — if anything it is
+   * a little ahead of it between focuses.
+   *
+   * And `weekStats` is a ROLLING 168 hours ending at the instant handed in
+   * (src/lib/streaks.ts says so, and `thisWeekStats` is the calendar-week one
+   * this section deliberately does not use — the heading below reads "Your Last
+   * 7 Days" for that reason). A rolling window has no midnight boundary to fall
+   * the wrong side of; the only thing a fresher clock moves is which session
+   * exactly 168 hours old is still inside it. So `nowMs` would make this figure
+   * slightly staler and nothing else, which is the opposite of the repair. */
   const wk = weekStats(log, Date.now(), myWeights);
   /** The sets this week's total could not price, in the words every other
    *  screen uses for them. Null when there are none. */
@@ -512,10 +532,23 @@ export default function MyTraining() {
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 };
   const G = layout.gutter;
 
-  const EntryRow = ({ e }: { e: WorkoutEntry }) => {
+  /** One logged exercise. A PLAIN FUNCTION, called as `entryRow(key, e)`, and
+   *  not a component rendered as `<EntryRow e={…} />`. A function declared in
+   *  this body is a new object on every render, so React sees a different
+   *  element TYPE and unmounts and remounts the row instead of updating it —
+   *  and the row holds a Pressable with `accessibilityRole="button"` and a
+   *  named label, so a remount takes the focus ring and the screen reader's
+   *  cursor with it. Every removal, every read landing and every keystroke in
+   *  the add form above re-renders this screen. Same rule as
+   *  app/(client)/injuries.tsx and app/(client)/report.tsx:475. It closes over
+   *  `t`, `ty`, `sp`, `hairline`, `wu` and `remove` from this body, so it stays
+   *  a call here rather than being lifted to module scope. It is used inside
+   *  two `.map`s, so the `key` is a parameter and lands on the returned View —
+   *  a call cannot carry one. */
+  const entryRow = (k: string, e: WorkoutEntry) => {
     const line = setsSummary(e.sets, wu);
     return (
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+      <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
         <View style={{ flex: 1 }}>
           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(e.exercise)}</Text>
           {/* No line rather than an invented one. A cardio row carries no sets,
@@ -744,9 +777,26 @@ export default function MyTraining() {
 
           {/* ── today ────────────────────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Today" note={known && today ? `${today.entries.length}` : undefined} />
+            {/* `whole`, not `known`. This was the one COUNT on the screen still
+                gated on "the read did not fail" while every figure forty lines
+                above it is gated on "the read is all of it", and 'partial' is
+                the status that sits between the two.
+                `useWorkoutLog` reaches 'partial' by two routes and the second is
+                the one that bites here. A truncated server page is newest-first,
+                so today's rows are the ones it certainly kept — but the other
+                route is a QUEUE FILE IT COULD NOT READ (src/ui/workoutLog.tsx:
+                `setQueueStatus(queueRead ? 'ready' : 'partial')`), and the
+                entries in that file are precisely the ones logged with no
+                signal, which is to say this morning's. So "Today · 3" over that
+                status is three out of a number this screen does not know, headed
+                by a figure that looks exact.
+                The entries themselves still LIST — rows in hand are real, and
+                the rule is that 'partial' may be shown and not counted. It is
+                the total that goes, and `PartialRead` at the top of the screen
+                has already said why. */}
+            <SectionHead title="Today" note={whole && today ? `${today.entries.length}` : undefined} />
             {today ? (
-              today.entries.map((e, i) => <EntryRow key={e.id ?? `${e.t}-${e.exercise}-${i}`} e={e} />)
+              today.entries.map((e, i) => entryRow(e.id ?? `${e.t}-${e.exercise}-${i}`, e))
             ) : status === 'loading' ? (
               <Text style={{ ...ty.body, color: t.ink3 }}>Reading your log…</Text>
             ) : !known ? (
@@ -755,6 +805,18 @@ export default function MyTraining() {
               // make.
               <Text style={{ ...ty.body, color: t.ink2 }}>
                 Whether you logged anything today is not known — your log could not be read.
+              </Text>
+            ) : !whole ? (
+              // Nothing in hand for today, out of a log that came back short.
+              // "Nothing logged today" is the same sentence as the branch below
+              // and it would be a different fact: a coach who logged three sets
+              // in a basement this morning, whose queue file then would not
+              // parse, is being told they did not train. An empty screen over an
+              // incomplete read is unknown, and it is the branch above — not the
+              // one below — that this resembles.
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                Nothing of your own is in hand for today, but your log came back short — anything you
+                logged without signal may not be among the entries this screen could read.
               </Text>
             ) : (
               <Text style={{ ...ty.body, color: t.ink2 }}>
@@ -772,7 +834,7 @@ export default function MyTraining() {
               recent.map((d) => (
                 <View key={d.day} style={{ marginBottom: sp.lg }}>
                   <Text style={{ ...ty.micro, color: t.ink3 }}>{dayLabel(d.day)}</Text>
-                  {d.entries.map((e, i) => <EntryRow key={e.id ?? `${e.t}-${e.exercise}-${i}`} e={e} />)}
+                  {d.entries.map((e, i) => entryRow(e.id ?? `${e.t}-${e.exercise}-${i}`, e))}
                 </View>
               ))
             ) : status === 'loading' ? (
@@ -781,6 +843,15 @@ export default function MyTraining() {
               <Text style={{ ...ty.body, color: t.ink2 }}>
                 Your own past sessions could not be read. They have not gone anywhere — this screen
                 cannot see them right now.
+              </Text>
+            ) : !whole ? (
+              // The same separation the Today section above makes, and for the
+              // same reason: "you have not logged any training of your own yet"
+              // is a claim about the whole of a coach's history, and a read that
+              // came back short is not the standing to make it.
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                Nothing of your own is in hand to list here, but your log came back short — this is
+                not the same as never having trained.
               </Text>
             ) : (
               // The empty state names whose log is empty. "No workouts yet" on a

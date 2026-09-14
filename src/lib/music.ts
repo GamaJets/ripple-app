@@ -224,3 +224,81 @@ export function generatePlaylist(p: GenParams, salt = 0): Playlist {
     source: 'curated',
   };
 }
+
+// ── What "connected" is allowed to mean ──────────────────────────────────────
+//
+// `spotifyStatus()` reads AsyncStorage and NOTHING else. It answers "connected"
+// because this device still holds a token blob — it never asks Spotify whether
+// that token is worth anything. Spotify's own answer arrives somewhere else
+// entirely: `tokenOrThrow`/`api` in src/lib/spotify.ts raise a SpotifyError of
+// kind 'signed_out' when the token is dead, and that lands in whichever handler
+// happened to make the call.
+//
+// So the screen held two facts, written by different call sites, and asked only
+// the first one: the header said "Connected · Tim" off the remembered flag while
+// the playlist read had already been told the token was dead. Same shape the
+// wearables code was fixed for — a badge claiming a link the import was silently
+// skipping.
+//
+// This keeps them apart and makes the second one decide. Two facts in, four
+// named states out, and nothing below may ask `remembersToken` on its own.
+
+/** Spotify's own verdict on the stored token, as far as this screen has heard it. */
+export interface LinkFacts {
+  /** This device holds a token blob. A memory, not a proof. */
+  remembersToken: boolean;
+  /** The stored token predates the current scope set, so some calls cannot work. */
+  scopesStale: boolean;
+  /**
+   * Spotify refused the stored token, in Spotify's words. `null` means Spotify
+   * has not refused it — NOT that Spotify has approved it. An unasked service
+   * has said nothing, and nothing is not yes.
+   */
+  refusal: string | null;
+}
+
+export type LinkState =
+  /** No token on this device. Nothing was ever granted, or it was given up. */
+  | 'absent'
+  /** Spotify refused the token this device holds. Grant again; do not say "connected". */
+  | 'refused'
+  /** Token accepted as far as we know, but it lacks permissions we need. */
+  | 'scopes_stale'
+  /** Token held and not refused. The only state that may call the Web API. */
+  | 'live';
+
+export function linkState(f: LinkFacts): LinkState {
+  if (!f.remembersToken) return 'absent';
+  // The refusal outranks the scope gap: a dead token cannot be fixed by asking
+  // for more scopes on it, and telling somebody to re-grant permissions when
+  // the real answer is "sign in again" sends them round a loop.
+  if (f.refusal) return 'refused';
+  if (f.scopesStale) return 'scopes_stale';
+  return 'live';
+}
+
+/** The one question every Web API path on the screen asks. */
+export function canReachSpotify(f: LinkFacts): boolean {
+  return linkState(f) === 'live';
+}
+
+/**
+ * What the Connect/Disconnect control says. There is no state in which a
+ * refused token is labelled with the account name: that label is the claim
+ * this whole file exists to stop.
+ */
+export function linkActionLabel(f: LinkFacts, accountName?: string): string {
+  const s = linkState(f);
+  if (s === 'refused') return 'Reconnect';
+  if (s === 'absent') return 'Connect';
+  return accountName && accountName.length > 0 ? accountName : 'Connected';
+}
+
+/** The section's status word, or undefined when there is nothing to say. */
+export function linkStatusNote(f: LinkFacts): string | undefined {
+  const s = linkState(f);
+  if (s === 'refused') return 'Signed out';
+  if (s === 'scopes_stale') return 'Needs permission';
+  if (s === 'live') return 'Connected';
+  return undefined;
+}

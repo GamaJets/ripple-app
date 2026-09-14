@@ -55,7 +55,23 @@ const SINCE: string | null = null;
 const UNTIL: string | null = null;
 
 export default function SitesPage() {
-  const [me, setMe] = useState<Me | null>(null);
+  /**
+   * Undefined until the auth call answers, and the other twenty-nine console
+   * routes all start here for a reason this one screen did not.
+   *
+   * It was `useState<Me | null>(null)`, and `ConsoleGate` reads those two
+   * values as two different SENTENCES: undefined is "Reading your account…",
+   * null is "You are not signed in" with a Sign in link under it. So a signed-in
+   * owner opening /sites was told, on first paint and before `loadMe()` had
+   * come back, that they were signed out — and the ME_UNREADABLE branch below
+   * is worse, because it sets `authUnread` and then leaves `me` at null for
+   * good: the gate tests `me === null` BEFORE `failed`, so an auth call that
+   * did not come back rendered the signed-out page permanently. That is the
+   * exact substitution ME_UNREADABLE exists to prevent — a question this
+   * console could not ask, reported as an answer about the reader — on the one
+   * route whose whole subject is which gyms the reader owns.
+   */
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [authUnread, setAuthUnread] = useState(false);
   const [read, setRead] = useState<SiteFiguresRead>({ status: 'loading', sites: [] });
   const [open, setOpen] = useState<string | null>(null);

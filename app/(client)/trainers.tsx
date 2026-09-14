@@ -106,7 +106,7 @@ import {
 } from '../../src/lib/coachCredentials';
 import {
   ratingDisplay, ratingLine, reviewListState, reviewerLabel, gymLine,
-  MAX_RATING, type RatingSummary, type Review,
+  MAX_RATING, reviewScoreLabel, type RatingSummary, type Review,
 } from '../../src/lib/reviews';
 // What a session fee is denominated in, and the four different reasons there
 // might be no answer. `wholeMoney` is the whole-unit formatter a human-typed
@@ -1066,6 +1066,25 @@ export default function FindTrainer() {
             because "we could not check" is not "nobody has invited you", and
             the member is the only person who can tell those apart by trying
             again. */}
+        {/* A truncated read, which the ternary below cannot say.
+            `fetchMyInvites` can now answer 'partial' — it took a `.limit()`
+            and reports when it filled it (src/ui/gymInvites.ts:106) — and the
+            branch below tests only 'error', so a partial read falls through and
+            draws the cards. That is right as far as it goes, because it counts
+            nothing and every card drawn is a real invitation. What it cannot do
+            is say that the list may be short, and this is the one screen where
+            the missing row is the member's own gym.
+
+            Its own block rather than a branch of the ternary, so it is also
+            drawn when the cards come back empty: 'partial' with nothing to show
+            is a read that ran out of room, not a member nobody has invited.
+            Matches src/ui/CoachRequests.tsx:311. */}
+        {gym.status === 'partial' ? (
+          <View style={{ marginTop: sp.lg }}>
+            <PartialRead what="invitations from gyms" shown={gymCards.length} onPress={gym.reload} />
+          </View>
+        ) : null}
+
         {gym.status === 'error' ? (
           <View style={{ marginTop: sp.lg }}>
             <Notice tone={t.warn} kicker="Your gym" title="We couldn’t check for a gym invitation"
@@ -1517,7 +1536,7 @@ export default function FindTrainer() {
                     {selReviews.map((r) => (
                       <View key={r.id} style={{ marginBottom: sp.lg }}>
                         <Text style={{ ...ty.caption, color: t.ink2 }}>
-                          {r.rating} / {MAX_RATING} · {reviewerLabel(r)}{r.edited ? ' · edited' : ''}
+                          {reviewScoreLabel(r)} · {reviewerLabel(r)}{r.edited ? ' · edited' : ''}
                         </Text>
                         {/* A review earned at another gym is shown, and said to
                             be from another gym. Hiding it would report a coach

@@ -290,6 +290,28 @@ export function threadWhen(iso: string | null, now: number): string | null {
  * @param roster how many clients came back at all. Zero of them is a different
  *        sentence from zero conversations, because the fix is different: one
  *        needs a client, the other needs somebody to say something.
+ *
+ * ── WHAT `roster` IS A COUNT OF, which the sentence used to get wrong ─────
+ *
+ * It is the row count of `coach_threads()`, and that function's FROM clause is
+ * `from clients c … where c.trainer_id = auth.uid()` (supabase/parts/148). So
+ * it counts the coach's clients WITH AN ACCOUNT and nobody else. A client the
+ * coach added by hand is a `coach_clients` row with no `clients` row behind it,
+ * is in no part of that read, and is therefore not in this number.
+ *
+ * This sentence said "You have no clients yet… Add a client from the Clients
+ * tab" — to a coach who may be looking at twelve of them on the Clients tab
+ * right now, every one added by hand. It is the same defect a lane fixed in
+ * app/(trainer)/assistant.tsx tonight, arriving through an empty state instead
+ * of through a filter: a number whose set was never asked about, printed as a
+ * fact about the coach's book.
+ *
+ * The count is not wrong, and it is not replaced — messaging a hand-added
+ * client is impossible until they join, which is what `sendCoachMessages`
+ * already tells a coach who tries ("Clients you added by hand have no account
+ * to message until they join"). What changes is that the sentence now says what
+ * it counted, so a coach with a full roster and no accounts on it is told why
+ * this screen is empty rather than told they have no clients.
  */
 export function threadsEmptyNote(status: 'loading' | 'ready' | 'partial' | 'error', roster: number): string | null {
   if (status === 'loading') return null;
@@ -297,7 +319,7 @@ export function threadsEmptyNote(status: 'loading' | 'ready' | 'partial' | 'erro
     return 'We could not load your conversations, so we cannot say whether anybody has written to you.';
   }
   if (roster === 0) {
-    return 'You have no clients yet, so there is nobody to message. Add a client from the Clients tab.';
+    return 'No clients with an account yet, so there is nobody here to message. A client you added by hand can be messaged once they join with your code.';
   }
   return 'No conversations yet. Pick a client below to start one.';
 }

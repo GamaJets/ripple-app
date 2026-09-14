@@ -31,6 +31,11 @@
 // stops the retyping and grants it no more meaning than it had.
 
 import type { LoadStatus } from '../ui/loadStatus';
+// The account-scoping rule for a blob kept on the handset, and the two traps
+// that come with it. See the section at the foot of this file.
+import {
+  accountCacheKey, cacheForAccount, isAccountCacheKey, type DeviceCache,
+} from './deviceAccountCache';
 
 /** What the coach's typing means. See the header for why "invalid" is not 0. */
 export type RateInput =
@@ -264,3 +269,45 @@ export function cooldownNote(value: number | null | undefined): string {
   const n = Math.round(value);
   return `Never inside ${n} day${n === 1 ? '' : 's'}. Each client is still paced off their own rhythm above that, so somebody who trained fortnightly is left longer than somebody who trained daily.`;
 }
+
+/* ── whose targets these are ────────────────────────────────────────────────
+ *
+ * `useTrainerGoals` cached the coach's monthly revenue and client targets on
+ * the handset under `'repple.trainer.goals'` — one key, no account in it,
+ * cleared by nothing. That is the same shape src/lib/mealSwaps.ts and
+ * src/lib/handsetClips.ts were written to end, and it had the same two costs
+ * here: the next coach to sign in on a shared handset opened Analytics to the
+ * previous coach's numbers, and the hook's BACKFILL — the branch that publishes
+ * targets this device holds to an account that has none — then wrote them into
+ * `coach_prefs` under whoever was signed in. A coach's revenue target is a
+ * fact about their business, and it arrived in a stranger's account looking
+ * like something they had set themselves.
+ *
+ * The rule, the two traps and the argument for deleting the old key rather
+ * than migrating it are in src/lib/deviceAccountCache.ts. This is the naming,
+ * kept beside the goal arithmetic it belongs to.
+ */
+
+/** Every per-account goals key starts with this. */
+export const TRAINER_GOALS_CACHE_PREFIX = 'repple.trainer.goals:';
+
+/** The unqualified key this replaces. Removed on sight and never read: the
+ *  blob names no account, so reading it into the signed-in one is a guess, and
+ *  the cost of losing it is a coach typing two numbers again — against the
+ *  cost of a stranger's target published to their account as their own. */
+export const LEGACY_TRAINER_GOALS_KEY = 'repple.trainer.goals';
+
+/** Where this coach's cached targets live, or null when there is no account to
+ *  scope them to — which means DO NOT PERSIST. */
+export const trainerGoalsCacheKey = (uid: string | null | undefined): string | null =>
+  accountCacheKey(TRAINER_GOALS_CACHE_PREFIX, uid);
+
+/** The cache state for an account, hydrated:false, as the hook must set it
+ *  BEFORE reading — see the trap in src/lib/deviceAccountCache.ts. */
+export const trainerGoalsCache = (uid: string | null | undefined): DeviceCache =>
+  cacheForAccount(TRAINER_GOALS_CACHE_PREFIX, uid);
+
+/** Whether a stored key holds somebody's targets. The legacy key is
+ *  deliberately not one of these. */
+export const isTrainerGoalsCacheKey = (k: string): boolean =>
+  isAccountCacheKey(TRAINER_GOALS_CACHE_PREFIX, k);

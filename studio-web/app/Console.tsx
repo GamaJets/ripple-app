@@ -25,6 +25,11 @@ type Theme = 'dark' | 'light';
  * — the owner who works at a bright front desk and a dark office wants a
  * different answer in each place — and storing it on `tenants` would make one
  * person's eyes a fact about the gym.
+ *
+ * This string is written a second time, as a literal, in `PAINT_THEME` in
+ * app/layout.tsx — the pre-paint script, which cannot import. Change one and
+ * change the other: if they drift, this component's effect still lands on the
+ * right palette, so what comes back is the flash rather than a wrong screen.
  */
 const THEME_KEY = 'repple-studio-theme';
 
@@ -140,7 +145,15 @@ export function Console() {
   // while Next renders this on the server, and `data-theme` on the html element
   // is not something React owns here.
   useEffect(() => {
-    const t = initialTheme();
+    // Whatever the pre-paint script in app/layout.tsx already decided is the
+    // answer, and `initialTheme` is only the fallback for a document that has
+    // none — the script is inside a `try` and a browser that threw out of it
+    // leaves the attribute unset. Adopting the painted value rather than
+    // recomputing it is what stops the two copies of this decision from
+    // disagreeing AFTER the paint: the worst a drift can then do is leave the
+    // flash it was written to remove.
+    const painted = document.documentElement.dataset.theme;
+    const t: Theme = painted === 'light' || painted === 'dark' ? painted : initialTheme();
     setTheme(t);
     document.documentElement.dataset.theme = t;
   }, []);

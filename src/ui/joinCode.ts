@@ -11,12 +11,43 @@ import { reportError } from '../lib/reportError';
 import { joinErrorMessage, normaliseCode } from '../lib/joinCode';
 import { shapeJoinCodes, spentCodeMessage, normaliseLabel, type JoinCodeRow, type RawJoinCode } from '../lib/joinCodes';
 import { shapeCodeReturns, type CodeReturnRow, type RawCodeReturn } from '../lib/codeReturn';
+// A count of PEOPLE, read the one way this codebase reads one. See
+// `fetchJoinCodeStats` below; src/ui/sessions.tsx imports it for the same
+// reason and src/lib/reschedule.ts:101 is the argument.
+import { queueLength } from '../lib/reschedule';
+import { ROW_CAP } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 import type { CoachedMode } from '../lib/types';
 
 export type MyCode = { ok: true; code: string } | { ok: false; reason: string };
 
-/** How many people have joined by this coach's code, and how many are waiting. */
+/**
+ * How many people have joined by this coach's codes, and how many are waiting.
+ *
+ * Null is the whole of the third state and the caller already draws it: null
+ * reaches `codeUptakeLine` in src/lib/handOutCode.ts, which says the read did
+ * not come back, and `app/(trainer)/join-code.tsx` keeps `undefined` separate
+ * for "not asked yet" so the failure sentence is not on screen at open.
+ *
+ * ── why the figures are not coerced ───────────────────────────────────────
+ *
+ * This used to end `Number(row.joined) || 0`, twice. `Number(null)` is 0,
+ * `Number('')` is 0, `Number(undefined)` is NaN and `|| 0` eats that too — so
+ * an absent key, a null column and a word all arrived at the same confident
+ * figure, and `codeUptakeLine` prints that figure as "0 people have joined on
+ * your codes. Nobody is waiting on you." That is a claim about who is in this
+ * coach's queue, built out of an unknown, and the pending half of it is a
+ * claim about people who are sitting there unanswered.
+ *
+ * It was safe TODAY only because both figures are `count(*)` over a CTE in
+ * `my_join_codes()`'s sibling and `count(*)` cannot be null — which is a fact
+ * about the current function body, not about this file, and is not the same
+ * thing as being correct. `queueLength` settles it at the boundary instead: a
+ * non-negative integer, or nothing. Either half unreadable and the whole answer
+ * is null, because half a queue is not a queue — reporting a real `joined`
+ * beside a fabricated `pending` of zero is the exact sentence above with one
+ * true clause in front of it.
+ */
 export async function fetchJoinCodeStats(): Promise<{ joined: number; pending: number } | null> {
   if (!USE_SUPABASE) return null;
   try {
@@ -24,7 +55,13 @@ export async function fetchJoinCodeStats(): Promise<{ joined: number; pending: n
     if (error) { reportError('joinCode.stats', error); return null; }
     const row = Array.isArray(data) ? data[0] : data;
     if (!row) return null;
-    return { joined: Number(row.joined) || 0, pending: Number(row.pending) || 0 };
+    const joined = queueLength(row.joined);
+    const pending = queueLength(row.pending);
+    if (joined == null || pending == null) {
+      reportError('joinCode.stats', new Error('my_join_code_stats answered without a readable joined/pending count'));
+      return null;
+    }
+    return { joined, pending };
   } catch (e) { reportError('joinCode.stats', e); return null; }
 }
 
@@ -37,10 +74,23 @@ export async function fetchJoinCodeStats(): Promise<{ joined: number; pending: n
  * substitutes a zero for an unknown — see src/lib/joinCodes.ts, which owns the
  * sentence each row renders.
  *
- * 'partial' is never produced: my_join_codes() returns at most twenty-one rows
- * and does its counting server-side, so PostgREST's 1,000-row cap cannot bite.
- * The type still carries it so the screens do not have to be revisited if that
- * ever stops being true.
+ * ── the row count this paragraph used to claim ───────────────────────────
+ *
+ * It said 'partial' was never produced because "my_join_codes() returns at most
+ * twenty-one rows", and the figure was wrong. Twenty is the cap on LIVE codes —
+ * `create_join_code` counts `revoked_at is null` before refusing (setup.sql) —
+ * and `my_join_codes()` returns the default row plus EVERY named code the coach
+ * has ever made, live and revoked, because the counts on a withdrawn code are
+ * the history of what worked. A coach who has turned twenty codes off and made
+ * twenty more has forty-one rows, and nothing bounds that afterwards but their
+ * own patience. src/lib/handOutCode.ts:216 carried the identical claim and
+ * records the same correction.
+ *
+ * So the cap is not out of reach by arithmetic, and the read does not assume it
+ * is. `my_join_codes()` has no LIMIT of its own, which leaves PostgREST's own
+ * ceiling as the only one — and a set cut off at that ceiling is indistinguishable
+ * from a set that ended there, so a read that comes back AT it is reported as a
+ * prefix. src/ui/coachReferrals.ts:63 makes the same call on the same shape.
  */
 export type JoinCodesRead = { status: LoadStatus; rows: JoinCodeRow[]; reason?: string };
 
@@ -55,7 +105,19 @@ export async function fetchMyJoinCodes(): Promise<JoinCodesRead> {
       reportError('joinCode.list', error);
       return { status: 'error', rows: [], reason: 'Your codes could not be read, so nothing here is a count.' };
     }
-    return { status: 'ready', rows: shapeJoinCodes((data ?? []) as RawJoinCode[]) };
+    const raw = (data ?? []) as RawJoinCode[];
+    // A read that came back at the server's own ceiling is a prefix of the real
+    // list, not the list. `>=` and not `>`: this is an RPC, so there is no
+    // `.limit(capLimit())` probe row to ask for — PostgREST's max-rows is the
+    // ceiling and it will not hand back one past it. The rows may be shown; no
+    // sentence over them may be stated as a total, which `namedCodesLine` and
+    // `leadCountLine` both already refuse to do under 'partial'.
+    const truncated = Array.isArray(data) && raw.length >= ROW_CAP;
+    return {
+      status: truncated ? 'partial' : 'ready',
+      rows: shapeJoinCodes(raw),
+      ...(truncated ? { reason: 'Not all of your codes came back in one go, so this is not all of them.' } : {}),
+    };
   } catch (e) {
     reportError('joinCode.list', e);
     return { status: 'error', rows: [], reason: 'Your codes could not be read, so nothing here is a count.' };

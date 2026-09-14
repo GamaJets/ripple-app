@@ -56,7 +56,9 @@
 // TOGETHER WITH THE CLAIM BEING MADE, and only fires on two shapes where the
 // claim cannot survive 'loading' or 'partial' under any reading:
 //
-//   RULE 1 — an assertion of EMPTINESS gated on `!== 'error'`.
+//   RULE 1 — a CLAIM ABOUT A SET gated on `!== 'error'`. Two shapes.
+//
+//     1a — an assertion of EMPTINESS.
 //     `{r.roster.length === 0 && r.status !== 'error' ? <Empty/> : null}`
 //     Under 'loading' the roster is `[]` because nothing has arrived, and the
 //     screen tells a coach with forty clients that they have none. This is the
@@ -65,6 +67,123 @@
 //     Note that the opposite direction — `status !== 'error' && list.length` —
 //     is NOT flagged: showing rows that really exist is fine under 'partial',
 //     and three of those in app/(trainer)/payments.tsx are honest.
+//
+//     1b — a FIGURE. See the next section; it is the reason this file was
+//     reopened.
+//
+// ── 1b, and the morning it was logged with no signal ──────────────────────
+//
+// Everything above pairs `!== 'error'` with an EMPTINESS assertion, and that is
+// all rule 1 could ever see. So it could not see a COUNT — because a count
+// matches none of the emptiness patterns. It matches the opposite of them.
+//
+// app/(trainer)/my-training.tsx carried exactly that. Every KPI on the screen
+// was gated on `whole` (`isWhole(status)`); forty lines further down, one line
+// was not:
+//
+//     <SectionHead title="Today" note={known && today ? `${today.entries.length}` : undefined} />
+//
+// where, at the top of the same component,
+//
+//     const known = status !== 'error';
+//
+// `check:whole` was run against that line before it was fixed and printed `ok`.
+// Twice over: the claim was a count and not an emptiness, and the comparison
+// was not even on the line — it was on line 163, bound to a name, and used on
+// line 784.
+//
+// Why it matters on THIS screen rather than as a general tidiness point:
+// `useWorkoutLog` reaches 'partial' by two routes, and the second is
+//
+//     setQueueStatus(queueRead ? 'ready' : 'partial')   src/ui/workoutLog.tsx:314
+//
+// — the on-device QUEUE FILE could not be parsed. A truncated server page is
+// newest-first, so a server-side 'partial' keeps today's rows; the queue file is
+// the other route, and the entries in it are precisely the ones logged with no
+// signal, which on a coach's own training screen is this morning's, in a
+// basement. So "Today · 3" was three out of a number the screen did not have,
+// printed in the typeface of an exact figure.
+//
+// ── what a FIGURE is, and what a LIST is ──────────────────────────────────
+//
+// The hard part of 1b is not finding counts. It is not firing on the honest
+// ones, and there are three kinds a screen draws over a short read:
+//
+//   · a COUNT or a SUM presented as a fact — "Today · 3", "£4,210 this month".
+//     This needs a whole read and nothing less. It is 1b.
+//   · a LIST being rendered. A partial read may be SHOWN; it may not be
+//     COUNTED. Rows in hand are real rows. Lane 85's own fix kept the entries
+//     listing under 'partial' and withheld only the number above it, and that
+//     is the house position — `PartialRead` at the top of the screen has
+//     already said the set is short. `.map(`, `<FlatList data={…}`, and
+//     `status !== 'error' && list.length ? <rows/> : null` are all this, and
+//     none of them is flagged.
+//   · a count of what the screen genuinely has IN HAND, beside a stated
+//     truncation — "showing 20 of many". That is not a claim about the set, it
+//     is a claim about the page, and it is correct. This gate CANNOT tell it
+//     apart from 1b, and does not try: it fires, and the line takes a
+//     `whole-ok:` reason saying the truncation is stated. That is the honest
+//     trade, and it is the same one rule 2 makes thirteen times above.
+//
+// So 1b matches two spellings and only two, both of which are a number being
+// produced rather than a set being tested:
+//
+//   · a COUNT CLOSING A HOLE — `.length` immediately followed by `}`. That is
+//     `${rows.length}` in a template literal and `{rows.length}` as a JSX child
+//     or prop. It is the count being HANDED TO THE READER. Deliberately not
+//     `.length ?`, `.length &&`, `.length > 0`, `.length === 0` or
+//     `.length - 1`: those are tests and arithmetic, and `disputes.length ?` in
+//     app/(trainer)/payments.tsx:2002 is the honest list-render above.
+//   · an ARITHMETIC FOLD — `.reduce(` and a `, 0)` seed on the same line. A
+//     fold seeded with a number is a total; a fold seeded with `new Map()` or
+//     `[]` is a regroup and is not a claim. 202 of the 207 single-line reduces
+//     in this tree seed with `0`, so the seed is a reliable tell and not a
+//     guess.
+//
+// ── the gate has to be GATING, not merely present ─────────────────────────
+//
+// app/(trainer)/calendar.tsx:700 is why this is a rule and not an `&&` of two
+// greps:
+//
+//     known, hasWeekly: weeklyFromSlots(availStatus, availSlots.length), clientsOnBook,
+//
+// `known` and a `.length` on one line, and `known` is not gating anything — it
+// is a field in an object literal, and the length is an argument to a function
+// that takes the status as its other argument and decides for itself. A rule
+// that fired on co-occurrence would call that a defect on its first run.
+//
+// So 1b requires the gate to stand BEFORE the figure and to be joined to it as
+// a condition: an `&&`, or a ternary `?`, in the text between them (`?.` and
+// `??` do not count — they are not gates). `known && today ? `${…length}`` has
+// it. Line 700 does not.
+//
+// ── the name, not just the comparison ─────────────────────────────────────
+//
+// 1b resolves ONE indirection, because without it the rule cannot reach the line
+// it was written for. A `const` whose entire right-hand side is the comparison —
+//
+//     const known = status !== 'error';
+//     const logKnown = logStatus !== 'error';
+//     const weighKnown = ci.status !== 'error';
+//
+// — is a NAME FOR THE WEAK GATE, and using the name is using the gate. Eight of
+// these exist in this tree, in seven files. Nothing else is followed: the whole
+// RHS must be that one comparison and nothing more, so
+// `const stated = i.policyStatus !== 'error' && !!i.policy;` in
+// src/lib/cancelDeadline.ts and `const landed = input.log != null && …` in
+// src/lib/planVsActual.ts are NOT aliases here. They are weak too, in their own
+// way, but a rule that starts following compound expressions is a rule that has
+// started guessing, and rule 2 already reads both of those lines directly.
+//
+// The mirror of it is the exemption. `const whole = isWhole(fl.status);` is a
+// name for the RIGHT gate, and a figure line carrying `isWhole(` or one of
+// those names is satisfied and not flagged. app/(trainer)/my-nutrition.tsx:791
+// is the sibling of Lane 85's line and was always correct —
+//
+//     note={known && whole && fl.entries.length ? `${fl.entries.length}` : undefined}
+//
+// — `known` is on it, a count is on it, and `whole` is what decides. Flagging
+// that would be flagging the fix.
 //
 //   RULE 2 — an expression that rules out 'error' AND 'loading' and stops
 //     there. `logStatus !== 'error' && logStatus !== 'loading'` is somebody
@@ -182,6 +301,44 @@
 //     today; the check is a substring match and would need a real parse.
 //   · a status crossing a function boundary. `restOf` in src/lib/muscleRecovery.ts
 //     answers 'partial' through `board.isFloor`, three files from the read.
+//
+// And rule 1b, specifically, cannot see these. They are listed because a gate
+// that overclaims is worse than one that states its limits — check-mount-zone
+// and check-currency-copies both write theirs down, and the second of those was
+// widened only after it admitted in its own header that it had been watching the
+// wrong half of the thing it named.
+//
+//   · A FIGURE THAT IS ALREADY A NUMBER. `note={known ? total : undefined}`,
+//     where `total` was counted three lines up. 1b looks for the COUNTING —
+//     `.length}` or a `, 0)` fold — so a count that has been given a name before
+//     it reaches the gate is invisible. This is the single biggest hole and it is
+//     the same hole rule 2 has: the check is line-local plus one named
+//     indirection, and the indirection it follows is the GATE, not the figure.
+//     Following the figure means constant-folding the file, which is a parse.
+//   · A COUNT SPELLED ANY OTHER WAY. `String(rows.length)`, `plural(rows.length)`,
+//     `rows.length.toString()`, `n = rows.length` — none of them closes a hole
+//     with `}`, so none of them matches. `.length` as a function ARGUMENT is
+//     excluded on purpose (calendar.tsx:700 is why), and that exclusion costs
+//     `fmt(rows.length)` along with it. Accepted, knowingly.
+//   · A MULTI-LINE FOLD. `.reduce((a, r) =>` on one line and `, 0);` on the next
+//     is the prettier output for anything long, and 1b needs both on one line.
+//   · A SUM THAT IS NOT A FOLD — a `SUM()` in a view, a total the server
+//     computed, an `d3.sum`-shaped helper. There is no name-based aggregate
+//     heuristic here at all, because `count`, `total` and `sum` are also the
+//     commonest nouns in this tree and a name rule would fire on scores of
+//     honest lines to catch none that exist.
+//   · AN ALIAS THAT IS NOT A PLAIN `const`. A destructured one, a parameter, a
+//     field, a `let` that is reassigned later. And the aliases it does follow are
+//     matched BY NAME ACROSS THE WHOLE FILE with no scope analysis, so a second
+//     `known` in another component in the same file would be conflated with the
+//     first. Every one of the eight aliases in this tree today is a single
+//     component-top `const`; the day that stops being true, this is the
+//     assumption that breaks.
+//   · THE HONEST TRUNCATION CAPTION. "showing 20" beside a stated limit is a
+//     claim about the page and not about the set, and is correct — and 1b will
+//     fire on it, because the distinction lives in the surrounding English.
+//     Write the `whole-ok:` reason. The rule asks for the sentence; it does not
+//     pretend it can read it.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { assertRootFloors } from './gate-floor.mjs';
@@ -217,6 +374,33 @@ const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/components', 'studio-
  * window check that answers 'partial' more precisely than `isWhole` could.
  * Those four carry written `whole-ok:` reasons instead of edits. The header's
  * point stands: the sentence was the work, in all ten cases.
+ *
+ * Rule 1b added nothing to this list, and the empty result is a finding rather
+ * than a shrug, so here is the whole of what it examined. Forty non-comment
+ * lines in these five roots carry `!== 'error'` at all. Eight of them are a
+ * `const` binding the comparison to a name. Run wide — every `.length` in any
+ * position, every `.reduce(`, and every call whose name reads like an aggregate
+ * — exactly two lines in the tree pair one of those gates with a figure:
+ *
+ *   app/(trainer)/calendar.tsx:700   `known, hasWeekly: weeklyFromSlots(availStatus, availSlots.length), …`
+ *     Not a defect and not flagged. `known` is a field in an object literal and
+ *     is gating nothing; the length is an argument to a function that is handed
+ *     the status separately and decides for itself. This is the line the
+ *     "must be GATING" requirement was written against.
+ *
+ *   app/(trainer)/my-nutrition.tsx:791  `note={known && whole && fl.entries.length ? …}`
+ *     Not a defect and not flagged. It is the sibling of the line this rule
+ *     exists for, on the coach's own nutrition screen rather than their own
+ *     training screen, and it was written correctly: `whole` is `isWhole(fl.status)`
+ *     and is what decides. It is here because it is the shape rule 1b must
+ *     never fire on, and because it shows the defect was one screen's slip and
+ *     not a habit.
+ *
+ * The one true positive rule 1b was written for — my-training.tsx's "Today · N"
+ * — was fixed by the lane that found it before this widening landed, so the
+ * rule ships green and guards a line that is already right. That is the
+ * intended end state and not a reason to doubt the rule: the three fixtures in
+ * the lane note reconstruct the pre-fix line and it fails on it.
  */
 const KNOWN = new Map([]);
 
@@ -270,6 +454,51 @@ const EQ_ERROR = /([A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*)\s*===\s*'error'/g
  */
 const CLAIMS_EMPTY = /\.length\s*===\s*0|\.length\s*<\s*1|![A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*\.length\b/;
 
+/* ── rule 1b: the figure, the gate's name, and the right gate's name ─────── */
+
+/**
+ * A COUNT being handed to the reader: `.length` immediately closing a hole.
+ * `${rows.length}` and `{rows.length}` both end `.length}`; `.length ?`,
+ * `.length &&`, `.length > 0`, `.length)` and `.length - 1` are tests,
+ * arguments and arithmetic, and are none of this rule's business. See the
+ * header for the two lines in this tree that turn on that distinction.
+ */
+const RENDERS_COUNT = /\.length\s*\}/;
+
+/**
+ * An ARITHMETIC FOLD: a `.reduce(` seeded with a number, on one line. A fold
+ * seeded with `0` is a total; one seeded with `new Map()` or `[]` is a regroup
+ * and claims nothing. Both halves must be on the line — a fold prettier has
+ * split across two is a miss, and the header says so.
+ */
+const SUMS = (l) => /\.reduce\s*\(/.test(l) && /,\s*(?:0|0\.0)\s*\)/.test(l);
+
+/**
+ * A NAME FOR THE WEAK GATE: a `const` whose ENTIRE right-hand side is the one
+ * comparison. `const known = status !== 'error';` is the weak gate wearing a
+ * name, and Lane 85's count was gated on the name six hundred lines from the
+ * comparison. Nothing compound is followed — see the header.
+ */
+const WEAK_ALIAS = /^\s*const\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*)\s*!==\s*'error'\s*;\s*$/;
+
+/** The mirror: a name for the RIGHT gate. `const whole = isWhole(fl.status);` */
+const WHOLE_ALIAS = /^\s*const\s+([A-Za-z_$][\w$]*)\s*=\s*isWhole\([^()]*\)\s*;\s*$/;
+
+const word = (id) => new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+
+/**
+ * Is the gate actually GATING the figure, rather than merely sharing a line
+ * with it? It must stand BEFORE the figure and be joined to it as a condition —
+ * an `&&`, or a ternary `?`. `?.` and `??` are stripped first: they are not
+ * gates, and treating them as such is how app/(trainer)/calendar.tsx:700 gets
+ * called a defect.
+ */
+function gatesTheFigure(line, gateEnd, figStart) {
+  if (gateEnd > figStart) return false;
+  const between = line.slice(gateEnd, figStart).replace(/\?\?|\?\./g, '');
+  return /&&|\?/.test(between);
+}
+
 const files = [];
 /* Counted per ROOT, not just in total. A single total threshold cannot notice a
  * root going missing, because the other roots cover for it — see
@@ -293,6 +522,16 @@ const found = [];
 for (const f of files) {
   const rel = relative(ROOT, f);
   const lines = readFileSync(f, 'utf8').split('\n');
+  /* One pass for the two families of name before any line is judged, because
+   * Lane 85's alias was declared at line 163 and used at 784. File-local, by
+   * name, no scope analysis — the header names that as an assumption. */
+  const weakAliases = new Map();
+  const wholeAliases = new Set();
+  lines.forEach((l, i) => {
+    let m;
+    if ((m = WEAK_ALIAS.exec(l))) weakAliases.set(m[1], { line: i + 1, src: m[2] });
+    if ((m = WHOLE_ALIAS.exec(l))) wholeAliases.add(m[1]);
+  });
   lines.forEach((line, i) => {
     if (isComment(line)) return;
     /* Both spellings of the enumeration reach the same rule, so both feed the
@@ -353,6 +592,58 @@ for (const f of files) {
         text: line.trim().slice(0, 110),
       });
     }
+
+    /* ── rule 1b — a FIGURE drawn under a gate that only ruled out failure ──
+     *
+     * Separate from the loop above because the gate need not be a comparison on
+     * this line: it may be a NAME for one, declared hundreds of lines up. */
+    const countAt = line.search(RENDERS_COUNT);
+    const foldAt = SUMS(line) ? line.search(/\.reduce\s*\(/) : -1;
+    const figStart = countAt >= 0 ? countAt : foldAt;
+    if (figStart < 0) return;
+    const figure = countAt >= 0 ? 'count' : 'total';
+
+    /* The right gate, by call or by name, anywhere on the line. my-nutrition's
+     * `known && whole && …` is the sibling of the line this rule exists for and
+     * was always correct; flagging it would be flagging the fix. */
+    if (/\bisWhole\s*\(/.test(line)) return;
+    for (const w of wholeAliases) if (word(w).test(line)) return;
+
+    /* Candidate gates: the weak comparison written out, and every name bound to
+     * one. Each carries where it ENDS, because a gate that stands after the
+     * figure is not gating it. */
+    const gates = [];
+    for (const m of line.matchAll(/([A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*)\s*!==\s*'error'/g)) {
+      /* If the line rules out 'loading' too it is rule 2's line, not this one,
+       * and reporting it twice teaches nobody anything new. */
+      if (new RegExp(`${m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*!==\\s*'loading'`).test(line)) continue;
+      gates.push({ id: `${m[1]} !== 'error'`, end: m.index + m[0].length, named: null });
+    }
+    for (const [a, meta] of weakAliases) {
+      if (i + 1 === meta.line) continue;                  // the declaration itself
+      const w = word(a);
+      let idx = -1;
+      const g = new RegExp(w.source, 'g');
+      let x;
+      while ((x = g.exec(line))) { if (x.index < figStart) idx = x.index + x[0].length; }
+      if (idx < 0) continue;
+      gates.push({ id: a, end: idx, named: meta });
+    }
+
+    const gate = gates.find((g) => gatesTheFigure(line, g.end, figStart));
+    if (!gate) return;
+    if (markedAbove(lines, i + 1, /whole-ok:\s*\S/)) return;
+
+    const via = gate.named
+      ? `\`${gate.id}\` is \`${gate.named.src} !== 'error'\` (declared at line ${gate.named.line}) — a name for "the read did not fail", which is not the claim`
+      : `\`${gate.id}\` rules out failure and nothing else`;
+    found.push({
+      rel,
+      line: i + 1,
+      rule: '1b',
+      wrong: `a ${figure} is drawn here, and ${via}. Under 'loading' there is nothing behind the number yet; under 'partial' it is a ${figure} over a set that is a PREFIX — and \`useWorkoutLog\` reaches 'partial' by a route that has nothing to do with the server, \`setQueueStatus(queueRead ? 'ready' : 'partial')\` at src/ui/workoutLog.tsx:314, where the rows missing are the ones logged with no signal`,
+      text: line.trim().slice(0, 110),
+    });
   });
 }
 
@@ -407,4 +698,4 @@ if (drifted.length) {
 }
 
 const backlog = [...KNOWN.values()].reduce((n, e) => n + e.count, 0);
-console.log(`check-whole — ok, ${files.length} files; no new figure or empty-state gated on "did not fail"${backlog ? `, ${backlog} known and ratcheted` : ''}`);
+console.log(`check-whole — ok, ${files.length} files; no new count, total or empty-state gated on "did not fail"${backlog ? `, ${backlog} known and ratcheted` : ''}`);

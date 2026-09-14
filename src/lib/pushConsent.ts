@@ -109,3 +109,30 @@ export function pushConsent(): PushConsent { return current; }
  * disable push for the rest of the session.
  */
 export function recordPushConsent(answer: 'yes' | 'no'): void { current = answer; }
+
+/**
+ * Un-know the answer, because the person it belonged to has signed out.
+ *
+ * The one case the rule above does not cover, and it is a real one rather than a
+ * loophole in it. `recordPushConsent` refuses 'unknown' so that no caller can
+ * silently disable push mid-session — but a sign-out is not mid-session. It is
+ * the end of the only session the answer was ever about.
+ *
+ * SettingsProvider is mounted at the root of app/_layout.tsx and outlives every
+ * sign-out, so this latch is the in-memory half of the same defect the stored
+ * blob is the on-disk half of (src/lib/personalSettings.ts). Without this, member
+ * A's 'no' stays in the process for member B's entire session: B's settings
+ * screen may re-read and show the switch on, and `registerForPush()` would go on
+ * refusing behind it — the switch and the token store disagreeing, which is the
+ * one thing this module exists to stop.
+ *
+ * 'unknown' rather than the default: B's answer has not been read, and that is a
+ * fact about time, which is precisely what this type can say and a boolean
+ * cannot. The next read lands within a tick or two of the next sign-in and
+ * publishes a real answer; until it does, nothing is registered and nothing is
+ * asked of the OS, which is the documented behaviour of 'unknown'.
+ *
+ * A separate export and not a widened `recordPushConsent`, so that the only way
+ * to reach 'unknown' is to say out loud that an account has gone.
+ */
+export function forgetPushConsent(): void { current = 'unknown'; }

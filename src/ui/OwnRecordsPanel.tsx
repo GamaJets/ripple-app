@@ -128,11 +128,24 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
   /** One row of a board. Assembled as a SENTENCE for the ear, because a
    *  Pressable-free row is still merged into one accessibility element and an
    *  em dash read aloud is a word that has gone missing. Every clause is
-   *  withheld when the figure behind it is not there. */
-  const Row = ({ title, line, when, trail, trailUnit }: {
+   *  withheld when the figure behind it is not there.
+   *
+   *  A PLAIN FUNCTION, called as `row(key, {…})`, and not a component rendered
+   *  as `<Row …/>`. This is the app/(client)/injuries.tsx shape exactly: the
+   *  outer View below is `accessible` with a label composed out of four
+   *  clauses, so it is ONE element to VoiceOver. A component declared in this
+   *  body is a new function object on every render, so React sees a different
+   *  element TYPE, unmounts the subtree and mounts a fresh one — and the
+   *  reader's cursor goes with it, re-announcing the whole board from the top
+   *  every time the unit, the log read or the weigh-in read changes anything.
+   *  It closes over `t`, `sp`, `ty`, `hairline` and `numeric` from this body,
+   *  which is why it stays here as a call rather than being lifted to module
+   *  scope. The `key` is passed in and lands on the returned View, because
+   *  there is no longer an element above it to carry one. */
+  const row = (k: string, { title, line, when, trail, trailUnit }: {
     title: string; line: string; when: string; trail?: string; trailUnit?: string;
   }) => (
-    <View accessible accessibilityLabel={[title, line, trail ? `${trail} ${trailUnit ?? ''}`.trim() : '', when ? `on ${when}` : '']
+    <View key={k} accessible accessibilityLabel={[title, line, trail ? `${trail} ${trailUnit ?? ''}`.trim() : '', when ? `on ${when}` : '']
       .filter(Boolean).join(', ')}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
       <View style={{ flex: 1 }}>
@@ -200,14 +213,13 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
         {prs.length ? (
           <Section>
             <SectionHead title="Best Estimated Max" note={isWhole(status) ? undefined : 'not all read'} />
-            {prs.map((pr, i) => (
-              <Row key={`${pr.exercise}-${i}`}
-                title={movement(pr.exercise)}
-                line={bestSetLabel(pr, setLoad(pr), setAdded(pr))}
-                when={dstr(pr.at)}
-                trail={fig(est1RMIn(pr.est1RM, unit))}
-                trailUnit={unit} />
-            ))}
+            {prs.map((pr, i) => row(`${pr.exercise}-${i}`, {
+              title: movement(pr.exercise),
+              line: bestSetLabel(pr, setLoad(pr), setAdded(pr)),
+              when: dstr(pr.at),
+              trail: fig(est1RMIn(pr.est1RM, unit)),
+              trailUnit: unit,
+            }))}
             {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{note}</Text> : null}
           </Section>
         ) : null}
@@ -216,14 +228,13 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
           <Rule />
           <Section>
             <SectionHead title="Most Reps at Bodyweight" />
-            {repsOnly.map((r, i) => (
-              <Row key={`${r.exercise}-${i}`}
-                title={movement(r.exercise)}
-                line={bodyweightSetLabel(r.reps, r.addedKg, r.addedKg ? liftLabel(r.addedKg, unit) : null)}
-                when={dstr(r.at)}
-                trail={fig(r.reps)}
-                trailUnit={r.reps === 1 ? 'rep' : 'reps'} />
-            ))}
+            {repsOnly.map((r, i) => row(`${r.exercise}-${i}`, {
+              title: movement(r.exercise),
+              line: bodyweightSetLabel(r.reps, r.addedKg, r.addedKg ? liftLabel(r.addedKg, unit) : null),
+              when: dstr(r.at),
+              trail: fig(r.reps),
+              trailUnit: r.reps === 1 ? 'rep' : 'reps',
+            }))}
           </Section>
         </>) : null}
 
@@ -231,14 +242,13 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
           <Rule />
           <Section>
             <SectionHead title="Longest Hold" />
-            {holds.map((h, i) => (
-              <Row key={`${h.exercise}-${i}`}
-                title={movement(h.exercise)}
-                // The seconds are the record. A load is what was held on top
-                // and is never presented as the whole of it.
-                line={timedSetLabel(h.secs, h.loadKg > 0 ? liftLabel(h.loadKg, unit) : null, h.bodyweight)}
-                when={dstr(h.at)} />
-            ))}
+            {holds.map((h, i) => row(`${h.exercise}-${i}`, {
+              title: movement(h.exercise),
+              // The seconds are the record. A load is what was held on top
+              // and is never presented as the whole of it.
+              line: timedSetLabel(h.secs, h.loadKg > 0 ? liftLabel(h.loadKg, unit) : null, h.bodyweight),
+              when: dstr(h.at),
+            }))}
           </Section>
         </>) : null}
 

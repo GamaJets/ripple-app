@@ -16,9 +16,95 @@
 // ── What this screen does not do differently ───────────────────────────────
 //
 // It calls exactly the same function, with the same two confirmations naming
-// the same person, and it states the same blast radius. This is a second door
-// onto one mechanism, not a second mechanism: two erasure paths that disagreed
-// about what survives would be worse than one that is hard to reach.
+// the same person. This is a second door onto one mechanism, not a second
+// mechanism: two erasure paths that disagreed about what survives would be
+// worse than one that is hard to reach.
+//
+// ── The blast radius the confirmation used to claim ────────────────────────
+//
+// It said "across 39 tables. Their invoices and memberships go too". BOTH
+// halves were wrong, and the second one was wrong in the direction that
+// actually hurts.
+//
+// The 39 is merely STALE. Part 41 records where it came from — a live count
+// against pg_constraint taken when the erasure function was written, when the
+// schema was a quarter of its present size. The real figure, measured against
+// the LIVE database (project phgfwzpkkwdysftlgkoq) on 14 September 2026 as the
+// transitive closure of `on delete cascade` from the row
+// `action_account_deletion()` actually deletes:
+//
+//   with recursive fk as (
+//     select (conrelid::regclass)::text as child,
+//            (confrelid::regclass)::text as parent
+//       from pg_constraint where contype='f' and confdeltype='c')
+//   , rec as (
+//     select 'auth.users'::text as tbl
+//      union
+//     select fk.child from fk join rec on fk.parent = rec.tbl)
+//   select count(*) from rec;
+//
+//   118 tables in `public`, 11 more inside Supabase's own `auth` schema
+//   (identities, sessions, refresh tokens, MFA factors — the sign-in account
+//   rather than gym records), 129 in all.
+//
+// So the sentence somebody read immediately before doing something with no undo
+// understated what it destroys by a factor of three.
+//
+// MEASURE THIS AGAINST THE LIVE DATABASE, NOT AGAINST setup.sql. This lane
+// counted the file first and got 120, having walked only the inline
+// `references` clauses in `create table`; the file also carries tables that
+// were later dropped or never reached this project. Worse, and the reason the
+// second half below was got wrong too: a `create table` clause is not the last
+// word on a foreign key. supabase/setup.sql:28188-28206 DROPS and RECREATES
+// three of them.
+//
+// ── "Their invoices and memberships go too" was INVERTED ───────────────────
+//
+// They do not go. The retention part of setup.sql — the one that adds
+// `gym_invoices.billed_name`, `gym_payments.payer_name` and
+// `memberships.member_label` — drops those three `_member_id_fkey` constraints
+// and recreates them ON DELETE SET NULL, precisely so a gym's books survive an
+// erasure. A BEFORE DELETE trigger (`profiles_retain_financial_record`) copies
+// the name onto each row first, so the record still reconciles. Confirmed live,
+// not read off the file:
+//
+//   gym_invoices.member_id   set null
+//   memberships.member_id    set null
+//   gym_payments.member_id   set null
+//
+// The old sentence therefore told an owner their invoices would be destroyed at
+// the moment they were deciding whether to press the button. Part 41's own
+// comment still carries the pre-retention wording, which is how both doors came
+// to repeat it.
+//
+// ── "with the person detached from them" ───────────────────────────────────
+//
+// Detached from the ACCOUNT, yes — every column above is `on delete set null`.
+// Not anonymous. Several surviving tables keep the name in their own text
+// columns, on purpose:
+//
+//   gym_invoices.billed_name, gym_payments.payer_name, memberships.member_label
+//                                    copied over by the trigger, so the books
+//                                    can still be reconciled
+//   gym_passes.holder_name           the name written at the desk
+//   gym_agreement_signatures.signed_name, .guardian_name
+//                                    "The name on a waiver IS the waiver" —
+//                                    the part's own words; it survives on
+//                                    purpose, as evidence
+//   gym_events.summary               composed at write time so the feed does
+//                                    not change when somebody is renamed or
+//                                    erased, which means it still names them
+//
+// An owner answering an erasure request repeats this sentence to the person who
+// asked, so it says detached rather than gone.
+//
+// ── The two doors agree, and on a live-measured figure ─────────────────────
+//
+// app/(owner)/deletions.tsx holds the same 118 in `CASCADE_TABLES`, measured
+// the same way on the same day by the lane working that file. This page states
+// it inline rather than importing it: the console builds on its own compiler
+// (scripts/check-studio.mjs) and does not reach into the phone app. If you add
+// a cascading foreign key, BOTH are stale — re-run the query above.
 //
 // ── The count that was a `.limit()` ────────────────────────────────────────
 //
@@ -397,10 +483,13 @@ export default function Deletions() {
               Erase {confirming.name ?? 'this account'}?
             </strong>{' '}
             This permanently deletes them and everything of theirs — profile, workouts, logs, scans,
-            messages and bookings, across 39 tables. Their invoices and memberships go too, which is
-            the opposite of what you would assume of a financial record and is worth reading twice.
-            Payments, door-log visits and guest passes stay, with the person detached from them.
-            Requested {day(confirming.requestedAt)}.
+            messages and bookings — across 118 tables of this gym&rsquo;s records, and their sign-in
+            account with them. Your financial record survives: invoices, memberships and payments
+            are kept, and so are door-log visits and guest passes. Those rows lose the link to the
+            account and keep the name, copied onto them as the account goes, so the books still
+            reconcile — detached, not anonymous. A guest pass keeps the name written at the desk, a
+            signed waiver keeps the name that was signed, and the activity feed keeps the sentence
+            it composed at the time. Requested {day(confirming.requestedAt)}.
           </p>
           {/* Two steps, and the second control is not where the first one was.
               The same two confirmations the phone asks for, for the same

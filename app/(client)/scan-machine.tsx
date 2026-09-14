@@ -211,7 +211,21 @@ export default function ScanMachine() {
     const first = timedSet ? readHold(reps) : null;
     if (timedSet && first && !first.ok) { Alert.alert('Check that hold', first.reason); return; }
     const r = timedSet ? (first as { ok: true; secs: number }).secs : (parseInt(reps, 10) || 0);
-    if (!r) return;
+    // Said, not swallowed. This was a bare `return`: the member taps Add Set,
+    // the button does visibly nothing, and there is no way to tell "the app is
+    // broken" from "you left the reps box empty" — on the screen used standing
+    // at the machine, one-handed, mid-set. Every other refusal in this function
+    // already names itself, and `readLift` on the very next line has said
+    // "Check that load" since it was written.
+    if (!r) {
+      Alert.alert(
+        timedSet ? 'Add the hold' : 'Add the reps',
+        timedSet
+          ? 'Type how long you held it — 45, or 1:30 — then tap Add Set.'
+          : 'Type how many repetitions you did, then tap Add Set. Nothing has been added yet.',
+      );
+      return;
+    }
     const load = readLift(kg, wu);
     if (!load.ok) { Alert.alert('Check that load', load.reason); return; }
     setSets((p) => [...p, { reps: r, kg: load.kg ?? 0, bw: bwSet, timed: timedSet }]);
@@ -227,7 +241,23 @@ export default function ScanMachine() {
     return undefined;
   };
 
+  // `saving` is not decoration. `logWorkouts` is a round trip, the button had
+  // no disabled state and no in-flight guard, and this is the screen used on a
+  // gym floor where the round trip is slow enough that a second tap is the
+  // ordinary human response to a button that has not answered. Two taps wrote
+  // the entry TWICE — the same sets, a second timestamp — and a duplicate is
+  // not cosmetic here: it doubles the day's volume, the week's tonnage, the
+  // calorie estimate and the Trained-this-week count, and there is no
+  // de-duplication anywhere downstream because two identical sets a minute
+  // apart are a thing people really do.
+  //
+  // app/(client)/goal.tsx guards its own save the same way and for the same
+  // reason: `if (saving) return;` at the top and `disabled={saving}` on the
+  // button, because either alone leaves a gap.
+  const [saving, setSaving] = useState(false);
+
   const save = async () => {
+    if (saving) return;
     if (!exercise.trim()) { Alert.alert('Name the exercise', 'Pick or type the machine/exercise first.'); return; }
     let entry;
     if (cardio) {
@@ -258,7 +288,17 @@ export default function ScanMachine() {
     // outside this screen had ever seen. Three outcomes now, and a member
     // standing at a machine in a basement is the reason the middle one exists:
     // a set nobody answered is kept on the phone and sent later.
-    const out = await logWorkouts([entry]);
+    setSaving(true);
+    // try/finally, so the flag is cleared whatever `logWorkouts` does. Without
+    // it a thrown transport error would leave the button disabled for the rest
+    // of the session, which turns a guard against a duplicate into a screen
+    // that cannot save at all.
+    let out: Awaited<ReturnType<typeof logWorkouts>>;
+    try {
+      out = await logWorkouts([entry]);
+    } finally {
+      setSaving(false);
+    }
     // Remember this machine's setup so the next scan of the same code auto-fills.
     if (rawCode) rememberMachine(rawCode, { name: exercise.trim(), group, cardio, unit });
     if (out === 'unsent') {
@@ -483,7 +523,7 @@ export default function ScanMachine() {
                   ))}
                 </View>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  Calories come from the machine's console or your Apple Watch. Leave it blank and we'll work it out from your average watts{watts.trim() && kcalNow != null ? ' (≈ ' + kcalNow + ' kcal)' : ''} — with neither, the session logs without a calorie figure.
+                  Calories come from the machine's console or your Apple Watch. Leave it blank and we'll work it out from your average watts{watts.trim() && kcalNow != null ? ' (≈ ' + num(kcalNow) + ' kcal)' : ''} — with neither, the session logs without a calorie figure.
                 </Text>
               </Section>
             ) : (
@@ -585,7 +625,10 @@ export default function ScanMachine() {
             <Rule />
 
             <Section>
-              <Cta label="Save to Workout Log" wide onPress={save} />
+              {/* Disabled while the write is in flight, and it says so rather
+                  than going quiet — a button that is still labelled "Save" and
+                  no longer responds is what makes somebody tap it again. */}
+              <Cta label={saving ? 'Saving…' : 'Save to Workout Log'} wide disabled={saving} onPress={save} />
               <View style={{ height: sp.sm }} />
               <Ghost label="Scan Another Machine" onPress={rescan} />
             </Section>

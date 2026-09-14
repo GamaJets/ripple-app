@@ -425,9 +425,21 @@ export interface ClassPayLine {
   trainerId: string;
   trainerName: string | null;
   payKind: ClassPayKind;
-  rateCents: number;
+  /**
+   * The snapshotted rate, and what the line came to — or null where the read
+   * did not hand a figure over.
+   *
+   * NOT NULL in supabase/parts/183 and still nullable here, which is the same
+   * position src/ui/coachSettlements.ts already takes about these very columns:
+   * the shape describes what a READ can hand back, which includes a row from a
+   * build that did not select the column and a value that does not parse.
+   * `Number(r.amount_cents) || 0` was the form, and it put a nought on the
+   * screen a gym pays people from — a class taught for free, and a total
+   * smaller than the truth that looks exactly like the truth.
+   */
+  rateCents: number | null;
   attendees: number | null;
-  amountCents: number;
+  amountCents: number | null;
   currency: string;
   settlementId: string | null;
   createdAt: string;
@@ -587,9 +599,12 @@ export async function fetchClassPay(
     trainerId: r.trainer_id,
     trainerName: names.get(r.trainer_id) ?? null,
     payKind: r.pay_kind === 'per_attendee' ? 'per_attendee' : 'per_class',
-    rateCents: Number(r.rate_cents) || 0,
+    // `numOrNull`, the same reader already used for `attendees` on this line.
+    // `Number(null)` is 0 and a line worth nought is a class the gym pays
+    // nothing for — a claim, not an absence.
+    rateCents: numOrNull(r.rate_cents),
     attendees: numOrNull(r.attendees),
-    amountCents: Number(r.amount_cents) || 0,
+    amountCents: numOrNull(r.amount_cents),
     currency: r.currency,
     settlementId: r.settlement_id ?? null,
     createdAt: r.created_at,
@@ -688,8 +703,11 @@ export interface Adjustment {
   trainerId: string;
   trainerName: string | null;
   kind: AdjustmentKind;
-  /** Signed minor units — negative for a deduction or an advance. */
-  amountCents: number;
+  /** Signed minor units — negative for a deduction or an advance — or null
+   *  where the read did not hand a figure over. Null and not 0: an adjustment
+   *  of nothing is a line `adjustmentBlocker` refuses to record, so a zero here
+   *  could only ever be a figure nobody sent. */
+  amountCents: number | null;
   currency: string;
   note: string;
   appliesOn: string;
@@ -751,7 +769,10 @@ export async function fetchAdjustments(sb: Queryable, tenantId: string): Promise
     trainerId: r.trainer_id,
     trainerName: names.get(r.trainer_id) ?? null,
     kind: (ADJUSTMENT_KINDS as readonly string[]).includes(r.kind) ? r.kind : 'bonus',
-    amountCents: Number(r.amount_cents) || 0,
+    // `numOrNull` and not `Number(x) || 0`: the amount is what the gym adds to
+    // or takes off somebody's pay, and 0 is a value the database refuses to
+    // store — so a zero out of this coercion was never a recorded figure.
+    amountCents: numOrNull(r.amount_cents),
     currency: r.currency,
     note: r.note,
     appliesOn: r.applies_on,
@@ -821,17 +842,31 @@ export interface AdjustmentSum {
   /** Every distinct currency present, sorted, so a screen can name them. */
   currencies: string[];
   count: number;
+  /** How many of those rows carried no readable amount. The third reason the
+   *  figures above are null, and the one a screen has to word differently: two
+   *  currencies is a total nobody can add, an unreadable amount is a total
+   *  nobody has all of. */
+  unreadable: number;
 }
 
 export function adjustmentsTotal(
-  rows: Array<{ kind: AdjustmentKind; amountCents: number; currency: string | null }>,
+  rows: Array<{ kind: AdjustmentKind; amountCents: number | null; currency: string | null }>,
 ): AdjustmentSum {
   const currency = sharedCurrency(rows);
   const currencies = [...new Set(rows.map((r) => (r.currency ?? '').trim().toUpperCase()).filter(Boolean))].sort();
+  const unreadable = rows.filter((r) => r.amountCents == null).length;
   const sum = (only: (k: AdjustmentKind) => boolean) =>
-    rows.filter((r) => only(r.kind)).reduce((a, r) => a + r.amountCents, 0);
-  if (!rows.length || !currency) {
-    return { cents: null, taxableCents: null, reimbursementCents: null, currency, currencies, count: rows.length };
+    rows.filter((r) => only(r.kind)).reduce((a, r) => a + (r.amountCents ?? 0), 0);
+  // The unreadable arm sits with the two that were already here, BEFORE any
+  // arithmetic: a row whose amount did not come back cannot be added, and
+  // adding the rest is a total that is smaller than the truth and looks exactly
+  // like it. `?? 0` inside `sum` is unreachable past this guard and is there so
+  // that a future arm cannot reintroduce the fabrication silently.
+  if (!rows.length || !currency || unreadable > 0) {
+    return {
+      cents: null, taxableCents: null, reimbursementCents: null,
+      currency, currencies, count: rows.length, unreadable,
+    };
   }
   return {
     cents: sum(() => true),
@@ -840,7 +875,48 @@ export function adjustmentsTotal(
     currency,
     currencies,
     count: rows.length,
+    unreadable,
   };
+}
+
+/**
+ * Minor units added up across pay lines, or null where any one of them could
+ * not be read.
+ *
+ * The house rule stated as a function, because three screens were each writing
+ * `rows.reduce((a, r) => a + r.amountCents, 0)` and that reduce over a widened
+ * field is how a fabricated zero comes back: a run missing one class line's
+ * amount is not a cheaper run, it is one nobody can hand over. An empty list
+ * really is nought — no lines is no money from lines.
+ */
+export function payLinesTotal(rows: ReadonlyArray<{ amountCents: number | null }>): number | null {
+  let total = 0;
+  for (const r of rows) {
+    if (r.amountCents == null) return null;
+    total += r.amountCents;
+  }
+  return total;
+}
+
+/**
+ * Why a run cannot be totalled: one of its lines carries an amount this read
+ * could not make sense of.
+ *
+ * Separate from `runCurrencyBlocker` because it is a different fact with a
+ * different remedy. Two currencies on one run is a total nobody can add, and
+ * the owner can act on it; a line with no readable amount is a total nobody has
+ * all of, and the remedy is to read the run again.
+ */
+export function unreadableAmountBlocker(
+  classes: ReadonlyArray<{ amountCents: number | null }>,
+  adjustments: ReadonlyArray<{ amountCents: number | null }>,
+): string | null {
+  const n = classes.filter((c) => c.amountCents == null).length
+    + adjustments.filter((a) => a.amountCents == null).length;
+  if (n === 0) return null;
+  return n === 1
+    ? 'One line on this run came back without an amount on it, so this run has no total. Read it again before settling — a run settled now would pay everything except that line and record itself as the whole of it.'
+    : `${n} lines on this run came back without an amount on them, so this run has no total. Read it again before settling — a run settled now would pay everything except those lines and record itself as the whole of it.`;
 }
 
 /* ── which period a pay line belongs to ────────────────────────────────────── */
@@ -909,26 +985,30 @@ export function scopedToRun<T>(
 export interface RunLines {
   sessionCents: number | null;
   sessions: number;
-  classCents: number;
+  classCents: number | null;
   classes: number;
-  adjustmentCents: number;
+  adjustmentCents: number | null;
   adjustments: number;
 }
 
 /**
  * The three parts of one coach's run, added up, or null where a part cannot be.
  *
- * `sessionCents` is nullable and the other two are not, and that asymmetry is
- * real: a session can be unpriced, and `payrollTotal` already refuses over one.
- * A class pay line and an adjustment both carry a snapshotted amount by
- * construction — they cannot exist unpriced — so a zero there is a genuine zero.
+ * All three parts are nullable now, and the note that used to stand here said
+ * the other two could not be: "a class pay line and an adjustment both carry a
+ * snapshotted amount by construction — they cannot exist unpriced — so a zero
+ * there is a genuine zero." That is true of the DATABASE and was never true of
+ * the read. Both amounts arrived through `Number(r.amount_cents) || 0`, so a
+ * column that did not come back, or a value that did not parse, reached this
+ * arithmetic as a class taught for nothing. `fetchClassPay` and
+ * `fetchAdjustments` now carry the null, and `payLinesTotal` is what callers
+ * add them up with.
  *
- * The TOTAL is null whenever the session half is, because a run that pays for
- * classes and cannot price the sessions is not a smaller run, it is one nobody
- * should hand over.
+ * The TOTAL is null whenever ANY part is, because a run that cannot price a
+ * part of itself is not a smaller run, it is one nobody should hand over.
  */
 export function runTotal(l: RunLines): number | null {
-  if (l.sessionCents == null) return null;
+  if (l.sessionCents == null || l.classCents == null || l.adjustmentCents == null) return null;
   return l.sessionCents + l.classCents + l.adjustmentCents;
 }
 

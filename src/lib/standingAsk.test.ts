@@ -9,6 +9,7 @@
 // first date on the wrong day.
 import {
   STANDING_ASK_RULE, NO_COACH_FOR_STANDING, standingAskNote, firstStandingDay, standingAskBlocker,
+  standingClockNote, zonePlace,
 } from './standingAsk';
 import { REQUEST_NOTE_MAX } from './sessionRequests';
 
@@ -78,6 +79,54 @@ eq(standingAskBlocker(mine, { dow: 4, hour: 18, minute: 30 }, true), null,
 // must not withdraw the only way a member has of reaching their coach either.
 eq(standingAskBlocker([], { dow: 2, hour: 7, minute: 0 }, false), null,
   'a read that did not finish claims nothing and blocks nothing');
+
+
+/* ── whose clock the weekly hour is on ─────────────────────────────────────
+ *
+ * The condition this replaces was `s.tz && devTz && s.tz !== devTz`, which has
+ * three false paths and only one of them means the clocks agree. The other two
+ * printed nothing, so "your coach is in your zone" and "we could not find out"
+ * were the same screen — over a wall-clock hour a member turns up to.
+ */
+
+eq(zonePlace('Asia/Dubai'), 'Dubai', 'a zone names its place');
+eq(zonePlace('America/Los_Angeles'), 'Los Angeles', 'and the underscores open out');
+eq(zonePlace('UTC'), 'UTC', 'a zone with no region is its own place');
+eq(zonePlace(''), null, 'an empty string names nowhere');
+eq(zonePlace(null), null, 'and neither does nothing');
+eq(zonePlace('   '), null, 'nor whitespace');
+eq(zonePlace('Asia/'), null, 'nor a zone whose last segment is empty — never a sentence built round a hole');
+
+// The one silence that is earned.
+eq(standingClockNote('Europe/London', 'Europe/London'), null,
+  'two known zones that are the same zone say nothing, which is the only case the old condition got right');
+
+// The case the note was written for, wording preserved.
+const away = standingClockNote('Asia/Dubai', 'Europe/London');
+ok(!!away && away.includes('Dubai') && away.includes('where it was agreed'),
+  'a member travelling is told whose seven o\'clock it is');
+
+// THE HOLE: a phone that cannot name its own zone. `deviceTimeZone` returns
+// null for any zone without a slash, which includes a handset reporting plain
+// 'UTC', and null whenever Intl throws.
+const noHere = standingClockNote('Asia/Dubai', null);
+ok(!!noHere && noHere.includes('Dubai'), 'an unknown device zone still names the zone the hour was agreed in');
+ok(!!noHere && /could not say|cannot tell/i.test(noHere),
+  'and says we cannot tell them whether it is their hour, rather than printing the silence that means it is');
+eq(standingClockNote('Asia/Dubai', ''), noHere, 'an empty device zone is the same nothing as a null one');
+
+// THE OTHER HOLE: a series row that came back without its zone.
+const noTz = standingClockNote(null, 'Europe/London');
+ok(!!noTz && /could not read/i.test(noTz),
+  'a weekly hour with no zone against it says so rather than being read as the reader\'s own');
+eq(standingClockNote('', 'Europe/London'), noTz, 'an empty tz is the same unknown as a null one');
+eq(standingClockNote(null, null), noTz, 'and knowing neither is still the series zone that is missing');
+
+// No sentence here may end up with a dash where a value goes.
+[standingClockNote('Asia/Dubai', 'Europe/London'), noHere, noTz].forEach((line, i) => {
+  ok(!!line && !line.includes('\u2014'), `clock note ${i} carries no em dash where a place belongs`);
+});
+
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('standingAsk: ok — the member asks for a weekly slot, and the note says what they are asking for');

@@ -68,7 +68,7 @@ import {
 import {
   reviewListState, reviewerLabel, gymLine, unansweredCount, validateReply,
   askMomentNote, reviewAskDraft, askListNote, ASK_IS_UNFILTERED, WHO_REVIEWED_IS_HIDDEN,
-  MAX_RATING, MAX_REPLY, REPLY_NOTE, type Review,
+  MAX_RATING, MAX_REPLY, REPLY_NOTE, reviewScoreLabel, reviewScorePhrase, type Review,
 } from '../../src/lib/reviews';
 import { useReviewAsks, type AskRow } from '../../src/ui/reviewAsks';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -424,7 +424,10 @@ export default function TrainerCredentials() {
                 {i > 0 ? <Rule /> : null}
                 <View style={{ paddingVertical: sp.md }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.rating} / {MAX_RATING}</Text>
+                    {/* `reviewScoreLabel`, not `{r.rating} / {MAX_RATING}`: the rating can come
+                        back unreadable, and the old form printed "0 / 5" against this
+                        coach — a score no client is allowed to give. */}
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{reviewScoreLabel(r)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
                       {reviewerLabel(r)} · {when(r.createdAt)}{r.edited ? ' · edited' : ''}
                     </Text>
@@ -609,7 +612,7 @@ export default function TrainerCredentials() {
               <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
                 <Text style={{ ...ty.title, color: t.ink }}>Reply</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
-                  To {reviewerLabel(replyTo)}’s {replyTo.rating} of {MAX_RATING} review, {when(replyTo.createdAt)}.
+                  To {reviewerLabel(replyTo)}’s {reviewScorePhrase(replyTo)}, {when(replyTo.createdAt)}.
                 </Text>
                 {replyTo.body ? (
                   <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{replyTo.body}</Text>
@@ -660,7 +663,36 @@ function ReviewAsks() {
   const [drafting, setDrafting] = useState<AskRow | null>(null);
 
   const rows = asks.rows;
-  if (asks.status === 'loading' || rows == null) return null;
+  if (asks.status === 'loading') return null;
+  /* ── a book we could not read is not a book with nobody in it ───────────
+   *
+   * This was `asks.status === 'loading' || rows == null`, and `rows == null`
+   * is not what a failed read looks like here. `useReviewAsks` folds the
+   * ROSTER's status into the one it returns (src/ui/reviewAsks.ts, at the
+   * bottom of the hook), and a roster that could not be read is an EMPTY ARRAY
+   * with 'error' beside it — src/ui/roster.tsx sets 'error' and leaves the
+   * list as it found it. So the hook answers `{ rows: [], status: 'error' }`,
+   * `rows == null` was false, and this section rendered `askListNote([])`:
+   *
+   *   "Nobody on the part of your book that was read is at a moment worth
+   *    asking at. That is a real answer — this list is not a monthly sweep…"
+   *
+   * A coach whose roster read had just failed was told, in those words, that
+   * the answer was real. Reviews are the one thing on this screen a coach is
+   * meant to go and act on, and "there is nobody worth asking" is the sentence
+   * that stops them looking. The two facts are opposite and the screen now
+   * says which one it has. */
+  if (asks.status === 'error' || rows == null) {
+    return (
+      <Section>
+        <SectionHead title="Worth Asking" />
+        <Flag tone={t.warn}>
+          Your clients could not be read just now, so nobody is suggested here. That is a read that failed, not
+          a book with nobody worth asking in it — nothing has been sent either way.
+        </Flag>
+      </Section>
+    );
+  }
   const worth = rows.filter((r) => r.moment !== 'none');
 
   return (

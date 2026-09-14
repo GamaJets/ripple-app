@@ -67,6 +67,7 @@ import {
   fetchAdjustments, addAdjustment, adjustmentBlocker, adjustmentSign,
   fetchClassPay, reverseSettlement, reversalReasonBlocker, stampRunExtras,
   runTotal, runCurrencyBlocker, adjustmentsTotal, scopedToRun, runScopeOf,
+  payLinesTotal, unreadableAmountBlocker,
   ADJUSTMENT_KINDS, ADJUSTMENT_LABEL, CLASS_PAY_LABEL,
   type PayIndex, type TrainerPay, type Adjustment, type AdjustmentKind,
   type ClassPayLine, type ClassPayKind,
@@ -844,6 +845,7 @@ export default function Payroll() {
       const anything = r.outstanding.length + r.classes.length + r.adjustments.length;
       const sessionSide = settleBlocker(r.outstanding, r.line?.unmarked ?? 0);
       const closedSide = closedMonthBlocker(period.fromDate, closes);
+      const unreadableSide = unreadableAmountBlocker(r.classes, r.adjustments);
       r.blocker =
         (r.line?.unmarked ?? 0) > 0 ? sessionSide
         // BEFORE the `anything === 0` arm, which is the whole point. A refused
@@ -867,6 +869,12 @@ export default function Payroll() {
         // run writes a permanent payment row and stamps the sessions paid, so it
         // never comes round again to be corrected.
         : payErr ? `${payErr} Until it does, this run would pay every coach the gym's standard fee, which is the wrong figure for anyone on their own rate.`
+        // A line that came back without an amount on it. Not the same fact as
+        // two currencies below — that one is a total nobody can add, this is a
+        // total nobody has all of — and it has to block for the same reason:
+        // `rowOwed` is null here, and the settlement would otherwise be written
+        // for everything except that line and recorded as the whole of it.
+        : unreadableSide ? unreadableSide
         : !ccy ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
         // Two currencies on one run is not a smaller run, it is one nobody can
         // hand over. A coach whose class rate is in EUR and whose gym pays in
@@ -929,6 +937,21 @@ export default function Payroll() {
   const settle = async (r: RunRow) => {
     if (r.blocker || !ccy) return;
     if (r.outstanding.length + r.classes.length + r.adjustments.length === 0) return;
+    // Read once, and refused rather than settled to zero.
+    //
+    // This was `amountCents: rowOwed(r) ?? 0` at the call below. `rowOwed` is
+    // null for a run that cannot be priced — an unpriced session, and now a
+    // class line or an adjustment whose amount did not come back — and `?? 0`
+    // turned every one of those into a payment record saying this coach was
+    // owed nothing, while stamping their sessions, classes and adjustments as
+    // paid. The blocker above already keeps the button off this path; the
+    // refusal is written out anyway, because the figure being written here is
+    // what somebody is paid.
+    const owed = rowOwed(r);
+    if (owed == null) {
+      setSettleErr('This run has no total — part of it could not be priced — so nothing was settled. Read the run again; settling it now would record a payment of nothing and stamp the work as paid.');
+      return;
+    }
     // The question is answered either way: a run that goes on to fail must not
     // leave a confirmation standing over a row whose figures are about to be
     // re-read, and one that succeeds has no row left to ask about.
@@ -961,7 +984,7 @@ export default function Payroll() {
         // `>= 0` check, so a run whose deductions exceed its pay is refused by
         // the database rather than stored as a negative payment; that is the
         // right refusal and the screen says so before the button is pressed.
-        amountCents: rowOwed(r) ?? 0,
+        amountCents: owed,
         // Of which, money the coach spent and is getting back rather than pay.
         // Null when the adjustments do not agree on a currency — the split is
         // then two splits and this run has no single figure for either, which
@@ -1773,11 +1796,16 @@ function Adjustments({ trainers, rows, rowsUnread, ccy, tenantId, me, period, on
     { key: 'who', header: 'Trainer', value: (a) => a.trainerName },
     { key: 'kind', header: 'Kind', value: (a) => ADJUSTMENT_LABEL[a.kind] },
     { key: 'amount', header: 'Amount', value: (a) => a.amountCents, numeric: true,
-      render: (a) => (
-        <span style={{ color: a.amountCents < 0 ? 'var(--crit)' : 'var(--good)' }}>
-          {money(a.amountCents, a.currency)}
-        </span>
-      ) },
+      // The null arm first. An adjustment whose amount did not come back has no
+      // sign either, and colouring it green as though it were a bonus of
+      // nothing is the invented figure this column used to print.
+      render: (a) => (a.amountCents == null
+        ? <span className="dash">no amount on the line</span>
+        : (
+          <span style={{ color: a.amountCents < 0 ? 'var(--crit)' : 'var(--good)' }}>
+            {money(a.amountCents, a.currency)}
+          </span>
+        )) },
     { key: 'note', header: 'Why', value: (a) => a.note },
     { key: 'settled', header: 'Paid', value: (a) => (a.settlementId ? 1 : 0),
       render: (a) => a.settlementId
@@ -1907,7 +1935,10 @@ function Run({
         // rather than dividing by a hundred and hoping. It was
         // `${c.rateCents / 100}` — a bare number with an invented decimal point
         // two places from the right, which in a yen gym is a different figure.
-        : <span title={r.classes.map((c) => `${c.payKind === 'per_attendee' ? `${c.attendees ?? '?'} × ` : ''}${money(c.rateCents, c.currency) ?? `${c.rateCents} minor units`}`).join(', ')}>
+        // `c.rateCents` may be null now, and the old fallback printed the word
+        // "null minor units" into the tooltip. A rate nobody read is said as
+        // that, never as a figure and never as a hole.
+        : <span title={r.classes.map((c) => `${c.payKind === 'per_attendee' ? `${c.attendees ?? '?'} × ` : ''}${c.rateCents == null ? 'no rate on the line' : money(c.rateCents, c.currency) ?? `${c.rateCents} minor units`}`).join(', ')}>
             {r.classes.length}
           </span> },
     { key: 'adjust', header: 'Adjustments', value: (r) => adjustmentsTotal(r.adjustments).cents, numeric: true,
@@ -1923,6 +1954,17 @@ function Run({
       render: (r) => {
         if (!r.adjustments.length) return <span className="dash">—</span>;
         const t = adjustmentsTotal(r.adjustments);
+        // The unreadable arm BEFORE the currency one, because `cents` is null
+        // for both and only one of them is about currency. "GBP — not added"
+        // over a line whose amount never arrived names the wrong problem and
+        // sends the owner to the wrong fix.
+        if (t.unreadable > 0) {
+          return (
+            <span className="dash" title={`${t.unreadable} of ${t.count} adjustments came back without an amount on them, so this column has no total. Read the run again.`}>
+              {t.unreadable} of {t.count} with no amount — not added
+            </span>
+          );
+        }
         if (t.cents == null) {
           return (
             <span className="dash" title={`${t.count} adjustments in ${t.currencies.join(' and ')}`}>
@@ -2113,12 +2155,16 @@ function Run({
  */
 function rowOwed(r: RunRow): number | null {
   if (r.outstanding.some((s) => s.rateCents == null)) return null;
+  // `payLinesTotal` and not a reduce: a class line or an adjustment whose
+  // amount did not come back makes the run unstateable, exactly as an unpriced
+  // session does on the line above. A reduce would have added the readable ones
+  // and handed over a figure smaller than the truth that looks like the truth.
   const cents = runTotal({
     sessionCents: settlementAmount(r.outstanding),
     sessions: r.outstanding.length,
-    classCents: r.classes.reduce((a, c) => a + c.amountCents, 0),
+    classCents: payLinesTotal(r.classes),
     classes: r.classes.length,
-    adjustmentCents: r.adjustments.reduce((a, x) => a + x.amountCents, 0),
+    adjustmentCents: payLinesTotal(r.adjustments),
     adjustments: r.adjustments.length,
   });
   return cents;

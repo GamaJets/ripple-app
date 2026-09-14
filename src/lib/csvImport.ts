@@ -694,11 +694,21 @@ export interface PaymentRow {
   note: string | null;
 }
 
+/**
+ * The words this recognises, and nothing else — see the refusal at the row.
+ *
+ * `other` is in here as a spelling in its own right because it is a STORED
+ * value: `gym_payments.method` is `check (method in ('card', 'cash',
+ * 'transfer', 'direct_debit', 'other'))` (part 29), `gymExport.ts` writes that
+ * column straight into payments.csv, and a file this product exported must
+ * re-import. Without it, refusing the unknown would refuse our own export.
+ */
 const METHODS: Record<string, PaymentRow['method']> = {
   card: 'card', creditcard: 'card', debitcard: 'card', visa: 'card', mastercard: 'card', stripe: 'card',
   cash: 'cash',
   transfer: 'transfer', banktransfer: 'transfer', bacs: 'transfer', wire: 'transfer',
   directdebit: 'direct_debit', dd: 'direct_debit', gocardless: 'direct_debit', standingorder: 'direct_debit',
+  other: 'other',
 };
 
 /**
@@ -771,8 +781,34 @@ export function previewPayments(
       );
     }
 
-    const rawMethod = at(r, 'method').trim().toLowerCase().replace(/[^a-z]/g, '');
-    const method: PaymentRow['method'] = rawMethod ? (METHODS[rawMethod] ?? 'other') : 'other';
+    // An unreadable method is REFUSED and named, like every other word column
+    // in this file. This line used to read `METHODS[rawMethod] ?? 'other'`, so
+    // "cheque", "paypal", "efectivo" and the typo "cardd" all became `other` —
+    // indistinguishable from a cell that said nothing, on an import screen that
+    // never displays the parsed method, in a row that becomes the gym's
+    // permanent record of how somebody paid. Same reasoning and same wording as
+    // status, delivery mode, billing period and active.
+    //
+    // A BLANK STILL MEANS `other`, and it is a different case rather than the
+    // same one handled leniently. `method` is not a required column: a sheet
+    // that omits it reads as '' on every row, so refusing a blank would reject
+    // a whole ledger for lacking a column this importer never asked for. And
+    // the stored column is `not null`, so there is no unknown to write — `other`
+    // is the only truthful home for "the file did not say". A blank is the file
+    // saying nothing; an unreadable word is the file saying something this
+    // cannot read, and only the second would have this import inventing a fact.
+    //
+    // The CELL decides whether the file said anything, not the stripped key:
+    // the strip is what lets "Direct Debit" and `direct_debit` both match, and
+    // it also turns "1" or "-" into an empty string, which would otherwise read
+    // as a blank and be filed as `other` in silence.
+    const methodCell = at(r, 'method').trim();
+    let method: PaymentRow['method'] = 'other';
+    if (methodCell) {
+      const hit = METHODS[methodCell.toLowerCase().replace(/[^a-z]/g, '')];
+      if (!hit) errors.push(`payment method "${methodCell}" is not one this recognises`);
+      else method = hit;
+    }
 
     const value: PaymentRow = {
       memberName,

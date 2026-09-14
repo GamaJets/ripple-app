@@ -35,10 +35,12 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 // 44pt, from the one place that holds the number. See the send button below.
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { useClientData } from '../../src/ui/clientData';
-// `sharedInjuries`, NOT `injurySummary`. The difference is the note, and the
-// note is seeded from the line off a physiotherapy report — see the header of
-// src/lib/coachShare.ts.
-import { sharedInjuries } from '../../src/lib/coachShare';
+// The fact-or-absence decision for every profile- and scan-derived field of the
+// payload. It applies `sharedInjuries` — NOT `injurySummary`, the difference
+// being the note seeded from a physiotherapy report (see the header of
+// src/lib/coachShare.ts) — and it refuses the empty injury list where the
+// profile read did not land.
+import { memberAskFacts, sleepFact } from '../../src/lib/memberAsk';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -72,13 +74,56 @@ export default function Coach() {
   const coachProgram = assigned.getProgram(cd.id);
   const coachNutrition = useCoachNutrition();
   const _adj = coachNutrition.get(cd.id);
+  /* ── whether the profile behind half of `context` is the member's answer ──
+   *
+   * src/ui/clientData.tsx says it in its own words: "Under 'error' the fields
+   * above are defaults and nulls that were never confirmed — a screen must not
+   * present them as the client's answers." The defaults are goal 'muscle',
+   * diet 'meat', coachingMode 'online', `injuries: []`, `focusAreas: []` and
+   * three meals a day, and its header is explicit that they are "plausible
+   * enough that nothing looks broken".
+   *
+   * On a screen that is enough of a defect. Here it is worse, because every one
+   * of those fields is posted to a language model as fact about this person and
+   * comes back to them in the second person. A failed profile read turned a
+   * vegetarian cutting on keto into a meat-eating client bulking, and — the one
+   * that matters — turned a disclosed shoulder into "Injuries / limitations:
+   * none disclosed", under a system prompt that instructs the model to train
+   * around disclosed injuries. An all-clear manufactured out of an empty list.
+   *
+   * app/(client)/dashboard.tsx already refuses to draw Fuel Today off this same
+   * unread profile and says which read is missing. This is the same refusal,
+   * addressed to the model instead of to the reader.
+   *
+   * The wording of each unread field, and the scan read behind weight, body fat
+   * and muscle, live in src/lib/memberAsk.ts rather than here — one copy, so the
+   * screen and the thing asserting the screen cannot drift.
+   */
+  const profileWhole = isWhole(cd.profileStatus);
+  /* Both halves of the daily target, and neither of them is the member's unless
+   * its read landed. The goal and the diet are what split a day into protein,
+   * carbs and fat, and the coach's adjustment is the correction on top: the
+   * `get()` behind `_adj` returns null identically for "your coach has not
+   * adjusted you" and "we could not find out whether they have", which is why
+   * src/ui/coachNutrition.tsx carries a status at all. Same guard the home
+   * screen, the Meals tab and the Food Log already apply. */
+  const targetInputsUnknown = !profileWhole
+    || (cd.coachingMode !== 'solo' && coachNutrition.status === 'error' && _adj == null);
   // null until there is a body to scale to. This used to run on the 70 kg /
   // 20% placeholder from clientData and present the result as the client's
   // own daily targets.
-  const macros = (cd.weightKg != null && cd.bodyFatPct != null)
+  const macros = (cd.weightKg != null && cd.bodyFatPct != null && !targetInputsUnknown)
     ? applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined))
     : null;
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
+  /* Whether the block the model is about to be told the member is on is their
+   * coach's. `?? buildProgram(…)` substitutes Repple's automatic programme, and
+   * nothing in the payload distinguished the two — so the model discussed "your
+   * plan" in the second person about a block nobody assigned. The screen's own
+   * `cachedNote` Flag below makes the same point about the THIRTY-DAY cached
+   * copy and, until now, made it only to the reader: the model was still handed
+   * the cached title as fact. Both now travel with the programme. */
+  const programUnknown = cd.coachingMode !== 'solo' && assigned.status === 'error' && coachProgram == null;
   // Every line of `context` below is handed to a language model as fact about
   // this person, and the model writes it back to them in the second person. So
   // an unread read here does not produce a blank screen, it produces a
@@ -125,19 +170,39 @@ export default function Coach() {
   const _streak = shownStreak(log);
   const _lastEx = logWhole && log.length ? log[0].exercise : '';
   const _prog = logWhole ? suggestProgression(log, wu)[0] : undefined;
-  // How this client is coached, in a sentence the model can act on.
-  //
-  // It was never sent, so the AI coach gave identical answers to someone whose
-  // trainer is standing next to them on Tuesday and to someone training alone
-  // with nobody to ask — "get a spotter", "ask your coach to check your setup"
-  // and "book a session" were all offered regardless of whether any of it was
-  // available. The three coached answers differ in exactly one way that matters
-  // to advice: who is in the room, and when.
-  const coaching =
-    cd.coachingMode === 'solo' ? 'training alone — no coach to refer them to'
-    : cd.coachingMode === 'inperson' ? 'coached in person — their coach is in the room for their booked sessions'
-    : cd.coachingMode === 'hybrid' ? 'coached in person for booked sessions and remotely in between — some weeks they train alone'
-    : 'coached remotely — their coach writes the plan but is never in the room';
+  /* ── the half of the payload that answers to the profile and scan reads ───
+   *
+   * `coaching`, the goal, the diet, the meals, the three body figures, the four
+   * target figures, the programme, the injuries and the focus areas. Every one
+   * of them is either the member's own answer or one of src/ui/clientData.tsx's
+   * constructed defaults, and only its status can say which — see the header of
+   * src/lib/memberAsk.ts for what each substitution costs when a model is the
+   * thing reading it.
+   *
+   * It is a pure function rather than twenty lines here for the reason
+   * `clientAskContext` in coachShare.ts is: the COACH's ask has had
+   * coachAsk.test.ts behind it since the day a named client's InBody scan went
+   * to a model, and the member's ask was the half still assembled inline where
+   * nothing could assert it. Asserted in src/lib/memberAsk.test.ts.
+   *
+   * How this client is coached, in particular, was never sent at all until
+   * recently: the AI coach gave identical answers to someone whose trainer is
+   * standing next to them on Tuesday and to someone training alone with nobody
+   * to ask — "get a spotter", "ask your coach to check your setup" and "book a
+   * session" were all offered regardless of whether any of it was available.
+   */
+  const facts = memberAskFacts({
+    profileStatus: cd.profileStatus,
+    scansStatus: cd.scansStatus,
+    coachingMode: cd.coachingMode,
+    goal: cd.goal, diet: cd.diet, mealsPerDay: cd.mealsPerDay,
+    weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg,
+    injuries: cd.injuries, focusAreas: cd.focusAreas,
+    macros, targetInputsUnknown, adjustUnread: profileWhole && targetInputsUnknown,
+    programTitle: program.title, programFocus: program.focus.join(', '),
+    programUnknown, programCachedNote: assigned.cachedNote,
+    brandLabel: BRAND.label,
+  });
 
   // Everything below is a candidate for sending. What actually goes is decided
   // by the allowlist in src/lib/coachShare.ts and applied inside
@@ -150,11 +215,10 @@ export default function Coach() {
   // set of figures. It was never needed: the greeting below is built on this
   // phone from `cd.name` and always was, so nothing the member sees changes.
   const context = {
-    coaching,
-    goal: cd.goal, diet: cd.diet, weightKg: cd.weightKg != null ? Math.round(cd.weightKg * 10) / 10 : 'not recorded',
-    bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,
-    kcal: macros?.kcal ?? 'not set', protein: macros?.protein ?? 'not set', carbs: macros?.carbs ?? 'not set', fat: macros?.fat ?? 'not set',
-    programTitle: program.title, programFocus: program.focus.join(', '),
+    // `coaching`, goal, diet, mealsPerDay, the three body figures, the four
+    // targets, the programme, the injuries and the focus areas — each of them
+    // the member's answer or a sentence saying it is not. See `facts` above.
+    ...facts,
     // What the score is made of travels with it. A model handed a bare 83
     // will talk about hydration whether or not hydration was in the scale,
     // because the number looks like it covers everything.
@@ -168,19 +232,21 @@ export default function Coach() {
     readinessGaps: _made.caveats.length
       ? `${_made.caveats.join(' ')} Do not present the score as the whole picture.`
       : undefined,
-    // Said plainly, with where it came from. A coach that knows the watch
-    // measured 5.2 hours can talk about the night; one handed only a score
-    // can only repeat the score back.
-    sleep: _sleepFor.avgHours == null
-      ? 'no nights recorded'
-      : `${Math.round(_sleepFor.avgHours * 10) / 10}h average over ${_sleepFor.nights.length} night${_sleepFor.nights.length === 1 ? '' : 's'}`
-        + `, ${_sleepFor.fromDevice ? `${_sleepFor.fromDevice} measured by a device` : 'none measured by a device'}`
-        + `${_sleepFor.fromTyped ? `, ${_sleepFor.fromTyped} logged by hand` : ''}`,
+    // Said plainly, with where it came from — a coach that knows the watch
+    // measured 5.2 hours can talk about the night; one handed only a score can
+    // only repeat the score back — and with the three silences behind a null
+    // average kept apart. See `sleepFact` in src/lib/memberAsk.ts.
+    sleep: sleepFact(_sleepFor),
     // "0 kcal eaten" is the answer a failed food read produces, and it is the
     // one thing on this screen a model will act on hardest.
     eatenToday: !foodWhole
       ? 'today’s food log could not be read — do not say they have eaten nothing, and do not tell them to eat on the strength of it'
-      : macros ? `${num(consumed.kcal)}/${num(macros.kcal)} kcal, protein ${consumed.protein}/${macros.protein}g` : `${num(consumed.kcal)} kcal eaten, no target set`,
+      : macros ? `${num(consumed.kcal)}/${num(macros.kcal)} kcal, protein ${consumed.protein}/${macros.protein}g`
+        // "no target set" is the member having none. Under an unread goal, diet
+        // or coach adjustment we simply could not work theirs out, and telling
+        // a model they have no target is how it offers to set one.
+        : targetInputsUnknown ? `${num(consumed.kcal)} kcal eaten — their target could not be worked out, so do not say they have none`
+          : `${num(consumed.kcal)} kcal eaten, no target set`,
     streak: logWhole ? _streak : 'unknown — their training log could not be read whole',
     lastTrained: _lastEx || undefined,
     // The load in the member's own unit, through the same `liftLabel` the
@@ -189,13 +255,13 @@ export default function Coach() {
     // ladder is plate-pair metric — so the conversion belongs here, at the
     // edge, exactly as it does on every screen that prints it.
     nextLift: _prog ? `${_prog.exercise}: ${liftLabel(_prog.nextWeight, wu)} x ${_prog.nextReps} (${_prog.action})` : undefined,
-    // Area and severity. NOT `injurySummary`, which appends the note — and the
-    // note is what `candidateNote` in src/lib/injuryExtract.ts seeds with the
-    // matched line off an uploaded physiotherapy report. The member wrote that,
-    // or accepted it, for their coach. It is not a thing to post to a model,
-    // and there is no toggle that makes it one.
-    injuries: sharedInjuries(cd.injuries) || 'none disclosed',
-    focusAreas: cd.focusAreas.length ? cd.focusAreas.join(', ') : 'none set',
+    // `injuries` and `focusAreas` come from `facts` at the top of this object.
+    // Area and severity only, through `sharedInjuries` — NOT `injurySummary`,
+    // which appends the note, and the note is what `candidateNote` in
+    // src/lib/injuryExtract.ts seeds with the matched line off an uploaded
+    // physiotherapy report. The member wrote that, or accepted it, for their
+    // coach. It is not a thing to post to a model, and there is no toggle that
+    // makes it one.
   };
 
   // "I know your plan, targets, and latest numbers" is a promise, and it was
@@ -259,7 +325,14 @@ export default function Coach() {
   // conversation, which is what it always was. Two things follow, both wanted:
   // it cannot be trimmed away by the thread cap, and it is not posted to the
   // model as "the replies so far" — it is our own copy, not a reply.
-  const greeting = `Hi ${cd.name.split(' ')[0]} I'm your ${BRAND.label} coach. ${
+  //
+  // The name is optional in the sentence rather than assumed into it. A client
+  // who has not finished onboarding has no name, and one whose profile read
+  // failed has none either — both produced "Hi  I'm your Repple coach", with
+  // the double space, on the first line of the screen. app/(client)/dashboard.tsx
+  // already drops the greeting's comma for the same reason.
+  const greetName = (cd.name || '').trim().split(' ')[0] || '';
+  const greeting = `Hi${greetName ? ` ${greetName}` : ''} I'm your ${BRAND.label} coach. ${
     consent === 'no'
       ? 'I have your plan and your targets, and not your body, sleep or injuries, because you asked me not to'
       : knowsAll ? 'I know your plan, targets, and latest numbers'

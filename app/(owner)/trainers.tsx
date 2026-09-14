@@ -29,7 +29,12 @@ import { trainerHealth, gymRollup } from '../../src/lib/ownerAnalytics';
 export default function OwnerTrainers() {
   const t = useTheme();
   const router = useRouter();
-  const { trainers, loading, status: trainersStatus, sessions30, payroll30, refresh } = usePlatformTrainers();
+  // `sessions30` and `payroll30` off the provider are the same two sums
+  // `gymRollup` computes below, and this screen now reads them from `roll`
+  // alongside `delivered30` and `unmarked30` — which the provider does not
+  // publish, and which are the halves that make the hero's sentence true.
+  // Two sources for one figure is how the two come to disagree.
+  const { trainers, loading, status: trainersStatus, refresh } = usePlatformTrainers();
   const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
   // `trainers.length === 0` was read straight off as "the gym has no trainers",
   // and a refused read leaves exactly that. This is the screen where that costs
@@ -156,22 +161,50 @@ export default function OwnerTrainers() {
           <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
         </View>
 
-        {/* Sessions delivered leads, because it is the number that moves. */}
+        {/* Sessions lead, because it is the number that moves. */}
+        {/* ── "Delivered" was the one word this figure could not carry ─────
+            The label read "Sessions Delivered · 30 Days" over `sessions30`,
+            which is every booking whose clock has passed WHATEVER its outcome
+            — src/lib/gymTrainers.ts says so at the field, and `markOutcome`
+            writes `outcome` without touching `status`, so a no-show, a
+            cancellation and a late cancellation are all inside it and inside
+            neither `delivered30` nor `unmarked30`.
+
+            The money beside it is `payroll30`, which is `delivered30 × fee`.
+            So the two halves of one hero counted two different populations,
+            and an owner dividing the money by the figure above it reads back a
+            session fee their gym does not charge. This was the third of the
+            three screens ownerAnalytics' own header names: /dashboard and
+            /revenue were corrected, and this one — the screen whose entire
+            subject is what the coaching staff delivered — was not.
+
+            The count is worth having and the word was not. `delivered` now
+            appears only beside the figure that means it. */}
         <Hero
-          label="Sessions Delivered · 30 Days"
-          figure={trainersUnknown ? '—' : num(sessions30)}
+          label="Sessions · 30 Days"
+          figure={trainersUnknown ? '—' : fig(num(roll.sessions30))}
           note={
             loading ? 'Loading your roster…'
             : trainersUnread ? 'Your roster could not be read'
-            : trainers.length === 0 ? 'Invite a trainer and their delivered sessions start counting here.'
-            : payroll30 == null
-              ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · set a session fee to see what that is worth`
+            // A prefix of the roster is not the roster, so it carries no count
+            // of trainers and no total of their sessions. Neither read emits
+            // this today — both refuse rather than degrade — so this is the
+            // house rule holding rather than a live miscount being fixed.
+            : !isWhole(rosterStatus) ? 'Only part of your roster came back, so this is not a total'
+            : trainers.length === 0 ? 'Invite a trainer and their sessions start counting here.'
+            // Said ahead of the money, because it is the reason there is none:
+            // `payroll30For` returns null while ANY session is unmarked, and an
+            // owner met "set a session fee" while their fee was already set.
+            : roll.unmarked30 > 0
+              ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${num(roll.delivered30)} marked delivered, ${num(roll.unmarked30)} still unmarked, so this cannot be valued yet`
+            : roll.payroll30 == null
+              ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${num(roll.delivered30)} marked delivered · set a session fee to see what that is worth`
               // gymMoney returns null when the gym has not set a currency, and
               // an unguarded ${} would put the word "null" in front of an
               // owner. The count is still true, so it is still said.
-              : gymMoney(payroll30, cur) == null
-              ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · set your gym's currency to see what that is worth`
-              : `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${gymMoney(payroll30, cur)} at your session fee`
+              : gymMoney(roll.payroll30, cur) == null
+              ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${num(roll.delivered30)} marked delivered · set your gym's currency to see what that is worth`
+              : `${num(roll.delivered30)} marked delivered · worth ${gymMoney(roll.payroll30, cur)} at your session fee`
           }
           onPress={() => router.push('/(owner)/revenue')}
         />

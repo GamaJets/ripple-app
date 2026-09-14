@@ -44,13 +44,16 @@ import { Rule, Section, SectionHead, Notice, Cta, Ghost, ListRow, Flag } from '.
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { INJURY_AREAS, areaLabel, newInjuryId, type Injury, type InjurySeverity } from '../../src/lib/injuries';
-import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle } from '../../src/lib/injuryEdit';
+import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle, injuryStanding } from '../../src/lib/injuryEdit';
 import { ackState, programmeChoiceState } from '../../src/lib/injuryGate';
 import { worstStatus } from '../../src/ui/loadStatus';
 import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fmtDay, num } from '../../src/lib/format';
 import { BACK_ICON } from '../../src/ui/direction';
+// The day this screen judges a disclosure's age against, kept live across
+// midnight. See `nowMs` below.
+import { useNow } from '../../src/ui/today';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
@@ -72,6 +75,17 @@ export default function Injuries() {
   // Held whole rather than as an id: the warning below is about what CHANGED,
   // so it needs the values as they were before the fields were touched.
   const [editing, setEditing] = useState<Injury | null>(null);
+  /**
+   * The clock every row's age is read against.
+   *
+   * `useNow()` and not `Date.now()`. A `Date.now()` in the render body is
+   * correct every time this screen redraws and only then, and a screen sitting
+   * open on a list of injuries redraws for nothing at all — so a row reading
+   * "Disclosed 89 days ago" the evening before the threshold would still say
+   * so the next morning, and the question this screen exists to put would not
+   * be put. `useNow` re-settles at local midnight, on foreground and on focus.
+   */
+  const nowMs = useNow().getTime();
 
   const active = c.injuries.filter((i) => i.status === 'active');
   const past = c.injuries.filter((i) => i.status === 'recovered');
@@ -151,22 +165,55 @@ export default function Injuries() {
 
   // One injury: a status dot, the area, its severity as ink text, and its two
   // actions. Divided by a hairline rather than boxed.
-  const Row = ({ inj, first }: { inj: Injury; first?: boolean }) => {
+  //
+  // A PLAIN FUNCTION, called as `row(i, first)`, and not a component rendered
+  // as `<Row inj={…} />`. The difference is not style. A component declared in
+  // this body is a new function object on every render, so React sees a
+  // different element TYPE each time and unmounts and remounts the whole
+  // subtree rather than updating it — and the outer View here is `accessible`
+  // with a composed label, so VoiceOver loses its place and re-announces the
+  // injury from the top every time anything on this screen changes state.
+  // Which is often: the sheet opening, a note being typed in it, a status
+  // toggling, both background reads landing.
+  //
+  // app/(client)/report.tsx already states this rule about its own
+  // `narrativeBlock` — "written as a plain call and not a component so it does
+  // not remount the text — and therefore does not interrupt a screen reader —
+  // every time this screen redraws". Same rule, same reason, and the `key`
+  // moves onto the returned element because there is no longer an element
+  // above it to carry one.
+  const row = (inj: Injury, first?: boolean) => {
     const { id, area: areaId, severity, status, note: nt } = inj;
+    // How long this has been standing, and whether it is time to ask about it.
+    // `nowMs` comes from `useNow()` above rather than from a `Date.now()` here:
+    // a clock read in a render body is right only at the moment something else
+    // happens to redraw, and the sentence this produces changes at midnight.
+    const age = injuryStanding(inj, nowMs);
     return (
-    <View style={{ paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
+    <View key={id} style={{ paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       {/* One element, one sentence. The dot's colour is the severity said in
           colour, and colour is the one thing a screen reader cannot read out —
           so the row is grouped and spoken whole rather than as three fragments
-          with an unnamed shape in front of them. */}
+          with an unnamed shape in front of them.
+          The age goes INSIDE the group, not beside it: a grouped View swallows
+          its children's labels, so a line rendered next to this one would be
+          read out as a separate stop with no injury attached to it. */}
       <View accessible accessibilityRole="text"
-        accessibilityLabel={`${areaLabel(areaId)}, ${status === 'active' ? `${severity} injury, active` : 'recovered'}${nt ? `. ${nt}` : ''}`}>
+        accessibilityLabel={`${areaLabel(areaId)}, ${status === 'active' ? `${severity} injury, active` : 'recovered'}${nt ? `. ${nt}` : ''}${age.line ? `. ${age.line}` : ''}`}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: status === 'active' ? sevColor(severity) : t.ink3 }} />
           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{areaLabel(areaId)}</Text>
           <Text style={{ ...ty.caption, color: t.ink2, textTransform: 'capitalize' }}>{status === 'active' ? severity : 'recovered'}</Text>
         </View>
         {nt ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{nt}</Text> : null}
+        {/* A disclosure nobody has revisited. `age.line` is null when there is
+            nothing honest to print — no date on the row, an unreadable one, a
+            recovered injury — so this renders nothing rather than a hedge. The
+            long-standing case is the one worth reading, so it gets the
+            attention colour; a recent one is a quiet fact. */}
+        {age.line ? (
+          <Text style={{ ...ty.caption, color: age.recheck ? t.ink2 : t.ink3, marginTop: sp.sm }}>{age.line}</Text>
+        ) : null}
       </View>
       {/* Named, because "Delete, button" in a list of injuries does not say
           which one — and this one cannot be undone from here. */}
@@ -232,7 +279,7 @@ export default function Injuries() {
             <Rule />
             <Section>
               <SectionHead title="Active" note={String(active.length)} />
-              {active.map((i, idx) => <Row key={i.id} inj={i} first={idx === 0} />)}
+              {active.map((i, idx) => row(i, idx === 0))}
             </Section>
           </View>
         ) : null}
@@ -242,7 +289,7 @@ export default function Injuries() {
             <Rule />
             <Section>
               <SectionHead title="Recovered" note={String(past.length)} />
-              {past.map((i, idx) => <Row key={i.id} inj={i} first={idx === 0} />)}
+              {past.map((i, idx) => row(i, idx === 0))}
             </Section>
           </View>
         ) : null}

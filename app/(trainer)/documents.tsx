@@ -18,8 +18,11 @@
 // ── What cannot happen here, and why the screen says so ───────────────────
 //
 // A document cannot be edited once it is uploaded. Not the title, not the file:
-// `coach_documents_immutable_guard` (supabase/parts/135) refuses the update, and
-// there is no UPDATE grant to reach it with anyway. That is not caution, it is
+// `coach_documents_immutable_guard` (supabase/parts/137-a-coachs-own-paperwork.sql
+// — the comments on this feature said "part 135" throughout, which is a
+// different file about standing appointments; `grant select, insert on
+// public.coach_documents to authenticated` is at 137:302) refuses the update,
+// and there is no UPDATE grant to reach it with anyway. That is not caution, it is
 // the whole point — an acceptance points at a document, so a coach who could
 // swap the file behind an accepted one would be holding a signed acceptance of
 // something nobody read. Re-issuing amended paperwork is a NEW document plus a
@@ -54,7 +57,7 @@ import {
 import { fmtDay } from '../../src/lib/format';
 import {
   COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_REACH_NOTE, DOC_MIME_TYPES, checkUpload,
-  coachDocPath, shapeDocs, sizeLabel, standingLine, STANDING_ROW_CAP, STANDING_TRUNCATED_NOTE,
+  coachDocPath, extForMime, shapeDocs, sizeLabel, standingLine, STANDING_ROW_CAP, STANDING_TRUNCATED_NOTE,
   uploadRefusalLine,
   type CoachDoc, type RawCoachDoc,
 } from '../../src/lib/coachDocs';
@@ -169,7 +172,7 @@ export default function CoachDocumentsScreen() {
        * One read for the whole list, rather than the per-document RPC behind
        * the Who's Accepted panel. `coach_document_acceptances` is readable
        * here without anything being widened: `coach_doc_accept_own_r`
-       * (supabase/parts/135 §4) admits a coach to the acceptance rows of their
+       * (supabase/parts/137, § “The acceptance”) admits a coach to the acceptance rows of their
        * OWN documents through an `exists` on `coach_documents.coach_id =
        * auth.uid()`, and `authenticated` holds `select` on the table. The ids
        * in the filter come straight out of the list above, which was itself
@@ -248,8 +251,34 @@ export default function CoachDocumentsScreen() {
     // Checked here, before any bytes move. A 413 from storage arrives as an
     // opaque failure, and "that file is too large" is a sentence somebody can
     // act on.
-    const verdict = checkUpload({ filename: a.name, mime: a.mimeType, bytes: a.size ?? 0 });
-    if (!verdict.ok) { Alert.alert('Can’t use that file', uploadRefusalLine(verdict.reason)); return; }
+    //
+    // ── and the size the picker did not give ──────────────────────────────
+    //
+    // `a.size` is null when the PICKER could not say how big the file is.
+    // expo-document-picker types it `size?: number` and several Android
+    // providers leave it out, which src/ui/nativeModules.ts carries through as
+    // null rather than inventing a number for it. This line then invented one:
+    // `a.size ?? 0`, and `checkUpload` refuses anything at or below zero bytes
+    // as 'empty' — so a perfectly readable waiver was turned away with "That
+    // file is empty, so there is nothing to ask anybody to accept", and no
+    // amount of trying again could get past it, because nothing about the file
+    // was wrong. An unreported size is not a size of nothing; it is the house
+    // rule about null and zero, wearing a file picker.
+    //
+    // So the size is judged where it is KNOWN: from the picker when the picker
+    // gave one, and otherwise off the bytes themselves below — which is the
+    // true length, and is still in front of the upload, which is what this
+    // check exists to be in front of.
+    const declared = typeof a.size === 'number' && Number.isFinite(a.size) ? a.size : null;
+    if (declared !== null) {
+      const verdict = checkUpload({ filename: a.name, mime: a.mimeType, bytes: declared });
+      if (!verdict.ok) { Alert.alert('Can’t use that file', uploadRefusalLine(verdict.reason)); return; }
+    } else {
+      // The two things that can still be settled without a size are settled
+      // here, so a file of a kind we cannot use is never read into memory.
+      if (!a.name.trim()) { Alert.alert('Can’t use that file', uploadRefusalLine('name')); return; }
+      if (!extForMime(a.mimeType)) { Alert.alert('Can’t use that file', uploadRefusalLine('type')); return; }
+    }
 
     const path = coachDocPath({
       coachId: uid, filename: a.name, mime: a.mimeType as string, millis: Date.now(), token: newToken(),
@@ -268,7 +297,12 @@ export default function CoachDocumentsScreen() {
         Alert.alert('Couldn’t read that file', 'It could not be read off this device, so nothing was uploaded.');
         return;
       }
-      if (bytes.byteLength === 0) { Alert.alert('Can’t use that file', uploadRefusalLine('empty')); return; }
+      // The real length, whatever the picker said about it — and the whole of
+      // the size check when the picker said nothing. Still before the upload,
+      // so a file too large for the bucket is refused with a sentence rather
+      // than by an opaque 413, and an empty one is still called empty.
+      const read = checkUpload({ filename: a.name, mime: a.mimeType, bytes: bytes.byteLength });
+      if (!read.ok) { Alert.alert('Can’t use that file', uploadRefusalLine(read.reason)); return; }
 
       const { error: upErr } = await supabase.storage
         .from(BUCKET).upload(path, bytes, { contentType: a.mimeType as string, upsert: false });
@@ -358,7 +392,7 @@ export default function CoachDocumentsScreen() {
 
   /* ── Sending one to a particular client ────────────────────────────────── */
   //
-  // The half part 135 did not build. Uploading a document made it readable by
+  // The half part 137 did not build. Uploading a document made it readable by
   // the WHOLE roster and there was no way to put one in front of one person —
   // which is most of what a coach actually sends: a training agreement, a rehab
   // protocol written after one consultation, a plan somebody paid for.

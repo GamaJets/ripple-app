@@ -60,7 +60,7 @@ import { money, normaliseCurrency } from '../../src/lib/gymRecord';
 // two. A yen has none and a Kuwaiti dinar has three.
 import { majorFromMinor } from '../../src/lib/coachMoney';
 import {
-  fetchTrainerPay, saveTrainerPay, fetchClassPay, addClassPay,
+  fetchTrainerPay, saveTrainerPay, fetchClassPay, addClassPay, payLinesTotal,
   classPayAmount, classPayBlocker, parseRate, payRateBlocker,
   payCurrency, CLASS_PAY_LABEL,
   type PayIndex, type TrainerPay, type ClassPayLine, type ClassPayKind,
@@ -237,8 +237,15 @@ function RateRow({ t, existing, busy, cur, onSave, onCancel }: {
         an empty field clears rather than storing a zero.
       </Text>
       <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
-        <Ghost label={busy ? 'Saving…' : 'Save Rate'} onPress={() => onSave(amount, kind)} />
-        <Ghost label="Cancel" onPress={onCancel} />
+        {/* Both off while the rate is saving. Save said 'Saving…' and stayed
+            pressable, so two taps were two writes of the same rate to the same
+            row — harmless in what it stores and not harmless in what it does
+            next, because each one calls `reload()` and the second lands on a
+            screen the first has already rebuilt. Cancel goes off with it: it
+            clears `editing`, which unmounts this row mid-write and leaves the
+            owner with no sight of whether the rate they typed was kept. */}
+        <Ghost label={busy ? 'Saving…' : 'Save Rate'} disabled={busy} onPress={() => onSave(amount, kind)} />
+        <Ghost label="Cancel" disabled={busy} onPress={onCancel} />
       </View>
     </View>
   );
@@ -653,9 +660,13 @@ export default function OwnerClassAnalytics() {
     // pay lines, and adding them is not a total — the count is still true, so
     // the sentence keeps the count and drops the amount.
     const cs = new Set(open.map((l) => l.currency));
+    // `payLinesTotal`, not a reduce. A line whose amount did not come back
+    // makes the sum null for the same reason two currencies do: the count is
+    // still true and the amount is not, so the sentence keeps the count and
+    // drops the figure rather than printing a queue that is smaller than it is.
     return {
       count: open.length,
-      cents: cs.size === 1 ? open.reduce((a, l) => a + l.amountCents, 0) : null,
+      cents: cs.size === 1 ? payLinesTotal(open) : null,
       currency: cs.size === 1 ? [...cs][0] : null,
     };
   }, [paid]);
@@ -950,7 +961,14 @@ export default function OwnerClassAnalytics() {
                       is how a coach gets paid for the same Tuesday twice. The
                       unique index on (class_id, trainer_id) would refuse the
                       second one, but a refusal after the tap is a worse way to
-                      learn it than not being offered. */}
+                      learn it than not being offered.
+
+                      That index was a claim in a comment with nothing holding
+                      it; it is now a checked one. `gym_class_pay_uq`, UNIQUE
+                      (class_id, trainer_id), confirmed present on the live
+                      database 14 September 2026. So the backstop this sentence
+                      leans on is real: a duplicate line cannot reach the table
+                      however the button is pressed. */}
                   {cur && paid !== null ? (
                     <View style={{ marginTop: sp.sm, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                       {on ? (
@@ -959,7 +977,17 @@ export default function OwnerClassAnalytics() {
                         <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{blocker}</Text>
                       ) : (
                         <>
-                          <Ghost label={busy === r.classId ? 'Adding…' : 'Add To Payroll'} onPress={() => putOnPayroll(r)} />
+                          {/* The label already said 'Adding…' and the control
+                              stayed live, so a second tap fired a second INSERT
+                              rather than nothing. `gym_class_pay_uq` refuses it
+                              — the money is safe either way — but what the
+                              owner then reads is `writeErr` carrying Postgres's
+                              own "duplicate key value violates unique
+                              constraint" on a payroll screen. Off while its own
+                              write is in flight; the other rows stay live,
+                              because `busy` holds one class id and they are
+                              different lines. */}
+                          <Ghost label={busy === r.classId ? 'Adding…' : 'Add To Payroll'} disabled={busy === r.classId} onPress={() => putOnPayroll(r)} />
                           {/* THE SAME EXPRESSION `putOnPayroll` files the line
                               with. It said `cur` while the insert said the
                               coach's own currency, so at a gym that had changed

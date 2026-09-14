@@ -584,8 +584,37 @@ export interface MemberPass {
   issuedOn: string;
   /** Null is a pass that does not expire, which is a choice a gym makes. */
   expiresOn: string | null;
-  usesTotal: number;
-  usesSpent: number;
+  /**
+   * How many uses the pass carries, and how many have gone — or null for
+   * either where the read did not hand a figure over.
+   *
+   * Both were `intOrNull(…) ?? 0`, which is this file's own reader being
+   * overruled four characters later: `intOrNull` exists precisely because
+   * `Number(null)` is 0, and the `?? 0` put the 0 back. The two of them are
+   * opposite wrong answers out of the same coercion — an unread `uses_total`
+   * reads as a pass with nothing on it, and an unread `uses_spent` as one
+   * nobody has used — and `passUsesLine` words each of them instead.
+   */
+  usesTotal: number | null;
+  usesSpent: number | null;
+}
+
+/**
+ * "3 of 10 used", and the three things to say when one of those figures did
+ * not come back.
+ *
+ * Here rather than in the screen because of the order of the tests: the nulls
+ * are ruled out FIRST, before anything compares or subtracts, and a sentence
+ * that reached for `usesTotal - usesSpent` with one of them missing would print
+ * NaN or a confident count of what is left on a pass nobody read.
+ */
+export function passUsesLine(p: Pick<MemberPass, 'usesTotal' | 'usesSpent'>): string {
+  if (p.usesTotal == null && p.usesSpent == null) {
+    return 'We couldn’t read how many uses this pass has or how many have gone';
+  }
+  if (p.usesTotal == null) return `${p.usesSpent} used, out of a number we couldn’t read`;
+  if (p.usesSpent == null) return `${p.usesTotal} on the pass, and we couldn’t read how many have gone`;
+  return `${p.usesSpent} of ${p.usesTotal} used`;
 }
 
 /** One thing the member bought from a personal trainer through Repple. */
@@ -600,7 +629,10 @@ export interface MemberCoachSale {
   refundedCents: number | string | null;
   /** Null on a one-off; a number is a pack of that many sessions. */
   sessionsTotal: number | null;
-  sessionsUsed: number;
+  /** How many of the pack have been delivered, or null where the read did not
+   *  say. `intOrNull(…) ?? 0` reported an unread figure as a pack nobody had
+   *  started, beside the price they paid for it. */
+  sessionsUsed: number | null;
   createdAt: string;
 }
 
@@ -670,8 +702,11 @@ export async function fetchMyPasses(sb: Queryable, uid: string): Promise<Read<Pa
         currency: typeof r.currency === 'string' && r.currency.trim() ? r.currency : null,
         issuedOn: r.issued_on,
         expiresOn: r.expires_on ?? null,
-        usesTotal: intOrNull(r.uses_total) ?? 0,
-        usesSpent: intOrNull(r.uses_spent) ?? 0,
+        // No `?? 0` behind `intOrNull`. The reader is the file's answer to
+        // `Number(null) === 0`, and settling its null at the call site is the
+        // caller overruling it in four characters.
+        usesTotal: intOrNull(r.uses_total),
+        usesSpent: intOrNull(r.uses_spent),
       })),
     } };
   } catch (e) {
@@ -721,7 +756,7 @@ export async function fetchMyCoachSales(sb: Queryable, uid: string): Promise<Rea
         status: typeof r.status === 'string' ? r.status : null,
         refundedCents: r.refunded_cents ?? null,
         sessionsTotal: intOrNull(r.sessions_total),
-        sessionsUsed: intOrNull(r.sessions_used) ?? 0,
+        sessionsUsed: intOrNull(r.sessions_used),
         createdAt: r.created_at,
       })),
     } };

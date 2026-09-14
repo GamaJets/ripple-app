@@ -30,7 +30,38 @@
 // three of them to arrive and one not to — which is the same partial state this
 // file exists to remove.
 //
-// ── The keys ───────────────────────────────────────────────────────────────
+// ── Whose they are, and the second defect ──────────────────────────────────
+//
+// The key was the literal `'repple.planEdits'`, with no account in it, and
+// src/ui/planEdits.tsx read it once with `[]` dependencies. Both halves are
+// defects and the second is the expensive one.
+//
+// The Train tab is a TAB: `expo-router`'s `Tabs` keeps tab screens mounted, and
+// this hook is held by app/(client)/workouts.tsx, so its four values and its
+// `latest` ref outlive the session that filled them. On a shared gym handset
+// member A signs out and member B signs in; the read never runs again, so B's
+// screen is still holding A's swaps, A's corrected loads, A's removed movements
+// and A's added exercises.
+//
+// And this blob does not stop at the device. `persist` calls `push`, which
+// upserts `client_plan_edits` on `client_id` — and `clientId` is a live render
+// value that has by then become B. So the FIRST change B makes to their own
+// plan serialises `{ ...latest.current, [key]: value }`: three of A's four
+// fields go up to the server under B's id, on B's row, where B's coach reads
+// them as B's plan. The device half is one person seeing another's swaps; the
+// server half is one person's record being written into another's, and it is
+// not self-correcting — the upsert replaces the row.
+//
+// A cold launch with B signed in reaches the same place by a shorter route: the
+// read at mount opens the unqualified key and hands B whatever A left.
+//
+// The account goes in the key (`planEditsKey`), the read is keyed ON that key
+// so an account change is a re-read, and the unqualified key is removed unread:
+// the blob names no member, so migrating it is a guess whose wrong answer is
+// one person's plan edits filed as another's — the same thing the defect did,
+// performed once deliberately.
+//
+// ── The keys inside the blob ───────────────────────────────────────────────
 //
 // `swaps`, `exEdits` and `removed` are keyed `dayIdx:exerciseKey`, which is the
 // screen's own `uid()` and identifies one row on one WEEKDAY rather than a
@@ -42,12 +73,67 @@
 // Nothing here trims, migrates or reconciles against the programme. A key that
 // no longer matches any exercise is left alone: the coach may put that movement
 // back next week, and a member's correction is not the app's to discard.
+import { accountStateStep, type AccountStateStep } from './accountScopedState';
 import type { ProgramExercise } from './programs';
 import type { SetRow } from './setRows';
 
-/** Where the edits live on the device. One key for all four, for the reason
- *  above: they are one answer and must not half-arrive. */
+/**
+ * The unqualified key this replaces — the one with no account in it.
+ *
+ * Kept exported, and kept at exactly this string, because it is still USED: the
+ * hook removes it on sight. It is never read. Renaming or dropping it would
+ * leave a member's old blob on the handset with nothing left that can delete
+ * it, which is the opposite of the fix.
+ */
 export const PLAN_EDITS_KEY = 'repple.planEdits';
+
+/** Every account-scoped plan-edits key starts with this. Nothing reads the
+ *  prefix at runtime; it is here so the shape can be asserted. */
+export const PLAN_EDITS_PREFIX = 'repple.planEdits:';
+
+/**
+ * Where one member's edits live. One key for all four, for the reason above:
+ * they are one answer and must not half-arrive.
+ *
+ * Null when there is no account to scope it to, and a null means DO NOT READ
+ * AND DO NOT WRITE — not on the device and not to the server. Falling back to
+ * the unqualified key is the defect.
+ *
+ * 'unknown' is refused as loudly as a null. It is the literal `cd.id` carries
+ * before src/ui/clientData.tsx has resolved an account (`sbUid ?? 'unknown'`),
+ * and every signed-out session on every handset would share it. The hook
+ * already refuses to PUSH under it, for the same reason; this is the other
+ * half of that refusal.
+ */
+export function planEditsKey(uid: string | null | undefined): string | null {
+  const id = typeof uid === 'string' ? uid.trim() : '';
+  if (!id || id === 'unknown') return null;
+  return `${PLAN_EDITS_PREFIX}${id}`;
+}
+
+/** Whether a key holds somebody's plan edits. For the sign-out assertion. */
+export const isPlanEditsKey = (k: string): boolean =>
+  typeof k === 'string' && k.startsWith(PLAN_EDITS_PREFIX);
+
+/**
+ * What the Train tab should do when the account under it changes.
+ *
+ * The three answers, and why a null uid is not a sign-out, are in
+ * src/lib/accountScopedState.ts. What is specific here is `onScreenSaved`: the
+ * hook passes its own `loaded` flag, so "forget what is on screen" only ever
+ * happens once the device has a copy of it under the departing member's own
+ * key. Edits made while a read was failing are held rather than thrown away —
+ * those are corrections a member typed at the rack and nothing else has.
+ */
+export function planEditsStepFor(session: {
+  uid: string | null | undefined; onScreenKey: string | null; onScreenSaved: boolean;
+}): AccountStateStep {
+  return accountStateStep({
+    key: planEditsKey(session.uid),
+    onScreenKey: session.onScreenKey,
+    onScreenSaved: session.onScreenSaved,
+  });
+}
 
 /** What a member has changed about their own plan. */
 export interface PlanEdits {

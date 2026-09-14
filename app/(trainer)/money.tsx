@@ -677,6 +677,19 @@ export default function CoachMoney() {
                 `${p.count} ${plural(p.count, 'fee', 'fees')} in ${p.currency}`,
                 wholeMoney(p.units, p.currency),
               ))}
+              {/* The one pot list on this screen that did not carry this, and
+                  the five siblings above and below it all do. A coach who
+                  charges in two currencies — one gym in AED, private clients in
+                  GBP — read two fee rows with nothing between them saying they
+                  are not to be added, on the only section whose amounts are
+                  WHOLE units rather than minor ones, which is already the
+                  easiest figure here to mistake. Same words as the others, so
+                  the rule reads as one rule rather than five. */}
+              {feeSum.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
               {!feeSum.pots.length && feeDenom.ok === false ? (
                 <Flag>{feeDenom.note}</Flag>
               ) : null}

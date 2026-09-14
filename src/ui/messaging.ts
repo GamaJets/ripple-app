@@ -52,7 +52,8 @@ import { reportError } from '../lib/reportError';
 import type { Message } from '../lib/types';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
-import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
+import { cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
+import { legacyThreadCacheKey, threadCacheKey } from '../lib/threadCache';
 import { classifyWrite } from '../lib/offlineQueue';
 import { useOutbox } from './outbox';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
@@ -70,9 +71,6 @@ import {
 } from '../lib/messageAttachments';
 
 export type ChatRole = 'client' | 'coach';
-
-/** Where a thread is kept on this device, keyed by the thread's own id. */
-const THREAD_SCOPE = 'thread';
 
 /**
  * How stale a cached thread may be before it stops being worth opening.
@@ -539,20 +537,53 @@ export function useThread(clientId: string | null, role: ChatRole) {
     setHasOlder(false);
     setLoadingOlder(false);
     setOlderError(null);
+    // …and so does the cached-at stamp, which used to be the one piece of
+    // thread state this reset forgot. It is cleared only on the SUCCESS path
+    // below, so a coach moving from a client whose thread came off the device
+    // to one whose read then FAILED kept the first client's stamp: an empty
+    // screen carrying "last confirmed on Tuesday", which is a claim about a
+    // conversation that was never read. Nothing is on screen from the device
+    // until the block below puts it there, so null is the only true value here.
+    setCachedAt(null);
     let cancelled = false;
     let channel: any = null;
     (async () => {
       let cid = clientId;
-      if (!cid && role === 'client') {
-        try {
-          const { data: sess } = await supabase.auth.getSession();
-          if (cancelled) return;
+      /**
+       * WHO IS READING, which is half of the cache key below.
+       *
+       * The thread key alone was the whole of it, and on the coach's side the
+       * thread key is the CLIENT's id — so two coaches signed into the same
+       * handset who both have that client on their roster shared one cached
+       * page of their conversation. src/lib/threadCache.ts is the whole
+       * argument and the whole fix; this is only where the second half is read.
+       *
+       * `getSession` and not `getUser`: it is local, it costs no round trip,
+       * and a cache key does not need the server's opinion of the token. Null
+       * here is not an error — it means no cache, which is the safe direction.
+       */
+      let viewer: string | null = null;
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        viewer = sess?.session?.user?.id ?? null;
+        if (!cid && role === 'client') {
           if (!sess?.session) { setStatus('ready'); setReady(true); return; }
           const { data: auth, error: authErr } = await supabase.auth.getUser();
+          if (cancelled) return;
           // Not knowing who you are is a failure, not an empty thread.
-          if (authErr) { if (!cancelled) { setStatus('error'); setReady(true); } return; }
+          if (authErr) { setStatus('error'); setReady(true); return; }
           cid = auth?.user?.id ?? null;
-        } catch { if (!cancelled) { setStatus('error'); setReady(true); } return; }
+          if (auth?.user?.id) viewer = auth.user.id;
+        }
+      } catch {
+        if (cancelled) return;
+        // A client's own thread has no key without this, so it is a failed
+        // read. A coach's key came from the roster and the read below can still
+        // happen — with no cache, because a cache this device cannot attribute
+        // to an account is one it must not open.
+        if (!cid) { setStatus('error'); setReady(true); return; }
+        viewer = null;
       }
       if (cancelled) return;
       tid.current = cid;
@@ -577,8 +608,21 @@ export function useThread(clientId: string | null, role: ChatRole) {
       // the same as an empty thread and must never render as one — the empty
       // state on this screen is "No messages yet. Say hello.", said to somebody
       // whose coach wrote to them that morning.
+      //
+      // Null when there is no account to attribute it to, and then this device
+      // holds nothing for this thread at all — see src/lib/threadCache.ts.
+      const ck = threadCacheKey(cid, viewer);
+      // The key this used to be written under, which names the thread and not
+      // the reader. REMOVED UNREAD, and that is the whole of the migration: the
+      // bytes carry no account, so no build can say whose conversation they
+      // were, and the honest thing to do with them is stop keeping them. The
+      // first read with signal writes the scoped key.
+      {
+        const legacy = legacyThreadCacheKey(cid);
+        if (legacy) AsyncStorage.removeItem(legacy).catch(() => { /* gone next launch either way */ });
+      }
       try {
-        const cached = readCache<any>(await AsyncStorage.getItem(cacheKey(THREAD_SCOPE, cid)));
+        const cached = ck ? readCache<any>(await AsyncStorage.getItem(ck)) : { rows: null, at: null };
         if (cancelled) return;
         if (cached.rows && cached.rows.length && withinHorizon(cached.at, Date.now(), THREAD_CACHE_HORIZON_MS)) {
           const rows = cached.rows.map(rowToMsg);
@@ -635,8 +679,14 @@ export function useThread(clientId: string | null, role: ChatRole) {
           // of a thread that is already longer than the cap, the rows on screen
           // are the same rows the live read shows, and the alternative is a
           // member with a long history having no cached thread at all.
-          AsyncStorage.setItem(cacheKey(THREAD_SCOPE, cid), packCache(rows))
-            .catch(() => { /* the thread is right this session either way */ });
+          //
+          // Only under a key that names the reader. With no account there is
+          // nowhere to write it that would not be device-global, and this
+          // session's thread is correct on screen either way.
+          if (ck) {
+            AsyncStorage.setItem(ck, packCache(rows))
+              .catch(() => { /* the thread is right this session either way */ });
+          }
         }
       } catch { if (!cancelled) setStatus('error'); }
       if (!cancelled) setReady(true);

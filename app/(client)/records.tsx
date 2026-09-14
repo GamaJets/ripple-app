@@ -20,6 +20,13 @@ import { est1RMIn, liftLabel, convertedNote } from '../../src/lib/units';
 import { personalRecords } from '../../src/lib/streaks';
 import { repRecords, bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 import { bestSetLabel } from '../../src/lib/bestSet';
+// The heaviest load actually touched on a movement, which this board has never
+// shown. `exerciseIndex` already computes it as `topLoadKg`, is tested for it —
+// including the belted pull-up, where the heaviest thing lifted is the body
+// plus the belt and not the 20 kg on it — and is what the panel at the foot of
+// app/(client)/history.tsx draws. Nothing new is computed here.
+import { exerciseIndex } from '../../src/lib/exerciseHistory';
+import { exerciseSlug } from '../../src/lib/exerciseId';
 import { holdRecords, holdLabel, timedSetLabel } from '../../src/lib/timedSets';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -86,6 +93,53 @@ export default function Records() {
  // back as work that produced no record of any kind.
  const holds = holdRecords(log);
  const nothing = prs.length === 0 && repsOnly.length === 0 && holds.length === 0;
+
+ /* ── the record this board has never shown ────────────────────────────────
+  *
+  * Every row here ranks by ESTIMATED one-rep max, and `PR.weight` is the load
+  * of the set that produced the best estimate — not the heaviest load on the
+  * movement. Those are two different records and they routinely disagree: a
+  * member who has benched 100 × 1 and 90 × 8 estimates highest off the 90, so
+  * the row reads "Best set 90 kg × 8" and the screen titled Personal Records
+  * never says 100 anywhere. Strong and Hevy both keep the two side by side and
+  * this app already computes ours — `topLoadKg` in src/lib/exerciseHistory.ts,
+  * drawn by the exercise panel at the foot of app/(client)/history.tsx, and
+  * nowhere on the board people actually open to look up a record.
+  *
+  * Keyed on `exerciseSlug` because that is what `exerciseIndex` groups by;
+  * `PR.exercise` is the stored English name and slugging it is the same
+  * mapping the index made on the way in. */
+ const topLoadBySlug = new Map<string, number | null>();
+ for (const e of exerciseIndex(log, weightSeries, logStatus)) topLoadBySlug.set(e.slug, e.topLoadKg);
+ /* Movements with any BODYWEIGHT set in the log. Their heaviest "load" is the
+  * member's own weigh-in plus whatever was belted on, which is a real load and
+  * the right thing to estimate from — and is not a thing that was ever on a
+  * bar. src/lib/bestSet.ts exists because this screen printed one as if it
+  * were, in the hero, and the same figure must not come back in through a new
+  * line three rows down. So a movement that has ever been logged at bodyweight
+  * gets no heaviest-load line at all, rather than one that is sometimes a bar
+  * and sometimes a body. */
+ const bodyPriced = new Set<string>();
+ for (const e of log) if (e.bw?.some(Boolean)) bodyPriced.add(exerciseSlug(e.exercise));
+ /**
+  * The heaviest load on this movement, in the reader's unit — null whenever
+  * there is nothing to add to the row.
+  *
+  * Compared as the STRINGS that will be drawn, not as kilograms. The board is
+  * stored in kg and read out rounded, so a 100.4 kg top set over a 100.0 kg
+  * record is two different numbers and one printed figure, and "Best set
+  * 100 kg × 8 / Heaviest 100 kg" is a line that says nothing twice.
+  */
+ const heaviestLine = (pr: { exercise: string; weight: number; bodyweight?: boolean }): string | null => {
+  if (pr.bodyweight) return null;
+  const slug = exerciseSlug(pr.exercise);
+  if (!slug || bodyPriced.has(slug)) return null;
+  const topKg = topLoadBySlug.get(slug);
+  if (topKg == null || !(topKg > pr.weight)) return null;
+  const shown = liftLabel(topKg, wu);
+  const already = liftLabel(pr.weight, wu);
+  return shown != null && shown !== already ? shown : null;
+ };
  const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
  /**
   * What a row SAYS, as one sentence.
@@ -129,6 +183,11 @@ export default function Records() {
   const parts = [`${rank}. ${movement(pr.exercise)}`];
   if (one != null) parts.push(`estimated one rep max ${one} ${wu}`);
   parts.push(`best set ${best}`, `on ${dstr(pr.at)}`);
+  // Spoken where it is drawn, and only where it is drawn. A row whose heaviest
+  // load IS the record's load has no extra clause, so VoiceOver reads exactly
+  // what the eye sees.
+  const heavy = heaviestLine(pr);
+  if (heavy) parts.push(`${logStatus === 'partial' ? 'heaviest read' : 'heaviest logged'} ${heavy}`);
   return parts.join(', ');
  };
  /** The same, for the hold board. The seconds are the record; a load is what
@@ -291,6 +350,14 @@ export default function Records() {
       <View style={{ flex: 1 }}>
        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(pr.exercise)}</Text>
        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {bestSetLabel(pr, setLoad(pr), setAdded(pr))} · {dstr(pr.at)}</Text>
+       {/* Only where it differs from the set above — see `heaviestLine`. The
+           word changes with the read: "logged" is a claim about the movement's
+           whole record and a truncated read cannot make one. */}
+       {(() => { const heavy = heaviestLine(pr); return heavy ? (
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+         {logStatus === 'partial' ? 'Heaviest read' : 'Heaviest logged'} {heavy}
+        </Text>
+       ) : null; })()}
       </View>
       <View style={{ alignItems: 'flex-end' }}>
        <Text style={{ ...value(17), color: t.ink }}>{fig(est1RMIn(pr.est1RM, wu))}</Text>
@@ -298,6 +365,13 @@ export default function Records() {
       </View>
      </View>
     ))}
+    {/* Why a row can name two loads. Said once, under the board, rather than in
+        every row that carries the second line. */}
+    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+     Ranked by estimated one-rep max, which is worked out from the reps you logged and is not a max you
+     tested. Where the heaviest load you have put on a lift came off a different set, that set is named
+     underneath it — the two are different records and this board is about the first.
+    </Text>
    </Section>
    </>) : null}
 

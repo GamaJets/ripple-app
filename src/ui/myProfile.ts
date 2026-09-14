@@ -61,6 +61,13 @@ export interface MyProfileRow {
  *  not a failure. */
 export interface MyClientRow {
   dob: unknown;
+  /** `clients.sex`, which holds 'f' or 'm' or nothing at all. Read through
+   *  `sexFromColumn` in src/lib/hrKcal.ts — the heart-rate calorie model is
+   *  the only thing that wants it and it is the one place that knows what the
+   *  two letters mean. It was absent from this select while clientData.tsx
+   *  read `r.sex` off the row, so the value was undefined for every member
+   *  whatever the column said. */
+  sex: unknown;
   height_cm: unknown;
   goal: unknown;
   diet: unknown;
@@ -114,7 +121,7 @@ export function readMyClientRow(uid: string): Promise<ReadOutcome<MyClientRow | 
   return clients.read(uid, async () => {
     const { data, error } = await supabase
       .from('clients')
-      .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours, water_goal_glasses, weight_unit, length_unit')
+      .select('dob, sex, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours, water_goal_glasses, weight_unit, length_unit')
       .eq('id', uid).maybeSingle();
     if (error) return { ok: false, error };
     return { ok: true, value: (data as MyClientRow | null) ?? null };

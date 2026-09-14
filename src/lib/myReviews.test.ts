@@ -132,6 +132,18 @@ const review = (p: Partial<MyCoachReview> = {}): MyCoachReview => ({
   // "your coach" would be a lie about somebody they have left, and it looks
   // like a name where a name is expected.
   ok(!/your coach/i.test(nameless), 'a coach who is no longer theirs is not called "your coach"');
+
+  // A rating that did not come back. `Number(r.rating) || 0` used to make this
+  // "You rated Sam Turner 0 out of 5" — a number below the lowest anybody is
+  // allowed to give, about a named person, invented out of an absent column.
+  const unread = myReviewRatingLine(review({ rating: null }));
+  ok(!/\b0\b/.test(unread), 'an unread rating is never printed as a zero');
+  ok(!/null|undefined|NaN/.test(unread), 'and never as a variable printed raw');
+  ok(/couldn’t read/.test(unread), 'it says the rating could not be read');
+  ok(/Sam Turner/.test(unread), 'the coach is still named where the record holds a name');
+  const unreadNameless = myReviewRatingLine(review({ rating: null, coachName: null }));
+  ok(!/—|null|undefined/.test(unreadNameless), 'no hole where the name would be');
+  ok(/couldn’t read/.test(unreadNameless), 'the nameless row says it too');
 }
 
 /* ── 4. who can read it ───────────────────────────────────────────────────*/

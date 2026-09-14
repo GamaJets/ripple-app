@@ -40,6 +40,7 @@ import {
 } from '../lib/coachCredentials';
 import {
   type Review, type MyReview, type RatingSummary, type WriteResult, asWriteResult,
+  ratingOf, ratingTally,
 } from '../lib/reviews';
 
 /** A read that says which of the two empties it is. */
@@ -193,7 +194,10 @@ export async function deleteCredential(id: string): Promise<{ ok: boolean; reaso
 function toReview(r: any): Review {
   return {
     id: String(r.review_id),
-    rating: Number(r.rating) || 0,
+    // `Number(r.rating) || 0` put ZERO STARS against a named coach on their own
+    // profile whenever the column did not come back — a score below the lowest
+    // any client is allowed to give. `ratingOf` carries the unknown.
+    rating: ratingOf(r.rating),
     body: typeof r.body === 'string' ? r.body : null,
     createdAt: typeof r.created_at === 'string' ? r.created_at : '',
     edited: r.edited === true,
@@ -231,7 +235,11 @@ export async function fetchRatingSummaries(coachIds: string[]): Promise<Read<Rec
   }
   const out: Record<string, RatingSummary> = {};
   for (const r of (Array.isArray(data) ? data : []) as any[]) {
-    out[String(r.coach_id)] = { count: Number(r.rating_count) || 0, sum: Number(r.rating_sum) || 0 };
+    // Both `|| 0` before this, which is the invention twice over: an unread
+    // count made a listed coach "No reviews yet", and an unread sum over a real
+    // count averaged to 0.0 stars. `ratingTally` carries each null separately,
+    // and `ratingDisplay` tests them before it compares or divides them.
+    out[String(r.coach_id)] = { count: ratingTally(r.rating_count), sum: ratingTally(r.rating_sum) };
   }
   // A coach with no reviews has no row, which is a real "none" under 'ready'.
   return { rows: out, status: 'ready' };
@@ -263,7 +271,10 @@ export async function fetchMyReview(coachId: string): Promise<Read<MyReview | nu
   return {
     rows: {
       id: String(r.review_id),
-      rating: Number(r.rating) || 0,
+      // The caller's own rating, read the same way. A zero here would seed the
+      // star picker in app/(client)/my-coach.tsx with a rating that does not
+      // exist and then offer to save it back over the real one.
+      rating: ratingOf(r.rating),
       body: typeof r.body === 'string' ? r.body : null,
       createdAt: typeof r.created_at === 'string' ? r.created_at : '',
       edited: r.edited === true,

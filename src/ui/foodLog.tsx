@@ -674,6 +674,19 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       return true;
     }
     if (!USE_SUPABASE) return false;
+    // Whose row this is. Every insert in this hook writes `client_id: owner`
+    // off the same ref, and nothing here ever addresses another person's meal —
+    // `food_trainer_read` is FOR SELECT, so a coach cannot delete a client's
+    // food log through this path or any other. So naming the owner narrows
+    // nothing a caller is entitled to do.
+    //
+    // A null owner is not a delete with no owner clause: there is no signed-in
+    // account to own the row, the read that fills `entries` never ran, and a
+    // DELETE aimed by id alone from a session with nobody in it is precisely
+    // the write this clause exists to make impossible. Returning false says the
+    // row is still there, which is true.
+    const owner = uidRef.current;
+    if (!owner) return false;
     try {
       // The row leaves the screen only once the server says it has gone. It used
       // to leave first, which meant a refused delete took the meal's calories
@@ -682,7 +695,18 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       //
       // Counting the returned rows, not just checking `error`: a DELETE that
       // matched nothing SUCCEEDS in PostgREST, having removed zero rows.
-      const { data, error } = await supabase.from('food_logs').delete().eq('id', id).select('id');
+      //
+      // `.eq('client_id', owner)` as well as the id, which this did not have.
+      // RLS already scopes it — `food_owner` is `client_id = auth.uid()` FOR
+      // ALL — so the clause changes nothing about what is permitted. It is here
+      // for the reason `updateScan` and `deleteScan` in src/ui/clientData.tsx
+      // carry the same clause and say so: a bug handing this an id from another
+      // account must fail to MATCH rather than leave a row-level policy as the
+      // only thing between one member and another member's record. That is not
+      // hypothetical on this handset — `listRef` has been shown holding the
+      // previous member's rows more than once in this codebase, and an id off a
+      // stale list is exactly the input this clause refuses.
+      const { data, error } = await supabase.from('food_logs').delete().eq('id', id).eq('client_id', owner).select('id');
       if (error || !data || !data.length) { reportError('foodLog.remove', error); return false; }
       setEntries(listRef.current.filter((x) => x.id !== id), uidRef.current);
       return true;
@@ -710,9 +734,17 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       // correction is that the figure on screen is the figure of record, and an
       // optimistic one would put the app straight back into the state this
       // codebase keeps being reported for: right on screen, wrong in the row.
+      // The owner clause `removeFood` above now carries, for the same reason
+      // and against the same input: an id off a list this provider has not
+      // finished clearing is an id belonging to somebody else, and a correction
+      // to another member's meal is the same class of write as a deletion of
+      // one. A null owner refuses rather than sending an unqualified UPDATE.
+      const owner = uidRef.current;
+      if (!owner) return false;
       const { data, error } = await supabase.from('food_logs')
         .update({ name: next.name, kcal: next.kcal, protein: next.protein, carbs: next.carbs, fat: next.fat })
         .eq('id', id)
+        .eq('client_id', owner)
         .select();
       if (error || !data || !data.length) { reportError('foodLog.update', error); return false; }
       setEntries(listRef.current.map((x) => (x.id === id ? rowToEntry(data[0]) : x)), uidRef.current);

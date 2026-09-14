@@ -266,6 +266,61 @@ eq(joinLabels(['sales', 'renewals', 'fees']), 'sales, renewals and fees', 'three
   // A code that WAS read is a code, whether or not more rows were coming.
   eq(denominate('gbp', 'partial').ok, true, 'three letters off a real row denominate under a truncated read');
   eq(denominate('gbp', 'loading').ok, true, 'and under one still in flight');
+
+  // ── the fourth answer: stated, and not a currency ──────────────────────
+  //
+  // `code.length >= 3` accepted 'POUNDS' and handed it back AS the currency,
+  // which is the laxity src/lib/coachMoney.ts, gymRecord.ts and priceBook.ts
+  // were all made strict to close — two rows both holding "pounds" compared
+  // equal, were subtracted, and put a member on list price. The rule of record
+  // is `/^[a-z]{3}$/` after trim and lowercase, and this now applies it.
+  //
+  // The three currencies with three different minor units are all exercised,
+  // because a code that denominates has to survive the same test whatever its
+  // scale: nothing here may pass only for the two-place ones.
+  for (const code of ['gbp', 'jpy', 'kwd', 'GBP', 'JPY', 'KWD', ' gbp ', ' KWD']) {
+    const d = denominate(code, 'ready');
+    eq(d.ok, true, `${JSON.stringify(code)} is a currency`);
+    eq(d.ok === true ? d.currency : null, code.trim().toUpperCase(),
+      'and comes back trimmed and upper-cased, which is what a screen prints');
+  }
+
+  /** The arm a refusal took, or null when it was not a refusal at all. */
+  const whyOf = (d: ReturnType<typeof denominate>): string | null => (d.ok === false ? d.why : null);
+
+  for (const junk of ['pounds', 'POUNDS', 'Japanese yen', 'GB', '£', 'gbp.', 'g b p', 'kwdd', '123']) {
+    const d = denominate(junk, 'ready');
+    eq(d.ok, false, `${JSON.stringify(junk)} is not a currency and is never handed back as one`);
+    eq(whyOf(d), 'unusable',
+      'and the reason is that something IS recorded and it is not money, not that nobody set one');
+  }
+
+  const junk = denominate('pounds', 'ready');
+  ok(junk.ok === false && /pounds/.test(junk.note),
+    'the note quotes what is actually recorded, because that is the thing somebody has to go and change');
+  ok(junk.ok === false && !/nobody has set/i.test(junk.note),
+    'and never says nobody set a currency, which is false about a value somebody typed');
+  ok(junk.ok === false && /gym settings/.test(junk.note), 'it still names where the fix is');
+  ok(junk.ok === false && !/failed/.test(junk.note), 'and does not describe it as a failed read');
+
+  // Judged on the value in hand, exactly as a good code is. A non-code read off
+  // a real row is a non-code whether or not more rows were coming, and no
+  // retry turns 'pounds' into money.
+  eq(whyOf(denominate('pounds', 'loading')), 'unusable',
+    'a stated non-currency is refused while the read is still in flight');
+  eq(whyOf(denominate('pounds', 'partial')), 'unusable', 'and under a truncated one');
+  // 'error' still wins, for the reason it wins over a good code: under a failed
+  // read we do not know that this string is what is recorded.
+  eq(whyOf(denominate('pounds', 'error')), 'unread',
+    'a failed read is still the answer, even holding something that is not a code');
+
+  // The three arms that mean "no currency in hand" keep the boundary they had:
+  // an empty string and whitespace are an ABSENCE, never a stated non-code.
+  eq(whyOf(denominate('', 'ready')), 'unset', 'an empty string is an absence, not a value somebody typed');
+  eq(whyOf(denominate('   ', 'ready')), 'unset',
+    'and so is whitespace, because trimming it leaves nothing stated');
+  eq(whyOf(denominate(undefined, 'loading')), 'unlanded',
+    'and an absence under an unlanded read is still unlanded');
 }
 
 /* ── 7. an empty ledger says different things under different reads ───────── */

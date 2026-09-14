@@ -85,7 +85,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Ghost, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Ghost, PartialRead, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useCoachThreads } from '../../src/ui/coachThreads';
 import { peerMonogram } from '../../src/lib/peerAvatar';
@@ -101,6 +101,22 @@ import {
   WAITING_TITLE, hasWaiting, waitedLabel, waitingCountNote, waitingLine, waitingNote, waitingOn,
   type Waiting,
 } from '../../src/lib/awaitingReply';
+// What this handset is still holding, which the read above cannot see. The
+// decisions are in src/lib/threadOutbox.ts; `asQueuedMessage` stays the only
+// place that narrows a stored payload back into a message.
+import { useOutbox } from '../../src/ui/outbox';
+import { asQueuedMessage } from '../../src/ui/messaging';
+import {
+  outboxThreadsNote, queuedByThread, queuedThreadNote,
+  type QueuedForThread, type QueuedWord,
+} from '../../src/lib/threadOutbox';
+// The clock this screen is ordered and timed by. NOT a bare `Date.now()` in the
+// render body: app/(trainer)/_layout.tsx registers this screen with
+// `href: null`, so it mounts once and is never torn down, and the value would
+// then be whatever day the coach first opened Messages. Everything on the
+// screen hangs off it — `threadWhen` on every row, and the whole-day threshold
+// `waitingOn` puts somebody on the queue by. See src/ui/today.ts.
+import { useNow } from '../../src/ui/today';
 import { isWhole } from '../../src/ui/loadStatus';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
@@ -115,7 +131,9 @@ import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
  * category noun where a name belongs is the defect TF-32 is about, and the coach
  * chat screen carried it until recently.
  */
-function ThreadRow({ t, now, onPress }: { t: CoachThread; now: number; onPress: () => void }) {
+function ThreadRow({ t, now, queued, onPress }: {
+  t: CoachThread; now: number; queued?: QueuedForThread | null; onPress: () => void;
+}) {
   const th = useTheme();
   // `unlinked` is unreachable here — the row exists because the roster returned
   // this client — so the only two outcomes are a name and 'withheld'.
@@ -127,14 +145,23 @@ function ThreadRow({ t, now, onPress }: { t: CoachThread; now: number; onPress: 
   // same solid brand pill as a real number — that would state a figure. It gets
   // the quiet surface instead, and the label under it says so out loud.
   const counted = badge !== null && badge !== '—';
+  // What this PHONE is holding for this conversation, which the server's answer
+  // above cannot know about. Everything else on this row is `stored`; this is
+  // the `unsent` state, and without it a reply typed underground renders as
+  // nothing at all. See src/lib/threadOutbox.ts.
+  const queuedNote = queuedThreadNote(queued);
+  // Both said to a screen reader, because `Pressable` collapses this whole
+  // subtree into one element: text drawn inside it is not announced on its own.
+  const hint = [
+    badge === '—' ? 'We could not read how many of their messages are unopened.' : counted ? `${badge} unopened` : null,
+    queuedNote,
+  ].filter(Boolean).join(' ');
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`Open the conversation with ${head.isName ? head.text : 'this client'}`}
-      accessibilityHint={badge === '—'
-        ? 'We could not read how many of their messages are unopened.'
-        : counted ? `${badge} unopened` : undefined}
+      accessibilityHint={hint || undefined}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
     >
       {/* The face, under the rule src/lib/peerAvatar.ts states: only ever what
@@ -180,6 +207,16 @@ function ThreadRow({ t, now, onPress }: { t: CoachThread; now: number; onPress: 
             We could not read how many of their messages are unopened.
           </Text>
         ) : null}
+        {/* The words this phone is still holding for this conversation. In its
+            own line under the preview rather than replacing it: the preview is
+            the last thing SAID in the thread and a queued reply is the last
+            thing typed, which nobody has read. The tone mark is what stops it
+            reading as a quiet aside. */}
+        {queuedNote ? (
+          <View style={{ marginTop: 3 }}>
+            <Flag tone={th.warn}>{queuedNote}</Flag>
+          </View>
+        ) : null}
       </View>
       <Icon name={FORWARD_ICON} size={16} color={th.ink3} />
     </Pressable>
@@ -201,15 +238,22 @@ function ThreadRow({ t, now, onPress }: { t: CoachThread; now: number; onPress: 
  * this is a short queue worked from the top, that is the whole book scanned by
  * recency, and both taps land on the same conversation.
  */
-function WaitingRow({ w, onPress }: { w: Waiting; onPress: () => void }) {
+function WaitingRow({ w, queued, onPress }: {
+  w: Waiting; queued?: QueuedForThread | null; onPress: () => void;
+}) {
   const th = useTheme();
   const head = peerHeading(w.thread.name ? { kind: 'named', name: w.thread.name } : { kind: 'withheld' }, 'client');
   const line = waitingLine(w);
+  // This queue is built from who spoke last ON THE SERVER, so a coach who has
+  // already answered from a train is still on it — correctly, because nobody
+  // has received that answer. What would be wrong is leaving them on it with no
+  // word of why, which is how the same reply gets typed twice.
+  const queuedNote = queuedThreadNote(queued);
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`Open the conversation with ${head.isName ? head.text : 'this client'}. ${line}`}
+      accessibilityLabel={`Open the conversation with ${head.isName ? head.text : 'this client'}. ${line}${queuedNote ? ` ${queuedNote}` : ''}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
     >
       <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: th.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
@@ -229,6 +273,11 @@ function WaitingRow({ w, onPress }: { w: Waiting; onPress: () => void }) {
           <Text style={{ ...ty.caption, color: th.ink2 }}>{waitedLabel(w.waitedMs)}</Text>
         </View>
         <Text style={{ ...ty.caption, color: th.ink3, marginTop: 2 }}>{line}</Text>
+        {queuedNote ? (
+          <View style={{ marginTop: 3 }}>
+            <Flag tone={th.warn}>{queuedNote}</Flag>
+          </View>
+        ) : null}
       </View>
       <Icon name={FORWARD_ICON} size={16} color={th.ink3} />
     </Pressable>
@@ -271,8 +320,17 @@ export default function Messages() {
   const pull = usePullToRefresh(useCallback(() => { refresh(); }, [refresh]));
 
   // One clock for the whole render, so two rows a millisecond apart cannot
-  // disagree about what "now" is.
-  const now = Date.now();
+  // disagree about what "now" is — and one that MOVES, which it was not.
+  //
+  // This read `Date.now()` in the render body. That is the second form of the
+  // frozen clock, the one `check:frozen-day` and `check:frozen-hook` do not
+  // see: they look for the `useState`/`useMemo` initialiser, and a bare call in
+  // a render body is only as fresh as the last render. This screen is an
+  // `href: null` tab that mounts once and stays mounted, so a coach who left it
+  // open and came back the next day was shown yesterday's "3h" on every row,
+  // and `waitingOn`'s whole-day threshold was measured against yesterday too —
+  // the queue of who is waiting on a reply, timed by a clock that stopped.
+  const now = useNow().getTime();
   const open = (c: CoachThread) => {
     // Exactly the call the existing sites make — app/(trainer)/leaderboard.tsx
     // and client.tsx — so a thread opened from here is the same screen with the
@@ -324,6 +382,35 @@ export default function Messages() {
     [unstarted, filter],
   );
   /**
+   * ── THE WORDS THIS PHONE IS STILL HOLDING ────────────────────────────────
+   *
+   * Everything above comes from `coach_threads()`, which is the server's answer
+   * and therefore describes only what is `stored`. The third state — typed,
+   * kept on this handset, delivered to nobody — was invisible on this screen,
+   * and it is the state a coach most needs to see here: they replied to three
+   * people underground, came back to an inbox that still showed those three
+   * clients' own words last, and had no way to tell whether their answers went.
+   *
+   * `null` when there is no outbox above this screen, which is a different fact
+   * from an empty one and is said as such — see `outboxThreadsNote`.
+   *
+   * A payload this build cannot narrow is kept with NO thread key rather than
+   * dropped: it is still a message on this phone, and `outboxThreadsNote`
+   * counts it against the total so the per-row marks are never presented as the
+   * whole queue.
+   */
+  const outbox = useOutbox();
+  const queuedWords = useMemo<QueuedWord[] | null>(() => {
+    if (!outbox) return null;
+    const out: QueuedWord[] = [];
+    for (const item of outbox.pending) {
+      if (item.kind !== 'message') continue;
+      out.push({ clientId: asQueuedMessage(item.payload)?.clientId ?? '', at: item.at });
+    }
+    return out;
+  }, [outbox]);
+  const queuedThreads = useMemo(() => queuedByThread(queuedWords ?? []), [queuedWords]);
+  /**
    * What the narrowing did, in one sentence, or null.
    *
    * `searched` is the number of threads the filter actually ran over — what
@@ -366,6 +453,19 @@ export default function Messages() {
    */
   const waiting = waitingOn(conversations, now, status);
   const waitNote = waitingNote(waiting);
+  /**
+   * The one sentence this screen owes about its own queue.
+   *
+   * Its denominator is what is ACTUALLY DRAWN — the conversations and the
+   * unstarted clients after the filter — so a message held for somebody the
+   * coach has narrowed out of the list is counted and said to be off-screen
+   * rather than marked nowhere and implied not to exist.
+   */
+  const shownIds = useMemo(
+    () => new Set([...shown, ...shownUnstarted].map((c) => c.clientId)),
+    [shown, shownUnstarted],
+  );
+  const outboxNote = outboxThreadsNote(queuedWords, outbox ? outbox.status : 'ready', shownIds);
   const G = layout.gutter;
 
   return (
@@ -420,6 +520,17 @@ export default function Messages() {
         {status === 'partial' ? (
           <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
             <PartialRead what="clients on your book" shown={conversations.length + unstarted.length} onPress={() => { refresh(); }} />
+          </View>
+        ) : null}
+
+        {/* ── what this phone has not sent yet ──────────────────────────────
+            Above the lists, because it is a fact about every row below them and
+            because it is the one thing on this screen the server did not say.
+            Drawn under a failed read of the conversations too: the queue is the
+            device's and is known whether or not the server answered. */}
+        {outboxNote ? (
+          <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
+            <Flag tone={t.warn}>{outboxNote}</Flag>
           </View>
         ) : null}
 
@@ -505,7 +616,7 @@ export default function Messages() {
             {waiting.rows.map((w, i) => (
               <View key={w.thread.clientId}>
                 {i > 0 ? <Rule inset={48} /> : null}
-                <WaitingRow w={w} onPress={() => open(w.thread)} />
+                <WaitingRow w={w} queued={queuedThreads.get(w.thread.clientId)} onPress={() => open(w.thread)} />
               </View>
             ))}
             {/* Said once, under the list. It carries the doubt about the read
@@ -530,7 +641,7 @@ export default function Messages() {
             {shown.map((c, i) => (
               <View key={c.clientId}>
                 {i > 0 ? <Rule inset={56} /> : null}
-                <ThreadRow t={c} now={now} onPress={() => open(c)} />
+                <ThreadRow t={c} now={now} queued={queuedThreads.get(c.clientId)} onPress={() => open(c)} />
               </View>
             ))}
           </Section>
@@ -569,7 +680,7 @@ export default function Messages() {
                 shownUnstarted.map((c, i) => (
                   <View key={c.clientId}>
                     {i > 0 ? <Rule inset={56} /> : null}
-                    <ThreadRow t={c} now={now} onPress={() => open(c)} />
+                    <ThreadRow t={c} now={now} queued={queuedThreads.get(c.clientId)} onPress={() => open(c)} />
                   </View>
                 ))
               ) : (

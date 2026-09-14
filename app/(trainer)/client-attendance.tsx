@@ -18,11 +18,25 @@
 // `unmarked` is a class that has run with nothing recorded either way, and it
 // is NOT an absence — a coach who is teaching does not always press the button.
 // So the two are never drawn alike here: an attendance says which record proves
-// it, and an unmarked class says that nobody marked it and stops. There is no
-// "missed" anywhere on this page, no absence count, and no attendance
-// percentage — a percentage needs a denominator of classes they were expected
-// at, and an unticked register is not evidence they were expected or that they
-// did not come.
+// it, and an unmarked class says that nobody marked it and stops.
+//
+// This paragraph used to continue: "There is no 'missed' anywhere on this page,
+// no absence count, and no attendance percentage." Quoted rather than deleted,
+// because the first third of it stopped being true at part 3060 and the rest
+// did not.
+//
+// There IS a missed line now. `gym_classes.register_taken_at` records whether
+// anybody opened the register at all, which is the one fact that separates "she
+// did not come" from "nobody pressed the button" — and with it set, an un-ticked
+// booked member is a no-show that this screen may say out loud. It is reachable
+// on no other path: src/lib/attendance.ts still answers `unmarked` wherever that
+// column is null, absent, or unreadable, and refuses to guess it.
+//
+// What has NOT changed is the rest of the sentence, and it never depended on the
+// missing word. There is still no absence COUNT and no attendance percentage —
+// a percentage needs a denominator of classes they were expected at, and neither
+// an unticked register nor a cancellation is evidence of what they were expected
+// at. A screen that can name one no-show is not a screen that can total them.
 //
 // ── And one caveat that is only true on the coach's side ───────────────────
 //
@@ -102,11 +116,33 @@ function shortDay(day: string): string {
 /**
  * What the record says, in the words a coach needs.
  *
- * Every one of these is a statement about the RECORD. None is a statement about
- * the client, because only one of the five states supports one: `attended`. The
- * `unmarked` line is written the long way round on purpose — a coach skimming
- * for a reason to ring somebody must not be able to read it as an absence, and
- * "Not recorded" on its own is exactly what would get read that way.
+ * Every one of these is a statement about the RECORD. The `unmarked` line is
+ * written the long way round on purpose — a coach skimming for a reason to ring
+ * somebody must not be able to read it as an absence, and "Not recorded" on its
+ * own is exactly what would get read that way.
+ *
+ * ── A correction, recorded rather than swallowed ──────────────────────────
+ *
+ * Until part 3060 this paragraph went on: "None is a statement about the
+ * client, because only one of the five states supports one: `attended`." That
+ * is written down here rather than deleted, because it is what this screen was
+ * built on and a reader who finds the old sentence quoted in a review needs to
+ * know it was looked at.
+ *
+ * It is wrong, and the count is the smaller half of why. There are eight states
+ * now, and FOUR of them are statements about the client: `attended`, and the
+ * three part 3060 made readable — `cancelled` and `late_cancelled`, which the
+ * client performed themselves, and `missed`, which says somebody took the
+ * register and they were not on it. A coach may act on `missed`: it is the one
+ * line here that is evidence of a no-show, and at a gym with a notice window a
+ * `late_cancelled` is evidence behind a charge.
+ *
+ * What survives the correction is the discipline, which never depended on the
+ * count: each line says WHICH RECORD says it, so a coach ringing somebody knows
+ * what they are ringing about and what to check at reception. `unmarked` stays
+ * the state that asserts nothing, and it is still the majority of an un-ticked
+ * register — `missed` is reachable only where `gym_classes.register_taken_at`
+ * is set, and src/lib/attendance.ts refuses to guess it.
  */
 function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' | 'ahead' } {
   switch (o.kind) {
@@ -123,6 +159,41 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
     case 'unmarked':
       return {
         label: 'Nobody took the register for this one, so there is nothing on record either way. It is not a missed session.',
+        tone: 'quiet',
+      };
+    case 'missed':
+      // The one line on this page a coach may act on, and it is still worded as
+      // the record: the fact is that the register was taken AND they are not on
+      // it, and a coach who says "you missed Tuesday" to somebody who was there
+      // needs to know which record to go and look at. Says "the register was
+      // taken" out loud because the line above it is the same missing tick with
+      // that one fact absent — without it the two read as the same state
+      // arbitrarily worded two ways.
+      return {
+        label: 'The register was taken for this class and they were not marked on it.',
+        tone: 'quiet',
+      };
+    case 'cancelled':
+      // Theirs, not the gym's, and said so: a seat withdrawn by the gym is a
+      // different event and does not arrive here. Past tense, because this row
+      // may equally be a class that has not run — `classOutcome` puts the
+      // cancellation ahead of the clock so nobody is told they hold a seat they
+      // gave up.
+      return {
+        label: 'Cancelled — they gave the seat up, outside your gym’s notice period.',
+        tone: 'quiet',
+      };
+    case 'late_cancelled':
+      // NO FEE, NO AMOUNT, NO CURRENCY, on the coach's side as well as the
+      // member's. What was charged was fixed by the gym's policy at the moment
+      // of cancelling and is stored beside the row in
+      // `class_booking_cancellations`; today's policy quoted over last month's
+      // cancellation is a figure nobody agreed to, and a coach repeating it to
+      // a client is how it becomes one. The argument in full is on `seatNote`
+      // in src/lib/classSeat.ts. A coach who needs the amount opens the
+      // cancellation, where src/lib/classCancel.ts words it from the row.
+      return {
+        label: 'Cancelled late — they gave the seat up inside your gym’s notice period.',
         tone: 'quiet',
       };
     case 'upcoming':
@@ -290,9 +361,10 @@ export default function ClientAttendanceScreen() {
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Every time your gym recorded them coming in — the class register and the door log, folded
-          together so one visit is one line. A class with nothing marked against it means nobody took
-          the register. It is not a missed session, and nothing here counts it as one.
+          Their classes and every time your gym recorded them coming through the door — the register
+          and the door log, folded together so one visit is one line. A class with nothing marked
+          against it means nobody took the register. It is not a missed session, and nothing here
+          counts it as one.
         </Text>
 
         {/* ── who ──────────────────────────────────────────────────────────── */}
@@ -390,7 +462,13 @@ export default function ClientAttendanceScreen() {
             ) : null}
 
             {a.status === 'partial' ? (
-              <Section><PartialRead what="visits" shown={a.events.length} onPress={() => { void a.reload(); }} /></Section>
+              // `shown` is RIGHT as `a.events.length` and stays: `PartialRead`
+              // says "showing the first N", and N is how many rows arrived and
+              // are on screen below it — a fact about the READ, not a count of
+              // visits. `what` was wrong for the same reason the heading below
+              // was: the two truncated lists are `class_bookings` and
+              // `gym_visits`, and a cancellation is a row in the first.
+              <Section><PartialRead what="bookings and visits" shown={a.events.length} onPress={() => { void a.reload(); }} /></Section>
             ) : null}
 
             {/* ── how often, and only where the record supports saying ────── */}
@@ -462,8 +540,20 @@ export default function ClientAttendanceScreen() {
 
             {/* ── the record itself ───────────────────────────────────────── */}
             <Section>
+              {/* RENAMED, and the number left alone. `a.events` is the whole
+                  timeline — upcoming bookings are in it, and since part 3060 so
+                  are cancellations. "Amy · every visit · 10" beside a client who
+                  cancelled ten classes and attended none is the heading naming
+                  the opposite of what the figure counts, in front of the person
+                  deciding whether to ring them.
+
+                  Renamed rather than filtered: the number sits directly above
+                  the list it describes, so filtering it to `attended` would
+                  print 0 over ten visible rows and read as a broken screen. The
+                  attended figure already has a home and a correct source —
+                  "Days on record" above, off `attendedDays`. */}
               <SectionHead
-                title={client ? `${client.name} · every visit` : 'Every visit'}
+                title={client ? `${client.name} · everything on record` : 'Everything on record'}
                 note={countable && a.events.length ? num(a.events.length) : undefined}
               />
 

@@ -19,7 +19,7 @@
 // accept_member_invite in 37-member-invites.sql. Three answers that disagree is
 // a support ticket, so there is one implementation and the SQL mirrors it.
 
-import { assertWhole, capLimit } from './rowCap';
+import { assertWhole, capLimit, capped } from './rowCap';
 import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 
@@ -474,20 +474,150 @@ export async function fetchInvites(
  * No tenant filter and none wanted: the point is that this runs BEFORE the
  * person belongs to a gym, so there is no tenant to filter by. The mi_invitee_
  * read policy scopes it to their own email address on the server.
+ *
+ * ── Capped, and deliberately NOT asserted whole ───────────────────────────
+ *
+ * This had no `.limit()` at all, and no limit is not no ceiling: PostgREST
+ * stops at a thousand rows and says nothing about having stopped (see
+ * src/lib/rowCap.ts). So this read could hand the phone a PREFIX of somebody's
+ * invitations, under a screen whose only other answer is "nobody has invited
+ * you", and nothing anywhere would have had cause to doubt it. A person with a
+ * thousand open invitations is not a state anybody expects; it is still the one
+ * invite read in this module that could be cut without anybody being told, and
+ * "not expected today" is not "correct".
+ *
+ * Where it parts company with its sibling is what to do about the cut.
+ * `fetchInvites` above THROWS, and is right to: it feeds `summariseInvites` and
+ * the console's acceptance rate, and a rate computed over an unknown fraction
+ * of a gym's history is a wrong number wearing a total's name. This read feeds
+ * a LIST on the member's phone — src/ui/gymInvites.ts, drawn as cards in
+ * app/(client)/trainers.tsx, where nothing is counted, summed or averaged — and
+ * rowCap.ts says plainly what the phone does instead: keep the honest page and
+ * carry the fact separately, as 'partial'. Throwing here would take a real,
+ * redeemable invitation off the only screen that can accept it, in order to
+ * protect a figure nobody is computing.
+ *
+ * `.order('id')` behind the date so that WHICH invitations a truncated read
+ * keeps is the same on every read, rather than whatever Postgres does with two
+ * rows written in the same millisecond.
  */
-export async function fetchMyInvites(sb: Queryable): Promise<MemberInvite[]> {
+export async function fetchMyInvites(
+  sb: Queryable,
+): Promise<{ rows: MemberInvite[]; truncated: boolean }> {
   const { data, error } = await sb
     .from('member_invites')
     .select('id, tenant_id, email, full_name, plan_id, invited_by, token, status, created_at, expires_at, accepted_at, accepted_by')
     .eq('status', 'pending')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
-  return (data ?? []).map((r: any) => toInvite(r, new Map()));
+  // `capped()` rather than a slice and a flag: the probe row was asked for so
+  // that it could be COUNTED, and rendering it as a real invitation is the
+  // mistake rowCap.ts wrote that helper to make impossible.
+  const page = capped((data ?? []) as any[]);
+  return {
+    rows: page.rows.map((r: any) => toInvite(r, new Map())),
+    truncated: page.truncated,
+  };
+}
+
+/* ── the one refusal the database makes and this module has to translate ──── */
+
+/**
+ * The gym's own rule, in words, for a surface that has nothing better to say.
+ *
+ * Deliberately names no button. A console screen that knows it has a Reopen
+ * control beside the offending address can say something better and should —
+ * studio-web/app/invites/page.tsx does exactly that. Everything else, including
+ * any future caller in the phone app, gets a sentence that describes the rule
+ * rather than the index that enforces it.
+ */
+export const DUPLICATE_INVITE_NOTE =
+  'already has an open invitation at this gym, so a second could not be written down. A gym '
+  + 'keeps one open invitation per address, and a lapsed one still holds the place until it is '
+  + 'reopened. Nothing has been written.';
+
+/**
+ * The refusal `uq_member_invites_open` makes, as a sentence.
+ *
+ * `email` is the address that was refused where the caller knows it, and null
+ * where it genuinely cannot: a batch is one INSERT statement, so a duplicate
+ * anywhere in it refuses the whole batch and Postgres does not say which row.
+ * Naming a guess there would have an owner strike the wrong line out of their
+ * list, so the null case says so instead.
+ */
+export class DuplicateInviteError extends Error {
+  readonly email: string | null;
+  constructor(email: string | null) {
+    super(
+      email
+        ? `${email} ${DUPLICATE_INVITE_NOTE}`
+        : `One of those addresses ${DUPLICATE_INVITE_NOTE} Which one is not in the refusal, so `
+          + 'none of them has been struck off here.',
+    );
+    this.name = 'DuplicateInviteError';
+    this.email = email;
+  }
 }
 
 /**
- * Invite one person. Throws with a readable reason when the address is not
- * usable, rather than letting a constraint violation surface as raw Postgres.
+ * True when a refused write is the database refusing a SECOND OPEN INVITATION
+ * for an address, rather than anything else.
+ *
+ * ── Why this is in the library and not at the screen ──────────────────────
+ *
+ * `inviteBlocker` catches the duplicate before the round trip and cannot always
+ * catch it. Both gaps are ordinary operation rather than a race nobody will
+ * meet: a screen whose list read FAILED passes `openTo: []` on purpose — it
+ * will not claim an address is free on the strength of a list it could not
+ * read — and the other machine at the front desk may write the same address
+ * between this page's read and this press. So the raw refusal
+ *
+ *     duplicate key value violates unique constraint "uq_member_invites_open"
+ *
+ * reaches a gym owner in normal use, and it reads as the product being broken
+ * on a refusal that is a rule the gym itself set. An owner who reads it as a
+ * fault re-invites somebody who already has an invitation waiting.
+ *
+ * Knowing that `23505` means that is database knowledge, and it belongs beside
+ * the insert that provokes it rather than being re-derived by every screen that
+ * calls one. `createInvite` and `createInvites` below therefore throw
+ * `DuplicateInviteError` and every caller gets an actionable sentence for free;
+ * a caller that can say something better — one that can name its own Reopen
+ * button — uses this predicate to recognise the case and substitute its own
+ * wording.
+ *
+ * Matched on the code rather than the wording: 23505 is unique_violation, and
+ * `member_invites` carries exactly one unique index an insert can hit. The
+ * constraint name is accepted too, for the case where the code is lost in
+ * transit, and so is this module's own wrapper, so that a call site swapping
+ * its private copy for this one needs no second branch.
+ */
+export function isDuplicateInvite(x: unknown): boolean {
+  if (x instanceof DuplicateInviteError) return true;
+  const e = x as { code?: unknown; message?: unknown; details?: unknown } | null;
+  if (String(e?.code ?? '') === '23505') return true;
+  return /uq_member_invites_open/.test(`${e?.message ?? ''} ${e?.details ?? ''}`);
+}
+
+/**
+ * Invite one person.
+ *
+ * Two different refusals, both of them in words a person can act on:
+ *
+ *  · the address is not one — checked here, before the round trip, so a CSV
+ *    import can report the bad rows without attempting two hundred of them;
+ *  · the gym already has an open invitation for it — checked by the database,
+ *    because only the database can. `uq_member_invites_open` is the authority
+ *    on that and `inviteBlocker`'s `openTo` is only ever the caller's best
+ *    guess at it. The 23505 that comes back is translated here rather than
+ *    rethrown raw; see `isDuplicateInvite` for why it is reachable at all and
+ *    why the translation is not the screen's job.
+ *
+ * Anything else — an RLS refusal, a dropped connection — is rethrown as it
+ * arrived, because this module has nothing true to add to it and inventing a
+ * friendlier sentence would describe a cause nobody established.
  */
 export async function createInvite(
   sb: Queryable,
@@ -498,7 +628,11 @@ export async function createInvite(
   const blocked = inviteBlocker(inv.email);
   if (blocked) throw new Error(blocked);
   const { error } = await sb.from('member_invites').insert(row(tenantId, inv, invitedBy));
-  if (error) throw error;
+  if (error) {
+    // The normalised address, because that is the one the index compared.
+    if (isDuplicateInvite(error)) throw new DuplicateInviteError(normaliseEmail(inv.email));
+    throw error;
+  }
 }
 
 /**
@@ -507,6 +641,12 @@ export async function createInvite(
  * Screens first and inserts only what can go, returning the rejects so the
  * import screen can show the gym exactly which lines of their spreadsheet did
  * not make it. A batch is never silently trimmed.
+ *
+ * The insert is ONE statement, so a duplicate anywhere in the batch refuses the
+ * whole of it — nothing lands, and the `DuplicateInviteError` thrown for it
+ * carries no address because Postgres does not say which row was the duplicate.
+ * Saying that out loud is what stops an owner pasting the list again minus the
+ * rows they assume went through.
  */
 export async function createInvites(
   sb: Queryable,
@@ -521,7 +661,15 @@ export async function createInvites(
   const { error } = await sb
     .from('member_invites')
     .insert(send.map((r) => row(tenantId, r as NewMemberInvite, invitedBy)));
-  if (error) throw error;
+  if (error) {
+    if (isDuplicateInvite(error)) throw new DuplicateInviteError(null);
+    throw error;
+  }
+  // An INSERT is the one write in this module that may be reported on the
+  // absence of an error. A refused UPDATE matches zero rows and says nothing
+  // (src/lib/wroteRows.ts); a refused INSERT raises — an RLS WITH CHECK, the
+  // unique index above, a NOT NULL — so "no error" here really is "these rows
+  // are on file", and `sent` is a count of rows the server accepted.
   return { sent: send.length, rejected: rejected as { row: NewMemberInvite; reason: string }[] };
 }
 
@@ -578,12 +726,20 @@ export async function extendInvite(
  * writes cross rows the invitee has no rights over, and the validation has to
  * be on the server or it is not validation. This is the call, not the logic —
  * which is why isRedeemable exists separately for the button's enabled state.
+ *
+ * `string | null`, not `string`. The declared type WAS `string` over a `data`
+ * that supabase-js will hand back as null whenever the function returns nothing
+ * — so the signature asserted a membership exists on the strength of `error`
+ * being null, which is the absence-of-an-error-is-success reading this codebase
+ * refuses everywhere else. src/ui/gymInvites.ts was already checking for the
+ * null the type said could not happen; now the type agrees with it, and any
+ * future caller is made to check rather than told it need not.
  */
-export async function acceptInvite(sb: Queryable, inviteId: string): Promise<string> {
+export async function acceptInvite(sb: Queryable, inviteId: string): Promise<string | null> {
   if (!sb.rpc) throw new Error('This Supabase client cannot call functions.');
   const { data, error } = await sb.rpc('accept_member_invite', { p_invite: inviteId });
   if (error) throw error;
-  return data as string;
+  return (data as string | null) ?? null;
 }
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */

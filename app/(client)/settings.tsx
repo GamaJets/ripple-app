@@ -332,6 +332,21 @@ export default function Settings() {
 
   const exportData = async () => {
     if (dataBusy) return; setDataBusy(true);
+    // `try { … } finally { … }` with no catch, which is not the same shape as
+    // the careful handling inside src/lib/gdpr.ts and does not inherit it.
+    //
+    // That module catches PER TABLE, so a refused table becomes an `error`
+    // object in the file rather than a throw. Two awaits sit OUTSIDE every one
+    // of those catches — `supabase.auth.getUser()` and `listMyFiles()` — and
+    // `shareTextFile` is a third await out here. Any of them rejecting on a
+    // basement connection took this handler down: the row went back from
+    // "Preparing Export…" to "Export My Data", no sheet appeared, no sentence
+    // appeared, and the member was left to conclude the button does nothing.
+    //
+    // On the screen that also holds Delete My Account, a data export that
+    // silently did not happen is the worst possible silence. So it is caught,
+    // reported, and said out loud — and `retryLine` separates a refusal from a
+    // basement, exactly as the deletion handlers below already do.
     try {
       const res = await exportMyDataDetailed();
       // The filename comes from the brand, not from a literal. A member of a
@@ -356,6 +371,15 @@ export default function Settings() {
           incompleteExportLine(res.failed.map((f) => f.table), BRAND.supportEmail),
         );
       }
+    } catch (e) {
+      reportError('settings.exportData', e);
+      // Nothing is set from a failed export — `files` stays whatever it was, so
+      // a previous good manifest is not replaced by the wreckage of this one.
+      // "Not exported", not "something went wrong": the member needs to know
+      // that no copy of their data was made, because the next thing this screen
+      // offers them is deleting it.
+      Alert.alert('Not exported',
+        `We couldn't put your data together just now, so no copy has been made. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
     } finally { setDataBusy(false); }
   };
 

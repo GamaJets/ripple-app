@@ -796,7 +796,36 @@ export function NotificationInbox(f: InboxFraming) {
    * the confirm-everything habit of `deleteEntry` and `app/(owner)/deletions.tsx`.
    * The reason is what the row IS. Deleting a workout entry destroys the record
    * of something somebody did; deleting the account of a member cascades across
-   * 39 tables. A notification is a COPY of something that already happened —
+   * 118 tables of gym data, plus 11 more inside Supabase's own `auth` schema —
+   * 129 in all.
+   *
+   * That figure read "39 tables" here until 14 September 2026. 39 was measured
+   * when the schema was about a quarter of its present size and was never
+   * re-counted, so this comment understated the contrast it exists to make by
+   * a factor of three. It is not a number to carry in your head; it moves the
+   * day somebody adds a cascading foreign key. Measured against the LIVE
+   * database (project phgfwzpkkwdysftlgkoq) on 14 September 2026, as the
+   * transitive closure of `on delete cascade` from the row
+   * `action_account_deletion()` actually deletes:
+   *
+   *     with recursive fk as (
+   *       select (conrelid::regclass)::text  as child,
+   *              (confrelid::regclass)::text as parent
+   *         from pg_constraint
+   *        where contype = 'f' and confdeltype = 'c')
+   *     , rec as (
+   *       select 'auth.users'::text as tbl
+   *        union
+   *       select fk.child from fk join rec on fk.parent = rec.tbl)
+   *     select count(*) from rec;
+   *
+   * Re-run that, not a count of clauses in `supabase/setup.sql` — the file
+   * parse gives 125 and is wrong, because a `create table` clause is not the
+   * last word on a foreign key. `app/(owner)/deletions.tsx` holds the same
+   * figure in `CASCADE_TABLES` with the same provenance; that is the copy an
+   * owner actually reads, and this one is only an argument about a gesture.
+   *
+   * A notification is a COPY of something that already happened —
    * the session is still cancelled, the invoice is still owed, the booking is
    * still in the calendar — so the cost of a mis-tap is losing a duplicate of a
    * fact that is still recorded in the place it belongs.

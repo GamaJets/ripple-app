@@ -16,12 +16,22 @@ import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 
 export default function ClientLayout() {
-  // This build is one of three separate apps. If the client portal is not
-  // the one it ships, nothing here is reachable — a deep link or a tapped
-  // notification pointing into it goes home instead of rendering a portal
-  // this user's app is not supposed to have.
-  if (!groupAllowed('client')) return <Redirect href="/" />;
-
+  // ── Every hook first, and the gates after them ────────────────────────────
+  //
+  // The early `return <Redirect/>` used to sit ABOVE all of these, and
+  // app/(owner)/_layout.tsx already carries the argument for why it must not:
+  // `groupAllowed('client')` reads a build constant today, so the branch is
+  // decided at compile time and React never sees the hook count change. The day
+  // that gate becomes dynamic — a per-account entitlement, a remote flag — the
+  // count changes between renders, and React reports it as whichever hook
+  // happens to be third rather than as "the gate changed".
+  //
+  // The one cost this file has that the owner layout does not: `useWaiver()`
+  // asks the server for this account's release of liability, and it now runs in
+  // the render that redirects. That render only happens in a build that does
+  // not ship the client portal, reached by a stale deep link, which is the rare
+  // case the redirect exists for — one query, no writes, and the component
+  // unmounts immediately after.
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 10);
@@ -29,21 +39,26 @@ export default function ClientLayout() {
   // What this client missed while they were away — and the one thing that
   // outranks it.
   //
-  // <WaiverGate> puts the release of liability on screen as a <Modal>, and this
-  // sheet is a <Modal> too. Two of those visible at once is a fight nobody
-  // wins: React Native presents them in its own order, and the one that loses
-  // is invisible until the other closes. That is survivable for news and
-  // absolutely not for the release — somebody who has not signed it must not be
-  // reading a feature list instead, and must never be able to dismiss their way
-  // past it by tapping a backdrop that belongs to a different sheet.
+  // <WaiverGate> puts the release of liability on screen as a native <Modal>.
+  // CORRECTION, recorded rather than swapped out: this sheet was a <Modal> too
+  // when that was written, and it is not one any more. src/ui/WhatsNew.tsx now
+  // renders an absolutely-positioned view inside the ordinary tree, because a
+  // walkthrough found the whole client app inert — every tab, every button,
+  // every scroll swallowed — by a modal iOS had never presented but which was
+  // still taking the touches. Two natives Modals visible at once is a fight
+  // nobody wins: React Native presents them in its own order and the loser is
+  // invisible until the other closes.
   //
-  // So the gate's own question is asked again here and the news is held until
-  // it answers 'pass'. It is the same cheap read the gate makes, and asking it
-  // rather than guessing is what makes "the waiver always wins" a fact instead
-  // of a hope. The check behind the sheet still runs while it is held, so the
-  // notes are ready the moment the release is signed.
+  // The hold below STAYS, and not merely out of caution. It is no longer about
+  // the presentation race — an overlay in the tree cannot enter one, and a
+  // native Modal draws over it regardless — it is about what the reader is
+  // looking at. Somebody who has not signed the release must not be reading a
+  // feature list instead, and `onClose` must not be reachable behind the gate,
+  // because dismissing the sheet records this release as read when nobody read
+  // it. The check behind the sheet still runs while it is held, so the notes
+  // are ready the moment the release is signed.
   const waiver = useWaiver();
-  const { user } = useAuth();
+  const { user, authed, loading } = useAuth();
   // `gate === 'block' || gate === 'wait'`, not `!== 'pass'`. The gate answers
   // THREE things and the negation collapsed them: 'block' (there is a release
   // to sign — hold, and the gate is on screen saying so), 'wait' (the read has
@@ -62,6 +77,39 @@ export default function ClientLayout() {
   // is indistinguishable from a sheet that is broken.
   const waiverHolds = waiver.applies && (waiver.gate === 'block' || waiver.gate === 'wait');
   const whatsNew = useWhatsNew(user?.id ?? null, waiverHolds);
+
+  // This build is one of three separate apps. If the client portal is not
+  // the one it ships, nothing here is reachable — a deep link or a tapped
+  // notification pointing into it goes home instead of rendering a portal
+  // this user's app is not supposed to have.
+  if (!groupAllowed('client')) return <Redirect href="/" />;
+
+  // ── And nobody reads this portal without a session ────────────────────────
+  //
+  // There was no auth gate anywhere inside app/(client), app/(trainer) or
+  // app/(owner) — the only Redirect in any of the three groups was the variant
+  // gate above. app/index.tsx is where `authed` is checked, and a deep link
+  // does not go through app/index.tsx: `repple://(client)/injury-doc` and a
+  // tapped notification both land on this layout directly, and every screen
+  // below it mounted and fired its reads with no session.
+  //
+  // The path that makes this more than untidy is the lock screen. Its Sign Out
+  // (src/ui/LockScreen.tsx) ends the session and navigates nowhere — "the lock
+  // lifts either way" — and AppLockProvider drops the lock the moment
+  // `signedIn` goes false (src/ui/appLock.tsx:130). So somebody handed a locked
+  // gym handset taps Sign Out and is left standing INSIDE the previous member's
+  // portal, on whatever screen they had open, rather than at sign-in. Every
+  // other sign-out in the app calls `router.replace('/welcome')` itself; that
+  // one cannot, and a gate here covers it and every future one that forgets.
+  //
+  // `!loading` is the whole of the care this needs. Redirecting while auth is
+  // still resolving would bounce a legitimately signed-in member to the welcome
+  // screen on every cold start, which is the opposite defect. Until the session
+  // is known this renders exactly what it rendered before; the moment it is
+  // known to be absent, the reader leaves. '/' rather than '/welcome' because
+  // app/index.tsx is what knows where a signed-out reader belongs.
+  if (!loading && !authed) return <Redirect href="/" />;
+
   return (
     <WaiverGate>
     <Tabs

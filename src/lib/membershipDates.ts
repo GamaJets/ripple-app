@@ -29,7 +29,7 @@
 // Pure. One value import — the codebase's single reader for "is this a day" —
 // and one type, which is erased.
 import { isStartDate } from './programStart';
-import { frozenDays } from './membershipFreeze';
+import { frozenDays, freezeState } from './membershipFreeze';
 import { addDays } from './termDates';
 import type { MembershipStatus } from './gymRecord';
 
@@ -170,6 +170,88 @@ export function unpausedEndsOn(
   // same mistake in the other direction.
   if (given == null || given <= 0) return current.endsOn;
   return addDays(current.endsOn, -given);
+}
+
+/* ── which people the owner is looking for ─────────────────────────────────
+ *
+ * A gym owner standing at a desk with a phone is not reading a roster. They
+ * are looking for one of three groups, and until now the only tool over four
+ * hundred rows was a name search — which only helps somebody who already knows
+ * the name. Mindbody, Glofox and PushPress all open their member list on a
+ * filter for exactly this reason.
+ *
+ * Three lenses, and each is a question with money behind it:
+ *
+ *   · expiring — a live membership whose end date is inside the next month.
+ *     The renewal conversation, and the only one that has to happen BEFORE the
+ *     date rather than after it.
+ *   · overrun — a live membership whose end date has already passed. This one
+ *     is specific to this product and is the reason it is here: supabase/parts/
+ *     2616 is deliberate that NOTHING flips `status` at midnight, so an expired
+ *     term sits beside a status of Active and the turnstile reads the status.
+ *     `datesNotes` above already says this to an owner who happens to open the
+ *     dates sheet on the right person; nothing anywhere let them FIND those
+ *     people. Every one of them is somebody training on a membership that ran
+ *     out, or somebody being billed for one that did.
+ *   · paused — a pause is recorded and has not finished. Somebody has to know
+ *     who is coming back, and an unreadable pause belongs here loudest of all.
+ *
+ * Pure, and every date comparison is a string comparison between bare days —
+ * `addDays` is the one piece of calendar arithmetic, and it is UTC-anchored on
+ * parsed components, so no reader's timezone can move a boundary. `today` is
+ * the GYM's day, the same one `datesNotes` takes.
+ */
+export type RosterLens = 'all' | 'expiring' | 'overrun' | 'paused';
+
+/**
+ * How far ahead 'expiring' looks, in days, inclusive of today.
+ *
+ * Named rather than written into the filter as a bare 30, because the SENTENCE
+ * beside the chip has to use the same number — the same rule `SEARCH_LIMIT` is
+ * held to in app/(owner)/members.tsx.
+ */
+export const EXPIRING_DAYS = 30;
+
+/**
+ * Whether one membership belongs in one lens.
+ *
+ * False wherever the row cannot answer the question, and that is the important
+ * half: an unreadable end date is not "not expiring", and an open-ended
+ * membership is not "expiring in a hundred years". Neither is counted into
+ * either date lens, so a chip's figure is a count of memberships this can
+ * actually stand behind rather than a count with unknowns folded in on one
+ * side. A row that answers no question sits under All, where it is still
+ * visible.
+ */
+export function lensMatch(
+  lens: RosterLens,
+  m: MembershipTerm,
+  today: string,
+  withinDays: number = EXPIRING_DAYS,
+): boolean {
+  if (lens === 'all') return true;
+
+  if (lens === 'paused') {
+    const st = freezeState({ from: m.frozenFrom, to: m.frozenTo }, today);
+    // 'thawed' is a pause that has run its course and needs nothing done to
+    // it. 'unreadable' is in, and is the point: a membership with dates this
+    // build cannot read is not a membership that was never paused, and whether
+    // somebody gets in on Tuesday is not a thing to be quiet about.
+    return st === 'scheduled' || st === 'frozen' || st === 'unreadable';
+  }
+
+  // Only a membership the door would still let through. A cancelled or expired
+  // one whose end date has passed is not an overrun, it is a closed contract.
+  if (m.status !== 'active' && m.status !== 'frozen') return false;
+  if (!isDay(m.endsOn) || !isDay(today)) return false;
+
+  if (lens === 'overrun') return m.endsOn < today;
+
+  // Inclusive at both ends: a membership ending today is expiring today, and
+  // one ending on the last day of the window is inside it.
+  const limit = addDays(today, withinDays);
+  if (limit == null) return false;
+  return m.endsOn >= today && m.endsOn <= limit;
 }
 
 /**

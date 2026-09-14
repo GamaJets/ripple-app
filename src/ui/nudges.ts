@@ -61,6 +61,7 @@ import {
 } from '../lib/nudge';
 import { assessCadence, worthRaising, byLateness, type Cadence } from '../lib/cadence';
 import { fetchCoachPrefs } from '../lib/coachPrefsStore';
+import { useAuth } from './auth';
 
 /**
  * How far back the record of what the coach did is read.
@@ -180,6 +181,8 @@ function rowToRecord(r: any): NudgeRecord {
 
 export function useNudges(): NudgeBook {
   const authRev = useAuthRevision();
+  // Handed to the store rather than re-resolved inside it — see coachPrefsStore.
+  const authUid = useAuth().user?.id ?? null;
   const { roster, status: rosterStatus } = useRoster();
   const { tenant } = useTenant();
   const tenantId = tenant?.id ?? null;
@@ -196,14 +199,14 @@ export function useNudges(): NudgeBook {
   useEffect(() => {
     let live = true;
     (async () => {
-      const { prefs, status: st } = await fetchCoachPrefs();
+      const { prefs, status: st } = await fetchCoachPrefs(authUid);
       // A refused read is the app's own pacing, not a zero. `cooldownFloor`
       // refuses anything outside 1..365 anyway, so this is belt and braces on
       // the one value that could silence a coach's whole list.
       if (live) setCooldownPref(st === 'ready' ? prefs.nudgeCooldownDays : null);
     })();
     return () => { live = false; };
-  }, [authRev]);
+  }, [authRev, authUid]);
 
   // null until the stored week comes back. See `watchDigestDue` on NudgeBook.
   const [digestSeen, setDigestSeen] = useState<string | null | undefined>(undefined);

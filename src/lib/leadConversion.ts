@@ -36,9 +36,15 @@
 //
 // ── The one that survives ─────────────────────────────────────────────────
 //
-// Part 204's trigger writes `joined_at` and `joined_via` onto the enquiry row
-// when an account is created whose email address matches the enquiry's contact
-// AND whose join code matches the code the enquiry arrived on. Both halves of
+// Part 211's trigger — `coach_requests_mark_lead_joined`, on the function
+// `lead_joined_notice()` — writes `joined_at` and `joined_via` onto the enquiry
+// row when an account is created whose email address matches the enquiry's
+// contact AND whose join code matches the code the enquiry arrived on. (This
+// line said part 204, which is the timed-sets and plan-edits part and touches
+// none of these columns; `joined_via` appears in exactly one part file and it
+// is 211. Line 97 below already said 211 about the same two columns, so the
+// file disagreed with itself about where its own figure comes from.) Both
+// halves of
 // that figure come off the SAME rows, recorded by the same mechanism, in the
 // same place:
 //

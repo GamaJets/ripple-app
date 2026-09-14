@@ -3541,27 +3541,92 @@ end $$;
 -- keep, and Google Play is about to require a public page describing it.
 --
 -- WHY A TRUE DELETE IS POSSIBLE HERE. profiles.id references auth.users(id) on
--- delete cascade, and 26 tables cascade directly from profiles — 39 once the
--- cascade is followed all the way down. Removing the auth user therefore
--- removes the person's data by construction rather than by a hand-maintained
--- list of DELETE statements that would drift the first time somebody adds a
--- table. Seventeen further columns across 13 tables are `on delete set null`:
--- those rows survive with the person detached, which is right for payments,
--- door-log visits and guest passes a gym must keep for tax and legal reasons.
+-- delete cascade, so removing the auth user removes the person's data by
+-- construction rather than by a hand-maintained list of DELETE statements that
+-- would drift the first time somebody adds a table.
 --
--- INVOICES AND MEMBERSHIPS ARE NOT IN THAT SURVIVING SET. An earlier version
--- of this comment said they were, and it was wrong: gym_invoices.member_id and
--- memberships.member_id are both `not null references profiles(id) on delete
--- cascade`, so deleting a member takes their invoices and memberships with
--- them. Counted from the live catalogue, not from memory:
+-- HOW FAR IT REACHES. 118 tables in `public`, plus 11 inside Supabase's own
+-- `auth` schema — 129 in all. Counted from the live catalogue, 14 September
+-- 2026, by the query below. That is the transitive closure of `on delete
+-- cascade` from `auth.users`: every table a row can be destroyed in by
+-- deleting that one row, which is the figure the public deletion page and the
+-- owner's confirmation dialog put in front of a member before an irreversible
+-- act.
 --
---   select confdeltype, count(*) from pg_constraint
+--   with recursive reach(oid) as (
+--     select 'auth.users'::regclass::oid
+--     union
+--     select c.conrelid from pg_constraint c
+--       join reach r on c.confrelid = r.oid
+--      where c.contype = 'f' and c.confdeltype = 'c')
+--   select n.nspname, count(*) from reach r
+--     join pg_class t on t.oid = r.oid
+--     join pg_namespace n on n.oid = t.relnamespace
+--    where r.oid <> 'auth.users'::regclass::oid
+--    group by n.nspname;        -- 14 Sep 2026: auth 11, public 118
+--
+-- FROM pg_constraint, NOT FROM setup.sql. The live catalogue is the only
+-- source that can answer this. A parse of the bundle sees the `references …
+-- on delete cascade` written at `create table` and cannot see the later
+-- `alter table … drop constraint … add constraint … on delete set null`
+-- that part 184 applies to three of them, so it over-counts: part 2370's header
+-- records the file parse giving 125 against the live 118, for exactly this
+-- reason, and both parts were measured on the same day against the same
+-- project. The `do $$` block at the foot of this file re-measures against
+-- whatever database setup.sql is being applied to, and says so when the figure
+-- has moved.
+--
+-- WHAT THIS PARAGRAPH USED TO SAY. Until 14 September 2026 it read "26 tables
+-- cascade directly from profiles — 39 once the cascade is followed all the way
+-- down", with no date beside it and no query under it. The 39 was taken when
+-- this schema was about a quarter of its present size and was never re-taken:
+-- the true figure is three times it. Both screens that tell a member what
+-- deletion destroys had copied that number out of this comment —
+-- studio-web/app/deletions/page.tsx and app/(owner)/deletions.tsx — so one
+-- unmeasured figure in a SQL comment became a false promise on two
+-- irreversible confirmations. It is recorded here rather than quietly
+-- overwritten because the next reader needs to know the number moved, not just
+-- what it is now. A figure in this file is therefore three things: the number,
+-- the date it was measured, and the query that measures it.
+--
+-- THE DIRECT FAN-OUT from profiles, same catalogue, same day: 76 columns
+-- across 68 tables cascade, and 81 columns across 59 tables are `on delete set
+-- null` — those rows survive with the person detached, which is right for
+-- payments, door-log visits and guest passes a gym must keep for tax and legal
+-- reasons. (This comment previously said 29 columns / 26 tables and 17 columns
+-- / 13 tables, measured the same way on a much smaller schema.)
+--
+--   select confdeltype, count(*) as cols, count(distinct conrelid) as tables
+--   from pg_constraint
 --   where contype='f' and confrelid='public.profiles'::regclass
---   group by confdeltype;   -- c: 29 cols / 26 tables, n: 17 cols / 13 tables
+--   group by confdeltype;   -- 14 Sep 2026: c 76 cols / 68 tables, n 81 / 59
 --
--- That matters beyond tidiness. The public deletion page and the owner's
--- confirmation dialog both tell people what survives, and a gym with a tax
--- obligation to retain invoices needs to know this deletes them.
+-- INVOICES, PAYMENTS AND MEMBERSHIPS SURVIVE, AND THIS COMMENT HAS NOW CLAIMED
+-- IT BOTH WAYS. The first version said the financial record survived. A
+-- correction replaced that with "INVOICES AND MEMBERSHIPS ARE NOT IN THAT
+-- SURVIVING SET … deleting a member takes their invoices and memberships with
+-- them", and told a gym with a tax obligation to retain invoices that this
+-- deletes them. That was true when it was written and it is not true now:
+-- part 184 (`184-an-erasure-that-does-not-unbalance-the-books.sql`) drops
+-- `gym_invoices_member_id_fkey`, `gym_payments_member_id_fkey` and
+-- `memberships_member_id_fkey` and recreates all three as `on delete set
+-- null`, behind a BEFORE DELETE trigger on profiles —
+-- `trg_profiles_retain_financial_record` — which copies the name onto
+-- `gym_invoices.billed_name`, `gym_payments.payer_name` and
+-- `memberships.member_label` while the profile row can still be read. Verified
+-- live on 14 September 2026: all three constraints read confdeltype 'n', and
+-- the trigger is on the table.
+--
+--   select conname, conrelid::regclass::text, confdeltype from pg_constraint
+--   where contype='f' and confrelid='public.profiles'::regclass
+--     and conrelid in ('public.gym_invoices'::regclass,
+--                      'public.gym_payments'::regclass,
+--                      'public.memberships'::regclass);  -- 14 Sep 2026: all 'n'
+--
+-- So the money stays, with the person detached from it and the billed name
+-- kept beside it, by design. The public deletion page and the owner's
+-- confirmation dialog tell people what survives; both must say the financial
+-- record does, and neither may go back to promising it is destroyed.
 --
 -- The cascade is the design. This file adds who may pull the trigger, a record
 -- that it happened, and a way for a gym to see what is waiting.
@@ -3673,15 +3738,99 @@ begin
   insert into deletion_log (tenant_id, subject_id, subject_label, requested_at, actioned_by)
   values (subj_tenant, p_subject, subj_name, subj_requested, auth.uid());
 
-  -- Cascades: 26 tables directly, 39 following the chain down.
-  -- Seventeen columns are `on delete set null`, so payments, visits and
-  -- passes survive with the person detached. Invoices and memberships do
-  -- NOT — they cascade. See the header.
+  -- Cascades. 118 tables in `public` and 11 in `auth`, 129 in all, counted
+  -- from the live catalogue on 14 September 2026 — this line said 39 until
+  -- that date, a count taken on a schema a quarter of this size. 81 columns
+  -- across 59 tables are `on delete set null` instead, so payments, visits
+  -- and passes survive with the person detached — and so do invoices,
+  -- payments and memberships, which this line used to say were destroyed.
+  -- The query, the provenance and the correction are in the header.
   delete from auth.users where id = p_subject;
 end $$;
 
 revoke execute on function public.action_account_deletion(uuid) from public, anon;
 grant execute on function public.action_account_deletion(uuid) to authenticated;
+
+
+-- ── does the figure at the top of this file still hold? ────────────────────
+--
+-- The number above governs an irreversible confirmation on two screens, and a
+-- number in prose goes stale silently: this one was wrong by a factor of three
+-- for however long it took somebody to re-measure by hand. So it is measured,
+-- rather than only asserted, against the catalogue of whatever database
+-- setup.sql is being applied to — the only source that can answer it. No gate
+-- under scripts/ can: they run offline in CI with no credentials by design, and
+-- parsing setup.sql gives the wrong answer for the reason the header states.
+--
+-- A WARNING, NOT AN EXCEPTION. setup.sql is pasted whole into the SQL editor.
+-- Aborting the run because somebody legitimately added a cascading table would
+-- break the paste and teach the next person to delete this block.
+--
+-- IT ONLY SPEAKS WHEN THE COUNT IS HIGHER THAN THE FIGURE, and that asymmetry
+-- is the honest shape rather than a convenience. This part is 41 of several
+-- hundred: on a FIRST paste it runs when most of the schema does not exist yet,
+-- so a count below 118 means "the bundle is still being applied" and cannot be
+-- told apart from "cascades were removed". On a re-run against a built
+-- database — which is how setup.sql is normally used — every table is already
+-- there and a count above the figure is drift, unambiguously. What this block
+-- therefore cannot catch is the opposite drift — the written figure becoming
+-- too HIGH because cascading foreign keys were dropped or turned into `set
+-- null`. That direction still needs the query in the header, run by a person.
+
+-- THE LIST IN THE WARNING BELOW NAMED THREE FILES UNTIL 14 SEPTEMBER 2026, and
+-- there were never three. It named this part, studio-web/app/deletions/page.tsx
+-- and app/(owner)/deletions.tsx — the three somebody happened to be editing the
+-- day this block was written. A warning that names a subset is worse than one
+-- that names nothing: it reads as the complete list, so the six it omitted
+-- would have been left stating a superseded figure by a person who had done
+-- exactly what the message told them to do. That is the shape of the original
+-- defect this whole file exists for — one unmeasured number copied onto five
+-- surfaces, each out of a different file's comment.
+--
+-- The list is now every carrier, and it is not a guess: check O of
+-- scripts/check-site-claims.mjs walks web, app, src, studio-web,
+-- supabase/parts and docs for the canonical phrasings and holds each hit
+-- against the threshold in this block. Nine files match today. Lane 111
+-- measured eight on 14 September 2026; web/delete-account.html became the
+-- ninth the same day, when the figure it stated in words ("sixty-six directly,
+-- and a hundred and six") was re-measured and rewritten in the canonical form
+-- so that this gate can see it — a figure spelled out in words was invisible
+-- to check O and had drifted unnoticed for exactly that reason.
+--
+-- IF THE COUNT IN THE MESSAGE AND THE COUNT check O REPORTS EVER DISAGREE, the
+-- gate is right and this comment is stale. Re-run `npm run check:site-claims`;
+-- its closing line reports how many files state the figure.
+
+do $$
+declare
+  n_public int;
+  n_auth int;
+begin
+  if to_regclass('auth.users') is null then
+    return;  -- no auth schema to close over; nothing to say.
+  end if;
+
+  with recursive reach(oid) as (
+    select to_regclass('auth.users')::oid
+    union
+    select c.conrelid
+      from pg_constraint c
+      join reach r on c.confrelid = r.oid
+     where c.contype = 'f' and c.confdeltype = 'c'
+  )
+  select count(*) filter (where n.nspname = 'public'),
+         count(*) filter (where n.nspname = 'auth')
+    into n_public, n_auth
+    from reach r
+    join pg_class t on t.oid = r.oid
+    join pg_namespace n on n.oid = t.relnamespace
+   where r.oid <> to_regclass('auth.users')::oid;
+
+  if n_public > 118 or n_auth > 11 then
+    raise warning 'account deletion now reaches % tables in public and % in auth. Nine files still say 118 and 11, measured 14 September 2026: supabase/parts/41-account-deletion.sql (its header, and the comment on the delete itself), supabase/parts/1120-the-files-an-erasure-left-behind.sql, supabase/parts/2370-a-permanent-record-of-deleting-nobody.sql, web/security.html, web/studio.html, web/delete-account.html, app/(owner)/deletions.tsx, src/ui/notifications.tsx and studio-web/app/deletions/page.tsx. Re-run both queries in part 41''s header against the live catalogue, update all nine, move the date on each, and move the threshold in this block last. Run `npm run check:site-claims` — check O enumerates the carriers and fails while any of them disagrees.',
+      n_public, n_auth;
+  end if;
+end $$;
 
 -- ▶ deletion-request-idempotent.sql
 
@@ -51289,12 +51438,16 @@ $function$;
 -- ── WHAT IT DOES TO A REAL PERSON ────────────────────────────────────────
 --
 -- A member photographs an oncology letter so the app can read an injury off
--- it. Months later they leave the gym and delete their account. Every row goes
--- — 26 tables directly, 39 down the chain (part 41). The letter does not. It
--- sits in `injury-docs` under the uid of an account that no longer exists,
--- with no row anywhere pointing at it, indefinitely, and the only person who
--- could ever have deleted it is the one whose credentials were destroyed by
--- the deletion.
+-- it. Months later they leave the gym and delete their account. Nearly every
+-- row goes with it — 118 tables in `public` and 11 more in Supabase's own
+-- `auth` schema, counted from the live catalogue on 14 Sep 2026, the query and
+-- the provenance being in part 41. (This line said "26 tables directly, 39
+-- down the chain" until that date, and the financial record is the deliberate
+-- exception: part 184 detaches it rather than deleting it.) The letter is not
+-- one of them. It sits in `injury-docs` under the uid of an account that no
+-- longer exists, with no row anywhere pointing at it, indefinitely, and the
+-- only person who could ever have deleted it is the one whose credentials were
+-- destroyed by the deletion.
 --
 -- The public deletion page is currently honest about this and that is the
 -- problem: web/delete-account.html says injury documents, message attachments
@@ -58868,6 +59021,69 @@ grant execute on function public.link_coaching(uuid, uuid, text) to authenticate
 -- headed "Delete ?", and a body reading "This permanently erases  and
 -- everything of theirs — their profile, workouts, logs, scans, messages and
 -- bookings, across 39 tables."
+--
+-- That is a QUOTATION of the confirmation as it stood when this part was
+-- written, kept verbatim because the blank is the defect this part is about.
+-- Two of its other words have since been corrected on the screen itself, and
+-- this note is here so the quotation above is not read as the current wording
+-- or as a figure anybody should copy.
+--
+-- ── the "39 tables" in that quotation was itself wrong ─────────────────────
+--
+-- 39 came from a live count taken when `action_account_deletion()` was
+-- written, when this schema was about a quarter of its present size, and it
+-- was never re-counted. It is not stale by a little. The function ends with
+-- `delete from auth.users where id = p_subject`, so the blast radius is the
+-- transitive closure of `on delete cascade` from `auth.users`, and measured
+-- against the LIVE catalogue on 14 September 2026 (project
+-- phgfwzpkkwdysftlgkoq) that is 118 tables in `public` plus 11 inside
+-- Supabase's own `auth` schema — 129 in all:
+--
+--   with recursive fk as (
+--     select (conrelid::regclass)::text  as child,
+--            (confrelid::regclass)::text as parent
+--       from pg_constraint
+--      where contype = 'f' and confdeltype = 'c')
+--   , rec as (
+--     select 'auth.users'::text as tbl
+--      union
+--     select fk.child from fk join rec on fk.parent = rec.tbl)
+--   select count(*) from rec;
+--
+-- Re-run that query rather than counting clauses in supabase/setup.sql. The
+-- file parse gives 125 and is wrong: a `create table` clause is not the last
+-- word on a foreign key, and the retention part named below drops three of
+-- them and recreates them with a different action. (Cited by constraint name
+-- rather than by line: setup.sql is generated from 349 parts and every line
+-- number in it moves the next time a part is added.)
+-- app/(owner)/deletions.tsx holds the
+-- 118 in `CASCADE_TABLES` with the same provenance, and the owner console
+-- states it inline.
+--
+-- ── and the sentence next to it was inverted ───────────────────────────────
+--
+-- The same confirmation went on to say the member's invoices and memberships
+-- went too. They do not. The retention part of this schema — the one adding
+-- `gym_invoices.billed_name`, `gym_payments.payer_name` and
+-- `memberships.member_label` — drops `memberships_member_id_fkey`,
+-- `gym_invoices_member_id_fkey` and `gym_payments_member_id_fkey` and
+-- recreates all three ON DELETE SET NULL, with a BEFORE DELETE trigger
+-- copying the name across first, precisely so a gym's financial record
+-- outlives the erasure. Confirmed live on 14 September 2026, all three
+-- `confdeltype = 'n'`:
+--
+--   select conname, confdeltype from pg_constraint
+--    where conname in ('memberships_member_id_fkey',
+--                      'gym_invoices_member_id_fkey',
+--                      'gym_payments_member_id_fkey');
+--
+-- So the copy told an owner their financial record would be destroyed at the
+-- moment they were deciding whether to press a button with no undo. Note also
+-- that the surviving rows are detached, NOT anonymous: `gym_passes.holder_name`,
+-- `gym_agreement_signatures.signed_name` and `.guardian_name`,
+-- `staff_grants.subject_name` and `gym_events.summary` all keep the name by
+-- design. Which is the other reason the blank `full_name` this part guards
+-- matters: a name copied onto a surviving row is a blank copied onto it.
 --
 -- ── latent, not damage ────────────────────────────────────────────────────
 --
@@ -71087,3 +71303,354 @@ comment on function public.cancel_class(uuid) is
   'by the part 3180 trigger, and the waitlist promotion runs only when a BOOKED '
   'seat was given up — decided on the status read under a row lock BEFORE the '
   'update, because an UPDATE''s RETURNING hands back the new row.';
+
+-- ▶ one-code-a-member-typed-could-mean-two-different-discounts.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- One code a member typed could mean two different discounts, and which one
+-- they got was not decided by anything in this product.
+--
+-- NOT APPLIED. The pre-flight query below has NOT been run against the live
+-- database by this lane — see "Run this BEFORE applying".
+--
+-- ── The defect, in three parts ─────────────────────────────────────────────
+--
+-- Found by the lane working app/(owner)/promotions.tsx, which could see all
+-- three from one screen and owned none of the files any of them live in. Each
+-- was re-verified here before this part was written.
+--
+--   1. THE SCREEN CHECKS A LIST IT MAY NOT HAVE. `addPromo` in
+--      src/ui/promos.tsx refused a code already present in `promos` — the array
+--      the provider is holding. Under 'error' that array is whatever the last
+--      successful read left behind, or empty; under 'partial' it is the first
+--      `capLimit()` page of a longer list. On both, a miss means "not in the
+--      part we have", and the screen reported it as "not in use".
+--
+--      It was also checking the wrong equality. It compared a raw stored `code`
+--      against an upper-cased input, so a stored `Summer` did not match a typed
+--      `SUMMER` — while `redeem_promo` below matches them to each other. The
+--      one comparison in the product that could have caught the collision was
+--      the one comparison that did not use the collision's own definition.
+--
+--      Fixed in src/ui/promos.tsx in the same change as this part: the screen
+--      now compares on `upper(trim())`, the same key this index uses, and
+--      `addPromo` reports whether the duplicate check actually ran rather than
+--      implying it did.
+--
+--   2. NOTHING STOPS IT AT THE DATABASE. `promos` (part 02) is:
+--
+--          create table if not exists promos (
+--            id uuid primary key default gen_random_uuid(),
+--            tenant_id uuid references tenants(id) on delete cascade,
+--            code text not null, discount int not null, active boolean default true,
+--            redemptions int default 0, created_at timestamptz not null default now()
+--          );
+--
+--      `code` carries `not null` and nothing else. No primary key covers it, no
+--      unique constraint, no unique index — confirmed by reading every part
+--      that names `promos` (02, 104, 105, 2612). The only unique index anywhere
+--      near this feature is `promo_redeemed_once` on
+--      `promo_redemptions (promo_id, member_id)`, which is a different
+--      question: it stops one member redeeming one code twice, and says
+--      nothing about one code existing twice.
+--
+--      This part is that missing half.
+--
+--   3. THE READ THAT PICKS THE WINNER PICKS ARBITRARILY. `redeem_promo`
+--      (part 104) is:
+--
+--          select * into v_promo
+--            from public.promos
+--           where tenant_id = v_tenant
+--             and upper(btrim(code)) = upper(btrim(p_code))
+--           limit 1;
+--
+--      `limit 1` with no `order by`. SQL guarantees nothing about which row
+--      that is. In practice it is whichever the executor reaches first, which
+--      moves with the plan, the physical row order, an autovacuum, an index
+--      being created — including, note, THIS ONE. So a gym holding a live 20%
+--      `SUMMER` and a switched-off 50% `SUMMER` hands a member 20% off, or
+--      nothing at all with the word "inactive", and the same member tapping
+--      twice can get a different answer each time.
+--
+--      THIS PART DOES NOT FIX THAT, DELIBERATELY. `redeem_promo` is SECURITY
+--      DEFINER and writes `promo_redemptions`; changing it belongs in its own
+--      part with its own review. The exact change it needs is written out in
+--      "What this part does NOT do" at the foot of this file, so that whoever
+--      takes it does not have to re-derive it.
+--
+-- ── What this part adds, and why it is this shape ─────────────────────────
+--
+--     create unique index promos_code_per_tenant
+--       on public.promos (tenant_id, upper(btrim(code)));
+--
+-- THE EXPRESSION IS THE POINT. A plain `unique (tenant_id, code)` — the shape
+-- this reaches for by reflex — would compare the text as stored, and would
+-- therefore permit `Summer` and `SUMMER` as two rows. `redeem_promo` matches a
+-- member's typing against `upper(btrim(code))`, so both of those rows answer
+-- one member's `summer`, and the coin flip this part exists to end would still
+-- be there with a unique constraint sitting on the table looking like it had
+-- been dealt with. A constraint that permits the exact collision it was added
+-- for is worse than no constraint, because it stops anyone looking again.
+--
+-- So the index key is the function `redeem_promo` actually applies, character
+-- for character. The rule the database enforces and the rule the redeem path
+-- reads by are then the same sentence, and they cannot drift into disagreeing.
+--
+-- AN INDEX RATHER THAN A TABLE CONSTRAINT, and not by preference: PostgreSQL
+-- has no expression form of `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE`. The
+-- column list of a unique constraint may name columns only. A unique index is
+-- the only way to say this, it enforces identically, and `ON CONFLICT` and the
+-- 23505 error code work against it exactly as against a constraint — which
+-- matters, because `addPromo` now reads that code to tell a duplicate apart
+-- from a transport failure. The one thing an index cannot be is the target of
+-- a foreign key, and nothing references `promos (tenant_id, code)`.
+--
+-- `upper(btrim(code))` is a legal index expression: both functions are
+-- IMMUTABLE for `text`. Nothing here depends on a collation or a locale, so the
+-- index cannot go stale under one.
+--
+-- NULLS: LEFT DISTINCT, ON PURPOSE. `promos.tenant_id` is nullable (part 02 —
+-- it is a plain reference with no `not null`), and under PostgreSQL's default
+-- two NULLs are distinct, so this index does NOT stop two same-code rows that
+-- both have no tenant. That is correct rather than overlooked. A promo with no
+-- tenant is reachable by nothing: `redeem_promo` requires
+-- `tenant_id = v_tenant` and `v_tenant` is checked non-null a few lines above
+-- it, and the owner screen reads `.eq('tenant_id', tenantId)`. Such a row can
+-- never be handed to a member, so it cannot produce the ambiguity this part is
+-- about. `NULLS NOT DISTINCT` would instead make this part fail to apply over
+-- rows that hurt nobody, on a gym that has a data problem of a different kind —
+-- and the pre-flight below reports those rows separately so that problem is
+-- seen rather than converted into a failed migration.
+--
+-- IT IS NOT PARTIAL. `where active` was considered and rejected. A switched-off
+-- code is still matched by `redeem_promo`'s select — the `active` test happens
+-- AFTER the row is chosen — so an inactive duplicate is one of the two rows the
+-- coin is flipped between, and the outcome "your code is switched off" when a
+-- live row exists is the worst of the available answers, not an exempt one. The
+-- uniqueness has to hold over every row, live or not.
+--
+-- ── WHAT HAPPENS IF A COLLIDING ROW EXISTS. READ THIS FIRST. ─────────────
+--
+-- **This part FAILS, LOUDLY, AND CHANGES NOTHING.**
+--
+-- `CREATE UNIQUE INDEX` scans the table and raises 23505 on the first pair that
+-- shares a key. The statement is atomic, so the index is not created; and
+-- because setup.sql is pasted and run as one multi-statement query, Postgres
+-- wraps the bundle in a single implicit transaction and rolls ALL of it back. A
+-- failure here leaves the database exactly as it was and applies no part after
+-- this one.
+--
+-- That is the intended behaviour, for the same reason part 3090 gives. There is
+-- no correct row for a migration to pick. Two `SUMMER`s at 20% and 50% are a
+-- gym's two decisions and only that gym knows which one it is still standing
+-- behind; and by the time this is applied, members may have redeemed BOTH. A
+-- migration that deleted one would be deciding, on a gym's behalf, which of its
+-- customers were given a discount — and see the FK hazard below for what that
+-- deletion actually destroys. So: no dedupe, no backfill, no coercion, no
+-- `delete from promos` anywhere in this file. The part refuses and a person
+-- decides.
+--
+-- ── Run this BEFORE applying. It is not optional. ────────────────────────
+--
+-- One row per colliding promo, with everything needed to decide, including how
+-- many members have already used each one. Read-only. Expect zero rows.
+--
+--     select p.tenant_id,
+--            upper(btrim(p.code)) as code_key,
+--            p.id,
+--            p.code               as code_as_typed,
+--            p.discount,
+--            p.active,
+--            p.created_at,
+--            (select count(*) from public.promo_redemptions r
+--              where r.promo_id = p.id) as redemptions
+--       from public.promos p
+--      where p.tenant_id is not null
+--        and exists (
+--          select 1 from public.promos q
+--           where q.tenant_id = p.tenant_id
+--             and q.id <> p.id
+--             and upper(btrim(q.code)) = upper(btrim(p.code))
+--        )
+--      order by p.tenant_id, code_key, p.created_at;
+--
+-- The `exists` correlates on the same expression the index keys on, so the
+-- query and the index cannot disagree about what a collision is. `code` is NOT
+-- NULL, so no row hides behind a NULL key.
+--
+-- And the rows this index deliberately leaves alone, so they are seen rather
+-- than discovered later. These do NOT block applying:
+--
+--     select id, code, discount, active, created_at
+--       from public.promos
+--      where tenant_id is null
+--      order by created_at;
+--
+-- ── IF THE FIRST QUERY RETURNS ROWS: what to do, and what NOT to do ──────
+--
+-- Read the `redemptions` column first. It decides which of two remedies is
+-- available, and getting this the wrong way round destroys records.
+--
+--   · redemptions = 0 on the row you do not want — DELETE IT.
+--     Nothing is lost. No member was ever given it.
+--
+--         delete from public.promos where id = '…';
+--
+--   · redemptions > 0 on the row you do not want — DO NOT DELETE IT.
+--     RENAME IT.
+--
+--         update public.promos set code = 'SUMMER-2025-OLD' where id = '…';
+--
+--     `promo_redemptions.promo_id` is `references public.promos(id) ON DELETE
+--     CASCADE` (part 104). Deleting the loser therefore deletes every
+--     redemption row hanging off it, silently and in the same statement. Those
+--     rows are not bookkeeping: they are the only record anywhere that a
+--     specific member was given a specific discount, they are what
+--     `my_promo_redemptions()` shows that member on their own offers screen,
+--     and they are the numerator of every figure the owner runs a promotion to
+--     read. A gym tidying up a duplicate would be erasing its own campaign
+--     results and its members' entitlements at the same time, with no error and
+--     nothing to undo it from.
+--
+--     Renaming keeps every redemption attached to the row it was actually made
+--     against, and keeps the discount that was given visible next to it. It is
+--     honest about one thing: a member who redeemed the loser will now see the
+--     new spelling on their offers screen, because `my_promo_redemptions()`
+--     returns `p.code` live rather than a copy taken at redemption. That is a
+--     changed label on a real event. A deletion is the event itself gone.
+--
+--   · The two rows agree on everything but case or spacing, and both have
+--     redemptions. Still rename — this is the same rule, and the fact that they
+--     "mean the same thing" is exactly why there is no information in choosing
+--     between them and no reason to lose either.
+--
+--   · Switching the loser off does NOT help. The index covers every row
+--     regardless of `active`; see "IT IS NOT PARTIAL" above.
+--
+-- ── Why NOT a NOT-VALID-style escape, and why not CONCURRENTLY ───────────
+--
+-- There is no `NOT VALID` for a unique index, and the nearest equivalent —
+-- `CREATE UNIQUE INDEX CONCURRENTLY`, which builds without an ACCESS EXCLUSIVE
+-- lock and leaves the index INVALID if it hits a duplicate — is wrong here on
+-- all three counts part 3090 makes against NOT VALID:
+--
+--   1. An INVALID unique index is not enforced at all, and is one word apart
+--      from a working one in `\d`. The colliding rows stay, the coin flip stays,
+--      and the file that was supposed to have ended it is present and looks
+--      applied.
+--   2. CONCURRENTLY cannot run inside a transaction block, and setup.sql is a
+--      single pasted multi-statement query wrapped in one implicit transaction.
+--      It would fail on syntax grounds before it failed on anything else.
+--   3. The lock argument buys nothing. `promos` holds a gym's discount codes —
+--      tens of rows, not millions. The scan is milliseconds.
+--
+-- The point of this part is that a gym with two SUMMERs finds out and fixes it.
+-- A mechanism whose success condition is "the ambiguous rows are still there
+-- and now look handled" is the opposite of the goal.
+--
+-- ── Applying this ────────────────────────────────────────────────────────
+--
+-- Idempotent by `if not exists`, matching the house form for indexes in parts
+-- 104 and 2612. Re-running the bundle is a no-op. No table is created, no
+-- column added or altered, no row read or written, no policy, grant, trigger or
+-- function touched. The only thing this part can do to a database is add one
+-- unique index — or refuse.
+--
+-- `if not exists` has one edge worth stating rather than discovering: it
+-- matches on NAME, so an index already called `promos_code_per_tenant` with a
+-- different definition would be left in place and this part would report
+-- success over it. No such index exists today — `promos` carries only its
+-- primary key — and the verification block at the foot of this file asserts the
+-- shape rather than the name, so that edge is closed rather than trusted.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. the pre-flight ───────────────────────────────────────────────────────
+--
+-- The query lives in the header rather than here, because a statement in this
+-- file RUNS and that one is for a person to run and READ. Applying this part
+-- without having run it is the one mistake it is possible to make.
+
+-- ── 2. one code, one meaning, per gym ───────────────────────────────────────
+--
+-- The key is `redeem_promo`'s own comparison. See the header for why a plain
+-- `unique (tenant_id, code)` would not have closed this.
+create unique index if not exists promos_code_per_tenant
+  on public.promos (tenant_id, upper(btrim(code)));
+
+-- ── 3. verify the SHAPE, not the name ───────────────────────────────────────
+--
+-- `create unique index if not exists` is satisfied by any index of that name.
+-- This asserts what the index actually is: unique, on `promos`, two key
+-- columns, and an expression among them. If a differently-shaped index had
+-- squatted the name, this raises and the whole bundle rolls back — which is the
+-- outcome to want, because the alternative is a schema that reports a rule it
+-- is not keeping.
+do $$
+declare
+  v_unique  boolean;
+  v_natts   int;  -- indnkeyatts: KEY columns only, so an INCLUDE would not be miscounted
+  v_hasexpr boolean;
+begin
+  select i.indisunique, i.indnkeyatts, i.indexprs is not null
+    into v_unique, v_natts, v_hasexpr
+    from pg_index i
+    join pg_class c on c.oid = i.indexrelid
+    join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relname = 'promos_code_per_tenant';
+
+  if not found then
+    raise exception 'promos_code_per_tenant is missing after part 3190';
+  end if;
+  if not v_unique then
+    raise exception 'promos_code_per_tenant exists but is not UNIQUE — it enforces nothing';
+  end if;
+  if v_natts <> 2 then
+    raise exception 'promos_code_per_tenant has % key columns, expected 2 (tenant_id, upper(btrim(code)))', v_natts;
+  end if;
+  if not v_hasexpr then
+    raise exception 'promos_code_per_tenant keys on plain columns — a raw code column permits Summer and SUMMER as two rows, which is the collision this part exists to stop';
+  end if;
+end $$;
+
+-- ── 4. what this part deliberately does NOT do ──────────────────────────────
+--
+--   · IT DOES NOT FIX `redeem_promo`, and that function is where the coin flip
+--     is actually spent. Once this index is applied there can be no two rows to
+--     choose between, so the missing `order by` stops having an effect — but it
+--     is still missing, it is still the only thing standing between a member and
+--     an arbitrary answer on any database this part has not reached yet, and it
+--     would come straight back if this index were ever dropped. A correct
+--     `limit 1` names its own winner. The change, for whoever takes the part
+--     that owns it:
+--
+--         select * into v_promo
+--           from public.promos
+--          where tenant_id = v_tenant
+--            and upper(btrim(code)) = upper(btrim(p_code))
+--          order by coalesce(active, false) desc, created_at desc, id desc
+--          limit 1;
+--
+--     `active desc` first because the row is chosen BEFORE `active` is tested,
+--     so without it a member holding a code the gym is currently running can be
+--     told it is switched off while the live row sits unread. `created_at desc`
+--     second because among live rows the newest is the gym's most recent
+--     statement of what that code means. `id desc` last because `created_at`
+--     defaults to `now()` and two rows written in one transaction share it
+--     exactly — without a unique column at the end the order is still not total,
+--     and "deterministic" has to mean deterministic rather than usually.
+--
+--     Note it does NOT order by `discount desc`. Handing the member the most
+--     generous of two rows reads as kindness and is a rule that quietly spends
+--     a gym's money on an offer they may have retired precisely by superseding
+--     it. Newest-wins matches what the gym last did.
+--
+--   · It does not drop `promos.redemptions`, the unused `int default 0` counter
+--     part 104 left in place. Still unread, still not this part's business.
+--   · It does not add `not null` to `tenant_id`. That is a real question about
+--     rows no reader can reach, and it is a different part with a different
+--     pre-flight.
+--   · It writes no row. No dedupe, no `upper(code)` normalisation pass, no
+--     merge of two codes' redemptions. Every one of those is Repple deciding
+--     which of a gym's offers was the real one, and which of its members were
+--     given a discount, from evidence it does not have.

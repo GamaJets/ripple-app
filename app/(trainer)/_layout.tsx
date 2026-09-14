@@ -22,33 +22,65 @@ import { groupAllowed } from '../../src/lib/variant';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { sp, type as ty } from '../../src/theme/scale';
+import { sp, type as ty, grown } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 import { FloorQueueSync } from '../../src/ui/floorQueue';
 
 export default function TrainerLayout() {
-  // This build is one of three separate apps. If the trainer portal is not
-  // the one it ships, nothing here is reachable — a deep link or a tapped
-  // notification pointing into it goes home instead of rendering a portal
-  // this user's app is not supposed to have.
-  if (!groupAllowed('trainer')) return <Redirect href="/" />;
-
+  // ── Every hook first, and the gates after them ────────────────────────────
+  //
+  // The early `return <Redirect/>` used to sit ABOVE these; app/(owner)/_layout
+  // .tsx carries the full argument. `groupAllowed('trainer')` reads a build
+  // constant, so the branch is decided at compile time and React never sees the
+  // hook count change — until the day that gate becomes dynamic, when React
+  // reports the change as whichever hook happens to be third rather than as
+  // "the gate changed". `useWhatsNew` is keyed on the account, so a redirecting
+  // render asks nothing it would not otherwise ask.
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 10);
   // What this coach missed while they were away, filtered to the coach app —
   // they are not told about client-only changes. Keyed on the account, so a
   // coach who has just made one is shown nothing at all.
-  const { user } = useAuth();
+  const { user, authed, loading } = useAuth();
   const whatsNew = useWhatsNew(user?.id ?? null);
+
+  // This build is one of three separate apps. If the trainer portal is not
+  // the one it ships, nothing here is reachable — a deep link or a tapped
+  // notification pointing into it goes home instead of rendering a portal
+  // this user's app is not supposed to have.
+  if (!groupAllowed('trainer')) return <Redirect href="/" />;
+
+  // And nobody reads this portal without a session. There was no auth gate in
+  // any of the three groups — app/index.tsx is where `authed` is checked, and a
+  // deep link or a tapped notification lands on this layout without going
+  // through it. The path that makes it matter is the lock screen: its Sign Out
+  // (src/ui/LockScreen.tsx) ends the session and navigates nowhere, and the
+  // lock drops as soon as `signedIn` goes false (src/ui/appLock.tsx:130), so
+  // the next person on a shared handset was left inside the previous coach's
+  // portal — client names, their Their Record screens, the roster — rather than
+  // at sign-in. `!loading` because redirecting while auth is still resolving
+  // would bounce a signed-in coach to welcome on every cold start; '/' because
+  // app/index.tsx is what knows where a signed-out reader belongs. The same
+  // gate is in app/(client)/_layout.tsx and app/(owner)/_layout.tsx.
+  if (!loading && !authed) return <Redirect href="/" />;
+
   return (
     <>
     <Tabs
       backBehavior="history"
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: 56 + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
+        // grown(56), not 56 — this was the only one of the three bars that did
+        // not scale, and the coach app is the one with a SIX-item bar and the
+        // longest names in it. 56 was drawn around a 23pt icon and an 11pt
+        // name; on Larger Text that name is 22 or 33, and the safe-area padding
+        // below it then pushes it off the bottom of a bar that never moved.
+        // Only the part that holds content grows; `bottomPad` is the phone's
+        // inset and is not text. Same line as app/(client)/_layout.tsx and
+        // app/(owner)/_layout.tsx, which both already had it.
+        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: grown(56) + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
         tabBarActiveTintColor: t.brand,
         tabBarInactiveTintColor: t.ink3,
         tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' },

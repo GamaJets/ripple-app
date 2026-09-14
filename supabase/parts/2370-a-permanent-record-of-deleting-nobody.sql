@@ -47,6 +47,69 @@
 -- everything of theirs — their profile, workouts, logs, scans, messages and
 -- bookings, across 39 tables."
 --
+-- That is a QUOTATION of the confirmation as it stood when this part was
+-- written, kept verbatim because the blank is the defect this part is about.
+-- Two of its other words have since been corrected on the screen itself, and
+-- this note is here so the quotation above is not read as the current wording
+-- or as a figure anybody should copy.
+--
+-- ── the "39 tables" in that quotation was itself wrong ─────────────────────
+--
+-- 39 came from a live count taken when `action_account_deletion()` was
+-- written, when this schema was about a quarter of its present size, and it
+-- was never re-counted. It is not stale by a little. The function ends with
+-- `delete from auth.users where id = p_subject`, so the blast radius is the
+-- transitive closure of `on delete cascade` from `auth.users`, and measured
+-- against the LIVE catalogue on 14 September 2026 (project
+-- phgfwzpkkwdysftlgkoq) that is 118 tables in `public` plus 11 inside
+-- Supabase's own `auth` schema — 129 in all:
+--
+--   with recursive fk as (
+--     select (conrelid::regclass)::text  as child,
+--            (confrelid::regclass)::text as parent
+--       from pg_constraint
+--      where contype = 'f' and confdeltype = 'c')
+--   , rec as (
+--     select 'auth.users'::text as tbl
+--      union
+--     select fk.child from fk join rec on fk.parent = rec.tbl)
+--   select count(*) from rec;
+--
+-- Re-run that query rather than counting clauses in supabase/setup.sql. The
+-- file parse gives 125 and is wrong: a `create table` clause is not the last
+-- word on a foreign key, and the retention part named below drops three of
+-- them and recreates them with a different action. (Cited by constraint name
+-- rather than by line: setup.sql is generated from 349 parts and every line
+-- number in it moves the next time a part is added.)
+-- app/(owner)/deletions.tsx holds the
+-- 118 in `CASCADE_TABLES` with the same provenance, and the owner console
+-- states it inline.
+--
+-- ── and the sentence next to it was inverted ───────────────────────────────
+--
+-- The same confirmation went on to say the member's invoices and memberships
+-- went too. They do not. The retention part of this schema — the one adding
+-- `gym_invoices.billed_name`, `gym_payments.payer_name` and
+-- `memberships.member_label` — drops `memberships_member_id_fkey`,
+-- `gym_invoices_member_id_fkey` and `gym_payments_member_id_fkey` and
+-- recreates all three ON DELETE SET NULL, with a BEFORE DELETE trigger
+-- copying the name across first, precisely so a gym's financial record
+-- outlives the erasure. Confirmed live on 14 September 2026, all three
+-- `confdeltype = 'n'`:
+--
+--   select conname, confdeltype from pg_constraint
+--    where conname in ('memberships_member_id_fkey',
+--                      'gym_invoices_member_id_fkey',
+--                      'gym_payments_member_id_fkey');
+--
+-- So the copy told an owner their financial record would be destroyed at the
+-- moment they were deciding whether to press a button with no undo. Note also
+-- that the surviving rows are detached, NOT anonymous: `gym_passes.holder_name`,
+-- `gym_agreement_signatures.signed_name` and `.guardian_name`,
+-- `staff_grants.subject_name` and `gym_events.summary` all keep the name by
+-- design. Which is the other reason the blank `full_name` this part guards
+-- matters: a name copied onto a surviving row is a blank copied onto it.
+--
 -- ── latent, not damage ────────────────────────────────────────────────────
 --
 -- Live counts at the time of writing: 0 profiles with a blank or whitespace

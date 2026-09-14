@@ -26,7 +26,15 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hrFreshness, staleHrNote } from '../../src/lib/hrFreshness';
 import { watchReach, zonesNote, liveHrNote, type WatchReach } from '../../src/lib/watchReach';
-import { parseLiveSession, mayRestore, type LiveSession } from '../../src/lib/liveSession';
+import { type LiveSession } from '../../src/lib/liveSession';
+// Whose session, whose sets, whose draft. The three keys on this screen were
+// device-global, and a session restored under the wrong member is finished
+// under the wrong member's id — see the header of that file.
+import {
+  DraftGate, LEGACY_SESSION_KEYS, gateForKey, gateHydrated, guidedDraftKey,
+  isLegacyWorkoutDraftKey, liveSessionKey, liveSessionResume, mayPersist,
+  workoutDraftKey,
+} from '../../src/lib/sessionScope';
 import { startLiveActivity, endLiveActivity } from '../../modules/workout-activity';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
@@ -162,7 +170,7 @@ import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { startGate } from '../../src/lib/startGate';
 import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, zonesFromSamples, hrStats, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
-import { hrKcal, hrKcalNote } from '../../src/lib/hrKcal';
+import { hrKcal, hrKcalNote, hrKcalUnknown, hrKcalUnknownNote } from '../../src/lib/hrKcal';
 import { reportError } from '../../src/lib/reportError';
 // 44pt is the minimum tap target — the number and the reasoning live in one
 // place, and the controls added here take it from there rather than from a
@@ -207,12 +215,15 @@ import { retryLine } from '../../src/lib/reachability';
  *  they were the same array by luck rather than by construction. */
 const WEEK = WEEK_DAYS;
 
-/** Where the guided runner's sets live between the moment they are typed and
- *  the moment the server takes them. One key, not one per day: only one guided
- *  session can be running, and the day it belongs to is stored inside so a
- *  stale one cannot be poured into a different session. See the restore in
- *  SessionRunner for why it is not deleted when it cannot be read. */
-const GUIDED_DRAFT_KEY = 'repple.guidedSession';
+// Where the guided runner's sets live between the moment they are typed and the
+// moment the server takes them is no longer a constant here. It was
+// `repple.guidedSession` — one key for the handset — and it is now one key per
+// ACCOUNT, composed by `guidedDraftKey` in src/lib/sessionScope.ts and built
+// inside SessionRunner where the member's id is in scope. One key per account
+// and not one per day is still right: only one guided session can be running,
+// and the day it belongs to is stored inside so a stale one cannot be poured
+// into a different session. See the restore in SessionRunner for why it is not
+// deleted when it cannot be read.
 // Session catalog. Each activity carries its own MET value, because the two used
 // to live in separate structures keyed by the display string: renaming a label
 // silently detached it from its MET, and `cardioKcal` falls back to 7 for an
@@ -811,24 +822,67 @@ export default function Train() {
    * this morning coming back as a nine-hour workout would put a figure in a
    * health record that describes an afternoon at a desk.
    */
-  const LIVE_SESSION_KEY = 'repple.liveSession.v1';
+  /*
+   * ── and WHOSE session it is ──────────────────────────────────────────────
+   *
+   * The key was `repple.liveSession.v1`, flat, with no account in it, so the
+   * record was the HANDSET's rather than the member's. On a gym desk phone
+   * that means member B mounts this screen and is handed member A's session in
+   * flight — and the cost is not a wrong screen, it is a wrong WRITE: the
+   * finish goes through `logWorkouts`, which stamps the row with the uid it
+   * resolves at save time (src/ui/workoutLog.tsx · `uidRef.current`), so A's
+   * hour is inserted as B's training history with no error anywhere.
+   *
+   * `liveSessionKey` puts the account in the key. A null key means there is no
+   * account to keep it under — signed out, or a session still restoring — and
+   * a null means DO NOTHING: no read, no write, and above all no delete, which
+   * would cost the member whose auth read has simply not landed yet the
+   * workout they are in the middle of. See src/lib/sessionScope.ts.
+   */
+  const liveKey = liveSessionKey(cd.id);
   const rememberSession = useCallback((rec: LiveSession | null) => {
-    if (!rec) { AsyncStorage.removeItem(LIVE_SESSION_KEY).catch(() => {}); return; }
-    AsyncStorage.setItem(LIVE_SESSION_KEY, JSON.stringify(rec)).catch(() => {});
-  }, []);
+    if (!liveKey) return;
+    if (!rec) { AsyncStorage.removeItem(liveKey).catch(() => {}); return; }
+    AsyncStorage.setItem(liveKey, JSON.stringify(rec)).catch(() => {});
+  }, [liveKey]);
 
-  // Restored once, on mount. A failure to read is a session that does not come
-  // back, which is the same as today and is not worth an error in front of
-  // somebody about to train.
+  // The key this screen last worked against, so an account CHANGE can be told
+  // from an account arriving. `undefined` is "no run yet".
+  const lastLiveKey = useRef<string | null | undefined>(undefined);
+  // Restored on mount, and again if the account changes. A failure to read is a
+  // session that does not come back, which is the same as today and is not
+  // worth an error in front of somebody about to train — and it is explicitly
+  // not a reason to remove the record, which is what `liveSessionResume`
+  // returning 'none' rather than 'forget' says.
   useEffect(() => {
+    const prev = lastLiveKey.current;
+    lastLiveKey.current = liveKey;
+    // ── the state in this component, not only the bytes on the disk ────────
+    //
+    // app/(client)/_layout.tsx redirects out of this whole group the moment
+    // `authed` goes false, so signing out unmounts the Tabs and everything in
+    // them — this screen's `session` and `timed` included. That is the primary
+    // teardown and it was already correct. This covers the narrower case it
+    // does not: the signed-in account CHANGING under a mounted tree. A runner
+    // left open across that would be finished under the new member's id, which
+    // is the same wrong write by a shorter route.
+    if (prev !== undefined && prev !== null && prev !== liveKey) {
+      setSession(false);
+      setTimed(null);
+      setResumeAt(null);
+      void endLiveActivity();
+    }
+    if (!liveKey) return;
     let gone = false;
     (async () => {
+      let read: 'ok' | 'failed' = 'ok';
       let raw: string | null = null;
-      try { raw = await AsyncStorage.getItem(LIVE_SESSION_KEY); } catch { return; }
+      try { raw = await AsyncStorage.getItem(liveKey); } catch { read = 'failed'; }
       if (gone) return;
-      const rec = parseLiveSession(raw);
-      if (!rec) return;
-      if (!mayRestore(rec, Date.now())) { rememberSession(null); return; }
+      const d = liveSessionResume({ uid: cd.id, read, raw, now: Date.now() });
+      if (d.act === 'forget') { AsyncStorage.removeItem(liveKey).catch(() => {}); return; }
+      if (d.act !== 'resume') return;
+      const rec = d.session;
       setResumeAt({ startedAt: rec.startedAt, pausedMs: rec.pausedMs ?? 0 });
       // The Activity does not survive the app being killed, so a restored
       // session puts it back — at the moment it actually started, not now.
@@ -841,6 +895,32 @@ export default function Train() {
     })();
     return () => { gone = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveKey]);
+
+  /*
+   * ── the keys these replace, removed unread ───────────────────────────────
+   *
+   * `repple.liveSession.v1`, `repple.guidedSession` and every
+   * `repple.workoutDraft.<date>` on this device. Deleted rather than migrated,
+   * and that is the decision rather than a shortcut: the blob carries no
+   * account, so reading it into whoever is signed in now is a GUESS, and the
+   * wrong answer files a stranger's lifts under this member's name in a health
+   * record their coach then programmes from. The right answer saves somebody
+   * re-typing sets that had not reached the server anyway. See the header of
+   * src/lib/sessionScope.ts.
+   *
+   * Once, on mount, and deliberately not gated on an account: these bytes
+   * belong to nobody the app can name, so there is nothing to wait for.
+   */
+  useEffect(() => {
+    AsyncStorage.multiRemove([...LEGACY_SESSION_KEYS]).catch(() => {});
+    (async () => {
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const stale = keys.filter(isLegacyWorkoutDraftKey);
+        if (stale.length) await AsyncStorage.multiRemove(stale);
+      } catch { /* they are unreadable to every account either way */ }
+    })();
   }, []);
   // The routine being followed, or null. Held here rather than inside the
   // runner so the modal is MOUNTED only while one is running — the same reason
@@ -1085,30 +1165,54 @@ export default function Train() {
   //
   // Persisted per day, so yesterday's abandoned draft cannot reappear on top of
   // today's session. Cleared when the workout is saved for real.
-  const draftKey = `repple.workoutDraft.${dstr(dateFor(dayIdx))}`;
-  const [draftLoaded, setDraftLoaded] = useState(false);
+  // Per day AND per account. It was `repple.workoutDraft.<date>`, which looks
+  // scoped and is not: a date is not an account, so every member training on
+  // this handset on this day shared one draft — and the sets in it are saved
+  // through the same provider that stamps the row with whoever is signed in at
+  // save time. `dstr` already produces a bare YYYY-MM-DD and it is passed
+  // through as a STRING; `workoutDraftKey` checks its shape and never parses it,
+  // because a date half built by round-tripping through a Date is a different
+  // day for every reader who is not in UTC. See src/lib/sessionScope.ts.
+  const draftKey = workoutDraftKey(cd.id, dstr(dateFor(dayIdx)));
+  // The arming flag for the write, rebuilt for each key rather than carried
+  // across one. A flag that survived the key changing would let an account
+  // switch whose read then failed write this member's empty draft straight
+  // over the other one's stored sets — the one way to LOSE a draft rather than
+  // merely misfile it.
+  const [draftGate, setDraftGate] = useState<DraftGate>(() => gateForKey(draftKey));
 
   useEffect(() => {
     let live = true;
-    setDraftLoaded(false);
+    // Disarmed BEFORE the read, not after it fails.
+    setDraftGate(gateForKey(draftKey));
+    // No account is no store. Sets typed now stay on screen for this session
+    // and are simply not kept — which is what a null key means, and is the only
+    // honest answer when the app cannot say whose they are.
+    if (!draftKey) { setLogged({}); return; }
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(draftKey);
         if (!live) return;
         setLogged(raw ? JSON.parse(raw) : {});
-      } catch { if (live) setLogged({}); }
-      finally { if (live) setDraftLoaded(true); }
+        // Armed only for the key that was actually read.
+        setDraftGate((g) => gateHydrated(g, draftKey));
+      } catch {
+        // An unreadable store is nothing on screen and nothing armed, so the
+        // next change is not written on top of bytes we never managed to read.
+        if (live) setLogged({});
+      }
     })();
     return () => { live = false; };
   }, [draftKey]);
 
   useEffect(() => {
-    // Only after the load has run, or the first render would immediately
-    // overwrite a stored draft with the empty object it starts from.
-    if (!draftLoaded) return;
+    // Only after a read of THIS key has landed, or the first render would
+    // immediately overwrite a stored draft with the empty object it starts
+    // from — and an account switch would do it to somebody else's.
+    if (!draftKey || !mayPersist(draftGate, draftKey)) return;
     if (Object.keys(logged).length === 0) AsyncStorage.removeItem(draftKey).catch(() => {});
     else AsyncStorage.setItem(draftKey, JSON.stringify(logged)).catch(() => {});
-  }, [logged, draftKey, draftLoaded]);
+  }, [logged, draftKey, draftGate]);
   // `dayKeyOf`, not `dstr(new Date(l.t))`. Same answer, one implementation: the
   // calendar dots, the day list and the day's totals all have to agree on which
   // day an entry belongs to, and three copies of the arithmetic is how they
@@ -4018,11 +4122,37 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
    * this is a suggestion under the field rather than something `finish` writes:
    * finish runs before the samples are back.
    */
-  const hrEstimate = useMemo(() => {
-    if (recovery) return null;
-    const mins = Math.round(finalElapsed / 60);
-    return hrKcal({ avgBpm: sessionAvgBpm ?? undefined, minutes: mins, age: age ?? undefined, weightKg: weightKg ?? undefined, sex: sex ?? undefined });
-  }, [recovery, finalElapsed, sessionAvgBpm, age, weightKg, sex]);
+  const hrInput = useMemo(() => ({
+    avgBpm: sessionAvgBpm ?? undefined,
+    minutes: Math.round(finalElapsed / 60),
+    age: age ?? undefined,
+    weightKg: weightKg ?? undefined,
+    sex: sex ?? undefined,
+  }), [sessionAvgBpm, finalElapsed, age, weightKg, sex]);
+
+  const hrEstimate = useMemo(() => (recovery ? null : hrKcal(hrInput)), [recovery, hrInput]);
+
+  /**
+   * Why there is no figure, when there is none.
+   *
+   * The offer above was rendered only when the estimate existed, and nothing
+   * was rendered when it did not — so a member for whom the model declines saw
+   * an empty space under the Calories box and no way to know whether the
+   * feature was missing, broken, or waiting on something of theirs.
+   *
+   * It is not a rare case. `sex` is one of the five inputs and `clients.sex`
+   * is written by nothing in this product, so today it is null for every
+   * member and this branch is the one everybody gets. The sentence names each
+   * missing input; for sex it says there is nowhere to record it rather than
+   * sending them to a profile screen that has no such field.
+   *
+   * Not shown for recovery, where the section above already explains that a
+   * calorie figure is not ours to record at all.
+   */
+  const hrUnknownNote = useMemo(
+    () => (recovery ? null : hrKcalUnknownNote(hrKcalUnknown(hrInput))),
+    [recovery, hrInput],
+  );
 
   const finish = () => {
     // Ask the watch what actually happened, before the figures are frozen.
@@ -4141,6 +4271,14 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
                     {hrKcalNote(hrEstimate, sessionAvgBpm)}
                   </Text>
                 </Pressable>
+              ) : hrEstimate == null && hrUnknownNote ? (
+                /* The blank, named. A missing figure is a fact about what this
+                   app was told, and saying which thing it was missing is the
+                   difference between a feature that is waiting and one that
+                   looks broken. */
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                  {hrUnknownNote}
+                </Text>
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {sessionKcal != null && sessionKcal > 0
@@ -4735,7 +4873,28 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // Legs would be worse than losing them. A draft that does not match today's
   // list is left where it is rather than deleted — it is somebody's training,
   // and it costs nothing to keep until it can be read.
-  const [draftChecked, setDraftChecked] = useState(false);
+  //
+  // ── and one key PER ACCOUNT ──────────────────────────────────────────────
+  //
+  // It was `repple.guidedSession`, flat. "Only one guided session can be
+  // running" is true of a handset and says nothing about whose it is: on a gym
+  // desk phone the next member to open the runner was handed the previous
+  // one's sets under "Picked up where you left off", and finishing them wrote
+  // them to the server under the NEW member's id — `logWorkouts` stamps the row
+  // with the uid it resolves at save time (src/ui/workoutLog.tsx). The day and
+  // the plan were checked; the person never was. `clientId` is already null
+  // rather than 'unknown' where it is passed in, and a null key means the sets
+  // are on screen for this session and are not kept. See src/lib/sessionScope.ts.
+  const guidedKey = guidedDraftKey(clientId);
+  /** Remove this account's draft. A no-op with no account, because there is
+   *  then no key of ours to remove and the flat one is not ours to read. */
+  const forgetGuidedDraft = useCallback(() => {
+    if (guidedKey) AsyncStorage.removeItem(guidedKey).catch(() => {});
+  }, [guidedKey]);
+  // Armed only by a read of THIS key that actually came back. It used to be a
+  // `finally`, which armed after a FAILED read too — so the next set typed was
+  // written straight over bytes the app had never managed to read.
+  const [draftGate, setDraftGate] = useState<DraftGate>(() => gateForKey(guidedKey));
   // A draft that belongs to some other day or some other plan. It cannot be
   // poured into this session, but it is still somebody's training, so the
   // "nothing logged yet" branch below leaves it alone rather than deleting
@@ -4747,10 +4906,20 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   const todayKey = dayKeyOf(new Date().toISOString());
   useEffect(() => {
     let live = true;
+    setDraftGate(gateForKey(guidedKey));
+    staleDraft.current = false;
+    if (!guidedKey) return;
     (async () => {
+      let read: 'ok' | 'failed' = 'ok';
+      let raw: string | null = null;
+      try { raw = await AsyncStorage.getItem(guidedKey); } catch { read = 'failed'; }
+      if (!live) return;
+      // A read that did not answer arms nothing and restores nothing. It is not
+      // an empty draft, and the sets on the disk stay where they are.
+      if (read !== 'ok') return;
+      setDraftGate((g) => gateHydrated(g, guidedKey));
       try {
-        const raw = await AsyncStorage.getItem(GUIDED_DRAFT_KEY);
-        if (!live || !raw) return;
+        if (!raw) return;
         const d = JSON.parse(raw) as { day?: string; plan?: string; results?: unknown; rpes?: unknown; idx?: number };
         // Same day and the same movements in the same order, or it is not this
         // session and must not be poured into it.
@@ -4772,19 +4941,19 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           })(),
         );
       } catch { /* an unreadable draft is not worth an error the member cannot act on */ }
-      finally { if (live) setDraftChecked(true); }
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [guidedKey]);
   useEffect(() => {
-    // Only after the restore has run, or the first render writes the empty
-    // arrays it starts from straight over the draft it was about to read.
-    if (!draftChecked || saveState === 'saved') return;
+    // Only after a read of THIS key has landed, or the first render writes the
+    // empty arrays it starts from straight over the draft it was about to read
+    // — and an account arriving late would do it to the other member's.
+    if (!guidedKey || !mayPersist(draftGate, guidedKey) || saveState === 'saved') return;
     const any = results.some((a) => a.length);
-    if (!any) { if (!staleDraft.current) AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); return; }
-    AsyncStorage.setItem(GUIDED_DRAFT_KEY, JSON.stringify({ day: todayKey, plan: planKey, results, rpes, idx })).catch(() => {});
-  }, [results, rpes, idx, draftChecked, saveState, todayKey, planKey]);
+    if (!any) { if (!staleDraft.current) forgetGuidedDraft(); return; }
+    AsyncStorage.setItem(guidedKey, JSON.stringify({ day: todayKey, plan: planKey, results, rpes, idx })).catch(() => {});
+  }, [results, rpes, idx, draftGate, guidedKey, forgetGuidedDraft, saveState, todayKey, planKey]);
 
   const ex = exercises[idx];
   const done = results[idx] || [];
@@ -5078,7 +5247,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     setSaveState('saving');
     const out = await onComplete(entries);
     setSaveState(out === 'stored' ? 'saved' : out === 'unsent' ? 'queued' : 'failed');
-    if (out !== 'refused') AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {});
+    if (out !== 'refused') forgetGuidedDraft();
     // Confetti for a session that is in the log. A queued one has not reached
     // anybody yet, and celebrating it is the far side of the line this screen's
     // own draft wording draws.
@@ -5114,7 +5283,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     setSaveState('saving');
     const out = await onRetry(pendingEntries);
     setSaveState(out === 'stored' ? 'saved' : out === 'unsent' ? 'queued' : 'failed');
-    if (out !== 'refused') AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {});
+    if (out !== 'refused') forgetGuidedDraft();
     if (out === 'stored') { setConfetti(true); tapLight(); }
   };
   // Bodyweight is a property of the MOVEMENT, so the tick clears when the
@@ -5179,7 +5348,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       [
         { text: 'Keep going', style: 'cancel' },
         { text: 'Save and end', onPress: () => finish() },
-        { text: 'Discard', style: 'destructive', onPress: () => { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); onClose(); } },
+        { text: 'Discard', style: 'destructive', onPress: () => { forgetGuidedDraft(); onClose(); } },
       ],
     );
   };
@@ -5443,13 +5612,13 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             wide
             onPress={() => {
               if (saveState === 'saving') return;
-              if (saveState !== 'failed') { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); onClose(); return; }
+              if (saveState !== 'failed') { forgetGuidedDraft(); onClose(); return; }
               Alert.alert(
                 'Close without saving?',
                 'These sets have not reached your log. Closing loses them — there is no copy anywhere else.',
                 [
                   { text: 'Try saving again', onPress: () => { void retry(); } },
-                  { text: 'Close and lose them', style: 'destructive', onPress: () => { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); onClose(); } },
+                  { text: 'Close and lose them', style: 'destructive', onPress: () => { forgetGuidedDraft(); onClose(); } },
                 ],
               );
             }}

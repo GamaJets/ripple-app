@@ -44,6 +44,35 @@ const files = readdirSync(PARTS)
   .sort((a, b) => partNumber(a) - partNumber(b) || a.localeCompare(b));
 if (!files.length) { console.error(`no parts found in ${PARTS}`); process.exit(1); }
 
+// Two parts may not claim the same number.
+//
+// The header above says the number IS the dependency order. When two parts share
+// one, that sentence stops being true for the pair: the sort's tiebreaker orders
+// them by the PROSE TITLE, alphabetically. That is deterministic — it is not a
+// random or directory-order outcome — but it is an order nobody chose, and it
+// moves when somebody reworded a title, which is not a thing anyone expects to
+// reorder a schema. Two lanes collided on a number in one night here; both
+// happened to notice. The one that matters is the collision nobody notices.
+//
+// Numeric, not textual: '09-x.sql' and '9-x.sql' are the same slot and collide,
+// even though their string prefixes differ.
+const byNumber = new Map();
+for (const f of files) {
+  const n = partNumber(f);
+  if (!Number.isFinite(n)) continue; // un-numbered parts claim no slot
+  if (!byNumber.has(n)) byNumber.set(n, []);
+  byNumber.get(n).push(f);
+}
+const collisions = [...byNumber.entries()].filter(([, fs]) => fs.length > 1);
+if (collisions.length) {
+  console.error(`${PARTS}: duplicate part number${collisions.length > 1 ? 's' : ''} — the number is the dependency order, so it must be unique.`);
+  for (const [n, fs] of collisions) {
+    console.error(`  ${n}: ${fs.join(', ')}`);
+  }
+  console.error('Renumber one of each pair (and rebuild) before continuing.');
+  process.exit(1);
+}
+
 const body = files
   .map((f) => `\n-- ▶ ${f.replace(/^\d+-/, '')}\n\n${readFileSync(join(PARTS, f), 'utf8').trimEnd()}\n`)
   .join('');

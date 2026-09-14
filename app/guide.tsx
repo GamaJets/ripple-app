@@ -22,6 +22,7 @@ import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../src/ui/components';
+import type { Theme } from '../src/theme/tokens';
 import { Rule, Section, SectionHead, Ghost } from '../src/ui/kit';
 import { sp, layout, type as ty } from '../src/theme/scale';
 import { VARIANT, VARIANT_LABEL } from '../src/lib/variant';
@@ -40,6 +41,43 @@ import { BACK_ICON } from '../src/ui/direction';
  */
 export const GUIDE_SEEN_KEY = 'repple.guide.seen';
 
+/**
+ * One section, whichever list it came from. The two are rendered identically on
+ * purpose — the difference between them is where they sit and what the kicker
+ * above them says, not how important they are.
+ *
+ * A module-scope PLAIN FUNCTION, called as `{block(s, t)}`, and not a component
+ * written as `<Block s={s} />`. Declared inside the screen body it was a new
+ * function object on every render, so React saw a different element TYPE each
+ * time and threw away every section of the guide rather than updating it. This
+ * screen is static reference text and re-renders rarely, so what that cost was
+ * work and a subtree that could hold no scroll or animation state — not a lost
+ * caret and not a wrong figure. The rule is the one stated at
+ * app/(client)/report.tsx:475 and enforced by scripts/check-remount.mjs.
+ *
+ * At module scope because it closes over nothing from the render body: the
+ * sections come in as an argument and the theme is passed.
+ *
+ * The `key` is on the View this RETURNS. It used to sit on `<Block key={s.title}
+ * …/>`; a plain call cannot carry one, and dropping it would cost React the
+ * identity of both lists — a quieter bug than the one being fixed here.
+ */
+const block = (s: GuideSection, t: Theme) => (
+  <View key={s.title}>
+    <Section>
+      <SectionHead title={s.title} />
+      <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>{s.summary}</Text>
+      {s.points.map((p, i) => (
+        <View key={i} style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
+          <Text style={{ ...ty.body, color: t.brand }}>•</Text>
+          <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{p}</Text>
+        </View>
+      ))}
+    </Section>
+    <Rule />
+  </View>
+);
+
 export default function Guide() {
   const t = useTheme();
   const router = useRouter();
@@ -50,25 +88,6 @@ export default function Guide() {
   // finer — scrolled to the end, spent thirty seconds — would be measuring
   // attention, which this app has no business doing and no way to do honestly.
   useEffect(() => { AsyncStorage.setItem(GUIDE_SEEN_KEY, '1').catch(() => {}); }, []);
-
-  // One section, whichever list it came from. The two are rendered identically
-  // on purpose — the difference between them is where they sit and what the
-  // kicker above them says, not how important they are.
-  const Block = ({ s }: { s: GuideSection }) => (
-    <View>
-      <Section>
-        <SectionHead title={s.title} />
-        <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>{s.summary}</Text>
-        {s.points.map((p, i) => (
-          <View key={i} style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
-            <Text style={{ ...ty.body, color: t.brand }}>•</Text>
-            <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{p}</Text>
-          </View>
-        ))}
-      </Section>
-      <Rule />
-    </View>
-  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
@@ -102,12 +121,12 @@ export default function Guide() {
             sat hard against the rule above it and read as part of the header
             paragraph rather than as the label on the list under it. */}
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>The tabs</Text>
-        {tabs.map((s) => <Block key={s.title} s={s} />)}
+        {tabs.map((s) => block(s, t))}
 
         {topics.length ? (
           <>
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Across the app</Text>
-            {topics.map((s) => <Block key={s.title} s={s} />)}
+            {topics.map((s) => block(s, t))}
           </>
         ) : null}
 
