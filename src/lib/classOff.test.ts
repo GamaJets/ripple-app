@@ -137,6 +137,26 @@ eq(classOffAudience([]).unreadable, 0, 'and so does an empty one');
   truthy(n.title !== CLASS_OFF_TITLE_MANY, 'the plural title is the waitlister’s own too');
   truthy(n.body.includes('3'), 'a member waiting on three of them is told three');
   truthy(!n.body.includes(':'), 'and with no reason given there is no dangling colon');
+  // The PLURAL body, asserted in its own right and not left to the singular's
+  // coverage. A mutation run found this: the plural sentence could be rewritten
+  // to "Your bookings are kept on the record" — the seat holder's claim, in the
+  // plural — and every assertion above still passed, because the title and the
+  // count are all they look at. It is the body a member waiting on several
+  // weeks of a series actually reads.
+  truthy(n.body.includes('waiting list'), 'the plural body says what they actually had, as the singular does');
+  truthy(n.body.includes('nothing to cancel'),
+    'and matches class_cancelled_notify in the plural too, so banner and inbox row agree');
+  truthy(!/\bbookings?\b/i.test(n.body),
+    'THE POINT, in the plural: three queue places are still no booking, so the word never appears');
+}
+
+// The same word, checked on the singular body. `!includes('booking is kept')`
+// above is a test of one phrasing; this is a test of the claim, and it is the
+// claim — not the phrasing — that is wrong about a waitlister.
+{
+  const n = classOffWaitingNotification('Reformer', 1, null);
+  truthy(!/\bbookings?\b/i.test(n.body),
+    'a waitlister is never told anything about a booking, because they have none');
 }
 
 {

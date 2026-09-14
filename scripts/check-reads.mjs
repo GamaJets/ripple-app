@@ -140,9 +140,13 @@ if (offenders.length) {
  *
  * ── the ratchet, and which way it fails ───────────────────────────────────
  *
- * 130 auth reads across 93 files discard their error today, in files that
+ * 116 auth reads across 91 files discard their error today, in files that
  * belong to other lanes — the count moved by five while this rule was being
- * written, because several of those files are being edited tonight. So:
+ * written, because several of those files are being edited tonight, and it has
+ * moved twice since: this rule opened at 130 across 93 files, and the money
+ * path came off it when src/lib/connect.ts (10) and src/lib/subscriptions.ts
+ * (4) were centralised onto src/lib/signedInUid.ts. Read AUTH_KNOWN, not this
+ * paragraph, where the two disagree. So:
  *
  *   · a file NOT in AUTH_KNOWN that discards an auth error FAILS. That is the
  *     whole tree outside the backlog, `studio-web/` included: Lane 114's site
@@ -163,12 +167,25 @@ if (offenders.length) {
  *
  * Every one of them is the same shape — `const { data } = await
  * supabase.auth.getUser()` or `.getSession()`, with no `error` on the line —
- * so there is one assessment for the list rather than ninety-three: none of
+ * so there is one assessment for the list rather than ninety-one: none of
  * these can tell "no session" from "could not ask", and each one decides
  * whether a person is signed in. The heaviest are named so the shape of the
- * backlog is visible without opening it: src/lib/connect.ts (10, the Stripe
- * Connect onboarding hops), src/ui/sessions.tsx (6), src/lib/subscriptions.ts
- * (4), and three files at 3.
+ * backlog is visible without opening it: src/ui/sessions.tsx (6), and four
+ * files at 3 — src/ui/challenges.tsx, src/ui/foodLog.tsx, src/ui/injuryAcks.tsx
+ * and app/(client)/trainers.tsx. Seventy of the 116 are `getSession()` rather
+ * than `getUser()`, which is the larger half and the same defect: a null
+ * session during an outage reads as signed-out everywhere it is asked.
+ *
+ * TWO ENTRIES HAVE BEEN DELETED RATHER THAN LOWERED, and that is the ratchet
+ * tightening rather than a backlog line going quiet. src/lib/connect.ts stood
+ * at 10 (the Stripe Connect onboarding hops) and src/lib/subscriptions.ts at 4;
+ * both now route every auth read through `signedInUid()` in
+ * src/lib/signedInUid.ts, which names `error` and passes the fate on, so both
+ * scan at 0. A cleared file is not a tolerated zero: neither path is on this
+ * Map any more, so a single fresh discard in either one is a NEW discard and
+ * fails the build outright — which is the point of deleting rather than
+ * writing `0`. The money path is the half of this backlog that must never come
+ * back, and it is now held by the strict arm of the rule.
  */
 const AUTH_KNOWN = new Map([
   ['app/(client)/agreements.tsx', 1],
@@ -186,8 +203,6 @@ const AUTH_KNOWN = new Map([
   ['app/(trainer)/videos.tsx', 1],
   ['app/join.tsx', 1],
   ['src/lib/billing.ts', 1],
-  ['src/lib/connect.ts', 10],
-  ['src/lib/subscriptions.ts', 4],
   ['src/lib/supabase.ts', 1],
   ['src/lib/wearables/oauth.ts', 1],
   ['src/ui/CoachRequests.tsx', 2],

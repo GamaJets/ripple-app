@@ -12,7 +12,7 @@
 // (this file is not in tsconfig.test.json's `files` list yet — that file is
 // managed centrally and Lane 140 does not edit it; the entry to add is named in
 // the lane report).
-import { uidFromAuth, authGateMessage, authGateFault } from './authedUid';
+import { uidFromAuth, authGateMessage, authGateFault, type AuthUserResult } from './authedUid';
 
 let failures = 0;
 function ok(what: string, cond: boolean) {
@@ -83,6 +83,44 @@ eq('an id of the wrong type is unreadable, not a sign-out',
 // not produce, and the cautious reading on a money path.
 eq('an error beside an id is still classified by the error',
   uidFromAuth({ data: { user: { id: 'u-1' } }, error: authErr('AuthRetryableFetchError', 0) }).uid, null);
+
+// ── the fact the call sites' guard rests on ──────────────────────────────
+//
+// Three sites — src/lib/signedInUid.ts, connect.createPackage and
+// subscriptions.myCoachId — guard on `fate !== null` rather than on `!uid`,
+// because `uid`'s non-null member is `string`, which includes '', so `!uid`
+// leaves `fate` as `AuthReadFate | null` and the compiler will not pass it to
+// `authGateMessage`. Swapping the guard is only behaviour-preserving if the two
+// tests agree on EVERY value this function can produce — that is, if a blank
+// uid is unreachable. That is asserted here rather than argued, because it is
+// the load-bearing half of the swap and it lives in this file, not at the sites.
+const EVERY_SHAPE: Array<AuthUserResult | null | undefined> = [
+  undefined, null, {}, NO_USER,
+  { data: null }, { data: { user: null } }, { data: { user: {} } },
+  { data: { user: { id: 'u-1' } } },
+  { data: { user: { id: '' } } },
+  { data: { user: { id: '   ' } } },
+  { data: { user: { id: '\t\n' } } },
+  { data: { user: { id: 0 } } },
+  { data: { user: { id: 12345 } } },
+  { data: { user: { id: false } } },
+  { data: { user: { id: 'u-1' } }, error: authErr('AuthRetryableFetchError', 0) },
+  { ...NO_USER, error: authErr('AuthSessionMissingError', 400) },
+  { ...NO_USER, error: authErr('AuthApiError', 429) },
+  { ...NO_USER, error: new Error('boom') },
+];
+let disagreements = 0;
+let blankUids = 0;
+for (const shape of EVERY_SHAPE) {
+  const read = uidFromAuth(shape);
+  // `!uid` and `fate !== null` must be the same question.
+  if ((read.fate !== null) !== !read.uid) disagreements++;
+  if (read.fate === null && !read.uid) blankUids++;
+}
+eq(`all ${EVERY_SHAPE.length} shapes: \`!uid\` and \`fate !== null\` agree`, disagreements, 0);
+eq('no shape yields a falsy uid with a null fate (a blank uid is unreachable)', blankUids, 0);
+eq('a blank-string id is unreadable, not a person and not a sign-out',
+  uidFromAuth({ data: { user: { id: '' } } }).fate, 'unreadable');
 
 // ── what the person is told, and what is recorded ────────────────────────
 ok('the sign-out sentence asks them to sign in',

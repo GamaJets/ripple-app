@@ -110,6 +110,14 @@ import {
   outboxThreadsNote, queuedByThread, queuedThreadNote,
   type QueuedForThread, type QueuedWord,
 } from '../../src/lib/threadOutbox';
+// …and the third outcome, which is not the same as the second and had reached
+// no screen at all. A refused message is dropped from the outbox — correctly —
+// and until this arrived the drop also took away the only mark saying it had
+// not gone. See src/lib/refusedMessages.ts.
+import { useRefusedMessages } from '../../src/ui/messaging';
+import {
+  refusedByThread, refusedScreenNote, refusedThreadNote, type RefusedForThread,
+} from '../../src/lib/refusedMessages';
 // The clock this screen is ordered and timed by. NOT a bare `Date.now()` in the
 // render body: app/(trainer)/_layout.tsx registers this screen with
 // `href: null`, so it mounts once and is never torn down, and the value would
@@ -131,8 +139,9 @@ import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
  * category noun where a name belongs is the defect TF-32 is about, and the coach
  * chat screen carried it until recently.
  */
-function ThreadRow({ t, now, queued, onPress }: {
-  t: CoachThread; now: number; queued?: QueuedForThread | null; onPress: () => void;
+function ThreadRow({ t, now, queued, refused, onPress }: {
+  t: CoachThread; now: number; queued?: QueuedForThread | null;
+  refused?: RefusedForThread | null; onPress: () => void;
 }) {
   const th = useTheme();
   // `unlinked` is unreachable here — the row exists because the roster returned
@@ -149,12 +158,19 @@ function ThreadRow({ t, now, queued, onPress }: {
   // above cannot know about. Everything else on this row is `stored`; this is
   // the `unsent` state, and without it a reply typed underground renders as
   // nothing at all. See src/lib/threadOutbox.ts.
-  const queuedNote = queuedThreadNote(queued);
-  // Both said to a screen reader, because `Pressable` collapses this whole
+  const queuedNote = queuedThreadNote(queued, now);
+  // The third state, and the one this row used to render as nothing. A message
+  // the SERVER refused is out of the outbox, so it has no `queued` mark — and a
+  // row with no mark is what a delivered message looks like. `now` is the same
+  // moving clock the rest of the row is timed by, so "Written 2 days ago" is
+  // measured rather than guessed.
+  const refusedNote = refusedThreadNote(refused, now);
+  // All three said to a screen reader, because `Pressable` collapses this whole
   // subtree into one element: text drawn inside it is not announced on its own.
   const hint = [
     badge === '—' ? 'We could not read how many of their messages are unopened.' : counted ? `${badge} unopened` : null,
     queuedNote,
+    refusedNote,
   ].filter(Boolean).join(' ');
   return (
     <Pressable
@@ -217,6 +233,17 @@ function ThreadRow({ t, now, queued, onPress }: {
             <Flag tone={th.warn}>{queuedNote}</Flag>
           </View>
         ) : null}
+        {/* A stronger tone than the queued mark, and deliberately: one is a
+            message that will go, the other is one that never will. They can be
+            drawn together — a coach who typed twice may have had the first
+            refused and the second still waiting — and the two sentences say
+            opposite things about the same conversation, which is the whole
+            reason they are two marks rather than one. */}
+        {refusedNote ? (
+          <View style={{ marginTop: 3 }}>
+            <Flag tone={th.crit}>{refusedNote}</Flag>
+          </View>
+        ) : null}
       </View>
       <Icon name={FORWARD_ICON} size={16} color={th.ink3} />
     </Pressable>
@@ -238,8 +265,9 @@ function ThreadRow({ t, now, queued, onPress }: {
  * this is a short queue worked from the top, that is the whole book scanned by
  * recency, and both taps land on the same conversation.
  */
-function WaitingRow({ w, queued, onPress }: {
-  w: Waiting; queued?: QueuedForThread | null; onPress: () => void;
+function WaitingRow({ w, now, queued, refused, onPress }: {
+  w: Waiting; now: number; queued?: QueuedForThread | null;
+  refused?: RefusedForThread | null; onPress: () => void;
 }) {
   const th = useTheme();
   const head = peerHeading(w.thread.name ? { kind: 'named', name: w.thread.name } : { kind: 'withheld' }, 'client');
@@ -248,12 +276,17 @@ function WaitingRow({ w, queued, onPress }: {
   // already answered from a train is still on it — correctly, because nobody
   // has received that answer. What would be wrong is leaving them on it with no
   // word of why, which is how the same reply gets typed twice.
-  const queuedNote = queuedThreadNote(queued);
+  const queuedNote = queuedThreadNote(queued, now);
+  // And the one that keeps somebody on this queue forever. A refused reply
+  // never reaches the server, so `lastSender` stays the client's and this row
+  // stays up — with nothing on it saying why, the coach retypes the same
+  // message into the same refusal.
+  const refusedNote = refusedThreadNote(refused, now);
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`Open the conversation with ${head.isName ? head.text : 'this client'}. ${line}${queuedNote ? ` ${queuedNote}` : ''}`}
+      accessibilityLabel={`Open the conversation with ${head.isName ? head.text : 'this client'}. ${line}${queuedNote ? ` ${queuedNote}` : ''}${refusedNote ? ` ${refusedNote}` : ''}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
     >
       <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: th.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
@@ -276,6 +309,11 @@ function WaitingRow({ w, queued, onPress }: {
         {queuedNote ? (
           <View style={{ marginTop: 3 }}>
             <Flag tone={th.warn}>{queuedNote}</Flag>
+          </View>
+        ) : null}
+        {refusedNote ? (
+          <View style={{ marginTop: 3 }}>
+            <Flag tone={th.crit}>{refusedNote}</Flag>
           </View>
         ) : null}
       </View>
@@ -411,6 +449,23 @@ export default function Messages() {
   }, [outbox]);
   const queuedThreads = useMemo(() => queuedByThread(queuedWords ?? []), [queuedWords]);
   /**
+   * ── AND THE ONES THE SERVER ANSWERED NO TO ───────────────────────────────
+   *
+   * The queue above holds messages that WILL go. This holds the ones that will
+   * not, and the difference was invisible here: `flush` drops a refused item
+   * exactly as it drops a stored one, so the "waiting to send" mark simply
+   * came off the row — leaving a row that looks identical to one whose reply
+   * landed. A coach reads that as delivery.
+   *
+   * `refused` is null when this device could not read its own record, which is
+   * not an empty one, and `refusedScreenNote` says so below.
+   */
+  const refusedRecord = useRefusedMessages();
+  const refusedThreads = useMemo(
+    () => refusedByThread(refusedRecord.refused ?? []),
+    [refusedRecord.refused],
+  );
+  /**
    * What the narrowing did, in one sentence, or null.
    *
    * `searched` is the number of threads the filter actually ran over — what
@@ -466,6 +521,10 @@ export default function Messages() {
     [shown, shownUnstarted],
   );
   const outboxNote = outboxThreadsNote(queuedWords, outbox ? outbox.status : 'ready', shownIds);
+  /** The same sentence for the opposite fact, and with the same denominator: a
+   *  refusal for somebody the coach has narrowed out of the list is counted and
+   *  said to be off-screen rather than marked nowhere. */
+  const refusedNote = refusedScreenNote(refusedRecord.refused, refusedRecord.status, shownIds);
   const G = layout.gutter;
 
   return (
@@ -531,6 +590,18 @@ export default function Messages() {
         {outboxNote ? (
           <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
             <Flag tone={t.warn}>{outboxNote}</Flag>
+          </View>
+        ) : null}
+
+        {/* ── and what the server said no to ────────────────────────────────
+            Above the queued note in severity and below it on the screen, so the
+            two are read in the order they happened: typed, waiting, refused.
+            Drawn under a failed read of the conversations for the same reason
+            the queue is — this is the DEVICE's record and is known whether or
+            not the server answered this morning. */}
+        {refusedNote ? (
+          <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
+            <Flag tone={t.crit}>{refusedNote}</Flag>
           </View>
         ) : null}
 
@@ -616,7 +687,8 @@ export default function Messages() {
             {waiting.rows.map((w, i) => (
               <View key={w.thread.clientId}>
                 {i > 0 ? <Rule inset={48} /> : null}
-                <WaitingRow w={w} queued={queuedThreads.get(w.thread.clientId)} onPress={() => open(w.thread)} />
+                <WaitingRow w={w} now={now} queued={queuedThreads.get(w.thread.clientId)}
+                  refused={refusedThreads.get(w.thread.clientId)} onPress={() => open(w.thread)} />
               </View>
             ))}
             {/* Said once, under the list. It carries the doubt about the read
@@ -641,7 +713,8 @@ export default function Messages() {
             {shown.map((c, i) => (
               <View key={c.clientId}>
                 {i > 0 ? <Rule inset={56} /> : null}
-                <ThreadRow t={c} now={now} queued={queuedThreads.get(c.clientId)} onPress={() => open(c)} />
+                <ThreadRow t={c} now={now} queued={queuedThreads.get(c.clientId)}
+                  refused={refusedThreads.get(c.clientId)} onPress={() => open(c)} />
               </View>
             ))}
           </Section>
@@ -680,7 +753,8 @@ export default function Messages() {
                 shownUnstarted.map((c, i) => (
                   <View key={c.clientId}>
                     {i > 0 ? <Rule inset={56} /> : null}
-                    <ThreadRow t={c} now={now} queued={queuedThreads.get(c.clientId)} onPress={() => open(c)} />
+                    <ThreadRow t={c} now={now} queued={queuedThreads.get(c.clientId)}
+                      refused={refusedThreads.get(c.clientId)} onPress={() => open(c)} />
                   </View>
                 ))
               ) : (

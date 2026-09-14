@@ -65,7 +65,8 @@ import {
 } from '../../src/lib/photoAI';
 import { usePhotoAI } from '../../src/ui/photoAI';
 import { ensureMediaPermission } from '../../src/ui/permissions';
-import { parseFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
+import { readFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
+import { foodReadSay } from '../../src/lib/readerAnswer';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 // The same review sheet the Food Log tab uses. This tab's photo path COMMITTED
 // — with an alert — while the other offered an editable sheet for the same read
@@ -576,7 +577,13 @@ export default function Nutrition() {
   const barcodeLog = () => setBcOpen(true);
   const describeLog = async () => {
     const text = nl.trim(); if (!text) return;
-    setLogBusy(true); const parsed = await parseFoodText(text); setLogBusy(false);
+    // `readFoodText`, not `parseFoodText`: the wrapper collapses four distinct
+    // outcomes into one null, and this screen used to show one sentence for all
+    // of them. A member who typed "a bowl of soup" and is shown an error learns
+    // the app is broken; one told the reader named no food in that line learns
+    // to type differently — which is the only one of the four they can act on.
+    setLogBusy(true); const read = await readFoodText(text); setLogBusy(false);
+    const parsed: ParsedFood[] | null = read && read.ok ? read.items : null;
     // A macro the reader did not give us is blank, not nought — see
     // src/lib/foodAI.ts. Those foods go to the sheet to be completed rather
     // than into the log with a zero standing in for a measurement.
@@ -624,7 +631,15 @@ export default function Nutrition() {
         Alert.alert('Logged — waiting to send', `${unsent === outs.length ? 'They are' : `${unsent} of them are`} counted toward today and kept on this phone until you have signal.`);
       }
     }
-    else if (!gaps.length) { Alert.alert('Could not read that', foodAIAvailable() ? 'Try e.g. \"2 eggs, toast and a coffee\".' : 'AI logging turns on with the AI backend.'); }
+    else if (!gaps.length) {
+      // `read === null` is the one case that is not an answer at all: no reader
+      // was asked, because the backend is off or the box was empty. It keeps
+      // its own sentence and is deliberately outside the four — saying "the
+      // reader did not answer" about a reader nobody asked would be a fifth
+      // wrong claim in place of the one this change removes.
+      if (read === null) Alert.alert('Nothing was read', foodAIAvailable() ? 'Try e.g. "2 eggs, toast and a coffee".' : 'AI logging turns on with the AI backend.');
+      else { const say = foodReadSay(read); Alert.alert(say.title, say.body); }
+    }
   };
 
   // Taken by day rather than read off `dayType`, so the info sheet can ask what

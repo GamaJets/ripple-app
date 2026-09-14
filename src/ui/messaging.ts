@@ -55,6 +55,13 @@ import { capLimit, capped } from '../lib/rowCap';
 import { cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
 import { legacyThreadCacheKey, threadCacheKey } from '../lib/threadCache';
 import { classifyWrite } from '../lib/offlineQueue';
+// The record of what the server DECLINED, which is the third outcome and the
+// only one no screen used to hear about. src/lib/refusedMessages.ts is the
+// whole argument; this file is the storage and the two writers.
+import {
+  readRefusedMessages, recordRefusal, refusedMessagesKey, writeRefusedMessages,
+  type RefusedMessage,
+} from '../lib/refusedMessages';
 import { useOutbox } from './outbox';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
 import { resolvePeerAvatar } from '../lib/peerAvatar';
@@ -1111,6 +1118,174 @@ export function useThread(clientId: string | null, role: ChatRole) {
   };
 }
 
+/* ── the third outcome, kept ───────────────────────────────────────────────
+ *
+ * `stored`, `unsent` and `refused` are three different facts and only the first
+ * two ever reached a screen. A refused message is dropped from the outbox by
+ * `flush` — correctly; offering it again gets the same answer — and until this
+ * existed that was the end of it: the "waiting to send" mark came off the row
+ * and the row then looked exactly like one that had been delivered.
+ *
+ * src/lib/refusedMessages.ts holds every decision and every sentence. What is
+ * here is the two halves that cannot be pure: the AsyncStorage round trip, and
+ * a way for the screens to learn that the store changed while they were open.
+ */
+
+/** Mounted `useRefusedMessages` hooks, so a refusal recorded by the outbox
+ *  handler reaches a list that is already on screen. Without it the coach's
+ *  inbox would not admit the refusal until it next remounted, which for an
+ *  `href: null` tab is not until the app is killed. */
+const refusedListeners = new Set<() => void>();
+
+function refusedChanged(): void {
+  // A copy, and each call guarded: a listener that throws must not stop the
+  // others from being told.
+  for (const fn of Array.from(refusedListeners)) { try { fn(); } catch { /* the rest still get told */ } }
+}
+
+/**
+ * Who is signed in, for the key — and whether that answer is knowable.
+ *
+ * `getSession` is local and costs no round trip, but it still reads the
+ * handset's own store and can fail, and its failure is NOT the same fact as
+ * nobody being signed in. The two lead to the same action on the WRITE side —
+ * there is no account to attribute a record to, so nothing is persisted — and
+ * to opposite ones on the READ side, where a device that could not say who is
+ * using it must not answer "nothing of yours was refused". So both halves are
+ * returned and the callers below decide separately.
+ */
+async function refusedUid(): Promise<{ uid: string | null; readable: boolean }> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    // auth-js resolves with an error rather than rejecting, so this is the only
+    // place the difference is visible. Lane 114's finding, applied here.
+    if (error) return { uid: null, readable: false };
+    return { uid: data?.session?.user?.id ?? null, readable: true };
+  } catch { return { uid: null, readable: false }; }
+}
+
+/**
+ * Write one refusal down.
+ *
+ * The read and the write are inside ONE try on purpose: a `getItem` that threw
+ * means this device could not say what it is holding, and writing over bytes we
+ * could not read would destroy somebody else's record of a message that never
+ * went. That is the same rule `enqueue` states in src/ui/outbox.tsx — "an
+ * outbox we could not read is one we must not write".
+ */
+async function keepRefusal(entry: RefusedMessage): Promise<void> {
+  const who = await refusedUid();
+  const key = refusedMessagesKey(who.uid);
+  if (!key) {
+    // Nothing is written. Falling back to an unqualified key would put one
+    // person's words where the next account reads them, which is worse than
+    // losing them — but it IS a loss whenever the cause was an unreadable
+    // session rather than a signed-out handset, so that half is reported.
+    if (!who.readable) reportError('messaging.refused-keep-uid', new Error('session unreadable'));
+    return;
+  }
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    await AsyncStorage.setItem(key, writeRefusedMessages(recordRefusal(readRefusedMessages(raw), entry)));
+    refusedChanged();
+  } catch (e) {
+    // Nothing else will ever raise this refusal, so a failure to keep it is
+    // worth reporting rather than swallowing.
+    reportError('messaging.refused-keep', e);
+  }
+}
+
+/** What a screen gets. `refused` is null when this device could not read its
+ *  own record — NOT an empty list, which is the claim "nothing of yours was
+ *  refused" and the one thing that must not be invented here. */
+export interface RefusedRecord {
+  refused: RefusedMessage[] | null;
+  /** The DEVICE's read of its own store. Never the server's opinion of
+   *  anything — the server has already given that, and it was no. */
+  status: LoadStatus;
+  /** The person has read one. It comes off the device with it, because nothing
+   *  else will ever tell them again. */
+  forget: (id: string) => void;
+}
+
+/**
+ * The messages the server refused, for this account, on this handset.
+ *
+ * Re-read on every auth revision, and the state is dropped BEFORE that read
+ * lands rather than after it: a key change means what is in state belongs to
+ * the previous account, and a read for the new one that is slow or that fails
+ * would otherwise leave a stranger's words on screen. That is the trap
+ * src/lib/accountScopedState.ts writes down, applied here.
+ */
+export function useRefusedMessages(): RefusedRecord {
+  const authRev = useAuthRevision();
+  const [refused, setRefused] = useState<RefusedMessage[] | null>(null);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const keyRef = useRef<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!USE_SUPABASE) { keyRef.current = null; setRefused([]); setStatus('ready'); return null; }
+    const who = await refusedUid();
+    const key = refusedMessagesKey(who.uid);
+    if (key !== keyRef.current) {
+      keyRef.current = key;
+      setRefused(null);
+      setStatus('loading');
+    }
+    if (!key) {
+      if (!who.readable) {
+        // This handset could not say who is using it. That is a doubt, not an
+        // empty record, and the screens say so — "nothing of yours was refused"
+        // is the one answer that must never be invented out of a failed read.
+        setRefused(null);
+        setStatus('partial');
+        return null;
+      }
+      // Nobody is signed in, which IS knowledge: there is no account here whose
+      // refusals could exist. An empty list rather than a doubt, so a signed-out
+      // handset is not alarming about nothing.
+      setRefused([]);
+      setStatus('ready');
+      return null;
+    }
+    try {
+      const raw = await AsyncStorage.getItem(key);
+      setRefused(readRefusedMessages(raw));
+      setStatus('ready');
+    } catch (e) {
+      // An unread store is not an empty one. 'partial' is what the screens
+      // turn into the sentence saying the marks below may be incomplete.
+      setRefused(null);
+      setStatus('partial');
+      reportError('messaging.refused-read', e);
+    }
+    return key;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => { if (!cancelled) { load().catch(() => { /* reported inside */ }); } };
+    run();
+    refusedListeners.add(run);
+    return () => { cancelled = true; refusedListeners.delete(run); };
+  }, [load, authRev]);
+
+  const forget = useCallback((id: string) => {
+    const key = keyRef.current;
+    setRefused((p) => (p ? p.filter((r) => r.id !== id) : p));
+    if (!key) return;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        const next = readRefusedMessages(raw).filter((r) => r.id !== id);
+        await AsyncStorage.setItem(key, writeRefusedMessages(next));
+      } catch (e) { reportError('messaging.refused-forget', e); }
+    })();
+  }, []);
+
+  return { refused, status, forget };
+}
+
 /**
  * Performs the write for a message that was queued while there was no signal.
  *
@@ -1135,7 +1310,15 @@ export function MessageOutboxHandler(): null {
       // A payload this file cannot read is one nothing can ever send. 'refused'
       // takes it out of the queue rather than leaving it to be retried on every
       // reconnect for the life of the install.
-      if (!q) return 'refused';
+      //
+      // Recorded on the way out, with no thread and no words, because those are
+      // exactly what could not be read. It is still somebody's message and it
+      // still never went: `unaddressedRefused` counts it against the total so
+      // the per-row marks are never presented as the whole of it.
+      if (!q) {
+        await keepRefusal({ id: item.id, clientId: '', sender: 'client', body: '', at: item.at });
+        return 'refused';
+      }
       try {
         const { data, error } = await supabase.from('messages').insert({
           client_id: q.clientId, sender: q.sender, body: q.body,
@@ -1143,7 +1326,18 @@ export function MessageOutboxHandler(): null {
         }).select('id');
         const out = classifyWrite(error as any, data ? data.length : 0);
         if (out !== 'stored') {
-          if (out === 'refused') reportError('messaging.outbox', error);
+          if (out === 'refused') {
+            reportError('messaging.outbox', error);
+            // …and told to the person, which `reportError` does not do. The
+            // flush is about to drop this item, and dropping it is right — the
+            // server has answered and the answer will not change. What was
+            // wrong was that the drop also took away the only mark on the
+            // screen saying the message had not gone, leaving a row that looks
+            // exactly like a delivered one. See src/lib/refusedMessages.ts.
+            await keepRefusal({
+              id: item.id, clientId: q.clientId, sender: q.sender, body: q.body, at: item.at,
+            });
+          }
           return out;
         }
         // No push from here either, and this call site is the clearest case of

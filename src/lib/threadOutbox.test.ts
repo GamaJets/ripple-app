@@ -58,6 +58,25 @@ const w = (clientId: string, at: string): QueuedWord => ({ clientId, at });
   ok(!!two && /cannot see them yet/.test(two), 'and still says nobody has them');
 }
 
+/* ── and how long it has been waiting, which was collected and never said ── */
+
+{
+  const NOW = Date.parse('2026-09-14T12:00:00.000Z');
+  const aged = queuedThreadNote({ count: 1, oldestAt: '2026-09-12T12:00:00.000Z' }, NOW);
+  ok(!!aged && /It has been waiting 2 days\./.test(aged), 'a reply stuck on the handset for two days says so — undated it reads as one typed a moment ago');
+  const many = queuedThreadNote({ count: 3, oldestAt: '2026-09-14T09:00:00.000Z' }, NOW);
+  ok(!!many && /The oldest has been waiting 3 hours\./.test(many), 'and a thread holding several is timed by the oldest of them');
+
+  const noClock = queuedThreadNote({ count: 1, oldestAt: '2026-09-12T12:00:00.000Z' });
+  ok(!!noClock && !/waiting 2/.test(noClock), 'with no clock the age is left off rather than guessed');
+  const noStamp = queuedThreadNote({ count: 1, oldestAt: null }, NOW);
+  ok(!!noStamp && !/has been waiting/.test(noStamp), 'and a word that carried no readable stamp gets no age either');
+  const future = queuedThreadNote({ count: 1, oldestAt: '2026-09-15T12:00:00.000Z' }, NOW);
+  ok(!!future && !/has been waiting/.test(future), 'a stamp in the future is a clock disagreeing with itself, not an age');
+  const unreadable = queuedThreadNote({ count: 1, oldestAt: 'not a date' }, NOW);
+  ok(!!unreadable && !/has been waiting/.test(unreadable), 'and neither is one that will not parse');
+}
+
 /* ── 4 · stamps ────────────────────────────────────────────────────────── */
 
 {

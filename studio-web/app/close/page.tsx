@@ -122,6 +122,27 @@ import {
   closeYear, closeYears, closeYearNote, CLOSE_YEAR_UNREAD_NOTE,
   type YearMonth,
 } from '@lib/closeYear';
+/*
+ * The same year, read DOWN the column.
+ *
+ * `closeYear` reads the STATE of each month — closed, reopened, open, running —
+ * and `gym_month_closes` has carried the four filed figures, each with its own
+ * currency column since supabase/parts/2540, on every row `fetchCloses`
+ * returns. So the figures were already in this browser and nothing looked at
+ * them: an owner asking "what did we file for the year" had twelve page loads
+ * and a piece of paper, which is the question every product a gym might leave
+ * to come here answers on its first finance screen.
+ *
+ * It is not a `reduce`. Three things make a year total a lie and the module
+ * argues each: a year filed in two moneys is two figures and never one; a year
+ * with three months unsigned is nine months wearing the year's name; and a
+ * close that filed a null is a month the record could not price rather than a
+ * month worth nothing. No read, no schema change, no new dependency — the rows
+ * are the ones this page already holds.
+ */
+import {
+  closeYearFigures, yearFigureNote, figureOn, CLOSE_FIGURE_LABEL, type YearFigure,
+} from '@lib/closeYearFigures';
 // `tenants.session_fee` is stored in WHOLE units and every `*_cents` column is
 // in minor units, and the factor between them is not a hundred — it is a
 // hundred in most of the world, one in Japan and Korea, and a thousand in
@@ -921,6 +942,7 @@ function CloseYearView({ closes, closesErr, zone, nowMs, monthKey }: {
           {note ? (
             <p style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: '84ch' }}>{note}</p>
           ) : null}
+          <YearFigures months={y.months} year={y.year} />
           <div style={{ padding: '0 14px 14px' }}>
             {y.months.map((m) => (
               <CloseYearRow key={m.key} m={m} zone={zone} here={m.key === monthKey} />
@@ -929,6 +951,47 @@ function CloseYearView({ closes, closesErr, zone, nowMs, monthKey }: {
         </>
       )}
     </Section>
+  );
+}
+
+/**
+ * The four filed figures of one year, each read down its own column.
+ *
+ * Rendered ONLY inside the `y.read` arm above, which is the whole of this
+ * component's safety: `closeYearFigures` over an unread year is four columns
+ * covering nothing, and four dashes under a "Taken" heading in a year an owner
+ * could not read would be four claims about their books.
+ *
+ * `quotedText(f.q, money)` and not a formatter of its own. A year filed in two
+ * moneys prints both, side by side, in the caller's own `money()` — the same
+ * function and the same rule as the Taken tile at the top of the month, so a
+ * gym trading in dirhams and pounds reads two amounts here rather than the dash
+ * that stood on the month for so long.
+ *
+ * The sentence under each figure is the module's, not this file's. It names the
+ * months the column could not speak for and WHY — never signed off, filed with
+ * no amount, filed with no currency — because a year figure that cannot say how
+ * much of the year is in it is not a figure an accountant can do anything with.
+ */
+function YearFigures({ months, year }: { months: YearMonth[]; year: number }) {
+  const figures = closeYearFigures(months);
+  return (
+    <div
+      style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: 1, background: 'var(--ring)', borderTop: '1px solid var(--ring)',
+        borderBottom: '1px solid var(--ring)', margin: '12px 0 14px',
+      }}
+    >
+      {figures.map((f: YearFigure) => (
+        <Kpi
+          key={f.figure}
+          label={`${f.label}, filed in ${year}`}
+          text={quotedText(f.q, money)}
+          note={yearFigureNote(f, year)}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -960,6 +1023,33 @@ function CloseYearRow({ m, zone, here }: { m: YearMonth; zone: string | null; he
           <>
             Signed off {gymDateText(m.live.closedAt, zone) ?? 'on a date that could not be read'}
             {' '}by {m.live.closedByName ?? 'somebody'}.
+            {/* ── what this month actually filed ────────────────────────────
+                The four figures were on the row the whole time and only the
+                month on screen could see them, so a year could be read for its
+                sign-offs and not for its money. Each is priced by its OWN
+                currency column and the Taken one alone may fall back to the
+                pre-2540 single code — `figureOn` holds that rule, and holds it
+                in one place so this line and the year total above cannot come
+                to disagree about which column speaks for what.
+
+                A dash is a figure the close could not state — a month whose
+                payments held two moneys, or whose read did not come back — and
+                never a month that took nothing. It is the same dash the tiles
+                on the month use, for the same reason. */}
+            <span style={{ display: 'block', marginTop: 2 }}>
+              {(['taken', 'invoiced', 'outstanding', 'payroll'] as const).map((f, i) => {
+                const cell = figureOn(m.live as MonthCloseRow, f);
+                return (
+                  <span key={f}>
+                    {i ? ' · ' : ''}
+                    {CLOSE_FIGURE_LABEL[f]}{' '}
+                    <span className="mono" style={{ color: 'var(--ink2)' }}>
+                      {money(cell.amountCents, cell.currency) ?? '—'}
+                    </span>
+                  </span>
+                );
+              })}
+            </span>
           </>
         ) : null}
         {/* Every reopen, not only the latest. A month taken apart twice is two
@@ -2840,12 +2930,49 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<GymInvo
   );
   if (!rows.length) return [];
 
+  /*
+   * ── an invoice of unknown size is not an invoice of nothing ─────────────
+   *
+   * This mapped `amount_cents ?? 0`. /accounting reads the SAME column on the
+   * same console and writes `?? null` under a comment that says in as many
+   * words: "Not `?? 0`. An invoice with no amount is money of unknown size, and
+   * every total on this page refuses rather than absorbs it." One column, one
+   * console, two answers — and this is the page whose figure is written
+   * permanently into `gym_month_closes.outstanding_cents` and handed to an
+   * accountant.
+   *
+   * The zero cannot be kept here, because `GymInvoice.amountCents` is `number`
+   * and `owedOf` adds it straight into `outstandingCents`: a row the read could
+   * not price would have been billed, aged and FILED as a bill for nothing,
+   * with nothing on the sheet saying a row had been read that way.
+   *
+   * So the read fails instead, loudly. That is the honest shape on THIS page
+   * and only on this one: a failed invoice read draws "this section is unknown,
+   * not empty", is one of the five `CLOSE_PARTS`, and holds the Close button —
+   * which is exactly the right answer to "one of the invoices behind the
+   * receivables figure has no amount this console can read". A smaller
+   * receivables figure is not a smaller month, it is a wrong one.
+   *
+   * `amount_cents` is `integer not null check (amount_cents >= 0)`
+   * (supabase/parts/29) and the select above names it, so this does not fire
+   * against today's schema. It is written for the same reason the currency line
+   * below it is: "in practice" is what every money defect in this tree was made
+   * of, and the alternative branch silently files a zero.
+   */
+  const unpriced = rows.filter((r: any) => !Number.isInteger(r.amount_cents)).length;
+  if (unpriced > 0) {
+    throw new Error(
+      `${unpriced} of the ${rows.length} invoices read for this month carr${unpriced === 1 ? 'ies' : 'y'} no amount this console can read. ` +
+      'They are not treated as invoices for nothing, so no receivables figure is offered and no month is closed over them.',
+    );
+  }
+
   const names = await namesFor(rows.map((r: any) => r.member_id));
   return rows.map((r: any) => ({
     id: r.id,
     memberId: r.member_id,
     memberName: names.get(r.member_id) ?? null,
-    amountCents: r.amount_cents ?? 0,
+    amountCents: r.amount_cents,
     // Not `?? 'AED'`. The column is NOT NULL and — since supabase/parts/150 —
     // has NO DEFAULT, so a write that omits the currency is rejected and a read
     // always finds one; this branch does not fire in practice. "In practice" is

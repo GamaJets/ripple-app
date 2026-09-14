@@ -179,8 +179,32 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
       // may equally be a class that has not run — `classOutcome` puts the
       // cancellation ahead of the clock so nobody is told they hold a seat they
       // gave up.
+      //
+      // ── A correction, recorded rather than swallowed ────────────────────
+      //
+      // This line read "Cancelled — they gave the seat up, outside your gym's
+      // notice period." That clause is written down here rather than deleted,
+      // because a coach who remembers reading it needs to know it was looked at
+      // and why it went.
+      //
+      // It asserted a notice period. `cancelStanding` in src/lib/classCancel.ts
+      // returns null — and `cancel_class` (supabase/parts/3180) then files a
+      // plain 'cancelled' — when `tenants.class_cancel_hours` is NOT SET, and
+      // both say in as many words that there is no default window and there
+      // must never be one. So 'cancelled' arrives here two ways that the record
+      // cannot tell apart: a gym with a window, cancelled in time; and a gym
+      // that has never stated one, where there is no inside or outside to be.
+      // At the second the old clause invented the gym's policy and then scored
+      // the client as having met it — the exact invention that function refuses
+      // — in front of the person deciding whether to ring them.
+      //
+      // What is said instead is the only thing the status word carries: it is
+      // not the late one. That is true under both readings, it is a statement
+      // about the RECORD like every other line here, and it is the distinction
+      // a coach actually needs, because the late word is the one with a charge
+      // behind it.
       return {
-        label: 'Cancelled — they gave the seat up, outside your gym’s notice period.',
+        label: 'Cancelled — they gave the seat up. It is not recorded as a late cancellation.',
         tone: 'quiet',
       };
     case 'late_cancelled':

@@ -330,6 +330,37 @@ const tap = (p: Provider, unit: WeightUnit) => {
   eq(p.store.get(`${UNIT_CACHE_PREFIX}${A}`), '{"weightUnit":"lb"}', 'and still write nothing');
 }
 
+/* ── a tap before the read lands is on screen and is not kept ────────────── */
+//
+// The window is short and the loss is real, so it is stated rather than left to
+// be inferred from the gate. What makes it the cheaper side is the SECOND
+// answer: `set` computes the blob from the whole of its state, so a tap on the
+// weight before this key has been read would write a blob with no length in it
+// over a key that holds one — a choice destroyed in order to store another.
+{
+  const p: Provider = {
+    store: new FakeStore(), cache: unitCache(null), weight: null, length: null, cached: NO_CACHED_UNITS,
+  };
+  p.store.set(`${UNIT_CACHE_PREFIX}${A}`, '{"weightUnit":"lb","lengthUnit":"in"}');
+
+  // A signs in. The read of their key has been started and has not come back.
+  account(p, A);
+  ok(!mayWriteCache(p.cache), 'before the read lands this handset may not be written to');
+  tap(p, 'kg');
+  eq(p.weight, 'kg',
+    'the tap moves the control at once — a unit that does not change when it is tapped is a control nobody trusts');
+  eq(p.store.get(`${UNIT_CACHE_PREFIX}${A}`), '{"weightUnit":"lb","lengthUnit":"in"}',
+    'and NOTHING is written: the blob `set` would compute names no length, so keeping the tap would erase a height this launch has not read');
+
+  // The read lands. The tap survives it, and so does the unread length.
+  readCache(p);
+  eq(p.weight, 'kg', 'the tap survives the read that overtakes it');
+  eq(p.length, 'in', 'and the length A chose on an earlier launch comes back off their own key');
+  tap(p, 'lb');
+  eq(p.store.get(`${UNIT_CACHE_PREFIX}${A}`), '{"weightUnit":"lb","lengthUnit":"in"}',
+    'and the next tap keeps BOTH answers, because by now both are known');
+}
+
 /* ── a write for the wrong account is refused ────────────────────────────── */
 {
   const p: Provider = {

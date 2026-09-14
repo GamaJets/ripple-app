@@ -13,8 +13,18 @@
 //
 // So weightUnit and lengthUnit now follow the account (clients.weight_unit /
 // clients.length_unit, part 61), with AsyncStorage kept as the cache that makes
-// the first paint right and as the only store when there is no session or the
-// backend is off. The push toggle is deliberately left device-local.
+// the first paint right and as the store that carries a choice through a
+// refused update or a dead gym network. The push toggle is deliberately left
+// device-local.
+//
+// That cache is keyed by ACCOUNT — `repple.units:<uid>`, src/lib/unitCache.ts —
+// and this sentence used to end "and as the only store when there is no session
+// or the backend is off". It no longer does, and the change is deliberate
+// rather than an oversight: with nobody signed in there is no account to scope
+// a key to, so nothing is written at all. A unit tapped before anybody signs in
+// is on screen for that session and is not kept. The alternative is the
+// unqualified key this repair exists to end, where what is kept is inherited by
+// whoever signs in next.
 //
 // ── The notification toggles used to be scenery ────────────────────────────
 //
@@ -768,11 +778,22 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // one case it would not exist.
     if (patch.weightUnit !== undefined || patch.lengthUnit !== undefined) {
       const store = unitStore.current;
-      const blob = mayWriteCache(store)
-        ? cachedUnitsBlob({ weightUnit: next.weightUnit, lengthUnit: next.lengthUnit })
-        : null;
-      if (mayWriteCache(store) && blob != null) {
-        AsyncStorage.setItem(store.key, blob).catch((e: unknown) => reportError('settings.units.cache.write', e));
+      // Not hydrated is a REFUSAL, and the cost of it is a real one: a member
+      // who taps a unit in the moment between an account change and that
+      // account's key coming back sees the tap on screen and does not keep it.
+      // That is the smaller loss. The blob written here is computed from the
+      // whole of `next`, so a tap on the weight before the read lands would
+      // write `{"weightUnit":"kg"}` over a key that holds a LENGTH this launch
+      // has not looked at — destroying a second answer in order to store the
+      // first.
+      if (mayWriteCache(store)) {
+        // Never null on this path — `SettingsPatch` cannot express a null unit,
+        // so `next` holds at least one — but a null means REMOVE THE KEY and
+        // removing is not what a tap does. Checked rather than assumed.
+        const blob = cachedUnitsBlob({ weightUnit: next.weightUnit, lengthUnit: next.lengthUnit });
+        if (blob != null) {
+          AsyncStorage.setItem(store.key, blob).catch((e: unknown) => reportError('settings.units.cache.write', e));
+        }
       }
     }
     // Only the unit columns go up. The notification preference now reaches the server: it is applied to `push_tokens`, so a handset that opted out receives nothing whatever a sending screen believes

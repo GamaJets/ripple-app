@@ -31,6 +31,14 @@
 //           why a queued message may be described as waiting rather than as
 //           failed.
 //
+//           That drop used to be the END of the refused message, which made
+//           this file's own sentence load-bearing in a way it could not carry:
+//           the mark came off the row and the row then read as delivered.
+//           src/lib/refusedMessages.ts is the record that catches it, and the
+//           two marks are drawn together on the same row because a coach who
+//           typed twice may have had the first refused and the second still
+//           waiting.
+//
 // ── What is deliberately NOT done ─────────────────────────────────────────
 //
 // THE PREVIEW LINE IS NOT REWRITTEN. A queued message is not the last thing
@@ -49,6 +57,7 @@
 // The state is src/ui/outbox.tsx and the narrowing is `asQueuedMessage` in
 // src/ui/messaging.ts, which stays the only place that reads a stored payload.
 import type { LoadStatus } from '../ui/loadStatus';
+import { waitedLabel } from './awaitingReply';
 import { num } from './format';
 
 /**
@@ -121,12 +130,52 @@ export function queuedTotal(words: readonly QueuedWord[]): number {
  *
  * Says the count and says it is NOT delivered, in that order, because the
  * count alone reads as a badge and a badge on a messaging list means unread.
+ *
+ * ── AND HOW LONG IT HAS BEEN THERE ────────────────────────────────────────
+ *
+ * `oldestAt` was collected and never said, which made every queued reply read
+ * as one typed a moment ago. They are not the same fact and a coach acts on
+ * them differently: a message written ninety seconds ago on a train is the
+ * queue working, and one that has been on the handset since Tuesday is a flush
+ * that has been failing for four days against a client who has heard nothing.
+ * This is the same defect `threadWhen` in src/lib/coachThreads.ts refuses on the
+ * server's side — an undated message reads as "just now" — arriving through a
+ * mark instead of through a timestamp.
+ *
+ * @param now the reader's clock, which must MOVE: this screen is an
+ *        `href: null` tab that mounts once, so a `Date.now()` frozen at first
+ *        paint would hold the age at whatever it was when Messages was first
+ *        opened. The call sites pass `useNow()`.
+ *
+ *        Omitted, or handed a thread whose words carried no readable stamp, the
+ *        age is left OFF rather than guessed. `waitedLabel` would answer "some
+ *        time" for a negative or unreadable span, and a sentence that says that
+ *        on every row is one nobody reads on the morning it matters.
  */
-export function queuedThreadNote(q: QueuedForThread | undefined | null): string | null {
+export function queuedThreadNote(q: QueuedForThread | undefined | null, now?: number): string | null {
   if (!q || q.count <= 0) return null;
-  return q.count === 1
+  const head = q.count === 1
     ? 'One reply is waiting to send from this phone. They cannot see it yet.'
     : `${q.count} replies are waiting to send from this phone. They cannot see them yet.`;
+  const held = heldForClause(q.oldestAt, now, q.count);
+  return held ? `${head} ${held}` : head;
+}
+
+/** "It has been waiting 2 days." / "The oldest has been waiting 2 days." — or
+ *  null, which is every case where the span is not known to be real. */
+function heldForClause(oldestAt: string | null, now: number | undefined, count: number): string | null {
+  if (!oldestAt || now === undefined || !Number.isFinite(now)) return null;
+  const t = Date.parse(oldestAt);
+  if (!Number.isFinite(t)) return null;
+  const ms = now - t;
+  // A stamp in the future is a clock that disagrees with itself, not an age.
+  // `waitedLabel` would say "some time", which on a queue mark reads as though
+  // something is wrong with the message rather than with the clock.
+  if (ms < 0) return null;
+  const label = waitedLabel(ms);
+  return count === 1
+    ? `It has been waiting ${label}.`
+    : `The oldest has been waiting ${label}.`;
 }
 
 /**

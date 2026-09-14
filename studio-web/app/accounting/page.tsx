@@ -132,7 +132,28 @@ import {
   fetchMarks, markException, clearMark, markBlocker, partitionByMark, markKey,
   type MarkIndex, type MarkState, type ReconcileMark,
 } from '@lib/gymReconcile';
-import { toCsv } from '@lib/gymExport';
+/*
+ * `minorToDecimal` beside `toCsv`, and the reason is the whole of the export
+ * below.
+ *
+ * Every amount in this file left in MINOR UNITS alone. That is the honest
+ * storage denomination and it is the wrong one to hand somebody: reading
+ * `50000` requires knowing how many places the money has, and the factor is not
+ * a hundred — it is a hundred in most of the world, NONE in Japan and Korea,
+ * and a THOUSAND in Kuwait and Bahrain. A Tokyo gym's ¥50,000 line was read as
+ * ¥500 by anybody who assumed two places, and a Kuwaiti gym's KWD 50.000 as
+ * KWD 500.00. There is nothing on the row that says which, and the file is
+ * opened weeks later by somebody who was not in the room.
+ *
+ * /close's export was repaired for exactly this and its comment says so at
+ * length; this page — the other month-end file, and the one headed "the form
+ * you hand to whoever files it" — never was. `minorToDecimal` asks the ROW's
+ * own currency how many places it has and returns an EMPTY cell where nobody
+ * said, never a number in no currency at all. The stored integer stays in its
+ * own column beside it, because that is what the database holds and what
+ * `parseMoneyCents` reads back on a re-import.
+ */
+import { toCsv, minorToDecimal } from '@lib/gymExport';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 // A figure quoted per currency, side by side, that says how many of its rows it
 // could not speak for. See the block below `sumOf` for the two figures this
@@ -1565,7 +1586,42 @@ function Registration({ read, rows, w, tenantId, me, onChange }: {
   );
 
   const draft: TaxStandingDraft = { status, registration, fromOn, toOn };
-  const blockers = standingBlockers(draft, rows);
+  /*
+   * ── the overlap check cannot fire over a read that did not come back ────
+   *
+   * `rows` is `books.standings.rows ?? []` — the null-erased prop — and
+   * `standingBlockers`' own doc comment names the hole this opens: "A refused
+   * read passes an empty list, which means the overlap check cannot fire — so
+   * the database's exclusion constraint is the one that actually holds the line
+   * and this is the half that explains it while somebody is still typing."
+   *
+   * That half was not being supplied. Twelve lines up `registrationDuring` is
+   * handed the NULL-preserving `read.rows` with the read's state beside it, so
+   * the section body says out loud that the history could not be read — and
+   * directly under that sentence this form reported no conflict and took the
+   * period, because zero rows overlap nothing. The form is rendered outside the
+   * `<Part>` guard on purpose (an owner with no history at all still has to be
+   * able to record the first period), so it is fully reachable in that state.
+   *
+   * Then `save` printed "Recorded. Every period this covers now carries that
+   * answer" — a claim about a record this console had not read. The best case
+   * is a 23P01 from the exclusion constraint arriving after the form has
+   * closed, with a message nobody can act on; the worse case is a gym whose
+   * periods genuinely did not overlap being told nothing while a real
+   * disagreement about which days it was registered goes into the file the
+   * accountant works from.
+   *
+   * So an unread history is its own blocker, first in the list, and it says
+   * which silence it is. 'loading' and 'failed' are both here: a form submitted
+   * in the second before the read lands is the same write over the same
+   * absence of evidence.
+   */
+  const historyUnread = read.state === 'failed'
+    ? `What this gym has already said about its registration could not be read${read.why ? `: ${read.why}` : ''}. A period recorded now cannot be checked against the ones already stored, and two statements about one day are two answers — so nothing is recorded until that read comes back.`
+    : read.state === 'loading'
+    ? 'Still reading what this gym has already said about its registration. A period recorded before that lands cannot be checked for an overlap with it.'
+    : null;
+  const blockers = [...(historyUnread ? [historyUnread] : []), ...standingBlockers(draft, rows)];
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1691,8 +1747,14 @@ function Registration({ read, rows, w, tenantId, me, onChange }: {
             <button type="button" style={linkBtn} onClick={() => { setOpen(false); setErr(null); }}>Leave it</button>
           </div>
           {/* Every reason at once rather than the first one, so somebody who
-              has left three fields wrong is not corrected three times. */}
-          {(fromOn || registration) && blockers.length ? (
+              has left three fields wrong is not corrected three times.
+
+              `historyUnread ||` on the front of the gate: the other blockers
+              are about what somebody has typed and there is nothing to say
+              until they have typed it, but a disabled Record button over an
+              unread history needs its sentence the moment the form opens — or
+              it is a control that refuses and will not say why. */}
+          {(historyUnread || fromOn || registration) && blockers.length ? (
             <ul style={{ margin: '0 14px 12px', paddingLeft: 18, fontSize: 12.5, color: 'var(--warn)', maxWidth: '76ch' }}>
               {blockers.map((b) => <li key={b} style={{ marginBottom: 4 }}>{b}</li>)}
             </ul>
@@ -1893,7 +1955,28 @@ function Filed({ read, rows, w, zone, tenantId, me, onChange }: {
     } finally { setBusy(false); }
   };
 
+  /*
+   * The removal is confirmed, and it was one press.
+   *
+   * `deleteFiling` is a HARD delete — the row is gone, and with it the only
+   * evidence in this product that a return covering these months was ever
+   * submitted, including its reference and who filed it. Everything else on
+   * these two screens that takes a fact off the record asks first: voiding an
+   * invoice opens a box and refuses to write until a reason is typed, closing a
+   * month takes a second press, and /costs confirms before removing one £40
+   * line. This was a link in a table row, beside five other rows, on the page
+   * an accountant works from.
+   *
+   * A step rather than a typed reason, and the difference is deliberate. The
+   * commonest removal is the ordinary typo — a quarter keyed with the wrong
+   * year — and its only repair IS removing the row; making somebody write a
+   * sentence to undo their own slip is how a confirmation becomes a thing
+   * people click through. What it must not be is one press.
+   */
+  const [removing, setRemoving] = useState<string | null>(null);
+
   const remove = (f: TaxFiling) => {
+    setRemoving(null);
     deleteFiling(supabase, f.id)
       .then(() => { setErr(null); setSaved(`That record has been removed. It is the record that has gone, not the filing — if the return really was submitted, record it again with the right details.`); onChange(); })
       .catch((e: any) => setErr(writeFailedText(e, {
@@ -1921,12 +2004,24 @@ function Filed({ read, rows, w, zone, tenantId, me, onChange }: {
         ? <span className="mono">{f.reference}</span>
         : <span className="dash">none recorded</span>) },
     { key: 'remove', header: '', align: 'right', value: () => null,
-      render: (f) => (
-        <button type="button" className="no-print" style={linkBtn} onClick={() => remove(f)}
+      render: (f) => (removing === f.id ? (
+        <span className="no-print" style={{ whiteSpace: 'nowrap' }}>
+          <button type="button" style={linkBtn} onClick={() => remove(f)}
+                  aria-label={`Yes, permanently remove the record of what was filed on ${f.filedOn}`}>
+            Yes, remove it
+          </button>
+          {' · '}
+          <button type="button" style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={() => setRemoving(null)}>
+            Keep it
+          </button>
+        </span>
+      ) : (
+        <button type="button" className="no-print" style={linkBtn}
+                onClick={() => { setErr(null); setSaved(null); setRemoving(f.id); }}
                 aria-label={`Remove the record of what was filed on ${f.filedOn}`}>
           Remove
         </button>
-      ) },
+      )) },
   ];
 
   return (
@@ -1975,6 +2070,20 @@ function Filed({ read, rows, w, zone, tenantId, me, onChange }: {
               </>
             ) : null}
           </p>
+          {/* The sentence under the second press. Said once, above the table,
+              rather than as a caption inside a row: what goes is the only
+              evidence in this product that these months were answered for, and
+              a reader has to see that before the second click and not after
+              it. */}
+          {removing ? (
+            <Banner tone="warn">
+              <strong style={{ color: 'var(--ink)' }}>This removes the record permanently.</strong>{' '}
+              The reference, who filed it and the period it covers all go, and every month it
+              covered reads afterwards as a month nobody has answered for &mdash; which is what this
+              section is for. It does not unfile anything with any authority. If the return really
+              was submitted, record it again with the right details.
+            </Banner>
+          ) : null}
           <DataTable noun="recorded filings"
             rows={showAll ? rows : periodRows} columns={cols} rowKey={(f) => f.id}
             empty={rows.length
@@ -2692,26 +2801,37 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
      */
     parts.push(head('SUMMARY — the figures on this page'));
     parts.push(toCsv(
-      ['Figure', 'Currency', 'Amount (minor units)', 'Rows in this amount', 'What this figure covers'],
+      ['Figure', 'Currency', 'Amount', 'Amount (minor units)', 'Rows in this amount', 'What this figure covers'],
       sums.flatMap(({ label, sum, read }) => {
         if (read && read.state) {
-          return [[label, 'not read', 'not read', 'not read',
+          return [[label, 'not read', 'not read', 'not read', 'not read',
             unreadable(`this figure's rows`, read.state, read.why).trim()]];
         }
         return sum.q.pots.length
-          ? sum.q.pots.map((pot) => [label, pot.currency, pot.minorUnits, pot.count, sum.note])
-          : [[label, 'no figure', 'no figure', sum.q.rows, sum.note]];
+          ? sum.q.pots.map((pot) => [
+              label, pot.currency,
+              minorToDecimal(pot.minorUnits, pot.currency), pot.minorUnits,
+              pot.count, sum.note,
+            ])
+          : [[label, 'no figure', 'no figure', 'no figure', sum.q.rows, sum.note]];
       }),
     ));
     parts.push('\nEach line is one currency. Two lines for one figure are two amounts of money and not an amount to add up: this app holds no rate between them.\n');
+    // Said once, at the top, for every table below. "Amount" is the figure as a
+    // person writes it; "Amount (minor units)" is the integer the database
+    // holds. How many places separate them is a fact about the currency on the
+    // row — none for a yen, three for a dinar — and an empty Amount cell means
+    // this file will not guess which, not that the amount is nothing.
+    parts.push('Every table below states each amount twice: "Amount" as it is written, and "Amount (minor units)" as the database stores it. How many decimal places lie between the two is a property of the currency on that row — none for JPY, two for GBP, three for KWD — so neither column may be derived from the other by assuming a hundred. An empty "Amount" cell means the row states no currency this file could scale it by; the stored integer beside it is still exact.\n');
 
     parts.push(head('MONEY IN — payments recorded in the month'));
     parts.push(books.payments.state !== null
       ? unreadable('the payments taken', books.payments.state, books.payments.why)
       : toCsv(
-          ['Taken at', 'Member', 'Amount (minor units)', 'Currency', 'Method', 'Kind', 'Note'],
+          ['Taken at', 'Member', 'Amount', 'Amount (minor units)', 'Currency', 'Method', 'Kind', 'Note'],
           payments.map((p) => [
-            p.takenAt, p.memberName, p.amountCents, p.currency,
+            p.takenAt, p.memberName,
+            minorToDecimal(p.amountCents, p.currency), p.amountCents, p.currency,
             (p.method ?? '').replace('_', ' '), p.kind, p.note,
           ]),
           false));
@@ -2720,10 +2840,11 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
     parts.push(books.settled.state !== null
       ? unreadable('the payroll settlements', books.settled.state, books.settled.why)
       : toCsv(
-          ['Settled at', 'Trainer', 'Period from', 'Period to', 'Amount (minor units)', 'Currency', 'Sessions', 'Method'],
+          ['Settled at', 'Trainer', 'Period from', 'Period to', 'Amount', 'Amount (minor units)', 'Currency', 'Sessions', 'Method'],
           settled.map((r) => [
             r.settledAt, r.trainerName, r.periodFrom, r.periodTo,
-            r.amountCents, r.currency, r.sessionsCount, r.method,
+            minorToDecimal(r.amountCents, r.currency), r.amountCents,
+            r.currency, r.sessionsCount, r.method,
           ]),
           false));
 
@@ -2776,10 +2897,11 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
     parts.push(books.costs.state !== null
       ? unreadable('the recorded costs', books.costs.state, books.costs.why)
       : toCsv(
-          ['Paid on', 'What for', 'Paid to', 'Category', 'Amount (minor units)', 'Currency', 'Note', 'Receipt on file'],
+          ['Paid on', 'What for', 'Paid to', 'Category', 'Amount', 'Amount (minor units)', 'Currency', 'Note', 'Receipt on file'],
           (books.costs.rows ?? []).map((c) => [
             c.paidOn, c.description, c.supplier, gymCostCategoryLabel(c.category),
-            c.amountCents, c.currency, c.note, receiptCell(c.id),
+            minorToDecimal(c.amountCents, c.currency), c.amountCents,
+            c.currency, c.note, receiptCell(c.id),
           ]),
           false));
     parts.push(`\n${RECEIPT_IS_NOT_A_CHECK_NOTE}\n`);
@@ -2792,10 +2914,11 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
           // one fact: a row reading `written_off` with an empty cell beside it
           // is a figure an accountant has to come back and ask about, and the
           // point of supabase/parts/2642 is that the answer is on the row.
-          ['Number', 'Issued', 'Due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status', 'Note', 'Not collected because'],
+          ['Number', 'Issued', 'Due', 'Billed to', 'Amount', 'Amount (minor units)', 'Currency', 'Status', 'Note', 'Not collected because'],
           raised.map((i) => [
             i.number, i.issuedOn, i.dueOn, i.memberName,
-            i.amountCents, i.currency, i.status, i.note,
+            minorToDecimal(i.amountCents, i.currency), i.amountCents,
+            i.currency, i.status, i.note,
             whyNotCollected(i.id, i.status),
           ]),
           false));
@@ -2804,11 +2927,13 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
     parts.push(books.invoices.state !== null
       ? unreadable('the invoice register', books.invoices.state, books.invoices.why)
       : toCsv(
-          ['Number', 'Issued', 'Due', 'Days past due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status'],
+          ['Number', 'Issued', 'Due', 'Days past due', 'Billed to', 'Amount', 'Amount (minor units)', 'Currency', 'Status'],
           outstanding.map((i) => [
             i.number, i.issuedOn, i.dueOn,
             i.dueOn ? daysPast(i.dueOn, asAt) : null,
-            i.memberName, i.amountCents, i.currency, i.status,
+            i.memberName,
+            minorToDecimal(i.amountCents, i.currency), i.amountCents,
+            i.currency, i.status,
           ]),
           false));
 

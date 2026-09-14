@@ -69,7 +69,7 @@
 // for "I want this to stop"; a long press on a bubble is for "look at THIS",
 // and it is the one that files a report carrying the message itself — copied
 // into the report row, so deleting the message afterwards cannot empty it.
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, Pressable, ScrollView, Image, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -78,7 +78,7 @@ import { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Flag, Ghost } from '../../src/ui/kit';
+import { Rule, Flag, Ghost, Notice } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import {
   HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE, HAS_NATIVE_CLIPBOARD, copyToClipboard,
@@ -105,8 +105,21 @@ import {
 } from '../../src/lib/threadSafety';
 import {
   useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
+  useRefusedMessages,
   type AttachSource, type PendingAttachment, type ThreadMessage,
 } from '../../src/ui/messaging';
+// The words this phone typed that the server declined. Not a bubble and not a
+// queue: `flush` drops a refused item, so the merge in `useThread` stops
+// producing its bubble and the member watches their own message disappear off
+// the screen with nothing said. See src/lib/refusedMessages.ts.
+import { refusedBodyNote, refusedForThread } from '../../src/lib/refusedMessages';
+// Finding something in a conversation that is months long. Nothing new is read
+// — the messages are already in memory — and the whole of the honesty is the
+// sentence saying WHAT was searched, because this screen holds the recent end
+// of the thread and not the thread. See src/lib/threadSearch.ts.
+import {
+  searchThread, threadSearchA11y, threadSearchActive, threadSearchLine,
+} from '../../src/lib/threadSearch';
 import { BACK_ICON } from '../../src/ui/direction';
 
 /** The clip itself. Split into its own component so the player hook receives a
@@ -306,6 +319,61 @@ export default function Messages() {
     canSend,
     them: OTHER,
   });
+
+  /**
+   * ── THE MESSAGES THAT WERE REFUSED ───────────────────────────────────────
+   *
+   * A queued message is drawn as a bubble by `useThread`'s merge, marked
+   * 'queued', and the line under it says nobody has it yet. When the flush
+   * meets a REFUSAL the item leaves the outbox — which is right, the server has
+   * answered and will answer the same way again — and the bubble leaves with
+   * it. The member sees their message vanish. Nothing tells them, and the
+   * likeliest cause on this side is the one they would most want to know
+   * about: their coach has blocked them (part 240), or the coaching link has
+   * ended.
+   *
+   * So the words are kept and put back here, above the composer rather than in
+   * the thread, because they are NOT in the conversation and drawing them as a
+   * bubble would be the same claim the queue's own mark exists to avoid.
+   *
+   * Only this thread's. A client has one coach, so in practice that is all of
+   * them — but the store is keyed by account and not by thread, and filtering
+   * by the key this screen actually settled on is what keeps it true if that
+   * ever stops being the case.
+   */
+  /**
+   * ── FINDING SOMETHING THEY SAID ──────────────────────────────────────────
+   *
+   * The answer to "what did they say about my knee" lives in this thread and
+   * there was no way to look for it. Every competitor searches message content;
+   * app/(trainer)/messages.tsx searches client NAMES and this screen searched
+   * nothing.
+   *
+   * Off by default and behind a control, because a chat screen opens to the
+   * newest message and a search field at the top of it would be the first thing
+   * a member reads every time.
+   */
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const searchOn = searching && threadSearchActive(query);
+  /**
+   * The bubbles that are drawn.
+   *
+   * `msgs` is left alone and is still what `receipt` and `waiting` are computed
+   * from above: a member searching their own thread has not read anything new
+   * and has not stopped waiting for a reply, and filtering the list must not
+   * change either claim.
+   */
+  const found = useMemo(() => (searchOn ? searchThread(msgs, query) : msgs), [searchOn, msgs, query]);
+  const searchLine = searchOn
+    ? threadSearchLine({ query, matched: found.length, searched: msgs.length, hasOlder, status })
+    : null;
+
+  const refusedRecord = useRefusedMessages();
+  const refusedHere = useMemo(
+    () => refusedForThread(refusedRecord.refused ?? [], threadId),
+    [refusedRecord.refused, threadId],
+  );
 
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
@@ -521,6 +589,17 @@ export default function Messages() {
             moderation path somebody has to go looking for is one they use after
             it has already gone wrong. The icon carries no status colour — the
             state is said in words under the composer. */}
+        {/* Searching this conversation. Beside the safety control rather than
+            above the thread, so the screen still opens to the newest message.
+            Closing it clears the query — a field left holding a word the member
+            cannot see is a conversation that looks half-missing next time. */}
+        <Pressable onPress={() => setSearching((v) => { if (v) setQuery(''); return !v; })}
+          accessibilityRole="button" hitSlop={8}
+          accessibilityState={{ selected: searching }}
+          accessibilityLabel={searching ? 'Stop searching this conversation' : 'Search this conversation'}
+          style={{ width: 34, height: 34, borderRadius: radius.md, backgroundColor: searching ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="search" size={16} color={searching ? t.brandInk : t.ink2} />
+        </Pressable>
         <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
           accessibilityLabel={blockActionLabel(safety.state, OTHER)}
           accessibilityHint="Block this conversation, or report a message in it"
@@ -529,6 +608,33 @@ export default function Messages() {
         </Pressable>
       </View>
       <Rule />
+      {/* ── the search field ──────────────────────────────────────────────
+          Drawn only while the control above is on. The sentence under it is the
+          important half and is never withheld: this screen holds the recent end
+          of a conversation that may be much longer, and "no match" said over a
+          prefix is a claim about the whole thread. */}
+      {searching ? (
+        <View style={{ paddingHorizontal: G, paddingTop: sp.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
+            <Icon name="search" size={16} color={t.ink3} />
+            <TextInput
+              value={query} onChangeText={setQuery} autoFocus
+              placeholder="Find a word in this conversation" placeholderTextColor={t.ink3}
+              autoCapitalize="none" autoCorrect={false}
+              accessibilityLabel="Find a word in this conversation"
+              style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+            {query ? (
+              <Pressable onPress={() => setQuery('')} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel="Clear the search">
+                <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {searchLine ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{searchLine}</Text>
+          ) : null}
+        </View>
+      ) : null}
       {/* The compose bar is lifted by measurement rather than by
           KeyboardAvoidingView, which under-lifted it by the height of the
           navigator header and left the keyboard sitting over the field you were
@@ -739,6 +845,30 @@ export default function Messages() {
             <Flag tone={t.warn}>{blockNote}</Flag>
           </View>
         ) : null}
+        {/* ── what did not go, and the words it was ─────────────────────────
+            One notice per refused message, because each one carries different
+            words and a person may want to send one again and not the other.
+            The body is selectable: this is the only copy of it left anywhere,
+            and Dismiss is the only thing that removes it — nothing expires
+            these, because nothing else will ever raise them again. */}
+        {refusedHere.map((r) => (
+          <View key={r.id} style={{ paddingHorizontal: G, paddingTop: sp.md }}>
+            <Notice
+              tone={t.crit}
+              kicker="Not delivered"
+              title="This message was refused"
+              note={refusedBodyNote(r, now.getTime())}
+            >
+              {r.body.trim() ? (
+                <Text selectable style={{ ...ty.body, color: t.ink, marginTop: sp.md }}>{r.body}</Text>
+              ) : null}
+              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+                <Ghost label="Dismiss" onPress={() => refusedRecord.forget(r.id)}
+                  a11yLabel="Dismiss this refused message. The words will not be kept." />
+              </View>
+            </Notice>
+          </View>
+        ))}
         <View ref={barRef} style={{ flexDirection: 'row', gap: sp.sm, paddingHorizontal: G, paddingVertical: sp.md, backgroundColor: t.bg, alignItems: 'center' }}>
           <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={8}
             style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>

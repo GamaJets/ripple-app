@@ -107,15 +107,25 @@ export async function readFoodText(text: string): Promise<FoodRead | null> {
   }
 }
 
-/**
- * The foods alone, for callers that have no words for the four outcomes yet.
+/*
+ * `parseFoodText` stood here and is gone, deliberately.
  *
- * An empty array is now returned where this used to return `null`: the reader
- * read the description and named no food in it, which is a read that worked.
- * Callers that test the array's length behave exactly as they did; the one
- * that wants to tell a member WHICH thing happened calls `readFoodText`.
+ * It returned the foods alone — `read.ok ? read.items : null` — and existed for
+ * one reason: to let the two describe-a-meal screens keep working while the four
+ * outcomes above were being separated, without changing them in the same edit.
+ * That is a migration scaffold, and the migration is finished: `foodlog.tsx` and
+ * `nutrition.tsx` both call `readFoodText` and both say which of the four
+ * happened.
+ *
+ * It is deleted rather than kept, because what it does is precisely the collapse
+ * this file was rewritten to undo. Its `null` meant four different things at
+ * once — nothing answered, the answer would not parse, the answer was the wrong
+ * shape, and the reader read the description and found no food in it. Only the
+ * last of those is something a member can act on, and a screen reaching for the
+ * short wrapper would silently lose that distinction again with nothing to say
+ * it had. A convenience that can only be used wrongly is not a convenience.
+ *
+ * If a future caller genuinely wants the foods and nothing else, the honest
+ * spelling is two lines at the call site against `readFoodText`, where the
+ * discarded reason is visible in the code doing the discarding.
  */
-export async function parseFoodText(text: string): Promise<ParsedFood[] | null> {
-  const read = await readFoodText(text);
-  return read && read.ok ? read.items : null;
-}
