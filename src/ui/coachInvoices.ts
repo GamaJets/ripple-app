@@ -41,6 +41,10 @@
 // void_coach_invoice() in part 138, which raises when it updates no row. What
 // reaches this file is an error message a coach can read.
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. `getUser()`
+// resolves rather than rejects on a dropped connection, so an outage arrives as
+// the same null user a sign-out does — see src/lib/authReadFate.ts.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
@@ -181,9 +185,23 @@ export async function fetchMyInvoices(): Promise<{ rows: CoachInvoice[]; status:
 export async function fetchInvoiceIssuer(): Promise<{ name: string | null; status: LoadStatus }> {
   if (!USE_SUPABASE) return { name: null, status: 'ready' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { name: null, status: 'error' };
+    // The error beside this call was discarded, so an outage and a sign-out
+    // both arrived as `uid === undefined` (src/lib/authReadFate.ts). The
+    // OUTCOME was already the cautious one and stays exactly as it was —
+    // 'error', which the document builder prints as "could not be read" rather
+    // than putting the platform's name where a business name belongs. What was
+    // missing is that an outage left no trace anywhere: the return type has
+    // room for two answers and the third had nowhere to go. `signedInUid`
+    // reports it under this key, so a coach who cannot issue an invoice leaves
+    // a record of why.
+    //
+    // Both fates stay 'error' deliberately. On a financial document a coach who
+    // is genuinely signed out has no name to print either, and "try again in a
+    // moment" is recoverable where a wrong From line on an immutable document
+    // is not.
+    const who = await signedInUid('coachInvoices.issuer');
+    if (who.fate !== null) return { name: null, status: 'error' };
+    const uid = who.uid;
     const { data, error } = await supabase.from('profiles').select('full_name').eq('id', uid).limit(1);
     if (error) { reportError('coachInvoices.issuer', error); return { name: null, status: 'error' }; }
     const rows = (data ?? []) as { full_name: string | null }[];
@@ -285,9 +303,18 @@ export interface InvoiceCurrency {
 export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
   if (!USE_SUPABASE) return { currency: null, source: null, status: 'ready', gap: null };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+    // Same repair, same reasoning, and here the answer this branch already
+    // gave happens to be the exactly right word: `gap: 'unreadable'`. It was
+    // being returned for a signed-out coach too, which overstated that case —
+    // but it is the honest one for the outage that used to arrive dressed as
+    // it, and the house rule for this file is that the currency is never
+    // assumed. An invoice cannot be issued while this is unknown, which is the
+    // intended outcome: the number comes out of a gapless per-coach sequence
+    // and the document is immutable once issued, so a retry is recoverable and
+    // a wrong three letters is not.
+    const who = await signedInUid('coachInvoices.currency');
+    if (who.fate !== null) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+    const uid = who.uid;
 
     const [pkgRes, profRes] = await Promise.all([
       supabase.from('trainer_packages').select('currency').eq('trainer_id', uid).limit(capLimit()),

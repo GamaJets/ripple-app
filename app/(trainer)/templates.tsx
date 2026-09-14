@@ -39,6 +39,25 @@
 // excluded from the write, and the button says "Assign to 7 of 8". Nobody is
 // silently skipped — a bulk assign that quietly dropped somebody would be worse
 // than one that refused, because the coach would believe they had sent it.
+//
+// ── And the third answer the gate had no word for ──────────────────────────
+//
+// Applying the gate was not enough, because what reached it had already been
+// flattened. A HAND-ADDED client — a `coach_clients` row the coach typed in, no
+// account, no app — is found in the roster, so the disclosures read 'ready';
+// their `injuries` is `undefined`, which src/ui/roster.tsx leaves undefined on
+// purpose because undefined is "nobody has ever asked this person" and `[]` is
+// "they were asked and said none"; and `(c?.injuries ?? [])` turned the first
+// into the second. `guardInjuries` returns ALLOWED on an empty list. So the
+// person on the book with the LEAST known about them opened the programme gate
+// most easily, and the screen's silence read as an all-clear.
+//
+// The three states are now told apart in src/lib/disclosureFact.ts and each has
+// a sentence. The assign is NOT withheld for a hand-added client — that is the
+// ordinary use of Add Client and refusing it would be a worse product than the
+// defect — but it is no longer made in silence: their row says nobody has ever
+// asked them, the sheet says it above the list, and the alert the coach
+// confirms names them.
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -66,8 +85,7 @@ import {
   type AssignTarget, type WriteOutcome,
 } from '../../src/lib/bulkActions';
 import { assignCtaLabel } from '../../src/lib/assignPicker';
-import type { LoadStatus } from '../../src/ui/loadStatus';
-import type { Injury } from '../../src/lib/injuries';
+import { disclosureFact, neverAskedBrief, type DisclosureFact } from '../../src/lib/disclosureFact';
 import { BACK_ICON, FORWARD_CHAR } from '../../src/ui/direction';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useProgrammeLibrary } from '../../src/ui/workoutTemplates';
@@ -151,33 +169,52 @@ export default function Templates() {
   const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setStartsOn(''); setAssignTpl(tpl); };
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
 
-  // ── One ticked client, as both guards need to see them ───────────────────
+  // ── What this screen actually knows about one person's injuries ──────────
   //
-  // `disclosures` is how the read of THIS person's own injury list went, and is
-  // a different question from how the acknowledgement read went. A client the
-  // roster never produced has an empty injury list for exactly the same reason
-  // a healthy client does, so only the status separates them — and a gate that
-  // opened on that silence is how somebody gets overhead press programmed
-  // around a shoulder nobody read.
+  // Three answers, not two, and the third one used to be spelled the same as
+  // the first. `disclosures` is how the read of THIS person's own injury list
+  // went — a different question from how the acknowledgement read went — and a
+  // client the roster never produced has an empty injury list for exactly the
+  // same reason a healthy client does, so only the status separates them.
+  //
+  // The status was not enough on its own. A HAND-ADDED client is found in the
+  // roster, so `c` was truthy, so `disclosures` read 'ready'; their `injuries`
+  // is `undefined` — src/ui/roster.tsx leaves it undefined deliberately,
+  // because undefined is "nobody has ever asked this person" and `[]` is "they
+  // were asked and said none" — and `?? []` turned the first into the second.
+  // `guardInjuries` returns ALLOWED on an empty list, so a person with no
+  // account who has never been asked anything opened the programme gate as
+  // though they had disclosed none, and a coach assigned a template on it.
+  //
+  // src/lib/disclosureFact.ts holds the three apart and hands this screen both
+  // the status the gate needs and the sentence the coach needs. The assign is
+  // still allowed for a hand-added client — that is the ordinary case and
+  // refusing it would be worse than the defect — but it is no longer allowed
+  // SILENTLY: `fact.note` is drawn on their row and again in the sentence the
+  // coach confirms.
+  const factFor = (clientId: string): DisclosureFact => {
+    const c = roster.find((r) => r.id === clientId);
+    return disclosureFact(rosterStatus, c, clientId, c?.name.split(' ')[0] ?? 'This client');
+  };
   const asMember = (clientId: string): FanOutMember => {
     const c = roster.find((r) => r.id === clientId);
-    const disclosures: LoadStatus =
-      rosterStatus === 'error' ? 'error'
-      : c ? 'ready'
-      : rosterStatus === 'loading' ? 'loading'
-      : 'error';
+    const fact = factFor(clientId);
     return {
       clientId,
       name: c?.name.split(' ')[0] ?? 'This client',
-      disclosures,
+      disclosures: fact.gateStatus,
       ackStatus: acks.status,
-      injuries: (c?.injuries ?? []).map((i, n): Injury => ({
-        id: `${clientId}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
-        status: 'active', note: i.note, at: '',
-      })),
+      injuries: fact.injuries,
       acknowledged: acks.acknowledged(clientId),
     };
   };
+  /** First names of the people this assign WOULD write to who have never been
+   *  asked about injuries. Read off `plan.send` rather than off the ticks: a
+   *  client the gate is already holding is a different sentence, said by the
+   *  gate, and naming them twice teaches a coach to skip both. */
+  const neverAskedNames = (ids: readonly string[]): string[] =>
+    ids.filter((id) => factFor(id).kind === 'never-asked')
+      .map((id) => roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client');
   const pickedMembers = pickedIds.map(asMember);
   // 'ready' for the list itself: unlike a group's membership, this list is the
   // ticks the coach just made with their own thumb. There is no read of it that
@@ -187,6 +224,10 @@ export default function Templates() {
   // What the sweeping gesture is allowed to claim, given how the roster read
   // went. See the comment beside the control itself.
   const selAll = selectAllOffer(rosterStatus, roster.length);
+  /** Said of the people this assign is about to reach who have never been asked
+   *  about injuries. Null when there are none, so the sheet drops the notice
+   *  rather than printing an empty one. */
+  const neverAskedLine = neverAskedBrief(neverAskedNames(plan.send));
 
   /**
    * The bulk assign, in three parts that used to be one.
@@ -236,8 +277,15 @@ export default function Templates() {
       return { clientId: id, name: c?.name.split(' ')[0] ?? 'This client', onProgramme: !!getProgram(id) };
     });
     const brief = overwriteBrief(targets, tpl.name);
+    // The moment of decision, so the third fact is said here too and not only
+    // on a row the coach may have scrolled past. `overwriteBrief` says what is
+    // being replaced; this says what is NOT known about the people it is being
+    // replaced for. Appended rather than woven in, because the two are separate
+    // facts and src/lib/bulkActions.ts owns the first.
+    const askedNote = neverAskedBrief(neverAskedNames(plan.send));
+    const body = [brief.body, askedNote].filter(Boolean).join('\n\n');
     const go = await new Promise<boolean>((resolve) => {
-      Alert.alert(brief.title, brief.body, [
+      Alert.alert(brief.title, body, [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
         // Destructive only when something is actually being destroyed. A red
         // button on every assign is a red button nobody reads.
@@ -476,6 +524,18 @@ export default function Templates() {
                   <Notice tone={t.warn} kicker="Not everybody" title="Some of these are held" note={plan.heldNote} />
                 ) : null}
 
+                {/* The third fact, which has no gate of its own and must not
+                    borrow the clearance. These people ARE being assigned to —
+                    that is the ordinary use of Add Client and refusing it would
+                    be worse than the defect — but the empty injury list behind
+                    them is an absence, not an answer, and the coach is told so
+                    before the tap as well as during it. */}
+                {neverAskedLine ? (
+                  <Notice tone={t.warn} kicker="Never asked"
+                    title="Some of these have never been asked about injuries"
+                    note={neverAskedLine} />
+                ) : null}
+
                 {/* An unread roster is not an empty one, and a short one is not
                     the whole book — "Select all" over it selects part of it. */}
                 {rosterStatus === 'error' ? (
@@ -574,6 +634,25 @@ export default function Templates() {
                   // coach comes to overwrite one without realising.
                   const replaces = assignGuard.allowed && !!getProgram(c.id);
                   const held = plan.blocked.find((b) => b.clientId === c.id);
+                  // What this screen knows about their injuries, as one of
+                  // three facts rather than as an empty list. See the note over
+                  // `asMember` and src/lib/disclosureFact.ts.
+                  //
+                  // The gate speaks first where it has something to say — it
+                  // knows whether the coach has read a disclosure, and whether
+                  // a read failed, and has better words for both. `fact.note`
+                  // fills the two silences the gate leaves: a client who was
+                  // asked and disclosed nothing, and a client nobody has ever
+                  // asked.
+                  //
+                  // Drawn on every row for an absence and only on a TICKED row
+                  // for a clearance. "They have never been asked" is a property
+                  // of the person a coach wants while choosing; "they were
+                  // asked and said none" is a reassurance that only matters at
+                  // the point of decision, and twenty of them down a list is
+                  // twenty lines nobody reads.
+                  const fact = disclosureFact(rosterStatus, c, c.id, c.name.split(' ')[0]);
+                  const factLine = held ? held.reason : (on || fact.warn) ? fact.note : null;
                   return (
                     <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
                       accessibilityRole="button"
@@ -586,7 +665,7 @@ export default function Templates() {
                         `${on ? 'Do not assign to' : 'Assign to'} ${c.name}`,
                         c.goal,
                         replaces ? 'This replaces the program they are on' : null,
-                        held ? held.reason : null,
+                        factLine,
                       ].filter(Boolean).join('. ')}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -611,9 +690,11 @@ export default function Templates() {
                         </View>
                         {/* Their own sentence, on their own row. A count of how
                             many are held tells the coach nothing about whose
-                            shoulder it is. */}
-                        {held ? (
-                          <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag>
+                            shoulder it is — and an absence gets a sentence here
+                            too, because the row that says nothing at all is the
+                            one that reads as an all-clear. */}
+                        {factLine ? (
+                          <Flag tone={held || fact.warn ? t.warn : t.ink3} style={{ marginTop: 4 }}>{factLine}</Flag>
                         ) : null}
                       </View>
                     </Pressable>

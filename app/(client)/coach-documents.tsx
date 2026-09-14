@@ -47,6 +47,10 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
+// Who is signed in, with the failure kept rather than collapsed into "nobody".
+// See the note in `load` for the sentence this screen used to print at a member
+// standing in a basement with an unsigned waiver.
+import { signedInUid } from '../../src/lib/signedInUid';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { classifyWrite } from '../../src/lib/offlineQueue';
@@ -99,14 +103,36 @@ export default function ClientCoachDocumentsScreen() {
       // comment fifteen lines below says this file exists to prevent.
       // `my_coach_documents` reads as the signed-in user; with no session it
       // was never called at all.
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setSignedOut(true); setStatus('error'); return; }
-      const { data: auth, error: authErr } = await supabase.auth.getUser();
-      if (authErr) { setStatus('error'); return; }
-      const id = auth?.user?.id ?? null;
-      if (!id) { setSignedOut(true); setStatus('error'); return; }
+      //
+      // ── and signed out is not "we could not ask" either ──────────────────
+      //
+      // This was a `getSession()` whose `error` was destructured away, followed
+      // by a `getUser()` whose error was read but never classified. Both halves
+      // were wrong in the same direction, and the first was the expensive one:
+      // `getSession()` REFRESHES an expired access token, so a member standing
+      // in a basement studio with no signal — which the header of this very file
+      // names as where a coach's paperwork is most often signed — got an
+      // `AuthRetryableFetchError` back with `session: null`, the discarded error
+      // left that indistinguishable from having no session at all, and the
+      // screen told them "Your coach's paperwork is only readable once you are
+      // signed in". They were signed in. The fix on offer was to sign in again,
+      // which is the one thing that could not work with no connection.
+      //
+      // `signedInUid` is the classification, imported rather than written a
+      // second time here: src/lib/authReadFate.ts is where the evidence for
+      // which AuthError means "not you" lives, and a private copy of that
+      // judgement in a screen is how two screens come to disagree about whether
+      // somebody is signed in. Narrowed on `fate`, never on `!uid` — `UidRead`'s
+      // signed-in member is `string`, which includes '', so the compiler cannot
+      // narrow on the uid and is right not to.
+      const who = await signedInUid('clientCoachDocs.load');
+      if (who.fate !== null) {
+        setSignedOut(who.fate === 'signed-out');
+        setStatus('error');
+        return;
+      }
       setSignedOut(false);
-      setUid(id);
+      setUid(who.uid);
       // sql-cap-ok: my_coach_documents() ends `limit 200`
       // (supabase/parts/156-a-document-meant-for-one-client.sql) on the
       // paperwork of the ONE coach this client trains under, and it orders

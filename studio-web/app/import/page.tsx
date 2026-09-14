@@ -48,9 +48,8 @@ import {
   fetchMemberships, fetchPlans, money,
   type Membership, type MembershipPlan,
 } from '@lib/gymRecord';
-import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
-import { parseGymZone } from '@lib/gymZone';
 import {
   keyPaymentRows, startImportRun, finishImportRun, importPayments,
   fetchImportRuns, undoImportRun, importedRowCount,
@@ -101,6 +100,30 @@ export default function ImportPage() {
   // Null here means the gym has not set one, and the import is refused rather
   // than guessed.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /**
+   * Why `ccy` is null, when it is — and the reason this had to be carried.
+   *
+   * The read below collapsed two facts into one null: `setCcy(error ? null :
+   * …)`. The gym that has not set a currency and the gym record that would not
+   * READ both arrived as `ccy === null`, and both refusals on this page then
+   * told the owner, in so many words, that "this gym has not set its currency
+   * … an owner sets it on the gym settings screen". For the second gym that is
+   * a claim about a setting, made out of a query that failed. An owner whose
+   * currency is set goes to Settings, finds GBP already sitting there, and is
+   * left with an import that will not run and nothing on screen that explains
+   * why — the page has sent them to fix something that is not broken.
+   *
+   * The refusal itself is right in both cases and does not change: an import
+   * that would stamp a currency nobody chose over a whole historical ledger is
+   * refused either way. What changes is which sentence is under the button, and
+   * therefore where the person goes next — Settings, or reload.
+   *
+   * This is the same bit `gymNameUnread` above already carries for the name.
+   * The name had it because the rail prints "No gym linked" for a null it is
+   * given no other word for; the currency did not, and it is the half of the
+   * row that stops money being written.
+   */
+  const [gymErr, setGymErr] = useState<string | null>(null);
   /** `tenants.timezone`, or null when the gym has not set one. The import log
    *  below stamps a time on every run, and which day a run landed on is a fact
    *  about the gym's day rather than about the desk this is read from. */
@@ -213,15 +236,18 @@ export default function ImportPage() {
       if (!who) return;
       setTenantId(who.tenantId);
       if (who.tenantId) {
-        // supabase-js resolves on a database error rather than rejecting, so
-        // the error has to be read off the result, not caught.
-        const { data, error } = await supabase
-          .from('tenants').select('name, currency, timezone').eq('id', who.tenantId).single();
-        setGymName(error ? null : ((data as any)?.name ?? null));
-        setGymNameUnread(!!error);
-        setCcy(error ? null : ((((data as any)?.currency ?? '') as string).trim().toUpperCase() || null));
-        const z = error ? { kind: 'clear' as const } : parseGymZone((data as any)?.timezone);
-        setZone(z.kind === 'zone' ? z.zone : null);
+        // `readTenant`, not the hand-written `select('name, currency,
+        // timezone')` that was here. It is the same query — it reads `error`
+        // off the resolved result, folds the currency and parses the zone
+        // exactly as this did — and it is the one place those three facts are
+        // read, so the failure comes back NAMED rather than as three nulls that
+        // three different sentences then have to guess at. See lib/currency.ts.
+        const t = await readTenant(supabase, who.tenantId);
+        setGymName(t.name);
+        setGymNameUnread(!!t.error);
+        setCcy(t.currency);
+        setGymErr(t.error);
+        setZone(t.zone);
         await loadGym(who.tenantId);
       }
     })();
@@ -888,11 +914,20 @@ export default function ImportPage() {
                   {busy ? 'Importing…' : ccy ? `Record ${paymentRows.length} payments in ${ccy}` : `Record ${paymentRows.length} payments`}
                 </button>
                 {!tenantId ? <span style={{ fontSize: 13, color: 'var(--crit)' }}>{NO_TENANT}</span> : null}
+                {/* Two reasons `ccy` is null, and they send the reader to two
+                    different places. The refusal is the same either way — a
+                    ledger stamped with a currency nobody chose cannot be
+                    corrected from the rows afterwards — but "go and set it" is
+                    a lie to the owner who already has. */}
                 {tenantId && !ccy ? (
                   <span style={{ fontSize: 13, color: 'var(--crit)' }}>
-                    These payments cannot be recorded: {NO_CURRENCY_NOTE}, and this file does not
-                    carry one. Every row would be stored in a currency nobody chose, permanently.
-                    An owner sets it on the gym settings screen.
+                    {gymErr
+                      ? <>These payments cannot be recorded: the gym record would not read, so the
+                          currency they would be stored in is <strong>unknown</strong> rather than
+                          unset — {gymErr} Reload the page; this is not a setting to go and change.</>
+                      : <>These payments cannot be recorded: {NO_CURRENCY_NOTE}, and this file does not
+                          carry one. Every row would be stored in a currency nobody chose, permanently.
+                          An owner sets it on the gym settings screen.</>}
                   </span>
                 ) : null}
                 <Result done={done} />
@@ -1040,9 +1075,14 @@ export default function ImportPage() {
                 {!tenantId ? <span style={{ fontSize: 13, color: 'var(--crit)' }}>{NO_TENANT}</span> : null}
                 {tenantId && !ccy && planRows.some(({ plan }) => !plan.currency) ? (
                   <span style={{ fontSize: 13, color: 'var(--crit)' }}>
-                    Some of these rows have no currency of their own and {NO_CURRENCY_NOTE}, so there
-                    is nothing to price them in. Add a `currency` column to the sheet, or set the
-                    gym's currency on the settings screen.
+                    {gymErr
+                      ? <>Some of these rows have no currency of their own, and the gym record would
+                          not read &mdash; so what they would inherit is <strong>unknown</strong> rather
+                          than unset: {gymErr} Reload the page, or add a <span className="mono">currency</span>{' '}
+                          column to the sheet so the rows do not need to inherit one.</>
+                      : <>Some of these rows have no currency of their own and {NO_CURRENCY_NOTE}, so there
+                          is nothing to price them in. Add a <span className="mono">currency</span> column to
+                          the sheet, or set the gym&apos;s currency on the settings screen.</>}
                   </span>
                 ) : null}
                 <Result done={done} />

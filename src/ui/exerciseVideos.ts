@@ -47,6 +47,10 @@ import {
   type ClipVisibility, type StoredClip,
 } from '../lib/handsetClips';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is — which here decides
+// which sentence a coach reads when their clip does not upload. See
+// src/lib/authReadFate.ts.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { exerciseSlug } from '../lib/exerciseId';
 import { writeFailure } from '../lib/wroteRows';
@@ -140,12 +144,23 @@ export async function uploadExerciseVideo(
     return null;
   };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
     // Not a silent null. A coach whose session lapsed while the picker was open
     // is the commonest way to arrive here, and "check your connection" is the
     // one piece of advice that cannot fix it.
-    if (!uid) return fail('signed-out', new Error('no signed-in user'));
+    //
+    // But the OTHER commonest way is a coach standing in a gym basement whose
+    // auth read did not land — and until the error beside this call was read,
+    // that coach got the same sentence: "you are not signed in on this device.
+    // Sign in and add it again." Which is false, and worse than useless,
+    // because the one thing that would fix it — waiting for signal — is the one
+    // thing it tells them not to do. The two refusals already existed
+    // (src/lib/exerciseVideoUpload.ts) and the file's own rule for choosing
+    // between them is the same asymmetry as this one: never send somebody to
+    // fix the thing that is working.
+    const who = await signedInUid('exerciseVideos.upload');
+    if (who.fate === 'signed-out') return fail('signed-out', new Error('no signed-in user'));
+    if (who.fate !== null) return fail('unreachable', new Error('auth read unreadable before upload'));
+    const uid = who.uid;
     const ab = await (await fetch(uri)).arrayBuffer();
     // The folder is the uploader's id: that is the whole of the storage write
     // rule (exvid_object_w), so a path shaped any other way is rejected.
@@ -363,9 +378,18 @@ export function useExerciseVideos() {
     let uploader: string | null = null;
     if (USE_SUPABASE) {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id;
-        uploader = uid ?? null;
+        // The error beside this call was discarded, so an outage reached the
+        // `else` below as "nobody signed in". The OUTCOME it sets is right and
+        // stays: no insert was attempted on either fate, so there is certainly
+        // no row, and 'refused' is what says that — which is what lets the
+        // orphan sweep delete the object the upload left behind. What was
+        // missing is the report: `signedInUid` records an unreadable auth read
+        // under this key, so a coach whose clip fell back to local storage on
+        // an outage leaves a trace of why rather than being filed alongside
+        // every genuinely signed-out one.
+        const who = await signedInUid('exerciseVideos.addVideo');
+        const uid = who.uid;
+        uploader = uid;
         const exerciseId = uid ? await ensureExercise(name, group) : null;
         if (uid && exerciseId) {
           const { data, error } = await supabase.from('exercise_videos').insert({

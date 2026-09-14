@@ -86,6 +86,12 @@ import { registerForPush, pushAvailable, handsetPushTokens, forgetRegisteredToke
 import { consentFromStored, recordPushConsent, forgetPushConsent } from '../lib/pushConsent';
 import { soundFromStored, recordRestSoundConsent, forgetRestSoundConsent } from '../lib/restTimer';
 import { assertWrote, writeFailure } from '../lib/wroteRows';
+// `getUser()` resolves rather than rejecting when the auth host cannot be
+// reached, so `!auth?.user?.id` meant "signed out, or we could not ask, and
+// this file cannot tell which". `revokePushToken` above already reads its
+// `error` for exactly that reason; these two are the sites that did not.
+import { signedInUid } from '../lib/signedInUid';
+
 import type { WeightUnit, LengthUnit } from '../lib/units';
 import { resolveUnits, deviceRegion, type UnitSource } from '../lib/unitPreference';
 import { SETTINGS_KEY } from '../lib/personalSettings';
@@ -588,11 +594,41 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id;
+        // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+        const who = await signedInUid('settings.units.who');
+        if (cancelled) return;
+        if (who.fate === 'unreadable') {
+          // ── the branch that threw away the only copy ──────────────────────
+          //
+          // This used to be the same line as the signed-out case below, and
+          // that made the offline launch the launch that ignores the offline
+          // cache. The member's chosen unit is under `repple.units:<uid>` —
+          // the key NEEDS the account — so a `getUser()` that resolved with
+          // `user: null` behind a retryable error skipped the cache read
+          // entirely, and then set `unitsLoaded` true, which by its own
+          // documented contract says the account's preference HAS been read
+          // and there was none. A member who chose pounds got the region's
+          // kilograms, on precisely the launch where the cache was the only
+          // thing that still knew.
+          //
+          // The uid cannot be recovered from here — no uid, no key — so the
+          // cache still cannot be opened. What changes is that nothing is
+          // CLAIMED about it. `unitsLoaded` stays false, which is the truth:
+          // the preference has not been read. `unitStore.current` stays the
+          // un-hydrated `unitCache(null)` set at the top of this effect, so
+          // `mayWriteCache` refuses and this launch writes nothing over a key
+          // it could not read. The units on screen stay null and
+          // `resolveUnits` keeps labelling the region's answer as the guess it
+          // is, rather than as the member's own.
+          //
+          // The outage itself is recorded by `signedInUid` under this context.
+          return;
+        }
         // Signed out. There is no account to scope a cache to and nothing to
         // push to, and the region guess is the whole story. Not an error state.
-        if (!uid) { if (!cancelled) setUnitsLoaded(true); return; }
+        if (who.fate !== null) { setUnitsLoaded(true); return; }
+        const uid = who.uid;
+
         // ── This account's own cached units ──────────────────────────────────
         //
         // Under `repple.units:<uid>`, which is the repair: the key names the
@@ -724,12 +760,31 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id;
-        // Signed out. Nothing is registered against anybody, and asking the OS
-        // for a token now would put a permission prompt in front of the welcome
-        // screen.
-        if (!uid || cancelled) return;
+        // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+        const who = await signedInUid('settings.push.apply');
+        if (cancelled) return;
+        // Both fates stop here, and unusually that is the ANSWER rather than a
+        // fallback: the two things below this line are registering a push token
+        // against an account and deleting one, and neither may be done under an
+        // identity that was not established. Acting on a false sign-out is what
+        // would be dangerous here — a revoke would silence a handset whose
+        // owner never asked for silence.
+        //
+        //   'signed-out'  — nothing is registered against anybody, and asking
+        //                   the OS for a token now would put a permission
+        //                   prompt in front of the welcome screen.
+        //   'unreadable'  — we could not ask. A member who turned push off
+        //                   keeps their stale `push_tokens` row for one more
+        //                   launch, which is the same deferral `revokePushToken`
+        //                   already calls 'off-pending', and this effect re-runs
+        //                   on the next auth revision.
+        //
+        // What is new is that the second one is no longer invisible:
+        // `signedInUid` reports it under this context, so an applier that never
+        // applied leaves a trace instead of looking like a device with nobody
+        // on it.
+        if (who.fate !== null) return;
+
         if (latest.current.notifPush) {
           // Idempotent, and deliberately still done here even though auth.tsx
           // registers too: this is what re-registers the handset of somebody

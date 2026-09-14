@@ -69,6 +69,10 @@ import {
 // has not set one. The tenant context does not carry the zone, and this screen
 // needs nothing else off the gym row.
 import { fetchGymZone } from '../../src/lib/gymZone';
+// Which recurring slots on the timetable are full and which are running empty —
+// bucketed on the GYM's clock, with anything that could not be placed on it
+// counted and named rather than dropped. src/lib/classSlots.ts.
+import { classSlots, unplacedNote } from '../../src/lib/classSlots';
 // The console's own month boundary, so "This month" on the phone and the
 // August run on the laptop are the same period rather than two numbers under
 // one label. Local midnight, not UTC's — see the header of monthEnd.ts.
@@ -272,6 +276,14 @@ export default function OwnerClassAnalytics() {
   // in. Null says "not known yet"; [] stays reserved for a range that really
   // held nothing.
   const [rows, setRows] = useState<ClassSummaryRow[] | null>(null);
+  /**
+   * The period label for the rows IN HAND — set beside them, from the same
+   * `rangeBounds` call that produced the bounds they were read with.
+   *
+   * Null until a read has landed, because until then there is nothing being
+   * labelled. See `periodLabel` below for what this replaced.
+   */
+  const [rowsLabel, setRowsLabel] = useState<string | null>(null);
   /** Which range the rows in hand are FOR. Without it the effect below cannot
    *  tell a refresh of the range on screen from a switch to a different one,
    *  and it has to clear for the second.
@@ -303,10 +315,27 @@ export default function OwnerClassAnalytics() {
   /** And when the pay rates did. The payroll column on this screen is those two
    *  reads multiplied together, so one stamp over it has to be the older. */
   const [payAt, setPayAt] = useState<number | null>(null);
+  /* ── the gym's clock, KEPT ───────────────────────────────────────────────
+   *
+   * `fetchGymZone` was already called on this screen, for `fetchClassPay`, and
+   * its answer was consumed inline and thrown away. The timetable section below
+   * needs it — a class start is an instant, and which 06:00 slot it belongs to
+   * is a question about the gym's wall clock, not the reader's.
+   *
+   * Three states and not two, for the reason `fetchGymZone` returns three:
+   * `{ zone: 'Asia/Dubai' }` is a gym that has said, `{ zone: null, error: null }`
+   * is a gym that has not, and `{ error }` is a read that failed. The third must
+   * never be shown as the second — "this gym has not set a timezone" is an
+   * instruction to change a setting that may already be right. `zoneRead` is
+   * what keeps "not asked yet" out of both.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneUnread, setZoneUnread] = useState(false);
+  const [zoneRead, setZoneRead] = useState(false);
 
   useEffect(() => {
     let on = true;
-    const { from, to } = rangeBounds(range);
+    const { from, to, label } = rangeBounds(range);
     // Cleared ONLY when the range changed. Without any clearing, the previous
     // range's rows stayed on screen while the new range loaded, so a payroll
     // total for the season sat under the heading "This week" — a number an
@@ -316,7 +345,10 @@ export default function OwnerClassAnalytics() {
     // with pull-to-refresh: the gesture re-runs this effect on the SAME range,
     // so pulling down emptied a correct payroll table, and a pull that failed
     // left it empty. `rowsRange` is what separates the two.
-    if (rowsRange.current !== range) { setRows(null); rowsRange.current = null; setReadFailed(false); }
+    // `rowsLabel` goes with `rows`, and for the same reason: it is the label OF
+    // those rows, so a range change that clears one and leaves the other would
+    // head an empty table with the departing range's period.
+    if (rowsRange.current !== range) { setRows(null); setRowsLabel(null); rowsRange.current = null; setReadFailed(false); }
     setReading(true);
     classSummary(from, to)
       // The stamp moves on a read that LANDED. A refused one leaves it where it
@@ -348,7 +380,9 @@ export default function OwnerClassAnalytics() {
       .then((r) => {
         if (!on) return;
         if (r == null) { setReadFailed(true); return; }
-        setRows(r); rowsRange.current = range; setReadFailed(false); setAttendanceAt(Date.now());
+        // The label is stamped with the rows, from the SAME `rangeBounds` call
+        // that produced the bounds they were read with. See `periodLabel`.
+        setRows(r); setRowsLabel(label); rowsRange.current = range; setReadFailed(false); setAttendanceAt(Date.now());
       })
       // A bare .then left a rejection unhandled and the screen showing whatever
       // it had, silently. The rows are now kept and LABELLED instead: a refresh
@@ -393,7 +427,13 @@ export default function OwnerClassAnalytics() {
       // classes to queue, and the lines fall back to the reader's day exactly
       // as a gym that has set none does.
       fetchGymZone(supabase, tenantId)
-        .then((z) => fetchClassPay(supabase, tenantId, z.zone))
+        .then((z) => {
+          // Kept as well as passed on. `fetchGymZone` reports a refused read as
+          // `{ zone: null, error }` rather than throwing, so all three answers
+          // arrive here and all three are recorded.
+          if (on) { setZone(z.zone); setZoneUnread(!!z.error); setZoneRead(true); }
+          return fetchClassPay(supabase, tenantId, z.zone);
+        })
         .then((p) => { if (on) setPaid(p); })
         .catch((e) => { reportError('classAnalytics.classPay', e); if (on) setPaid(null); throw e; }),
     ])
@@ -566,6 +606,22 @@ export default function OwnerClassAnalytics() {
   const byKind = useMemo(() => byGroup((r) => r.kind || r.title), [list]);
   const maxBranch = Math.max(1, ...byBranch.map(([, v]) => v.attended));
   const maxKind = Math.max(1, ...byKind.map(([, v]) => v.attended));
+  /**
+   * Which recurring slots on the timetable are working.
+   *
+   * The one question this screen held all the data for and never asked. It
+   * already groups by branch and by kind; `startsAt` was on every row and
+   * nothing grouped by WHEN, which is the first thing an owner wants from a
+   * class report — what to cut, and what to run a second time.
+   *
+   * No new read. `list` is the rows already in hand and `zone` is the gym read
+   * this screen was already making for `fetchClassPay`.
+   */
+  const slots = useMemo(() => classSlots(list, zone), [list, zone]);
+  const slotGap = unplacedNote(slots, zone, zoneUnread);
+  /** The busiest slot, as the bar scale. `Math.max(1, …)` so an all-empty
+   *  timetable divides by one rather than by nought. */
+  const maxSlotBooked = Math.max(1, ...slots.slots.map((s) => s.booked));
   /** Class ids already on a payroll line, so nothing is offered twice. */
   const already = useMemo(() => new Set((paid ?? []).map((p) => p.classId)), [paid]);
   const G = layout.gutter;
@@ -636,12 +692,37 @@ export default function OwnerClassAnalytics() {
   /**
    * The period this screen is reporting, in words.
    *
-   * Recomputed on render rather than stored, so the label cannot drift from the
-   * bounds the read used. "September 2026 so far" is a different claim from
-   * "the last 30 days" and the owner is about to reconcile it against a payroll
-   * run named after a month.
+   * ── it was a SECOND clock read, and it drifted from the first ────────────
+   *
+   * This was `rangeBounds(range).label` — a bare call, in the render body, with
+   * `now` defaulting to `new Date()`. The comment on it said the label
+   * "cannot drift from the bounds the read used", and the opposite was true:
+   * the bounds come from `rangeBounds(range)` inside the effect, at the moment
+   * the query is issued, and this was a different call to the same function at
+   * a different moment. Two clock reads, one label over the other's rows.
+   *
+   * scripts/check-frozen-day.mjs does not see this shape — it catches a clock
+   * frozen into a `useState` or `useMemo` initialiser, and this was neither. It
+   * is the other half of the same problem, and on this screen it is the worse
+   * half, because of how long the screen lives: `class-analytics` is registered
+   * `href: null` in app/(owner)/_layout.tsx, and expo-router mounts such a
+   * screen once and NEVER tears it down — not on a sign-out, not on
+   * backgrounding the app.
+   *
+   * So: an owner opens Classes & Payroll at 23:50 on 31 August with the range
+   * on "This month". The effect reads August. At 00:01 the pay read lands, or
+   * they open a rate editor, or they pull to refresh and the read fails — any
+   * re-render at all — and this line is evaluated again against the new day.
+   * `monthKeyOf(now)` is now September, so the heading over Classes, Check-ins,
+   * Avg Fill and Avg Show reads "September 2026 so far" while every figure
+   * under it is August's. The screen's own header explains at length why the
+   * month was made to match the console's payroll run; this quietly renamed it.
+   *
+   * The label is now stamped WITH the rows, from the same call, and falls back
+   * to the live one only while nothing has landed — where there is nothing yet
+   * being labelled and the label describes the read in flight.
    */
-  const periodLabel = rangeBounds(range).label;
+  const periodLabel = rowsLabel ?? rangeBounds(range).label;
 
   /**
    * Lines queued and NOT settled.
@@ -934,6 +1015,91 @@ export default function OwnerClassAnalytics() {
             {byKind.map(([k, v]) => (
               <Bar key={k} t={t} label={k} note={`${v.attended} · ${v.classes} run`} pct={Math.round((v.attended / maxKind) * 100)} dim />
             ))}
+          </Section>
+
+          <Rule />
+
+          {/* ── which hours of which days are working ──────────────────────
+              The question this screen had every figure for and never asked. It
+              grouped by branch and by class type; `startsAt` was on every row
+              and nothing grouped by WHEN — which is what an owner is actually
+              deciding when they open a class report, because it is the only one
+              of the three they can change next week.
+
+              Emptiest first. A full slot needs no decision and a half-empty one
+              does, so the list is ordered by the thing it exists to surface
+              rather than by size. src/lib/classSlots.ts holds the ordering, the
+              fill rule and the timezone rule, with a test under plain node.
+
+              Bucketed on the GYM's clock. A 06:00 class read from another
+              country would otherwise split across two buckets or merge with the
+              07:00 one, and the fill rate this section is for would then be
+              taken over the wrong set of classes. */}
+          <Section>
+            <SectionHead
+              title="By Time Of Day"
+              note={slots.slots.length ? `${slots.slots.length} slot${slots.slots.length === 1 ? '' : 's'}` : undefined}
+            />
+            {/* Said before the bars, because it governs what they are made of.
+                Three sentences for three silences — a gym that has not set a
+                timezone, a zone read that did not come back, and a handful of
+                start times that would not parse are three different things with
+                three different next steps. */}
+            {slotGap ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{slotGap}</Flag> : null}
+            {!zoneRead ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                Checking what time it is at the gym, before the timetable is bucketed by it.
+              </Text>
+            ) : slots.slots.length === 0 ? (
+              // Only when there is nothing ELSE to say: an unplaced count is
+              // already explained above, and "no classes ran" over a range whose
+              // classes simply could not be placed would be the false half of
+              // the two.
+              slotGap ? null : (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  No classes ran in this range, so there is no timetable to read.
+                </Text>
+              )
+            ) : (
+              <>
+                {slots.slots.map((sl) => (
+                  <Bar
+                    key={`${sl.weekday}:${sl.hour}`}
+                    t={t}
+                    label={sl.label}
+                    // The fill rate is the figure, and a dash where no class in
+                    // the slot recorded what it could hold. A 0% there would
+                    // read as a slot nobody booked, which is the opposite of
+                    // "nobody wrote down how many places it had".
+                    note={`${sl.fill == null ? '—' : Math.round(sl.fill * 100) + '% full'} · ${sl.booked} booked · ${sl.classes} run`}
+                    // The BAR is booked-against-the-busiest-slot, not the fill
+                    // rate, so a slot with no capacity on record still draws at
+                    // its true size rather than at nothing. The fill rate is on
+                    // the line beside it, where it can be withheld.
+                    pct={Math.round((sl.booked / maxSlotBooked) * 100)}
+                    dim={sl.fill == null}
+                  />
+                ))}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                  Emptiest first, so the slot worth a decision is at the top. The bar is how many
+                  people booked, against your busiest slot; the percentage is how full it was, and
+                  is a dash for a slot where no class recorded how many places it had.
+                </Text>
+                {/* A separate fact and a separate sentence, because it is not a
+                    fill rate and must never be read as one. "Nobody came" and
+                    "nobody took the register" are indistinguishable in this
+                    table, and saying the first would send an owner to cut a
+                    class that may be full. */}
+                {slots.noPresent > 0 ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {slots.noPresent} class{slots.noPresent === 1 ? '' : 'es'} in this range had
+                    bookings and nobody marked present. That is either a class nobody turned up to
+                    or a register nobody took, and this screen cannot tell which &mdash; both are
+                    worth a word with whoever taught them.
+                  </Text>
+                ) : null}
+              </>
+            )}
           </Section>
 
           <Rule />

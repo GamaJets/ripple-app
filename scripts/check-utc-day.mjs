@@ -224,13 +224,35 @@ const KNOWN = new Map([
  *  local one has to be able to write both, and several here do exactly that. */
 const isTest = (f) => /\.test\.[jt]sx?$/.test(f) || f.includes('__tests__');
 
+
+// ── a scan that was cut short must not read as a clean one ────────────────
+//
+// Lanes write this tree while gates run over it, so a file listed by readdir
+// and gone by the time it is stat'd or read is an ordinary event here, not a
+// defect. What was NOT ordinary is what used to happen next: the throw went up
+// to `try { walk(root) } catch {}` at the bottom of this file, whose comment
+// says it is there for "a root that is not there yet" — so it swallowed the
+// vanished file AND every file after it in that root, and the run then printed
+// ok over a tree it had partly not opened.
+//
+// A gate whose final line names a file count is making a claim about coverage.
+// So: a disappearance is survived per entry, counted, and said out loud. The
+// root-level catch now tolerates only the root itself being absent; anything
+// else is a real fault and is allowed to be one.
+let vanished = 0;
+const gone = (e) => e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+
 function walk(dir, out = []) {
   let entries;
-  try { entries = readdirSync(dir); } catch { return out; }
+  try { entries = readdirSync(dir); }
+  catch (e) { if (gone(e)) { vanished++; return out; } throw e; }
   for (const e of entries) {
     if (e === 'node_modules' || e.startsWith('.')) continue;
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) walk(p, out);
+    let st;
+    try { st = statSync(p); }
+    catch (e) { if (gone(e)) { vanished++; continue; } throw e; }
+    if (st.isDirectory()) walk(p, out);
     else if (/\.tsx?$/.test(p) && !isTest(p)) out.push(p);
   }
   return out;

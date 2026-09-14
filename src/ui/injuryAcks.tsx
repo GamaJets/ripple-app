@@ -10,6 +10,12 @@
 // be built on the difference.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. An auth error is
+// not a sign-out — see src/lib/authReadFate.ts — and on this provider the
+// difference is whether a client is told their coach has not read their
+// injuries or that we could not check.
+import { signedInUid } from '../lib/signedInUid';
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
 import { worstStatus, type LoadStatus } from './loadStatus';
@@ -57,9 +63,30 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     setStatus('loading');
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) { if (alive()) { setRows({}); setStatus('ready'); } return; }
+      // ── an outage is not "this coach has read nothing" ───────────────────
+      //
+      // The error beside this call was discarded, so `uid` was `undefined` for
+      // an unreachable auth server exactly as it is for nobody being signed in
+      // (src/lib/authReadFate.ts has the library reading). Both landed on
+      // `setRows({}); setStatus('ready')`.
+      //
+      // An empty map under 'ready' is not nothing: `acknowledged()` reads a
+      // missing client out of it as `[]`-meaning-none, which this file's own
+      // interface documents as "this coach has never acknowledged anything for
+      // them", and src/lib/injuryGate.ts then refuses Assign with the sentence
+      // that says GO AND READ THE DISCLOSURES. Under 'error' that same gate
+      // refuses with the sentence that says the acknowledgements could not be
+      // read — which is the true one, and the one that does not send a coach
+      // to re-read work they have already done. Same refusal, honest reason.
+      const who = await signedInUid('injuryAcks.read');
+      if (who.fate !== null) {
+        if (alive()) {
+          setRows({});
+          setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+        }
+        return;
+      }
+      const uid = who.uid;
       // ── The probe row, and the order that makes it mean anything ─────────
       //
       // `.limit(capLimit())` asks for one row past the cap so that a full page
@@ -118,9 +145,20 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
     const keys = [...new Set(injuries.map(injuryKey))].sort();
     if (!USE_SUPABASE) { setRows((r) => ({ ...r, [clientId]: keys })); return true; }
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return false;
+      // Refused on both fates, and the write below is never reached — which
+      // matters more here than the read above it. `trainer_id` is the upsert's
+      // conflict target; a null uid would not have produced an anonymous row,
+      // it would have been refused by the column, but only AFTER the request
+      // went. Answering here instead keeps the acknowledgement attributable by
+      // construction and reports the outage under this key rather than losing
+      // it inside a database error about a not-null constraint.
+      //
+      // `false` is already this function's "the write did not land" and every
+      // caller renders it as that, so an outage costs the coach a retry rather
+      // than a confirmation the server does not hold.
+      const who = await signedInUid('injuryAcks.write');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
       // Counted, not merely un-errored. A row the policy filtered out is not an
       // error in PostgREST, and this is the write a coach is told opened the
       // gate — reporting a confirmation the server does not hold is the one
@@ -234,13 +272,31 @@ export function useMyInjuryAcks(): MyInjuryAcks {
     let cancelled = false;
     (async () => {
       try {
-        // getSession, not getUser: getUser REJECTS with nobody signed in, and
-        // treating that as a failure would latch this into 'error' before
-        // anybody had logged in. No session is a true answer.
-        const { data: sess } = await supabase.auth.getSession();
+        // getSession, not getUser: this answers from device storage and works
+        // offline, and treating "nobody is signed in" as a failure would latch
+        // this into 'error' before anybody had logged in. No session is a true
+        // answer.
+        //
+        // What was NOT a true answer was a session that could not be read.
+        // `read: null` under 'ready' is this screen telling a client, as a
+        // fact about their own care, that their coach has not confirmed
+        // reading the injuries they disclosed — and `choices: []` that nothing
+        // has been assigned over them. Those are the two sentences this
+        // provider's `readStatus`/`choicesStatus` split exists to keep
+        // truthful; an unclassified auth error walked straight past both.
+        const who = await sessionUid('injuryAcks.mine');
         if (cancelled) return;
-        const uid = sess?.session?.user?.id;
-        if (!uid) { setState({ status: 'ready', readStatus: 'ready', choicesStatus: 'ready', read: null, choices: [] }); return; }
+        if (who.fate !== null) {
+          if (who.fate === 'signed-out') {
+            setState({ status: 'ready', readStatus: 'ready', choicesStatus: 'ready', read: null, choices: [] });
+            return;
+          }
+          // Both facts are unknown, and each carries how its own read went —
+          // so both say 'error' rather than one standing in for the pair.
+          setState({ status: 'error', readStatus: 'error', choicesStatus: 'error', read: null, choices: [] });
+          return;
+        }
+        const uid = who.uid;
 
         const [ackRes, progRes] = await Promise.all([
           supabase.from('injury_acknowledgements')

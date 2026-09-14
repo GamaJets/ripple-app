@@ -24,7 +24,9 @@
 // Node for Dates constructed after it changes.
 //
 // Compile with tsc, run with node.
-import { isOverdue, type GoalTarget } from './goalTargets';
+import {
+  isOverdue, deadlineTally, deadlineNote, type GoalTarget, type DeadlineTally,
+} from './goalTargets';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -116,8 +118,133 @@ inZone('UTC', () => {
     'and is once that day is over');
 });
 
+/* ── the tally the coach's goal board leads with ────────────────────────────
+ *
+ * `deadlineTally` is the same boundary counted rather than tested one goal at a
+ * time, plus the two buckets that exist so an unjudgeable goal is never counted
+ * as on time.
+ *
+ * The `soon` window is built by LOCAL CALENDAR arithmetic, and the assertion
+ * that makes that claim is the daylight-saving one at the bottom — found by
+ * mutation, not by reading. A version written `nowMs + days * 86400000` passes
+ * every other assertion in this file, including the UTC+14 ones: a fixed offset
+ * shifts both sides of the comparison equally, so only a day that is not 24
+ * hours long can tell the two apart. */
+
+inZone('UTC', () => {
+  // Null is not an empty book. The screen hands null when the read did not
+  // land, and zeros there would read as "nothing has slipped".
+  eq(deadlineTally(null, at(2026, 9, 14)), null,
+    'an unread goal list produces no tally at all, never four zeros');
+  eq(deadlineTally(undefined, at(2026, 9, 14)), null,
+    'and neither does an absent one');
+
+  const t0 = deadlineTally([], at(2026, 9, 14));
+  eq(t0?.overdue, 0, 'a client with no goals has none overdue');
+  eq(t0?.undated, 0, 'and none undated');
+
+  const book = [
+    goal({ id: 'past', targetDateISO: '2026-09-12' }),
+    goal({ id: 'today', targetDateISO: '2026-09-14' }),
+    goal({ id: 'in-6', targetDateISO: '2026-09-20' }),
+    goal({ id: 'in-8', targetDateISO: '2026-09-22' }),
+    goal({ id: 'none', targetDateISO: null }),
+    goal({ id: 'junk', targetDateISO: 'not a date' }),
+    goal({ id: 'done', targetDateISO: '2026-08-01', achievedAtISO: '2026-08-02T09:00:00Z' }),
+  ];
+  const t = deadlineTally(book, at(2026, 9, 14, 10));
+
+  eq(t?.overdue, 1, 'only the goal whose day is over is overdue');
+  // The boundary that matters most on this screen: today's goal is SOON and
+  // never overdue. A tally that compared the target date to today's date as
+  // strings would put it in the wrong bucket and tell a coach a client had
+  // missed a deadline they still have the afternoon of.
+  eq(t?.soon, 2, 'today and the one other day inside the next seven are due soon');
+  eq(t?.undated, 1, 'a goal with no target date is named, not counted as on time');
+  eq(t?.unreadable, 1, 'and neither is one whose date this build cannot read');
+
+  // Two goals are in NO bucket: the achieved one, a month past its date, and
+  // `in-8`, which is the eighth day out. That second absence is the point of
+  // there being no `ahead` field — a coach acts on the first three and nothing
+  // here invites them to infer a fourth by subtraction.
+  eq((t?.overdue ?? 0) + (t?.soon ?? 0) + (t?.undated ?? 0) + (t?.unreadable ?? 0), 5,
+    'a goal marked done is counted in no bucket, however long ago its date was');
+
+  const narrow = deadlineTally(book, at(2026, 9, 14, 10), 0);
+  eq(narrow?.soon, 1, 'with a window of zero days, only today is soon');
+});
+
+// Large offset, and a day either side of the local date line's disagreement
+// with UTC. In Kiritimati (UTC+14) the local 14th begins at 10:00 UTC on the
+// 13th; a tally built on UTC days would have the 12th's goal still merely
+// "soon" at this instant, and today's goal already overdue.
+inZone('Pacific/Kiritimati', () => {
+  const t = deadlineTally(
+    [goal({ targetDateISO: '2026-09-12' }), goal({ id: 'b', targetDateISO: '2026-09-14' })],
+    at(2026, 9, 14, 9),
+  );
+  eq(t?.overdue, 1, 'UTC+14: the 12th is over here and is counted overdue');
+  eq(t?.soon, 1, 'and the 14th is still today here, so it is soon and not late');
+});
+
+// The day that is 25 hours long. Clocks go back in Los Angeles on 1 Nov 2026,
+// so the seven days after Wednesday 28 October contain 169 hours and not 168.
+// Counted on the local calendar, a goal targeted at 4 November is the seventh
+// day out and is due soon. Counted as `nowMs + 8 * 86400000`, the window closes
+// an hour before the 5th begins — and the goal falls out of the figure the coach
+// reads, silently, once a year, in the week a coach is most likely to be
+// planning around a clock change.
+inZone('America/Los_Angeles', () => {
+  const t = deadlineTally(
+    [goal({ targetDateISO: '2026-11-04' })],
+    at(2026, 10, 28),
+  );
+  eq(t?.soon, 1, 'across the end of daylight saving, the seventh day out is still inside a seven-day window');
+  eq(t?.overdue, 0, 'and nothing about a clock change makes it late');
+});
+
+/* ── the sentence, and the clause that keeps it from being an all-clear ───── */
+
+{
+  const note = (o: Partial<DeadlineTally>) => deadlineNote(
+    { overdue: 0, soon: 0, undated: 0, unreadable: 0, ...o },
+  );
+
+  eq(deadlineNote(null), null, 'no tally, no sentence');
+  eq(note({}), null, 'a client with no open goals gets no sentence, because the board above already says so');
+
+  eq(note({ overdue: 2, soon: 1 }),
+    '2 goals are past their target date. 1 more goal is due within a week.',
+    'the two figures, and "more" only once there is something to be more than');
+  eq(note({ overdue: 1 }),
+    '1 goal is past its target date. Nothing with a target date is late or due within a week.'.split('.')[0] + '.',
+    'one overdue goal is singular throughout');
+  eq(note({ soon: 1 }),
+    '1 goal is due within a week.',
+    'and a goal due soon with nothing late does not say "more"');
+
+  // The clause this whole function exists for. Four goals, none of which has a
+  // target date: the deadline figures are both zero and both are true, and a
+  // board that stopped after the first sentence would be an all-clear over a
+  // set nothing was ever asked of.
+  eq(note({ undated: 4 }),
+    'Nothing with a target date is late or due within a week. 4 goals have no target date, so they are in neither figure.',
+    'an empty set is never reported as an all-clear on its own');
+  eq(note({ overdue: 1, undated: 1, unreadable: 1 }),
+    '1 goal is past its target date. 1 goal has no target date, so it is in neither figure. '
+    + '1 goal carries a target date this app could not read, so it is in neither figure either.',
+    'and the two kinds of unknown are named apart, because they are different things to do something about');
+
+  // check:prose walks these strings; a dash inside a sentence is what it exists
+  // to stop, and this asserts it here too so a rewrite cannot reintroduce one
+  // without a test saying so.
+  for (const s of [note({ overdue: 2, soon: 1 }), note({ undated: 4 }), note({ unreadable: 1 })]) {
+    ok(!/\s[—–-]\s/.test(s ?? ''), `no dash inside a sentence: ${JSON.stringify(s)}`);
+  }
+}
+
 if (errors.length) {
   console.error(`goalOverdue: ${errors.length} failed\n` + errors.map((e) => '  · ' + e).join('\n'));
   process.exit(1);
 }
-console.log('goalOverdue ok — a day is not late until it is over, and it is over on the reader’s own calendar');
+console.log('goalOverdue ok — a day is not late until it is over, it is over on the reader’s own calendar, and a goal nothing can be said about is named rather than counted as on time');

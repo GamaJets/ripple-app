@@ -55,6 +55,11 @@
 import { createContext, useMemo, useRef, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. `getUser()` does
+// not reject on a dropped connection — it resolves with a null user and an
+// error beside it — so an outage and a sign-out arrive identically unless the
+// error is read. See src/lib/authReadFate.ts.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { classifyWrite } from '../lib/offlineQueue';
@@ -191,18 +196,31 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       setStatus('loading');
-      let who: string | null = null;
-      try {
-        const { data } = await supabase.auth.getUser();
-        who = data?.user?.id ?? null;
-      } catch { who = null; }
+      const read = await signedInUid('goalTracker.load');
       if (cancelled) return;
-      setUid(who);
-      if (!who) {
+      setUid(read.uid);
+      if (read.fate === 'signed-out') {
         // Signed out is a true answer: nobody has goals, and saying so is not
         // the same as failing to look.
         setGoals([]); setStatus('ready'); return;
       }
+      if (read.fate !== null) {
+        // Failing to look, which is the other thing entirely. The `catch` this
+        // replaces collapsed both into `who = null`, and so did the error this
+        // call used to discard: `getUser()` resolves rather than rejects on a
+        // dropped connection (src/lib/authReadFate.ts). So an outage set
+        // `goals: []` under 'ready', and an empty list under 'ready' is a
+        // screen entitled to say "you haven't set any goals yet" and offer to
+        // add a first one — to somebody who has three, mid-block, whose
+        // targets simply could not be read.
+        //
+        // The writes below are already safe on this path and it is worth
+        // saying why rather than assuming it: both `add` paths gate on `uid`,
+        // which is null here, so neither can insert a goal against an
+        // unestablished `client_id`. Only the sentence was wrong.
+        setStatus('error'); return;
+      }
+      const who = read.uid;
       // Unread, and before anything else touches them. The blob carries no
       // account, so reading it is a guess about whose target it is — and the
       // only place that guess could land is somebody's `goal_targets` row. See

@@ -225,11 +225,35 @@ const EXCUSE = /(?:currency|unit)-ok:\s*\S/;
  */
 const KNOWN = new Map([]);
 
+
+// ── a scan that was cut short must not read as a clean one ────────────────
+//
+// Lanes write this tree while gates run over it, so a file listed by readdir
+// and gone by the time it is stat'd or read is an ordinary event here, not a
+// defect. What was NOT ordinary is what used to happen next: the throw went up
+// to `try { walk(root) } catch {}` at the bottom of this file, whose comment
+// says it is there for "a root that is not there yet" — so it swallowed the
+// vanished file AND every file after it in that root, and the run then printed
+// ok over a tree it had partly not opened.
+//
+// A gate whose final line names a file count is making a claim about coverage.
+// So: a disappearance is survived per entry, counted, and said out loud. The
+// root-level catch now tolerates only the root itself being absent; anything
+// else is a real fault and is allowed to be one.
+let vanished = 0;
+const gone = (e) => e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+
 function walk(dir, out = []) {
-  for (const e of readdirSync(dir)) {
+  let entries;
+  try { entries = readdirSync(dir); }
+  catch (e) { if (gone(e)) { vanished++; return out; } throw e; }
+  for (const e of entries) {
     if (e === 'node_modules' || e === '.tmp' || e.startsWith('.')) continue;
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) walk(p, out);
+    let st;
+    try { st = statSync(p); }
+    catch (e) { if (gone(e)) { vanished++; continue; } throw e; }
+    if (st.isDirectory()) walk(p, out);
     // Tests are excluded: their whole job is to pin what a hundred does in a
     // named currency, so every assertion in coachMoney.test.ts looks exactly
     // like the offence.
@@ -284,7 +308,8 @@ const files = [];
 const perRoot = new Map();
 for (const r of ROOTS) {
   const before = files.length;
-  try { walk(join(ROOT, r), files); } catch { /* a root that is not there yet */ }
+  try { walk(join(ROOT, r), files); }
+  catch (e) { if (!gone(e)) throw e; /* only the root itself may be absent */ }
   perRoot.set(r, files.length - before);
 }
 assertRootFloors('check:hundreds', perRoot);

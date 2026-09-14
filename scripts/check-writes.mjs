@@ -252,16 +252,7 @@ const KNOWN = new Map([]);
  * least placed to judge it. The three sites in src/lib that this rule also
  * reached WERE marked, because this lane can answer for them.
  */
-const KNOWN_COUNT = new Map([
-  ['src/ui/quietHours.ts', {
-    count: 1,
-    fix: "The delete in `saveQuietHours` when `q` is null. The comment under it already says \"A delete that matched nothing is a success here and only here\" — put that in a `no-count-ok:` above the write and this entry goes away.",
-  }],
-  ['src/ui/wearables.tsx', {
-    count: 1,
-    fix: "The `device_sleep_nights` delete in `forgetSleep`. Its comment already reads \"Zero rows is success here, not silence\" and names src/lib/wroteRows.ts as the rule it is departing from; that sentence is the `no-count-ok:` reason, it just needs the marker in front of it.",
-  }],
-]);
+const KNOWN_COUNT = new Map([]);
 
 const isTest = (f) => /\.test\.[jt]sx?$/.test(f) || f.includes('__tests__');
 

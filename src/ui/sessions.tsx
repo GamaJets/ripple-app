@@ -44,6 +44,13 @@ import { sendPushChecked } from './pushNotifications';
 import { reofferSlot, refundSession, sessionsRemaining } from '../lib/connect';
 import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and — when nobody is — WHICH of the two reasons it was. A
+// bare `getSession()` cannot tell an outage from a sign-out (both arrive as
+// `session: null`), and every hook in this file used to read the first as the
+// second. See src/lib/authReadFate.ts for the library reading that establishes
+// it and src/lib/sessionUidRead.ts for the classification.
+import { sessionUid } from '../lib/sessionUid';
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 // The three answers `promote_session_waitlist` can give. Shared with the owner
 // console, which reads the same RPC and cannot import this module: it pulls in
@@ -326,13 +333,41 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     if (!USE_SUPABASE) return;
     {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // No session is a true answer, not a failed check. Treating "nobody is
+        // signed in" as an error latched this provider into 'error' on the
+        // first tick — before anybody had signed in — where it stayed, because
+        // the effect never ran a second time.
+        //
+        // But "no session" was being read off `sess?.session` with the `error`
+        // beside it discarded, and those are two different answers wearing the
+        // same face. src/lib/authReadFate.ts has the library reading: when the
+        // stored access token has expired and the refresh cannot reach the
+        // server, `getSession()` resolves with `session: null` and an
+        // `AuthRetryableFetchError`. So a member in a basement gym, or anyone
+        // through a captive portal, took this branch — and 'ready' with an
+        // empty `sessions` array is the coach's diary and the client's
+        // upcoming-session card both stating, as a fact, that there is no
+        // training booked. On the screen whose whole subject is training they
+        // have already paid for and are standing there for.
+        //
+        // `sessionUid` keeps the same storage-first call and separates the two.
+        const who = await sessionUid('sessions.hydrate');
         if (cancelled()) return;
-        if (!sess?.session) { setStatus('ready'); return; }
+        // Narrowed on `fate`, not on `!who.uid`: UidRead's signed-in member has
+        // `uid: string`, which includes '', so the falsy check does not
+        // discriminate the union.
+        if (who.fate !== null) {
+          // 'signed-out' keeps the old behaviour, because it was right for the
+          // answer it was given: an empty calendar under 'ready' is the true
+          // state of an account nobody is signed into.
+          //
+          // 'unreadable' is 'error', and under 'error' this provider's empty
+          // list means UNKNOWN rather than none — which is the whole point of
+          // src/ui/loadStatus.ts and the difference between "we could not read
+          // your calendar" and "you have nothing booked".
+          setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+          return;
+        }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled()) return;
         if (authErr) { setStatus('error'); return; }
@@ -1251,12 +1286,23 @@ export function useCancellationPolicy(): { policy: CancellationPolicy | null; st
     let cancelled = false;
     (async () => {
       try {
-        const { data: sess } = await supabase.auth.getSession();
+        const who = await sessionUid('cancellationPolicy.read');
         if (cancelled) return;
         // Signed out is a true answer, not a failed read. Latching 'error' on
         // the first tick before anybody has signed in is the bug the hydrate
         // above this file was fixed for; it is not repeated here.
-        if (!sess?.session) { setPolicy(null); setStatus('ready'); return; }
+        //
+        // An OUTAGE is not that answer, and it used to come down the same
+        // branch. `policy: null` under 'ready' is the state this hook's own
+        // header calls out: "your coach does not charge one" is a different
+        // sentence from "we could not read your coach's policy", and printing
+        // the second as the first is how somebody comes to believe a
+        // cancellation is free. They then cancel, and are charged.
+        if (who.fate !== null) {
+          setPolicy(null);
+          setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+          return;
+        }
         const { data, error } = await supabase.rpc('my_cancellation_policy');
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
@@ -1335,11 +1381,34 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
     let cancelled = false;
     (async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
+        const who = await signedInUid('myCancellationPolicy.read');
         if (cancelled) return;
-        const id = auth?.user?.id ?? null;
-        setUid(id);
-        if (!id) { setStatus('ready'); setSynced(true); return; }
+        setUid(who.uid);
+        if (who.fate !== null) {
+          // ── the two answers that used to be one ───────────────────────────
+          //
+          // 'signed-out' keeps what was here: ready, synced, and the empty
+          // defaults on screen, because there is no coach whose policy could
+          // have been read.
+          //
+          // 'unreadable' must not. The defaults are `applies: false, fee: null`
+          // — the profile screen renders that as this coach charging NOTHING
+          // for a late cancellation, which is a statement about their own
+          // business terms, made to them, over a read that never arrived. And
+          // `synced: true` is the flag that says "the server copy is now in
+          // these fields"; setting it over an outage is the same false claim
+          // stated to the write path instead of to the coach.
+          //
+          // The write itself is safe on both branches and it is worth saying
+          // why, because it is not by accident: `flushPolicy` and the debounce
+          // effect both gate on `uid`, which is null here, so nothing is sent
+          // and the empty defaults cannot clobber a policy the coach already
+          // has. What was wrong was only ever what the screen said.
+          if (who.fate === 'signed-out') { setStatus('ready'); setSynced(true); return; }
+          setStatus('error');
+          return;
+        }
+        const id = who.uid;
         const { data, error } = await supabase.from('trainers')
           .select('late_cancel_applies, late_cancel_notice_hours, late_cancel_fee, tenant_id')
           .eq('id', id).maybeSingle();
@@ -1548,8 +1617,19 @@ export function useSlotWaitlist(daysAhead: number = 60): {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setTaken([]); setMine([]); setStatus('ready'); return; }
+      const who = await sessionUid('slotWaitlist.read');
+      // An outage used to land here as "no session" and set BOTH lists empty
+      // under 'ready'. `taken: []` is app/(client)/calendar.tsx drawing
+      // "Nothing on this day" over a day that is really full — the exact
+      // sentence SLOTS_ROW_CAP above exists to stop a silent cut from printing
+      // — and `mine: []` tells somebody who is third in a queue that they are
+      // waiting for nothing. Two false facts about a member's own booking, on
+      // the read that is most likely to be made from a gym with no signal.
+      if (who.fate !== null) {
+        setTaken([]); setMine([]);
+        setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+        return;
+      }
       const from = new Date().toISOString();
       const to = new Date(Date.now() + daysAhead * 86_400_000).toISOString();
       const [slots, queue] = await Promise.all([
@@ -1845,9 +1925,18 @@ export function useLateCancelCharges(audience: ChargesAudience): {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setCharges([]); setStatus('ready'); return; }
-      const uid = sess.session.user.id;
+      const who = await sessionUid('charges.read');
+      // `charges: []` under 'ready' is the sentence "you have never been
+      // charged a late-cancellation fee", shown to the member it would be
+      // about. Under an outage that is a claim about somebody's money made
+      // from a read that did not happen, and the direction it is wrong in is
+      // the reassuring one — which is worse, because nobody goes looking.
+      if (who.fate !== null) {
+        setCharges([]);
+        setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+        return;
+      }
+      const uid = who.uid;
       // Two literal reads rather than one conditionally-extended builder, for
       // the reason `setWaived` below writes two literal updates: a chain
       // assembled behind an `if` is opaque to scripts/check-schema.mjs and to
@@ -1916,8 +2005,25 @@ export function useLateCancelCharges(audience: ChargesAudience): {
     // never meant to offer it.
     if (audience === 'mine') return false;
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id ?? null;
+      // ── the one site in this file that WROTE on a false sign-out ─────────
+      //
+      // This read was `const { data: auth } = await supabase.auth.getUser()`
+      // with the error dropped, and `uid` fell through as null. The write below
+      // does not gate on it: it went ahead and stamped `waived_by: null` on the
+      // row. So an auth outage did not stop a coach forgiving a fee — it
+      // recorded the forgiveness with NOBODY's name against it, on a money row
+      // whose whole purpose is to say who decided a client no longer owed
+      // something. Unattributable, and indistinguishable afterwards from a
+      // waiver the database itself had produced.
+      //
+      // A waiver is a correction, and a correction is a second recorded fact.
+      // A fact with no author is not one, so the write is refused rather than
+      // attempted — and refused on BOTH fates, because a coach who is genuinely
+      // signed out cannot author it either. `false` is already this function's
+      // "it did not land", and every caller reports it as that.
+      const who = await signedInUid('charges.waive');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
       // An update the policy filters out is not an error in PostgREST — it
       // changes zero rows and reports success. The rows it returns are what is
       // counted, or a coach is told they forgave a fee that still stands.

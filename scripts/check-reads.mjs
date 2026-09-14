@@ -38,11 +38,35 @@ import { assertRootFloors } from './gate-floor.mjs';
 // same failure mode and gets the same rule.
 const ROOTS = ['src', 'app', 'studio-web/app', 'studio-web/lib'];
 const files = [];
+
+// ── a scan that was cut short must not read as a clean one ────────────────
+//
+// Lanes write this tree while gates run over it, so a file listed by readdir
+// and gone by the time it is stat'd or read is an ordinary event here, not a
+// defect. What was NOT ordinary is what used to happen next: the throw went up
+// to `try { walk(root) } catch {}` at the bottom of this file, whose comment
+// says it is there for "a root that is not there yet" — so it swallowed the
+// vanished file AND every file after it in that root, and the run then printed
+// ok over a tree it had partly not opened.
+//
+// A gate whose final line names a file count is making a claim about coverage.
+// So: a disappearance is survived per entry, counted, and said out loud. The
+// root-level catch now tolerates only the root itself being absent; anything
+// else is a real fault and is allowed to be one.
+let vanished = 0;
+const gone = (e) => e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+
 function walk(dir) {
-  for (const e of readdirSync(dir)) {
+  let entries;
+  try { entries = readdirSync(dir); }
+  catch (e) { if (gone(e)) { vanished++; return; } throw e; }
+  for (const e of entries) {
     if (e === 'node_modules' || e.startsWith('.')) continue;
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) walk(p);
+    let st;
+    try { st = statSync(p); }
+    catch (e) { if (gone(e)) { vanished++; continue; } throw e; }
+    if (st.isDirectory()) walk(p);
     else if (/\.tsx?$/.test(p)) files.push(p);
   }
 }
@@ -53,7 +77,8 @@ function walk(dir) {
 const perRoot = new Map();
 for (const r of ROOTS) {
   const before = files.length;
-  try { walk(r); } catch { /* a root that is not there yet */ }
+  try { walk(r); }
+  catch (e) { if (!gone(e)) throw e; /* only the root itself may be absent */ }
   perRoot.set(r, files.length - before);
 }
 assertRootFloors('check:reads', perRoot);
@@ -188,33 +213,12 @@ if (offenders.length) {
  * back, and it is now held by the strict arm of the rule.
  */
 const AUTH_KNOWN = new Map([
-  ['app/(client)/agreements.tsx', 1],
-  ['app/(client)/coach-documents.tsx', 1],
-  ['app/(client)/devices.tsx', 1],
-  ['app/(client)/foodlog.tsx', 1],
-  ['app/(client)/trainers.tsx', 3],
-  ['app/(owner)/settings.tsx', 1],
-  ['app/(trainer)/builder.tsx', 1],
-  ['app/(trainer)/checklists.tsx', 1],
-  ['app/(trainer)/client-report.tsx', 1],
-  ['app/(trainer)/documents.tsx', 1],
-  ['app/(trainer)/group.tsx', 1],
-  ['app/(trainer)/my-nutrition.tsx', 1],
-  ['app/(trainer)/videos.tsx', 1],
-  ['app/join.tsx', 1],
-  ['src/lib/billing.ts', 1],
   ['src/lib/supabase.ts', 1],
-  ['src/lib/wearables/oauth.ts', 1],
-  ['src/ui/CoachRequests.tsx', 2],
-  ['src/ui/EndReasonSheet.tsx', 2],
-  ['src/ui/WhatsNew.tsx', 1],
-  ['src/ui/announcements.tsx', 2],
   ['src/ui/appFeedback.ts', 1],
   ['src/ui/assignedPrograms.tsx', 1],
   ['src/ui/attendance.ts', 1],
   ['src/ui/auth.tsx', 2],
   ['src/ui/availability.ts', 2],
-  ['src/ui/challenges.tsx', 3],
   ['src/ui/checkins.tsx', 1],
   ['src/ui/classes.tsx', 1],
   ['src/ui/clientData.tsx', 1],
@@ -226,12 +230,9 @@ const AUTH_KNOWN = new Map([
   ['src/ui/coachCosts.ts', 1],
   ['src/ui/coachDelivery.ts', 1],
   ['src/ui/coachExercises.ts', 1],
-  ['src/ui/coachInvoices.ts', 2],
   ['src/ui/coachNotes.tsx', 1],
-  ['src/ui/coachNotify.ts', 2],
   ['src/ui/coachNutrition.tsx', 1],
   ['src/ui/coachPayTerms.ts', 1],
-  ['src/ui/coachProfile.tsx', 1],
   ['src/ui/coachReceipts.ts', 1],
   ['src/ui/coachRota.ts', 1],
   ['src/ui/coachSettlements.ts', 1],
@@ -241,20 +242,14 @@ const AUTH_KNOWN = new Map([
   ['src/ui/deviceHrv.ts', 1],
   ['src/ui/deviceSleep.tsx', 1],
   ['src/ui/exerciseDetail.ts', 1],
-  ['src/ui/exerciseVideos.ts', 2],
   ['src/ui/feedback.tsx', 1],
-  ['src/ui/foodLog.tsx', 3],
-  ['src/ui/glucoseData.ts', 1],
-  ['src/ui/goalTracker.tsx', 1],
   ['src/ui/groupProgram.ts', 1],
   ['src/ui/habits.tsx', 1],
-  ['src/ui/injuryAcks.tsx', 3],
   ['src/ui/intake.ts', 1],
   ['src/ui/invites.tsx', 1],
   ['src/ui/joinCode.ts', 1],
   ['src/ui/leads.ts', 1],
   ['src/ui/measurements.tsx', 1],
-  ['src/ui/messageTemplates.ts', 2],
   ['src/ui/messaging.ts', 1],
   ['src/ui/myCoachRequests.ts', 1],
   ['src/ui/nightlyPasses.ts', 1],
@@ -263,14 +258,9 @@ const AUTH_KNOWN = new Map([
   ['src/ui/outbox.tsx', 1],
   ['src/ui/ownerCosts.ts', 1],
   ['src/ui/pushNotifications.ts', 1],
-  ['src/ui/quietHours.ts', 2],
   ['src/ui/recordOutbox.ts', 1],
   ['src/ui/reviewAsks.ts', 1],
-  ['src/ui/roster.tsx', 2],
-  ['src/ui/sessions.tsx', 6],
-  ['src/ui/settings.tsx', 2],
   ['src/ui/stretchCatalogue.ts', 1],
-  ['src/ui/tenant.tsx', 1],
   ['src/ui/trainerInvites.tsx', 1],
   ['src/ui/trialAccount.ts', 1],
   ['src/ui/waiver.tsx', 1],

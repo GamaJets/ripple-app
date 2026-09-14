@@ -41,7 +41,7 @@ import { Rule, Section, SectionHead, ListRow, Ghost, Flag, fig } from '../../src
 import { RepdbAttribution } from '../../src/ui/Attribution';
 import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
-import { useAuth } from '../../src/ui/auth';
+import { useAuth, useSignOutAndSay } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { useSettings } from '../../src/ui/settings';
 import { lockSettingNote } from '../../src/lib/appLock';
@@ -50,6 +50,14 @@ import { useTenant } from '../../src/ui/tenant';
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 import { supabase } from '../../src/lib/supabase';
+// Who is signed in, with the failure kept rather than collapsed into a null
+// uid. `supabase.auth.getUser()` does not reject on a dropped connection — it
+// RESOLVES with `{ data: { user: null }, error }` — so the `catch` this screen
+// used to rely on was unreachable for the one case it was there for, and an
+// auth outage on the deletion screen left no trace anywhere. See the headers of
+// src/lib/authReadFate.ts and src/lib/authedUid.ts; `signedInUid` is the glue
+// that makes the call and reports the fault under this screen's own key.
+import { signedInUid } from '../../src/lib/signedInUid';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
@@ -118,6 +126,12 @@ export default function OwnerSettings() {
   const t = useTheme();
   const router = useRouter();
   const auth = useAuth();
+  // Signing out is a network call that can fail, and until now every caller
+  // navigated to /welcome regardless — telling somebody they were signed out
+  // without establishing it. This awaits the fate and says so when it is not
+  // 'ended'. See src/lib/signOutFate.ts for why the two failures cannot be
+  // told apart from the resolved value.
+  const leaveNow = useSignOutAndSay('ownerSettings');
   const lock = useAppLock();
   const st = useSettings();
   const toggleLock = async () => {
@@ -199,13 +213,41 @@ export default function OwnerSettings() {
   const readFacts = useCallback(async (): Promise<OwnerFacts> => {
     const unread: OwnerFacts = { waiting: null, coOwners: null, requestedAt: null, selfRead: false };
     if (!USE_SUPABASE) { setFacts(unread); return unread; }
-    let uid: string | null = null;
-    try {
-      const { data: a } = await supabase.auth.getUser();
-      uid = a?.user?.id ?? null;
-    } catch (e) { reportError('ownerSettings.auth', e); }
-    if (!uid) { setFacts(unread); return unread; }
-    const me = uid;
+    /*
+     * ── the error was on the line and was thrown away ────────────────────
+     *
+     * This was:
+     *
+     *     try {
+     *       const { data: a } = await supabase.auth.getUser();
+     *       uid = a?.user?.id ?? null;
+     *     } catch (e) { reportError('ownerSettings.auth', e); }
+     *
+     * and `error` is not on the destructure, so it was discarded. That matters
+     * more here than the missing variable suggests, because of WHICH case it
+     * loses: src/lib/authReadFate.ts sets out, from the installed library's own
+     * source, that `getUser()` does not reject on a dropped connection. It
+     * RESOLVES with `{ data: { user: null }, error }` — an `AuthRetryableFetchError`,
+     * which auth-js itself files under "infrastructure errors [that] should not
+     * cause session invalidation".
+     *
+     * So the `catch` above could not fire for an outage, and an outage was
+     * therefore the one failure this screen recorded nowhere at all: no report,
+     * no console line, nothing. The three facts below — how many people are
+     * waiting to be erased, whether another owner would remain to action them,
+     * and whether this owner already has a request open — all went to null, the
+     * dialog copy said each "could not be read", and no trace was left that the
+     * reason was an outage rather than three refused queries.
+     *
+     * `signedInUid` names `error`, hands it to `authReadFate`, and reports a
+     * fault for 'unreadable' while staying silent for a genuine sign-out —
+     * because not being signed in is not a fault. The three nulls and the
+     * sentences over them are unchanged and were already right; what is new is
+     * that the outage now leaves a trace.
+     */
+    const who = await signedInUid('ownerSettings.auth');
+    if (!who.uid) { setFacts(unread); return unread; }
+    const me = who.uid;
 
     // The three reads fail independently. A gym that cannot read its own
     // owner roster still has to be told how many people are waiting on it.
@@ -267,13 +309,38 @@ export default function OwnerSettings() {
   const load = useCallback(async (): Promise<OwnerFacts> => {
     setReloading(true);
     try {
-      return await readFacts();
-      // Stamped once, at the end, because the three reads land together as far
-      // as this screen is concerned — `readFacts` settles all three and writes
-      // one object. A read that failed leaves its own field null and the stamp
-      // still moves, which is right: the screen DID ask, just now, and the
-      // nulls beside it are what came back.
+      /*
+       * ── the stamp was set AFTER a return, so it was never set ────────────
+       *
+       * This read:
+       *
+       *     return await readFacts();
+       *     setFactsAt(Date.now());     ← unreachable
+       *
+       * with the comment below sitting between the two lines, describing
+       * behaviour that could not happen. `factsAt` therefore stayed null for
+       * the life of the screen, and `oldestFetch` answers null the moment any
+       * of its arguments is null — deliberately, so a stamp can never speak for
+       * a read that has not landed. So `<Fetched at={fetchedAt} />` above had
+       * no time on it, on every visit, for every owner: the one control that
+       * says how old the deletion queue is printed nothing, and the gym name
+       * read beside it was covered by the same silence.
+       *
+       * That is the screen's most consequential figure going unlabelled. The
+       * queue is a statutory 30-day clock, this screen tells the owner how many
+       * people are on it, and an owner who had just actioned somebody on the
+       * console had no way to tell a stale count from a current one.
+       *
+       * Stamped BEFORE the return now, and stamped unconditionally, because the
+       * three reads land together as far as this screen is concerned —
+       * `readFacts` settles all three and writes one object. A read that failed
+       * leaves its own field null and the stamp still moves, which is right:
+       * the screen DID ask, just now, and the nulls beside it are what came
+       * back.
+       */
+      const read = await readFacts();
       setFactsAt(Date.now());
+      return read;
     } finally {
       setReloading(false);
     }
@@ -320,7 +387,7 @@ export default function OwnerSettings() {
   const signOut = () => {
     Alert.alert('Sign out?', 'You will need your email and password to sign back in. Nothing is deleted.', [
       { text: 'Stay signed in', style: 'cancel' },
-      { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('ownerSettings.signOut', e); } } },
+      { text: 'Sign out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
 
@@ -376,7 +443,7 @@ export default function OwnerSettings() {
         [
           { text: 'Stay signed in', style: 'cancel' },
           { text: 'Open Deletion requests', onPress: () => router.push('/(owner)/deletions') },
-          { text: 'Sign out', style: 'destructive', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('ownerSettings.signOut', e); } } },
+          { text: 'Sign out', style: 'destructive', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
         ],
       );
     } catch (e) {

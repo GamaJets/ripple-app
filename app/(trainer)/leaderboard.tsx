@@ -68,6 +68,7 @@ import { deltaLabel } from '../../src/lib/deltaLabel';
 import { useRoster } from '../../src/ui/roster';
 import { useToday } from '../../src/ui/today';
 import { rowFacts, rowSpoken, unreadMark, injuryMark } from '../../src/lib/leaderboardFacts';
+import { disclosureFact } from '../../src/lib/disclosureFact';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -275,7 +276,23 @@ export default function Leaderboard() {
             // null when there is nothing honest to say, so the row draws or
             // omits whole elements rather than printing a dash into a sentence.
             const facts = rowFacts(c, today);
-            const injury = injuryMark(c.injuries);
+            // `injuryMark` draws nothing for an empty list and nothing for a
+            // list that never arrived, and on a row those two nothings read the
+            // same: as an all-clear. The partition above already keeps the
+            // hand-added off this list, so what is left here is the STATUS
+            // question — under a failed roster read these rows are whatever
+            // survived the failure, and their disclosures were not read at all.
+            // src/lib/disclosureFact.ts answers which of the three it is; the
+            // badge is drawn only from an answer, and an absence says so in its
+            // own words instead of drawing nothing.
+            const disc = disclosureFact(status, c, c.id, c.name.split(' ')[0]);
+            const injury = disc.kind === 'asked' ? injuryMark(c.injuries) : null;
+            // Only the absences are spoken. A row that was asked and came back
+            // clear draws no badge and says nothing — which is honest HERE only
+            // because the line above guarantees that a silent row is an asked
+            // one. Saying "asked, and disclosed nothing" on twenty rows would
+            // bury the one row that is not.
+            const discSpoken = disc.kind === 'asked' ? null : disc.spoken;
             const unread = unreadMark(c.unread);
             return (
             <Pressable key={c.id} onPress={() => openClient(c)}
@@ -284,7 +301,11 @@ export default function Leaderboard() {
               // which are the two things a screen reader cannot read, and the
               // sentence comes from the same rules that draw them so the two
               // cannot drift apart.
-              accessibilityLabel={`${c.name}, rank ${i + 1}, last check-in rating ${rating} per cent. ${rowSpoken(c, today)} Opens their messages.`}
+              // The absence is spoken as well as drawn. `rowSpoken` is built
+              // from the row's own fields and cannot see the status, so the one
+              // fact it has no way of carrying is added here rather than
+              // reworded there.
+              accessibilityLabel={`${c.name}, rank ${i + 1}, last check-in rating ${rating} per cent. ${rowSpoken(c, today)}${discSpoken ? ` ${discSpoken}` : ''} Opens their messages.`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <Text style={{ ...value(15), color: i === 0 ? t.brand : t.ink3, width: 20, textAlign: 'center' }}>{i + 1}</Text>
               <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -309,8 +330,15 @@ export default function Leaderboard() {
                 {facts.length ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{facts.join(' · ')}</Text>
                 ) : null}
-                {injury || unread ? (
+                {injury || unread || disc.kind === 'unread' ? (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: 5 }}>
+                    {/* An absence with a name on it. ink3, never amber: this is
+                        not an alert about the client, it is this screen saying
+                        it does not know — and the badge that IS an alert has to
+                        stay the only amber thing on the row. */}
+                    {disc.kind === 'unread' ? (
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries not read</Text>
+                    ) : null}
                     {/* Amber only for a disclosure made inside the last
                         fortnight — the ones a coach has probably not seen. An
                         injury they have already talked about is a fact about
@@ -373,11 +401,16 @@ export default function Leaderboard() {
                   answering, and those are opposite phone calls. */}
               {unplaced.map((c, i) => {
                 const facts = rowFacts(c, today);
-                const injury = injuryMark(c.injuries);
+                // The same three facts as the ranked rows above, for the same
+                // reason: a row with no injury badge on it must be a row that
+                // was asked, not a row nobody could read.
+                const disc = disclosureFact(status, c, c.id, c.name.split(' ')[0]);
+                const injury = disc.kind === 'asked' ? injuryMark(c.injuries) : null;
+                const discSpoken = disc.kind === 'asked' ? null : disc.spoken;
                 const unread = unreadMark(c.unread);
                 return (
                 <Pressable key={c.id} onPress={() => router.push({ pathname: '/(trainer)/chat', params: { clientId: c.id, name: c.name } })}
-                  accessibilityRole="button" accessibilityLabel={`Message ${c.name}, who has not checked in. ${rowSpoken(c, today)}`}
+                  accessibilityRole="button" accessibilityLabel={`Message ${c.name}, who has not checked in. ${rowSpoken(c, today)}${discSpoken ? ` ${discSpoken}` : ''}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                     <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
@@ -390,8 +423,11 @@ export default function Leaderboard() {
                     {facts.length ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{facts.join(' · ')}</Text>
                     ) : null}
-                    {injury || unread ? (
+                    {injury || unread || disc.kind === 'unread' ? (
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: 5 }}>
+                        {disc.kind === 'unread' ? (
+                          <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries not read</Text>
+                        ) : null}
                         {injury ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                             {/* A DOT in the status colour, with the words in ink. `warn` is
@@ -442,6 +478,16 @@ export default function Leaderboard() {
                 nothing of theirs reaches this board. That is not a missing check-in and not a low
                 score — there is no app for them to check in from yet. Send them your coaching code
                 and they start appearing above from the day they join.
+              </Text>
+              {/* Said here because it is the one thing on this screen that is
+                  about their SAFETY rather than their ranking. Injuries are
+                  disclosed by the client in their own app, so these people have
+                  never been asked — and a row with no injury badge on it, in a
+                  list where every other row's badge is drawn from a real
+                  answer, reads as an all-clear. It is not one. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Nobody has asked them about injuries either — there is no screen for them to
+                disclose one on — so nothing on this page says they are uninjured.
               </Text>
               {noAccount.map((c, i) => (
                 <Pressable key={c.id}

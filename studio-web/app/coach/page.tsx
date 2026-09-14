@@ -483,26 +483,59 @@ export default function Coach() {
   }, [roster, sessions]);
 
   /**
-   * What the delivered sessions in this window are priced at.
+   * What the delivered sessions in this window are priced at — ONE FIGURE PER
+   * CURRENCY, never one figure.
    *
    * Only outcome === 'completed' under PAY_DELIVERED_ONLY, because whether a
    * no-show is payable is the gym's policy and not this screen's to assert. A
    * session carrying no rate is left out of the sum and counted separately —
    * summing it as zero would quietly tell a coach their hour was worth nothing.
+   *
+   * ── why this is a set of pots and was a single `cents` ──────────────────
+   *
+   * `sessions.rate_currency` is selected by `fetchMySessions` and mapped onto
+   * `rateCurrency` twenty lines above, and nothing on this screen read it. The
+   * sum was `cents = (cents ?? 0) + s.rateCents` over every payable session,
+   * and the note under the tile then rendered it with `amount(cents, ccy)` —
+   * the GYM's currency today. So a coach with sessions payroll had stamped AED
+   * on and sessions stamped GBP had the two integers added and the result
+   * labelled with whichever one the gym record happens to carry now. This is
+   * not hypothetical for a gym that changed currency: part 1011 stamps the
+   * currency at settlement, so the older rows keep the money they were priced
+   * in for ever, which is the point of stamping it.
+   *
+   * A session payroll has NOT yet stamped carries no currency of its own and
+   * inherits the gym's — that is the rule this file already stated and it is
+   * kept. Where the gym has not set one either, the session cannot be written
+   * in any money at all, so it is counted out into `noCurrency` rather than
+   * added to a pot; it is not a zero and it is not somebody else's dirhams.
    */
   const priced = useMemo(() => {
     if (!sessions) return null;
-    let cents: number | null = null;
-    let payable = 0, withRate = 0;
+    const byCurrency = new Map<string, { cents: number; count: number }>();
+    let payable = 0, withRate = 0, noCurrency = 0;
     for (const s of sessions) {
       if (!isPayable(s, PAY_DELIVERED_ONLY)) continue;
       payable += 1;
       if (s.rateCents == null) continue;
-      cents = (cents ?? 0) + s.rateCents;
       withRate += 1;
+      // The row's own currency wins; a row payroll has not stamped inherits
+      // the gym's. Folded the way lib/currency folds `tenants.currency`, so
+      // ' gbp ' and 'GBP' are one pot rather than two.
+      const own = (s.rateCurrency ?? '').trim().toUpperCase() || null;
+      const cur = own ?? ((ccy ?? '').trim().toUpperCase() || null);
+      if (!cur) { noCurrency += 1; continue; }
+      const pot = byCurrency.get(cur) ?? { cents: 0, count: 0 };
+      pot.cents += s.rateCents;
+      pot.count += 1;
+      byCurrency.set(cur, pot);
     }
-    return { cents, payable, withRate };
-  }, [sessions]);
+    const pots = [...byCurrency.entries()]
+      .map(([currency, v]) => ({ currency, cents: v.cents, count: v.count }))
+      // Largest first: the coach's main money is the one they came to read.
+      .sort((a, b) => b.cents - a.cents || a.currency.localeCompare(b.currency));
+    return { pots, payable, withRate, noCurrency };
+  }, [sessions, ccy]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -623,11 +656,18 @@ export default function Coach() {
           note={
             priced == null ? undefined
               // A sum over sessions that carry no rate is not zero money; it is
-              // no answer. Say which of the two this is.
-              : priced.cents == null
-                ? priced.payable > 0 ? 'none of them carry a rate' : undefined
-                : !ccy ? NO_CURRENCY_NOTE
-                : `${amount(priced.cents, ccy)} across ${priced.withRate} of ${priced.payable}`
+              // no answer. Say which of the three this is — and where there are
+              // two currencies, say both rather than adding them: AED 6,000 and
+              // GBP 400 is two facts, and one number over them is about
+              // neither. This app holds no rate between any two monies.
+              : priced.pots.length === 0
+                ? priced.withRate === 0
+                  ? priced.payable > 0 ? 'none of them carry a rate' : undefined
+                  : `${NO_CURRENCY_NOTE}, so ${priced.noCurrency} priced session${priced.noCurrency === 1 ? '' : 's'} cannot be written`
+                : `${priced.pots.map((p) => amount(p.cents, p.currency)).join(' + ')} across ${priced.withRate - priced.noCurrency} of ${priced.payable}${
+                    priced.noCurrency > 0
+                      ? ` · ${priced.noCurrency} more priced in no currency anybody has set`
+                      : ''}`
           }
         />
       </div>

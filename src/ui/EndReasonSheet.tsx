@@ -36,6 +36,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Modal, TextInput, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. A `getSession()`
+// that could not reach the auth server answers `session: null`, exactly as a
+// signed-out device does — see src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { useTheme } from './components';
@@ -264,9 +268,18 @@ export function useDepartures(reload?: number): DepartureRead {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setRows([]); setStatus('ready'); return; }
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess?.session?.user?.id ?? null;
-      if (!uid) { setRows([]); setStatus('ready'); return; }
+      const who = await sessionUid('departures.read');
+      if (who.fate === 'signed-out') { setRows([]); setStatus('ready'); return; }
+      // The error beside this call was discarded, so an unreachable auth server
+      // landed on the line above (src/lib/authReadFate.ts): `rows: []` under
+      // 'ready'. Read the note on the database error below — 'error' is there
+      // so the card "draws no list at all rather than an empty one" — and note
+      // what `rows` being `Departure[] | null` is FOR: null is unknown, `[]` is
+      // "nobody has left". An outage said the second, to a coach, about their
+      // own roster, on the card that asks them to explain each departure. The
+      // count of what is still missing came from the same read, so it agreed.
+      if (who.fate !== null) { setRows(null); setStatus('error'); return; }
+      const uid = who.uid;
       const since = new Date(Date.now() - DEPARTURE_WINDOW_DAYS * 86_400_000).toISOString();
       const { data, error } = await supabase
         .from('coaching_relationships')
@@ -397,9 +410,17 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
     if (!USE_SUPABASE) return;
     let live = true;
     void (async () => {
+      // `meId` stays null on both fates, and that was already the right
+      // outcome: `openOne` passes `meId ?? ''`, `fetchEndRecord` refuses an
+      // empty id, and the row says END_RECORD_UNREADABLE — "we could not read
+      // who ended this", which is true whichever of the two happened. What was
+      // missing is that an outage left no trace: the `catch` swallowed it and
+      // the discarded `error` swallowed the rest. `sessionUid` reports an
+      // unreadable read under this key, so a coach opening a departure that
+      // will not open leaves a record of why.
       try {
-        const { data } = await supabase.auth.getSession();
-        if (live) setMeId(data?.session?.user?.id ?? null);
+        const who = await sessionUid('departures.whoAmI');
+        if (live) setMeId(who.uid);
       } catch { /* leaves meId null, which reads as unreadable rather than as theirs */ }
     })();
     return () => { live = false; };

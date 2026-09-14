@@ -105,6 +105,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+// Who is posting, and which of the two reasons nobody is. A `getSession()` that
+// could not reach the auth server answers `session: null`, exactly as a
+// signed-out device does — see src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
+import type { UidRead } from '../lib/authedUid';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
 import { adoptServerId, isPending, localId, mergeLog } from '../lib/wellnessSync';
@@ -299,7 +304,13 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     // Both readers now answer in the same shape — the ids AND whether that is
     // all of them — so the fan-out cannot lose the second half by treating the
     // first as an array.
-    const found = kind === 'gym' ? await gymRecipients() : await coachRecipients((await currentUid()) ?? '');
+    // `me.uid ?? ''` keeps what was here: `coachRecipients('')` finds nobody
+    // and the report below carries `recipients: null` — "we do not know who
+    // this reached" — which is already the right answer for an identity that
+    // could not be read. What changes is that the outage is now classified and
+    // reported rather than silently becoming an empty string.
+    const me = kind === 'gym' ? null : await currentUid();
+    const found = kind === 'gym' ? await gymRecipients() : await coachRecipients(me?.uid ?? '');
     const ids = found?.ids ?? null;
     const truncated = !!found?.truncated;
     const note = noticeNotification(kind, body, kind === 'gym' ? gymName.current : null);
@@ -326,12 +337,20 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  const currentUid = async (): Promise<string | null> => {
-    if (uid) return uid;
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      return sess?.session?.user?.id ?? null;
-    } catch { return null; }
+  /**
+   * Who is posting — and, when nobody is, which of the two reasons.
+   *
+   * It used to answer `string | null`, with the `error` from `getSession()`
+   * dropped and a `catch` that also answered null. Both callers below read that
+   * null as "no account": one addresses a coach notice with `''` and the other
+   * decides which gym a notice belongs to. An unreachable auth server produces
+   * exactly that null (src/lib/authReadFate.ts), so an outage did not stop
+   * either of them — it made them proceed on an identity nobody had
+   * established.
+   */
+  const currentUid = async (): Promise<UidRead> => {
+    if (uid) return { uid, fate: null };
+    return sessionUid('announcements.whoAmI');
   };
 
   /** Send one announcement. Returns false for every reason it is not on the
@@ -340,6 +359,20 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
    *  account as their trainer. */
   const send = async (owner: string, a: Announcement): Promise<boolean> => {
     try {
+      // ── a gym notice with no tenant is not sent ───────────────────────────
+      //
+      // `myTenant()` answers null both for an account that owns no gym and for
+      // an auth read that did not land, and the second used to flow straight
+      // into the insert as `tenant_id: null`. `ann_write` checks
+      // `is_owner_of(tenant_id)`, so that row was always going to be refused —
+      // this only stops the request being made and makes the refusal say what
+      // it is. The important part is what it forecloses: an outage must never
+      // be one column-default away from posting a gym's notice into the wrong
+      // gym, or into none. `false` is already this function's "it is not on
+      // the server", the entry stays pending on the phone, and the flush on
+      // reconnect sends it.
+      const tenant = a.kind === 'coach' ? null : await myTenant();
+      if (a.kind !== 'coach' && !tenant) return false;
       // Typed as one shape rather than inferred from the branches: a union of
       // two object literals is inferred with `coach_id: string` on one side and
       // `null` on the other, which supabase-js's insert generic then refuses.
@@ -360,7 +393,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         // admits 'clients' or 'trainers' and nothing else, and a gym notice is
         // addressed to the people the schema calls clients. A third word here
         // is not a naming choice, it is a rejected insert.
-        : { author_id: owner, coach_id: null, audience: 'clients', body: a.body, tenant_id: await myTenant() };
+        : { author_id: owner, coach_id: null, audience: 'clients', body: a.body, tenant_id: tenant };
       const { data, error } = await supabase.from('announcements')
         .insert(row)
         .select('id').single();
@@ -379,8 +412,12 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
    *  held, so an owner who is moved between tenants does not post into the one
    *  they were in when the app launched. */
   const myTenant = async (): Promise<string | null> => {
-    const id = await currentUid();
-    if (!id) return null;
+    const who = await currentUid();
+    // Null on both fates, as before — but the two are now told apart one level
+    // up, at `send`, which refuses a gym notice rather than posting one with no
+    // tenant on it. See the note there.
+    if (who.fate !== null) return null;
+    const id = who.uid;
     try {
       const { data, error } = await supabase.from('profiles').select('tenant_id, tenants(name)').eq('id', id).limit(1);
       if (error) return null;
@@ -395,20 +432,32 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let id: string | null = null;
-      try {
-        // No session is a true answer, not a failed check — getUser() REJECTS
-        // when nobody is signed in, and reading that as an error is how sibling
-        // providers used to latch into 'error' before anybody had signed in.
-        const { data: sess } = await supabase.auth.getSession();
-        id = sess?.session?.user?.id ?? null;
-      } catch { /* no local session; treated as signed out below */ }
+      // No session is a true answer, not a failed check — reading "nobody is
+      // signed in" as an error is how sibling providers used to latch into
+      // 'error' before anybody had signed in.
+      //
+      // A session that could not be READ is the other answer, and it used to
+      // arrive down the same branch: `getSession()` resolves `session: null`
+      // when a refresh cannot reach the server (src/lib/authReadFate.ts), so
+      // `id` fell to null and the three lines below wiped the board to empty
+      // under 'ready'. That is a coach's notices and a gym's announcements
+      // both reported as "nothing has been posted" — and, exactly as in
+      // src/ui/foodLog.tsx, the same branch skips the device's own cache,
+      // because a cache key needs an account. So the offline copy that exists
+      // for this moment is discarded at this moment.
+      const who = await sessionUid('announcements.read');
       if (cancelled) return;
 
       cacheable.current = true;
       // Signed out, or a build with no backend: nothing is addressed to nobody,
       // and there is no absent server to misreport.
-      if (!id || !USE_SUPABASE) { setUid(null); setAnns([], null); setStatus('ready'); return; }
+      if (who.fate === 'signed-out' || !USE_SUPABASE) { setUid(null); setAnns([], null); setStatus('ready'); return; }
+      // Could not ask. The list on screen is left exactly as it is and the
+      // status says it was not confirmed — which is what the `catch` around the
+      // server read below already does, in its own words: "offline: the cached
+      // list stands, and now says so".
+      if (who.fate !== null) { setStatus('error'); return; }
+      const id = who.uid;
       setUid(id);
 
       let local: Announcement[] = [];

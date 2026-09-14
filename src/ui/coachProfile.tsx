@@ -35,6 +35,12 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. `getUser()`
+// resolves with a null user on a dropped connection rather than rejecting, so
+// the error is the only thing that separates an outage from a sign-out — see
+// src/lib/authReadFate.ts, and the SIGNED_OUT listener below, which documents
+// what a false sign-out costs on this particular screen.
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
 import { reportError } from '../lib/reportError';
@@ -161,14 +167,43 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
     let cancelled = false;
     const fetchReal = async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const u = auth?.user;
+        const who = await signedInUid('coachProfile.read');
         if (cancelled) return;
-        setUid(u?.id ?? null);
+        setUid(who.uid);
         // Settle rather than return: a signed-out launch used to leave `synced`
         // false forever, which now reads as "still loading" and would hold a
         // screen on a spinner that nothing is ever going to resolve.
-        if (!u) { setTrainerRow('unknown'); setSynced(true); return; }
+        if (who.fate === 'signed-out') { setTrainerRow('unknown'); setSynced(true); return; }
+        if (who.fate !== null) {
+          // ── the door the listener below already guards, opened from here ──
+          //
+          // Read the long note on the SIGNED_OUT listener: `uid` null makes
+          // `resolveTrainerAccess` answer 'signed-out', "which blanks the
+          // profile AND turns every setter on this provider into a no-op, so
+          // their Name and Bio fields go quietly read-only". That note is about
+          // an INITIAL_SESSION delivered as null when `getSession()` errors —
+          // and this call had the identical hole, because the error beside
+          // `getUser()` was discarded and an unreachable auth server resolves
+          // with `user: null` (src/lib/authReadFate.ts). Settling here signed a
+          // working coach out of their own profile screen while they were
+          // looking at it.
+          //
+          // So `synced` stays FALSE, and that is the opposite of the line above
+          // rather than a contradiction of it. `settled` is `hydrated &&
+          // synced`, so access resolves to 'loading' — which is exactly true:
+          // nobody has established who this is yet. The spinner argument does
+          // not apply, because unlike a sign-out there IS something to wait
+          // for: this effect is keyed on `readNonce`, `reload()` bumps it, and
+          // pull-to-refresh is what the coach already has in their hand.
+          //
+          // 'unknown' on the trainer row is left as it is, for the reason that
+          // field is three-valued at all: "a read that failed says nothing at
+          // all, and treating it as absence would demote a real coach every
+          // time their connection dropped."
+          setTrainerRow('unknown');
+          return;
+        }
+        const u = { id: who.uid };
 
         const prof = await supabase.from('profiles').select('full_name, avatar').eq('id', u.id).single();
         if (cancelled) return;

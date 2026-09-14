@@ -77,6 +77,65 @@
 //     stand-in for something nobody said. The difference is whether an answer
 //     existed.
 //
+//  6. A CURRENCY IN A SENTENCE. `'Cancel after 12pm and the £10 fee applies'`.
+//     Rule 3 above wants a FIGURE beside the symbol and finds it by looking for
+//     an interpolation — `$${total}`, `£{price}`, `AED ${n}`. A lane
+//     mutation-testing the two attendance screens wrote `£10` into a
+//     member-facing sentence, with the number typed out in the string, and
+//     every gate in this directory passed it including this one.
+//
+//     It is the same defect and it is worse placed. src/lib/classSeat.ts's
+//     `seatNote` must never quote a late-cancellation fee at all — the fee owed
+//     is the one stored in `class_booking_cancellations` at the moment of
+//     cancelling, and quoting today's policy over last month's cancellation
+//     bills a member a price nobody ever showed them; classSeat.test.ts asserts
+//     "names no fee and no currency" for it. The two screens that RENDER those
+//     outcomes had no equivalent guard. And Repple is white-labelled: there is
+//     no symbol that is right for a London gym and a Dubai one at once, so a
+//     symbol baked into a sentence is wrong for most tenants by construction.
+//
+//     See "what rule 6 scans" below for what a sentence is here, and for the
+//     two things it deliberately treats differently.
+//
+// ── what rule 6 scans, and what it lets through ───────────────────────────
+//
+// It reads USER-FACING TEXT: the body of every quoted literal on the line, and
+// in a `.tsx` file the JSX text between tags as well — including a bare
+// continuation line, because React Native prose is written one sentence to a
+// line with the tags on the lines above and below it.
+//
+// A span is only text at all if it reads as a SENTENCE — a word of three or
+// more letters that is not itself a currency code. That single test is what
+// separates this rule from the picker: `'AED'`, `'GBP'`, `'£'` alone are a
+// catalogue entry, a validated code, a symbol table (src/lib/coachCurrency.ts
+// lists 26 codes and src/lib/billing.ts maps gbp→£; neither is prose and
+// neither is touched). Two tiers then apply, and they are not the same tier
+// because the two things are not equally wrong:
+//
+//   A SYMBOL — £ € ¥ ₹ ₩ ₽ د.إ — anywhere in that sentence. There is no
+//   reading of a white-labelled product in which a symbol typed into prose is
+//   right: it is one gym's money asserted at every other gym's members. No
+//   figure needs to be near it.
+//
+//   A CODE — the 26 in CODES — only where a FIGURE is beside it: `AED 450.00`,
+//   `450.00 AED`, `AED450`. A code in a sentence with no number is almost
+//   always the sentence NAMING what a code is, and this tree is full of those
+//   for good reasons: `'A currency is its three-letter ISO code — GBP, AED,
+//   EUR, USD'` is how src/lib/gymPolicy.ts refuses a bad one; src/lib/csvImport.ts
+//   and studio-web/app/accounting/page.tsx both explain that "two for GBP, none
+//   for JPY, three for KWD" is why a figure cannot be scaled without its
+//   currency. Every one of those is the product being honest about exactly the
+//   thing this file exists to protect, and a rule that reported them would be
+//   arguing with its own case. A code with a number against it is a PRICE, and
+//   a price is the thing that cannot be hardcoded.
+//
+// `$` is scanned only as `$` immediately before a digit. That is deliberate and
+// it is the whole difficulty of this rule, the same one rule 3 has: `$` is a
+// template-literal delimiter, a regex anchor, a `String.replace` group
+// reference (`'$1-$2-$3T'` is in app/(client)/scans.tsx) and a SQL placeholder.
+// A bare `$` scanned in prose would report all four and teach people to switch
+// the gate off. `$10` inside a sentence is a price and nothing else.
+//
 // ── what it deliberately does not flag ────────────────────────────────────
 //
 // A currency code in a PICKER — the list an owner chooses from is a list of
@@ -134,6 +193,35 @@ const ROOT = process.cwd();
  * and means something different: that line is CORRECT and will stay.
  */
 const KNOWN = new Map([
+  // ── the two rule 6 found ────────────────────────────────────────────────
+  //
+  // Both are in other lanes' files, so both are ratcheted and NEITHER is
+  // annotated. A `currency-ok:` pasted into somebody else's screen by the
+  // person who wrote the rule is the rule being switched off from the position
+  // least able to judge the site, which is the one use an escape hatch must
+  // never have. If the owner of either file decides the sentence is right as it
+  // stands, the marker is theirs to write and the entry comes off this list.
+
+  // A catalogue of the wording of every notification this product sends — the
+  // `body` here is an EXAMPLE, not a rendered string, which is why it reads so
+  // convincingly like one. It is still the only place in the tree where a
+  // number and a currency are typed together into a member-facing sentence, and
+  // a catalogue that models the wrong shape is where the wrong shape gets
+  // copied from. [fix] word the example without the money — the sentence works
+  // as "Invoice 0007 — Ten sessions." — or let the owner mark it
+  // `currency-ok:` saying it is a catalogue entry and not a send.
+  ['src/lib/notifyInbox.ts:currency-prose', { count: 1 }],
+
+  // "USD 49 plus GBP 39 is not 88 of anything" — the platform console
+  // explaining why it lists each currency separately instead of summing them.
+  // The two codes are an ILLUSTRATION of the argument this whole file makes,
+  // which is the best possible reason for a currency to appear in a sentence
+  // and still not a reason the rule can see: a figure against a code is a
+  // figure against a code. [fix] the illustration survives without the numbers
+  // — "an amount in USD plus an amount in GBP is not an amount in anything" —
+  // or the page's owner marks it `currency-ok:` with that sentence.
+  ['studio-web/app/platform/page.tsx:currency-prose', { count: 1 }],
+
   // src/lib/exportShare.ts:money-arity — CLOSED. `OwnerReportData` now carries
   // `currency: string | null`, app/(owner)/dashboard.tsx passes the gym's own
   // `tenants.currency`, and the report prints the value line for a gym that has
@@ -254,6 +342,89 @@ const CODE = CODES.join('|');
  *  ones that have actually been typed into this repo beside a figure. */
 const SYMBOL = '[$£€¥₹₩₽]';
 
+/* ── rule 6's vocabulary ───────────────────────────────────────────────────
+ *
+ * Separate constants from SYMBOL above on purpose. SYMBOL is the set that shows
+ * up BESIDE AN INTERPOLATION, where `$` has to be in the set because `$${x}` is
+ * the commonest form of that bug. Rule 6 reads prose, where a bare `$` is four
+ * other things (see the header) and only `$` before a digit is money.
+ */
+
+/** A currency symbol standing in a sentence. `د.إ` is here and `$` is not; the
+ *  header says why. */
+const SYMBOL_IN_PROSE = /[£€¥₹₩₽]|د\.إ/;
+
+/** A dollar amount typed out: `$10`, `$ 10`. Not a bare `$`. */
+const DOLLAR_FIGURE = /\$ ?\d/;
+
+/** A code with a FIGURE against it — a price rather than the name of a code.
+ *  One character of slack either side and no more: `AED 450.00`, `450 AED`,
+ *  `AED450`. `'…,month,AED,yes'` (a CSV example header in
+ *  studio-web/app/import/page.tsx) has a word between the two and is not a
+ *  price; neither is `'two for GBP, none for JPY, three for KWD'`. */
+const CODE_PRICED = new RegExp(`\\b(?:${CODE})\\s?\\d|\\d\\s?(?:${CODE})\\b`);
+
+/** Every code, for stripping before the sentence test below. */
+const CODE_ANYWHERE = new RegExp(`\\b(?:${CODE})\\b`, 'g');
+
+/**
+ * Is this span a SENTENCE rather than a catalogue entry?
+ *
+ * A word of three or more letters that is not itself a currency code. This one
+ * test is what lets the 26-code list in src/lib/coachCurrency.ts, the symbol
+ * table in src/lib/billing.ts and every `'GBP'` being parsed or validated
+ * through untouched, without a single exception being written for them — see
+ * the header. It is deliberately cheap and deliberately generous: a rule about
+ * what a MEMBER READS has no business guessing at anything subtler than "are
+ * there words here".
+ */
+function readsAsProse(span) {
+  return /(?:^|[^A-Za-z])[A-Za-z]{3,}(?:[^A-Za-z]|$)/.test(span.replace(CODE_ANYWHERE, ' '));
+}
+
+/**
+ * The user-facing text on one line: the body of every quoted literal, plus — in
+ * a `.tsx` file — the JSX text between tags.
+ *
+ * The last clause is the one that matters for the defect this rule was written
+ * for. React Native prose is written
+ *
+ *     <Text style={s.note}>
+ *       Cancel after 12pm and the £10 fee applies.
+ *     </Text>
+ *
+ * so the sentence sits on a line of its own with no tag on it at all. A line in
+ * a `.tsx` file holding neither `<` nor `>` outside a literal is JSX text or it
+ * is nothing this rule can be fooled by: an identifier cannot contain `£`, and
+ * a string containing one was already returned as a literal above.
+ */
+function userFacingText(line, tsx) {
+  const spans = [];
+  let plain = '';
+  let i = 0;
+  while (i < line.length) {
+    const c = line[i];
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < line.length) {
+        if (line[j] === '\\') { j += 2; continue; }
+        if (line[j] === c) break;
+        j++;
+      }
+      spans.push(line.slice(i + 1, j));
+      plain += ' '.repeat(Math.min(j, line.length) - i + 1);
+      i = j + 1;
+      continue;
+    }
+    plain += c;
+    i++;
+  }
+  if (!tsx) return spans;
+  for (const m of plain.matchAll(/>([^<>]*)</g)) spans.push(m[1]);
+  if (!plain.includes('<') && !plain.includes('>')) spans.push(plain);
+  return spans;
+}
+
 /** Weight units. Length units are deliberately absent: "in" is a preposition
  *  and "cm" is rare enough to have produced nothing, so including them would
  *  cost more in silenced lines than it catches. */
@@ -293,11 +464,35 @@ const INVENTED_UNIT = [
 ];
 
 const files = [];
+
+// ── a scan that was cut short must not read as a clean one ────────────────
+//
+// Lanes write this tree while gates run over it, so a file listed by readdir
+// and gone by the time it is stat'd or read is an ordinary event here, not a
+// defect. What was NOT ordinary is what used to happen next: the throw went up
+// to `try { walk(root) } catch {}` at the bottom of this file, whose comment
+// says it is there for "a root that is not there yet" — so it swallowed the
+// vanished file AND every file after it in that root, and the run then printed
+// ok over a tree it had partly not opened.
+//
+// A gate whose final line names a file count is making a claim about coverage.
+// So: a disappearance is survived per entry, counted, and said out loud. The
+// root-level catch now tolerates only the root itself being absent; anything
+// else is a real fault and is allowed to be one.
+let vanished = 0;
+const gone = (e) => e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+
 function walk(dir) {
-  for (const e of readdirSync(dir)) {
+  let entries;
+  try { entries = readdirSync(dir); }
+  catch (e) { if (gone(e)) { vanished++; return; } throw e; }
+  for (const e of entries) {
     if (e === 'node_modules' || e.startsWith('.')) continue;
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) walk(p);
+    let st;
+    try { st = statSync(p); }
+    catch (e) { if (gone(e)) { vanished++; continue; } throw e; }
+    if (st.isDirectory()) walk(p);
     // Tests are excluded: their whole job is to pin what a named currency
     // renders as, so every assertion in them looks exactly like offence 3.
     else if (/\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p)) files.push(p);
@@ -310,7 +505,8 @@ function walk(dir) {
 const perRoot = new Map();
 for (const r of ROOTS) {
   const before = files.length;
-  try { walk(r); } catch { /* a root that is not there yet */ }
+  try { walk(r); }
+  catch (e) { if (!gone(e)) throw e; /* only the root itself may be absent */ }
   perRoot.set(r, files.length - before);
 }
 assertRootFloors('check:currency', perRoot);
@@ -402,6 +598,16 @@ function argCount(line, from) {
 
 /** Every hit, in file order, each tagged with the KNOWN key it counts against. */
 const findings = [];
+
+/* Rule 6's empty-set guard. The file count above says the walk found files; it
+ * says nothing about whether `userFacingText` still recognises a sentence when
+ * it sees one — a one-character slip in it would leave rule 6 reading no text
+ * at all in 1,070 files and reporting that every sentence in the product is
+ * clean. The floor is the invariant, not today's number: `app`, `src` and the
+ * console are three user-facing products and cannot between them hold fewer
+ * than twenty thousand sentences. There were 78,043 on 14 September 2026. */
+let proseSpans = 0;
+const PROSE_FLOOR = 20_000;
 
 function flag(file, i, kind, what, fix) {
   const rel = relative(ROOT, file);
@@ -501,6 +707,27 @@ for (const file of files) {
       return;
     }
 
+    // ── 6. a currency in a sentence ──────────────────────────────────────
+    // Rule 3 above needs an interpolation to find the figure. This one needs
+    // no figure at all for a symbol, and a typed-out one for a code. See the
+    // header for what a sentence is here and why the two tiers differ.
+    for (const span of userFacingText(line, rel.endsWith('.tsx'))) {
+      if (!readsAsProse(span)) continue;
+      proseSpans++;
+      const symbol = span.match(SYMBOL_IN_PROSE) || span.match(DOLLAR_FIGURE);
+      const priced = symbol ? null : span.match(CODE_PRICED);
+      if (!symbol && !priced) continue;
+      flag(file, i, 'currency-prose',
+        symbol
+          ? `a currency symbol typed into a sentence a member reads — \`${symbol[0]}\` in "${span.trim().slice(0, 72)}"`
+          : `a price stated in one gym's currency, in a sentence — \`${priced[0]}\` in "${span.trim().slice(0, 72)}"`,
+        'Repple is white-labelled: no symbol is right for a London gym and a Dubai one at once. '
+        + 'Word the sentence without the money and let the formatter state the figure and its currency '
+        + 'together (money()/gymMoney()/amount()) — and if the sentence is about a FEE, read the fee '
+        + 'that was stored when it was incurred, never today\'s policy: src/lib/classSeat.ts says why.');
+      return;
+    }
+
     // ── 5. an invented unit ──────────────────────────────────────────────
     // Before rule 4's early return, not after it: every shape of this rule
     // mentions a unit preference by name, which is precisely what that return
@@ -533,6 +760,14 @@ for (const file of files) {
  * that has DROPPED fails too, with a different message: the number comes down
  * with the work, or the list slowly stops describing the tree.
  */
+if (proseSpans < PROSE_FLOOR) {
+  console.error(`check-currency: rule 6 found only ${proseSpans} sentence${proseSpans === 1 ? '' : 's'} of user-facing text `
+    + `across ${files.length} files, expected at least ${PROSE_FLOOR}. These are three products people read, so its `
+    + 'reader has stopped recognising prose and "no currency in a sentence" would be a claim about text it never saw. '
+    + 'Refusing to pass.');
+  process.exit(1);
+}
+
 const seen = new Map();
 for (const f of findings) seen.set(f.key, (seen.get(f.key) ?? 0) + 1);
 

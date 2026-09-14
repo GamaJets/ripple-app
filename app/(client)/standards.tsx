@@ -38,6 +38,9 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { personalRecords } from '../../src/lib/streaks';
 import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
 import { gradeLift } from '../../src/lib/strengthLevel';
+// Which lift is furthest behind the others, measured on each lift's own ladder
+// rather than on the ratio column. See the note where `balance` is built.
+import { balanceLine, weakestLift } from '../../src/lib/strengthBalance';
 import { STRENGTH_LIFTS, countsFor } from '../../src/lib/strengthLifts';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
@@ -125,6 +128,28 @@ export default function Standards() {
  const nextTarget = (bw != null && lvl >= 0 && lvl < LEVELS.length - 1) ? weightIn(lift.mult[lvl + 1] * bw, wu) : null;
  return { lift, best, grade, lvl, nextTarget };
  });
+
+ // ── which lift is furthest behind the rest ───────────────────────────────
+ //
+ // The question this screen is opened with, and the one five independent rows
+ // could not answer. It cannot be answered by reading down the ratio column
+ // either: the five ladders are not the same ladder, so an Elite 1.1× press and
+ // a barely-Novice 1.1× deadlift look identical there. `weakestLift` compares
+ // each lift's position on its OWN scale. See src/lib/strengthBalance.ts.
+ //
+ // Gated on BOTH reads being whole, which is not belt-and-braces. A truncated
+ // training log under-states a best lift, and an under-stated lift is precisely
+ // what this would name as the weak one — so the member would be sent to train
+ // the lift our read had failed on. The bodyweight is the divisor behind every
+ // ratio fed in, and `c.status` is the worst of the two reads it comes from.
+ // Every grade on this screen is already gated this way; this sentence is the
+ // one that would be acted on, so it gets the same gate and no less.
+ const balance = liftsWhole && bodyWhole
+  ? balanceLine(weakestLift(rows.flatMap(({ lift, grade }) => (
+     grade.kind === 'graded' ? [{ name: lift.name, ratio: grade.ratio, mult: lift.mult }] : []
+    ))))
+  : null;
+
  const G = layout.gutter;
 
  return (
@@ -172,6 +197,18 @@ export default function Standards() {
      note={logStatus === 'error'
       ? 'Nothing below is a level you are at — it is a level we could not look up. Your lifts are on your record.'
       : 'You have logged more sessions than this screen can read in one go, so a best lift set before that is not counted here and the level beside it may be under-stated.'} />
+   ) : null}
+   {/* The takeaway, above the rows it is drawn from.
+       Read as text and not as a Notice: a Notice carries a status mark, and
+       nothing here is a warning — a lift sitting lower on its own scale than
+       its neighbours is an ordinary fact about an ordinary training history,
+       and marking it would turn a comparison into a verdict on the reader.
+       Null whenever either read is short, so this never appears beside the
+       caveat above it. */}
+   {balance ? (
+    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.sm }}>
+     {balance}
+    </Text>
    ) : null}
    {rows.map(({ lift, best, grade, lvl, nextTarget }, i) => (
     <View key={lift.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>

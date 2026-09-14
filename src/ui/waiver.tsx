@@ -20,7 +20,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthRevision } from './authRevision';
-import { useAuth } from './auth';
+import { useSignOutAndSay } from './auth';
 import { useRouter } from 'expo-router';
 import { useReachability } from './reachability';
 import { retryLine } from '../lib/reachability';
@@ -144,8 +144,21 @@ function Tick({ on, label, detail, onPress }: {
  * genuinely stuck here needs, and it is the only door this screen may open.
  */
 function SignOutWay({ label }: { label: string }) {
-  const auth = useAuth();
   const router = useRouter();
+  /**
+   * Leave, and say what leaving actually established.
+   *
+   * This was a bare `signOut().finally(() => router.replace('/welcome'))`, which
+   * navigates identically whether the session ended or nothing was reached —
+   * and being returned to the welcome screen is how this app tells somebody
+   * they are signed out. The navigation STAYS: the user is cleared from the
+   * tree before the network is touched, so there is nowhere else for this
+   * person to stand, and the gate is about to unmount either way. What is added
+   * is the sentence, because a member who signs out here to reach ANOTHER
+   * account is exactly the person for whom a session that comes back at the
+   * next launch is a surprise.
+   */
+  const leave = useSignOutAndSay('waiver');
   return (
     <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
       <Ghost label={label} onPress={() => Alert.alert(
@@ -153,7 +166,7 @@ function SignOutWay({ label }: { label: string }) {
         'You have agreed to nothing and nothing is recorded either way. Sign out and you can sign back in — on this account or another one — and the release will be waiting exactly as it is now.',
         [
           { text: 'Stay', style: 'cancel' },
-          { text: 'Sign Out', style: 'destructive', onPress: () => { void auth.signOut().finally(() => { try { router.replace('/welcome'); } catch { /* the gate unmounts with the session either way */ } }); } },
+          { text: 'Sign Out', style: 'destructive', onPress: () => { void leave(() => router.replace('/welcome')); } },
         ],
       )} />
     </View>

@@ -54,7 +54,7 @@ import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
 import { deviceUnitNote } from '../../src/lib/unitPreference';
-import { useAuth } from '../../src/ui/auth';
+import { useAuth, useSignOutAndSay } from '../../src/ui/auth';
 import { useAppLock, LOCK_PLATFORM } from '../../src/ui/appLock';
 import { openLegalDoc } from '../../src/ui/legal';
 import { lockSettingNote, lockMethodsLabel, lockSettingsLabel, defaultLockLabel } from '../../src/lib/appLock';
@@ -179,6 +179,12 @@ export default function Settings() {
   const reach = useReachability();
   const st = useSettings();
   const auth = useAuth();
+  // Signing out is a network call that can fail, and until now every caller
+  // navigated to /welcome regardless — telling somebody they were signed out
+  // without establishing it. This awaits the fate and says so when it is not
+  // 'ended'. See src/lib/signOutFate.ts for why the two failures cannot be
+  // told apart from the resolved value.
+  const leaveNow = useSignOutAndSay('clientSettings');
   const lock = useAppLock();
   // The row's own name. `lock.label` is the real device word once the hardware
   // has answered; before that, and when there is no hardware, it is the neutral
@@ -267,7 +273,7 @@ export default function Settings() {
       // without it, so the previous member's coach could still reach this
       // handset. It lives in src/ui/auth.tsx now rather than on this screen,
       // because the coach and owner apps sign out too.
-      { text: 'Sign out', onPress: () => { try { void auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('clientSettings.signOut', e); } } },
+      { text: 'Sign out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
   // Said under the picker rather than left implied. Repple records weight in
@@ -440,7 +446,7 @@ export default function Settings() {
         // to a company they have never heard of, that cannot act for their gym,
         // and whose existence they were never told about.
         if (!ok) { Alert.alert('Not requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`); return; }
-        Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. You have been signed out.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch { /* ignore */ } } }]);
+        Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. Signing you out of this phone now.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }]);
       } },
       ],
     );

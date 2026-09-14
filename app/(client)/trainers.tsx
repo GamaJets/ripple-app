@@ -73,6 +73,15 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+// Who is signed in, with the failure kept rather than collapsed into "nobody".
+// `sessionUid` for the storage-first read (it answers offline, which is the
+// whole reason this screen asks it that way) and `signedInUid` for the one
+// place that genuinely wants the server's verdict. See src/lib/authReadFate.ts
+// for why a null session is not a sign-out.
+import { sessionUid } from '../../src/lib/sessionUid';
+import { signedInUid } from '../../src/lib/signedInUid';
+import { authGateMessage } from '../../src/lib/authedUid';
+
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode } from '../../src/lib/types';
 // Who coaches you, asked the way the database asks it — BOTH links, so this
@@ -405,9 +414,29 @@ export default function FindTrainer() {
         // Signed out is a true answer, not a failed check — and fetchMyCoach()
         // throws when there is no session, which would land in the catch below
         // and report an error to somebody who is simply not signed in.
-        const { data: sess } = await supabase.auth.getSession();
+        //
+        // But "no session" was being read off `sess?.session` alone, and that
+        // is not only the signed-out answer. `getSession()` goes to the network
+        // to refresh an access token that has actually expired, and when that
+        // refresh cannot reach the server it RESOLVES with `session: null` and
+        // a retryable error beside it — byte-identical, at this line, to a
+        // device nobody has ever signed in on. So an outage took the branch
+        // below, and the screen settled into 'ready' with `coach` null: "You
+        // don't have a coach yet", in front of somebody who does. That is the
+        // exact state in which a coached member stops asking to leave, and it
+        // is the sentence the 'error' branch further down was written to avoid.
+        //
+        // sessionUid() keeps the two apart, and where they cannot be told
+        // apart it answers 'unreadable' — which lands on the honest screen
+        // rather than on the confident wrong one.
+        const who = await sessionUid('findTrainer.myCoach');
         if (cancelled) return;
-        if (!sess?.session) { setCoach(null); setCoachStatus('ready'); return; }
+        // Narrowed on `fate`, never on `!who.uid`: UidRead's members are told
+        // apart by fate, and `string` includes '', so `!who.uid` does not
+        // discriminate the union.
+        if (who.fate === 'signed-out') { setCoach(null); setCoachStatus('ready'); return; }
+        if (who.fate !== null) { setCoachStatus('error'); return; }
+
         const mine = await fetchMyCoach();
         if (cancelled) return;
         setCoach(mine);
@@ -574,8 +603,26 @@ export default function FindTrainer() {
       if (!USE_SUPABASE) { setStatus('ready'); return; }
       setStatus('loading');
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id ?? null;
+        // `uid` is used for exactly two things below, and an outage used to
+        // take the `!uid` path through both of them without saying so:
+        //
+        //   · it drops your own listing out of the directory. Unavoidably
+        //     best-effort — nobody can be filtered out when nobody has been
+        //     identified — and harmless, because the request path re-asks who
+        //     you are and now refuses to write when it cannot tell.
+        //   · it gates the "which coaches have you already asked" read. THAT
+        //     one mattered: with `uid` null the read never happened,
+        //     `pendingUnknown` was never set, and the screen went on drawing
+        //     plain "Request" buttons — which is the screen asserting it
+        //     looked and found nothing outstanding, over a check it never
+        //     made.
+        //
+        // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+        const who = await signedInUid('findTrainer.load');
+        if (cancelled) return;
+        const uid = who.uid;
+        if (who.fate === 'unreadable') setPendingUnknown(true);
+
 
         // supabase-js resolves; it does not throw. An RLS refusal or a dead
         // connection arrives as `error` set and `data` null, so a query read for
@@ -652,7 +699,15 @@ export default function FindTrainer() {
             setSent(Object.fromEntries((reqs ?? []).map((r: any) => [r.trainer_id, true])));
             setPendingUnknown(false);
           }
+        } else if (who.fate === 'signed-out') {
+          // Nobody is signed in, so there are genuinely no outstanding
+          // requests to hide. Said explicitly rather than left to the initial
+          // state, because this effect re-runs on Try Again and would
+          // otherwise carry a previous read's answers over a new one.
+          setSent({});
+          setPendingUnknown(false);
         }
+
 
         if (!cancelled) { setCoaches(list); setStatus(page.truncated || profPage.truncated ? 'partial' : 'ready'); }
 
@@ -720,9 +775,36 @@ export default function FindTrainer() {
     // the unique index.
     let stored = false;
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) { Alert.alert('Sign in required', `Sign in to ${BRAND.label} to request coaching.`); return; }
+      // ── two answers that were told as one ────────────────────────────────
+      //
+      // This was `const uid = auth?.user?.id; if (!uid) Alert.alert('Sign in
+      // required', …)`. `getUser()` is a network call that does not reject:
+      // offline, a captive portal, a 502 from the auth host — each resolves
+      // with `user: null` and a retryable error that this line discarded. So
+      // the sentence a signed-in member read during an outage was a statement
+      // about THEM, that they were not signed in, made by code that had not
+      // managed to ask. It sends them to a login form that was never the
+      // problem, and it is the same substitution as the one on the coach card
+      // above.
+      //
+      // Nothing is written on either fate — both return before the insert —
+      // so the 'unreadable' sentence's "nothing has been changed" is true
+      // here.
+      const asker = await signedInUid('findTrainer.request');
+      // Narrowed on `fate`, never on `!asker.uid`: `string` includes ''.
+      if (asker.fate !== null) {
+        Alert.alert(
+          asker.fate === 'signed-out' ? 'Sign in required' : 'We couldn’t check your account',
+          asker.fate === 'signed-out'
+            ? `Sign in to ${BRAND.label} to request coaching.`
+            : authGateMessage(asker.fate),
+          [{ text: 'OK' }],
+        );
+        return;
+      }
+      const uid = asker.uid;
+
+
       // `source` is what makes the coach's attribution add up. The column and
       // its check constraint have allowed 'directory' since part 56 and nothing
       // ever wrote it: this insert left it null, so a client who found their

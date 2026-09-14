@@ -83,7 +83,7 @@ import { convertedNote } from '../../src/lib/units';
 import { fmtDay } from '../../src/lib/format';
 import { sp, layout, hairline, type as ty, radius, elevation } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
-import { useAuth } from '../../src/ui/auth';
+import { useAuth, useSignOutAndSay } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
 import { useTenant } from '../../src/ui/tenant';
@@ -302,6 +302,12 @@ export default function TrainerSettings() {
   // this actually converts, so nobody expects it to rewrite stored history.
   const weightNote = convertedNote(st.weightUnit);
   const auth = useAuth();
+  // Signing out is a network call that can fail, and until now every caller
+  // navigated to /welcome regardless — telling somebody they were signed out
+  // without establishing it. This awaits the fate and says so when it is not
+  // 'ended'. See src/lib/signOutFate.ts for why the two failures cannot be
+  // told apart from the resolved value.
+  const leaveNow = useSignOutAndSay('trainerSettings');
   const lock = useAppLock();
   const toggleLock = async () => {
     if (!lock.available) {
@@ -641,7 +647,7 @@ export default function TrainerSettings() {
   const signOut = () => {
     Alert.alert('Sign out?', 'You will need your email and password to sign back in. Nothing is deleted.', [
       { text: 'Stay signed in', style: 'cancel' },
-      { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('trainerSettings.signOut', e); } } },
+      { text: 'Sign out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
 
@@ -658,8 +664,8 @@ export default function TrainerSettings() {
       await loadPending();
       Alert.alert(
         'Deletion requested',
-        `Your request is recorded and now sits in your gym's deletion queue. ${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action it, after which your account and your data are erased permanently.\n\nYou will be signed out now.`,
-        [{ text: 'OK', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('trainerSettings.signOut', e); } } }],
+        `Your request is recorded and now sits in your gym's deletion queue. ${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action it, after which your account and your data are erased permanently.\n\nSigning you out of this phone now.`,
+        [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }],
       );
     } catch (e) {
       reportError('trainerSettings.delete', e);

@@ -4,6 +4,7 @@
 // establishes a persisted session (AsyncStorage), and the session is rehydrated
 // on launch. Screens are unchanged — they just read { authed, user }.
 import { createContext, useMemo, useRef, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { Alert } from 'react-native';
 import { BRAND } from '../lib/brands';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
@@ -31,6 +32,8 @@ import { currentReach } from '../lib/reachability';
 import { emailCodeError, emailResendError, type OtpOutcome } from './emailOtp';
 import { checkTenantBrand, stampTenantBrand, signUpWithBrand, brandSignUpMetadata } from '../lib/tenantBrand';
 import { clearPersonalDeviceState } from './signOutState';
+import { signOutOutcome, type SignOutOutcome } from '../lib/signOutFate';
+import { SIGN_OUT_UNCONFIRMED_HANDSET, SIGN_OUT_UNCONFIRMED_TITLE } from '../lib/signOutSay';
 import { readMyProfileRow, forgetMyRows } from './myProfile';
 
 export type Role = 'owner' | 'trainer' | 'client';
@@ -89,11 +92,22 @@ interface AuthValue {
   /**
    * End the session, and take this person's device-local state with it.
    *
-   * Returns a promise so a caller that has something to do afterwards can wait,
-   * but nothing has to: the user is cleared from the tree immediately and the
-   * teardown continues on its own. See `clearPersonalDeviceState`.
+   * Returns WHAT IT ESTABLISHED, and a caller that navigates or says "signed
+   * out" has to read it. This used to resolve `void` with the failure swallowed
+   * into `reportError`, so all nine call sites in the three apps navigated to
+   * /welcome whatever had happened — and a person was told they had signed out
+   * by being shown the sign-in screen. The tree does gate on `user` being
+   * cleared, so the screens go; what survives a failed sign-out is the STORED
+   * SESSION, which the next launch rehydrates. See src/lib/signOutFate.ts for
+   * which errors mean the session is gone and which establish nothing, and
+   * src/lib/signOutSay.ts for what may be said about the second kind.
+   *
+   * `'ended'` — the session is gone. Navigate, and say so.
+   * `'unconfirmed'` — nothing was established. Navigating is still right (the
+   * user is already cleared from the tree and there is nowhere else to stand),
+   * but the person must be told that this phone may still be signed in.
    */
-  signOut: () => Promise<void>;
+  signOut: () => Promise<SignOutOutcome>;
   /**
    * Why the last session was refused, when nobody was there to be told.
    *
@@ -583,7 +597,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     throw new Error('Social sign-in is not set up yet — please use email for now.');
   };
 
-  const signOut = async (): Promise<void> => {
+  const signOut = async (): Promise<SignOutOutcome> => {
     // The tree first. Signing out has to LOOK instant — the screens gate on
     // `authed`, and making somebody watch a network round trip before the app
     // admits they have gone is how a second tap arrives.
@@ -594,7 +608,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // the sort of thing that stops being true when somebody adds a second key
     // to it, and it costs one call to be certain. src/ui/myProfile.ts.
     forgetMyRows();
-    if (!USE_SUPABASE) return;
+    // No backend in this build: there is no session anywhere to survive this,
+    // so the one that existed on this device is genuinely gone.
+    if (!USE_SUPABASE) return 'ended';
     // ── Before the session ends ───────────────────────────────────────────
     //
     // This used to be one line: end the session, clear the user, done. What it
@@ -618,9 +634,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // left every caller to work out whether it could, which is how the other two
     // exits came to do nothing at all. The cause says where this is being called
     // from and src/lib/signOutSweep.ts decides the rest.
+    // ── And what the caller is told ───────────────────────────────────────
+    //
+    // The last line used to end the session inside a `try` whose `catch` handed
+    // the error to `reportError` and resolved void — so every one of the nine
+    // call sites in the three apps navigated to /welcome whatever had happened,
+    // and being returned to /welcome is how this app tells somebody they have
+    // signed out.
+    //
+    // `sbSignOut` rethrows the `error` half of `supabase.auth.signOut()`
+    // verbatim (src/lib/supabase.ts), so the caught value IS the AuthError and
+    // `signOutOutcome` classifies it without anything being re-derived here.
+    // Classified rather than simply counted as a failure, because the library
+    // brands an outage, a DNS failure and every 5xx as an AuthError alongside a
+    // genuine "there was no session to end" — and only the second of those is
+    // safe to report as a sign-out that happened.
+    //
+    // The report stays. A fate returned to a screen is a second recorded fact,
+    // not a replacement for the first.
+    //
+    // Nothing below this comment may move above the sweep: the push-token
+    // delete is `user_id = auth.uid()` and can only be made from inside the
+    // session being ended. src/lib/signOutState.test.ts holds that ordering.
     try { await clearPersonalDeviceState({ cause: 'deliberate', uid: leavingUid.current }); }
     catch (e) { reportError('auth.signOut.clear', e); }
-    try { await sbSignOut(); } catch (e) { reportError('auth.signOut', e); }
+    try { await sbSignOut(); return 'ended'; }
+    catch (e) { reportError('auth.signOut', e); return signOutOutcome(e); }
   };
 
   const sendPasswordReset = async (email: string) => {
@@ -692,4 +731,45 @@ export function useAuth(): AuthValue {
   const v = useContext(Ctx);
   if (!v) throw new Error('useAuth must be used inside <AuthProvider>');
   return v;
+}
+
+/**
+ * Sign out, go wherever this screen goes, and say so when none of it was
+ * established.
+ *
+ * ── why every Sign Out button wants this rather than `auth.signOut()` ─────
+ *
+ * There are nine of them across the three apps and they were all the same
+ * line: call it, navigate to /welcome, catch a throw that could not happen.
+ * Being returned to /welcome is how this app says "you are signed out", so all
+ * nine said it whatever had happened — and the failure that matters leaves the
+ * STORED SESSION on the device for the next launch to restore. One button
+ * pressed on a bad connection, one phone handed on, one person inside another
+ * person's account.
+ *
+ * The sentence lives in src/lib/signOutSay.ts and the discrimination in
+ * src/lib/signOutFate.ts; this is the join between them and the screens, so
+ * that adding a tenth Sign Out button does not mean deciding any of it again.
+ *
+ * `after` still runs on an unconfirmed sign-out, and deliberately: `user` is
+ * cleared from the tree before the network is touched, so the screen behind is
+ * already gated and there is nowhere else for this person to stand. What
+ * changes is that they are told, rather than shown a sign-in screen and left
+ * to conclude it.
+ *
+ * `Alert` rather than screen state because the screen that raised this is
+ * usually unmounted by the time the answer arrives.
+ */
+export function useSignOutAndSay(context: string): (after?: () => void) => Promise<SignOutOutcome> {
+  const { signOut } = useAuth();
+  return useCallback(async (after?: () => void) => {
+    let fate: SignOutOutcome = 'unconfirmed';
+    try { fate = await signOut(); }
+    catch (e) { reportError(`${context}.signOut`, e); }
+    if (after) {
+      try { after(); } catch (e) { reportError(`${context}.signOut.after`, e); }
+    }
+    if (fate !== 'ended') Alert.alert(SIGN_OUT_UNCONFIRMED_TITLE, SIGN_OUT_UNCONFIRMED_HANDSET);
+    return fate;
+  }, [signOut, context]);
 }

@@ -49,6 +49,13 @@ import { registerFlush } from '../lib/offlineQueue';
 import { writeFailure } from '../lib/wroteRows';
 import { useRecoverRead } from './readRefresh';
 import { readMyProfileRow, readMyClientRow, forgetMyRows } from './myProfile';
+// `supabase.auth.*` resolves rather than rejecting on a dropped connection —
+// `{ data: { user: null }, error }` — and offline, DNS, a captive portal and a
+// 5xx are all branded as one AuthError, so a discarded error reads as "signed
+// out". src/lib/authReadFate.ts holds that discrimination against the installed
+// library and src/lib/authedUid.ts joins it to a uid; imported rather than
+// restated, so there is only ever one copy of it to keep true.
+import { uidFromAuth } from '../lib/authedUid';
 import { sexFromColumn } from '../lib/hrKcal';
 
 // Declared in src/lib/types.ts alongside the labels and the two predicates the
@@ -322,6 +329,47 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
    *  than state because nothing renders from it and it is set once, before
    *  `hydrated` unblocks the effect that reads it. */
   const cacheRead = useRef(true);
+  /** Which account the fields above describe, readable from inside the auth
+   *  listener below. That effect is keyed on `readTick` alone, so `sbUid` in
+   *  its closure is whatever it was when the listener was registered — which is
+   *  precisely not the question "has the account changed since". */
+  const sbUidRef = useRef<string | null>(null);
+
+  /**
+   * Put every field describing a PERSON back to the value its `useState` opens
+   * with.
+   *
+   * Lifted out of the sign-out branch below because a sign-out is not the only
+   * way the account under this provider changes. `onAuthStateChange` raises
+   * SIGNED_IN for a new account without a SIGNED_OUT in between whenever one
+   * session replaces another in the same process, and the old code answered
+   * that with `loadForUser(id)` — which reads the SCANS and leaves everything
+   * else to the profile effect. That effect assigns a field only where it found
+   * one: `if (fromProfile) setName(…)`, `if (Array.isArray(r.injuries))
+   * setInjuries(…)`. So a new member whose `injuries` column is null kept the
+   * PREVIOUS member's disclosed injuries on screen — and, because the read
+   * itself succeeded, `nameSynced` armed the push effect, which then wrote that
+   * other person's injuries, goal, diet and allergens onto this member's
+   * `clients` row six hundred milliseconds later. The wipe therefore happens on
+   * the way IN, before the read lands and whatever it decides.
+   *
+   * Deliberately does NOT touch `nameSynced` or `sbUid`: those two are the push
+   * effect's arming gate and the caller owns the order they move in — see the
+   * note in the sign-out branch.
+   */
+  const forgetMember = () => {
+    setName(''); setDob(''); setPhoto(null); setHeightCm(null);
+    // `sex` was missing from the sign-out list this is lifted from, which is
+    // the recurring shape: four fields cleared and the fifth left standing.
+    setSex(null);
+    setGoal('muscle'); setCoachingMode('online'); setDiet('meat');
+    setAvoid([]); setInjuries([]); setFocusAreas([]); setMealsPerDay(3);
+    setCoachLinked(null); setTrainerId(null);
+    setStepGoal(null); setSleepGoalHours(null); setWaterGoalGlasses(null);
+    setScans([]); setManualWeight(null); setManualBodyFat(null); setManualAt(null);
+    setScanMetrics({});
+    setSaveFailed(false);
+  };
 
   // Load the user's saved profile on first mount.
   useEffect(() => { (async () => {
@@ -497,8 +545,19 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           // member however the column read. Anything outside the two letters
           // still leaves it null, and a null means the model declines to
           // produce a figure rather than guessing at a body.
-          const readSex = sexFromColumn(r.sex);
-          if (readSex) setSex(readSex);
+          // ASSIGNED, not skipped — the same reading the three goal columns
+          // below get. `if (readSex) setSex(readSex)` only ever moved this
+          // field towards having a value: a column that is null, or holds
+          // something outside the two letters, left whatever was already in
+          // state. Nothing in this app writes `clients.sex`, so it is null for
+          // every member today and that branch therefore NEVER fires — which
+          // means the only way this field can hold a letter is by having been
+          // set for somebody else earlier in the process, and the only way it
+          // can be let go of is this line. src/lib/hrKcal.ts picks a different
+          // published equation for each sex (the weight term changes sign), so
+          // an inherited letter is not a cosmetic field on a profile screen, it
+          // is a different calorie figure for every session this member trains.
+          setSex(sexFromColumn(r.sex));
           if (typeof r.goal === 'string' && r.goal) setGoal(r.goal as Goal);
           // `readDiet`, not `as Diet`. The column is plain text; the union is
           // five values; and a value outside it reaches `mealAt`, whose pools
@@ -798,6 +857,21 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     const loadForUser = async (id: string) => {
+      // ── A DIFFERENT ACCOUNT IS NOT A RE-READ ──────────────────────────────
+      //
+      // Dropped on the way IN, before the read below lands and whatever it
+      // decides — the rule src/lib/accountScopedState.ts states, applied to the
+      // React state rather than to a storage key. `forgetMember` says at length
+      // what it cost not to be here. The SAME account re-reading (a token
+      // refresh, a foreground, a `reload`) keeps what is on screen, so nothing
+      // blanks while a routine refresh runs.
+      //
+      // `nameSynced` first and by itself, for the ordering reason the sign-out
+      // branch gives: it is the push effect's arming gate, and it must be shut
+      // before any field is blanked so that effect can never see a cleared name
+      // beside the previous uid and conclude the member erased their profile.
+      if (sbUidRef.current && sbUidRef.current !== id) { setNameSynced(false); forgetMember(); }
+      sbUidRef.current = id;
       setSbUid(id);
       try {
         // Read newest-first and turned back below, rather than the ascending
@@ -821,13 +895,35 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     };
     (async () => {
       try {
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        const whoRes = await supabase.auth.getUser();
         if (cancelled) return;
-        if (authErr) { reportError('clientData.hydrate.auth', authErr); setScansStatus('error'); setProfileStatus('error'); return; }
-        const id = auth?.user?.id;
-        // Signed out: there is no server-side profile or scan history to miss.
-        if (!id) { setScansStatus('ready'); setProfileStatus('ready'); return; }
-        if (!cancelled) await loadForUser(id);
+        // ── the error is classified, not merely noticed ────────────────────
+        //
+        // `if (authErr) → 'error'` treated every failure alike, and a genuine
+        // sign-out IS one of them: `getUser()` answers somebody with no session
+        // with `AuthSessionMissingError`, not with a clean null. So the app
+        // said "we could not read your profile" on the welcome screen of every
+        // launch nobody was signed in for, and `useRecoverRead` went on asking.
+        // The other direction is the expensive one and is why this uses the
+        // shared classification rather than reading `error` itself: an outage
+        // called 'signed-out' would publish 'ready' over an empty profile, and
+        // app/(client)/injuries.tsx prints "no injuries" on exactly
+        // `injuries.length === 0 && profileStatus === 'ready'`.
+        //
+        // Narrowed on `fate`, never on `!uid` — UidRead's members are told
+        // apart by fate, and `string` includes ''.
+        const who = uidFromAuth(whoRes);
+        if (who.fate !== null) {
+          if (who.fate === 'unreadable') {
+            reportError('clientData.hydrate.auth', new Error('auth read unreadable — who is signed in could not be established'));
+            setScansStatus('error'); setProfileStatus('error');
+            return;
+          }
+          // Signed out: there is no server-side profile or scan history to miss.
+          setScansStatus('ready'); setProfileStatus('ready');
+          return;
+        }
+        if (!cancelled) await loadForUser(who.uid);
       } catch (e) { reportError('clientData.hydrate.auth', e); if (!cancelled) { setScansStatus('error'); setProfileStatus('error'); } }
     })();
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
@@ -897,23 +993,23 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       // a legacy non-batched update it is not, and then only this order holds.
       setNameSynced(false);
       setSbUid(null);
-      setName(''); setDob(''); setPhoto(null); setHeightCm(null);
-      setGoal('muscle'); setCoachingMode('online'); setDiet('meat');
-      setAvoid([]); setInjuries([]); setFocusAreas([]); setMealsPerDay(3);
-      setCoachLinked(null); setTrainerId(null);
-      setStepGoal(null); setSleepGoalHours(null); setWaterGoalGlasses(null);
-      setScans([]); setManualWeight(null); setManualBodyFat(null); setManualAt(null);
-      // The cached composition breakdowns go with the scans they belong to.
-      // They used not to: this block cleared `scans` and left `scanMetrics`
-      // standing, and the read that filled it had `[]` dependencies so it never
-      // ran again — so the departing member's visceral fat, BMR and segmental
-      // lean stayed in memory for the life of the process and merged onto the
-      // next member's scan of the same date. The key effect above would reach
-      // the same state a render later, off `sbUid` going null; it is done here
-      // as well so that clearing a person's body record does not depend on the
-      // ordering of two effects.
-      setScanMetrics({});
-      setSaveFailed(false);
+      sbUidRef.current = null;
+      // The fields themselves, through the same function the account-change
+      // path above uses, so the two can never come to clear different lists.
+      // They already had: `sex` was on neither list, and it is the field the
+      // heart-rate calorie model picks a published equation by.
+      //
+      // The cached composition breakdowns go with the scans they belong to, and
+      // `forgetMember` takes those too. They used not to go at all: this block
+      // cleared `scans` and left `scanMetrics` standing, and the read that
+      // filled it had `[]` dependencies so it never ran again — so the
+      // departing member's visceral fat, BMR and segmental lean stayed in
+      // memory for the life of the process and merged onto the next member's
+      // scan of the same date. The key effect above would reach the same state
+      // a render later, off `sbUid` going null; it is done here as well so that
+      // clearing a person's body record does not depend on the ordering of two
+      // effects.
+      forgetMember();
       // 'ready', not 'error': there is genuinely no profile and no scan history
       // to read for nobody, which is what the signed-out branch above says too.
       setProfileStatus('ready'); setScansStatus('ready');

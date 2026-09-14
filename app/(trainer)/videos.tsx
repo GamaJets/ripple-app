@@ -105,6 +105,7 @@ import { clipsPerMovement, movementSlug, duplicateClipNote } from '../../src/lib
 // against the exercise you were looking at; this is that, built out of the
 // prefill `upload()` has taken since the row-tap path was written.
 import { supabase } from '../../src/lib/supabase';
+import { signedInUid } from '../../src/lib/signedInUid';
 import { chunkIds, uniqueIds } from '../../src/lib/idLookup';
 import { USE_SUPABASE } from '../../src/lib/config';
 
@@ -240,9 +241,16 @@ function useGrantableClients(enabled: boolean) {
     if (!USE_SUPABASE) { setPeople([]); setHandAdded(0); setStatus('ready'); return; }
     setStatus('loading');
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) { setStatus('error'); return; }
+      // `signedInUid`, not `const { data: auth } = await getUser()`. That line
+      // threw the `error` away, so a dropped connection and a genuine sign-out
+      // both arrived as a missing id with nothing recorded anywhere. Both still
+      // land on 'error' here, which is right — 'error' is UNKNOWN on this screen
+      // and the picker draws no list under it — but the outage now leaves a
+      // trace, and the discrimination is the one in src/lib/authedUid.ts rather
+      // than a second copy of it.
+      const me = await signedInUid('videos.grantableClients');
+      if (me.uid === null) { setStatus('error'); return; }
+      const uid = me.uid;
 
       const { data: cls, error } = await supabase.from('clients').select('id').eq('trainer_id', uid);
       if (error) { setStatus('error'); return; }

@@ -48,6 +48,9 @@ import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '../../src/lib/
 // for a gym that has not said which calendar that is. See `today` below.
 import { fetchGymZone } from '../../src/lib/gymZone';
 import { gymTodayWindow } from '../../src/lib/gymToday';
+// The instant this screen judges "today" against, re-settled at local midnight,
+// on every foreground and whenever the screen is focused. See `dayWindow`.
+import { useNow } from '../../src/ui/today';
 import { DateSheet } from '../../src/ui/DateSheet';
 import {
   freezeState, frozenDays, thawedEndsOn, freezeLine, freezeRefusal,
@@ -164,6 +167,25 @@ export default function OwnerMembers() {
    *  the first few matches rather than all of them, and "nobody matching" is
    *  not a sentence this sheet may say. */
   const [searchCut, setSearchCut] = useState(false);
+  /**
+   * Whether the register was IN HAND when the list below was filtered.
+   *
+   * `held` — the set of people who already hold an active membership — is built
+   * from `list`, which is `rows ?? []`. Under a failed register read `rows` is
+   * null, so `held` is EMPTY, and an empty set removes nobody: every match is
+   * offered as somebody with no membership, and `createMembership` will open a
+   * second one for a member who already has one.
+   *
+   * The same sheet already keeps the LOOKUP's two failures apart with
+   * `searchFailed` and `searchCut`, and says so in three places. This is the
+   * third read the sheet leans on and the only one whose failure it did not
+   * carry — and it is the one the sentence "everyone matching already holds an
+   * active membership" is actually a claim about.
+   *
+   * Captured at search time rather than read at render, so the flag describes
+   * the list being shown rather than whatever the register has done since.
+   */
+  const [heldKnown, setHeldKnown] = useState(true);
   const [picked, setPicked] = useState<Candidate | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
 
@@ -188,14 +210,53 @@ export default function OwnerMembers() {
   const [zone, setZone] = useState<string | null>(null);
   const [zoneUnread, setZoneUnread] = useState(false);
   /**
-   * Today at the gym, recomputed on every render.
+   * Whether the question has been ASKED yet — the third silence.
+   *
+   * The doc above this pair names two and the screen kept two, and the pair
+   * cannot hold three: before `load` returns, `zone` is null and `zoneUnread`
+   * is false, which is byte for byte the state that means "the gym row read
+   * fine and has no timezone set". `clockNote` therefore fell to
+   * `dayWindow.note` — NO_ZONE_NOTE — and the Open-a-Membership sheet told an
+   * owner, on every visit, for the whole of the round trip:
+   *
+   *   "This membership will be recorded as starting 2026-09-14 — this gym has
+   *    not set its timezone, so days and hours here are your own device's, not
+   *    the gym's"
+   *
+   * at a gym that has set its timezone. A sentence that sends somebody to
+   * change a setting that is already right is the exact failure the two-way
+   * split above was written to avoid, arrived at from the third direction.
+   *
+   * app/(owner)/ops.tsx keeps all three on the same column and gates on this
+   * one; this is that flag, by that name.
+   */
+  const [zoneRead, setZoneRead] = useState(false);
+  /**
+   * Today at the gym.
    *
    * Not frozen into a `useState` initialiser: a desk phone with this screen
    * open across midnight would otherwise keep writing yesterday's date onto
    * every membership opened after twelve, which is the shape of frozen-`today`
    * bug this codebase keeps finding.
+   *
+   * ── and "recomputed on every render" was only half an answer ────────────
+   *
+   * It was `gymTodayWindow(zone)`, whose `now` parameter defaults to
+   * `Date.now()` — so the clock was read in the render body, and a render body
+   * is only as fresh as the last render. This screen is registered `href: null`
+   * in app/(owner)/_layout.tsx and expo-router never tears such a screen down,
+   * and nothing here re-renders on the passage of time. So on a desk phone left
+   * on this tab overnight the day did not move at midnight; it moved at the
+   * next tap, and until then the "Renewing · 30d" and "Ran out" chip counts
+   * (and the lens filtering the register by them) were cut against yesterday.
+   *
+   * `useNow()` re-settles at local midnight, on every foreground and on focus —
+   * src/ui/today.ts argues the case — so the day moves when the day moves, and
+   * the value is still computed here rather than stored, which is what keeps it
+   * from freezing. It is the same answer scripts/check-frozen-day.mjs prescribes
+   * for the two render-body clocks still on its ratchet.
    */
-  const dayWindow = gymTodayWindow(zone);
+  const dayWindow = gymTodayWindow(zone, useNow().getTime());
   /* ── pausing a membership, with dates on it ──────────────────────────────
      `status = 'frozen'` has existed since part 29 and has never had dates, so
      a pause had to be lifted by hand and gave back none of the time it took.
@@ -220,7 +281,12 @@ export default function OwnerMembers() {
   const [dtBusy, setDtBusy] = useState(false);
   /** Whose calendar the start date will be written on, where that needs saying.
    *  Two silences, two sentences — a failed zone read is not an unset zone. */
-  const clockNote = zoneUnread
+  const clockNote = !zoneRead
+    // Nothing has been established yet, so nothing is claimed. Not silence
+    // either: the sheet below quotes a date, and a reader is owed the fact that
+    // whose calendar it is on has not been settled.
+    ? 'Checking what time it is at the gym, before the date below is written on its calendar.'
+    : zoneUnread
     ? 'This gym’s timezone could not be read, so the start date below is your own device’s calendar day, '
       + 'not the gym’s. That is a read that did not come back, not a gym with no timezone set.'
     : dayWindow.note;
@@ -237,6 +303,12 @@ export default function OwnerMembers() {
     } catch (e) {
       reportError('members.zone', e);
       setZone(null); setZoneUnread(true);
+    } finally {
+      // In a `finally`, because what this flag records is that the question was
+      // ASKED and came back — which is true of the refusal as well as of the
+      // answer. `zoneUnread` is what separates those two; this only separates
+      // both of them from "not yet".
+      setZoneRead(true);
     }
     try {
       /**
@@ -394,7 +466,10 @@ export default function OwnerMembers() {
         .order('full_name', { ascending: true })
         .limit(SEARCH_LIMIT);
       if (error) throw error;
+      // Built from the register, and the register may not have come back. See
+      // `heldKnown`: an empty `held` is not "nobody holds a membership".
       const held = new Set(list.filter((m) => m.status === 'active').map((m) => m.memberId));
+      setHeldKnown(loaded);
       const rows = (data ?? []) as any[];
       // At the ceiling means there are probably more. The sentence below turns
       // on this: "nobody matching, or everyone matching already holds an
@@ -993,9 +1068,29 @@ export default function OwnerMembers() {
                       not read it as “not found” — check your connection and type the name again.
                     </Flag>
                   ) : found !== null ? (
-                    found.length === 0 ? (
+                    <>
+                    {/* The register is what says who already holds a membership,
+                        and it is a different read from the lookup above. Said
+                        here, beside the names, because this is where the owner
+                        decides — and because without it the names read as a
+                        checked list rather than an unchecked one. */}
+                    {!heldKnown ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                        Your membership register could not be read, so nobody below has been checked
+                        against it. Anyone here may already hold an active membership, and opening
+                        one now would be a second. Pull down on the register behind this sheet and
+                        try again before adding anybody.
+                      </Flag>
+                    ) : null}
+                    {found.length === 0 ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                        {searchCut
+                        {!heldKnown
+                          // The half of the sentence that is a claim about the
+                          // register is dropped, because the register was not
+                          // read. What is left is the half the lookup can
+                          // actually support.
+                          ? 'Nobody matching that name.'
+                          : searchCut
                           ? `More than ${SEARCH_LIMIT} people match that, and every one this lookup saw already holds an active membership — which is not the same as everyone who matches. Type more of the name.`
                           : 'Nobody matching, or everyone matching already holds an active membership.'}
                       </Text>
@@ -1019,7 +1114,8 @@ export default function OwnerMembers() {
                           ))}
                         </ScrollView>
                       </View>
-                    )
+                    )}
+                    </>
                   ) : null}
                 </>
               )}

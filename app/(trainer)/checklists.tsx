@@ -92,6 +92,7 @@ import {
 import { bulkReport, selectAllOffer, type WriteOutcome } from '../../src/lib/bulkActions';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { signedInUid } from '../../src/lib/signedInUid';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -140,21 +141,47 @@ export default function CoachChecklists() {
   const [ticks, setTicks] = useState<{ window: DayWindow; rows: TickRow[] } | null>(null);
   const [tickStatus, setTickStatus] = useState<LoadStatus>('ready');
   const [uid, setUid] = useState<string | null>(null);
+  /**
+   * Whether the coach's own id has been established — and it is NOT the same
+   * question as `uid === null`.
+   *
+   * `supabase.auth.getUser()` does not reject on a dropped connection: it
+   * RESOLVES with `{ data: { user: null }, error }` (src/lib/authReadFate.ts
+   * sets out why, against the installed copy of auth-js). The effect below read
+   * only `data`, so a coach on gym wifi that had just dropped and a coach who
+   * is genuinely signed out both arrived as `uid === null` — and the effect
+   * that starts the reads then fell into its `else`, which set BOTH statuses to
+   * 'ready' over null rows. 'ready' with no items is the sentence "you haven't
+   * set anything for them", which this screen prints under the client's own
+   * name, about a list that may have twelve lines on it.
+   *
+   * So the three answers are kept apart: 'reading' while nobody has answered
+   * yet, 'known' once there is an id, 'unknown' for both fates — because the
+   * two sentences this screen can print ("could not be read" and "you have set
+   * nothing") differ on exactly one thing, and both fates belong on the same
+   * side of it.
+   */
+  const [whoami, setWhoami] = useState<'reading' | 'known' | 'unknown'>(USE_SUPABASE ? 'reading' : 'known');
   const [draft, setDraft] = useState('');
   const [icon, setIcon] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  /* Ask who is signed in. A callback rather than an inline effect body, because
+   * pull-to-refresh below calls it too: with `whoami` at 'unknown' this screen
+   * says the list could not be read, and until this could be asked again the
+   * only way out of that was to quit the app. This screen is registered
+   * `href: null` inside <Tabs>, so it is never unmounted and the effect would
+   * never have run a second time. */
+  const readWhoami = useCallback(async () => {
     if (!USE_SUPABASE) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await supabase.auth.getUser();
-        if (!cancelled) setUid(data?.user?.id ?? null);
-      } catch { if (!cancelled) setUid(null); }
-    })();
-    return () => { cancelled = true; };
+    // `signedInUid` asks, classifies, and reports the outage while staying
+    // silent about a plain sign-out — which is not a fault. It never throws.
+    const me = await signedInUid('checklists.whoami');
+    setUid(me.uid);
+    setWhoami(me.uid !== null ? 'known' : 'unknown');
   }, []);
+
+  useEffect(() => { void readWhoami(); }, [readWhoami]);
 
   /* The client whose answers are allowed to land, in both reads.
    *
@@ -285,8 +312,28 @@ export default function CoachChecklists() {
       setItems(null); setTicks(null);
       void load(uid, picked); void loadTicks(picked);
     }
+    else if (picked) {
+      /* A client is chosen and there is no coach id to read their list with.
+       *
+       * This used to fall into the `else` below and be filed as 'ready' — an
+       * empty list, stated as a fact about the coach, produced by an auth read
+       * that may simply not have landed. The list is keyed on `coach_id`, so
+       * without one nothing can be asked; 'loading' while the answer is still
+       * out and 'error' once it has come back without an id are both true, and
+       * neither of them says the coach has set this person nothing.
+       *
+       * The ticks go the same way rather than being read on their own. They do
+       * not need a coach id, but `summariseAdherence` divides them by the items,
+       * and ticks under a list this screen could not read is a numerator with
+       * no denominator — `adhStatus` is their worst either way, so the only
+       * thing a separate read would buy is a round trip.
+       */
+      setItems(null); setTicks(null);
+      const s: LoadStatus = whoami === 'reading' ? 'loading' : 'error';
+      setStatus(s); setTickStatus(s);
+    }
     else { setItems(null); setTicks(null); setStatus('ready'); setTickStatus('ready'); }
-  }, [uid, picked, askable, load, loadTicks]);
+  }, [uid, whoami, picked, askable, load, loadTicks]);
 
   /* ── pull to refresh ─────────────────────────────────────────────────────
    *
@@ -306,8 +353,15 @@ export default function CoachChecklists() {
    * at that moment is made of. */
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     r.refresh(),
+    // Asked again on every pull, not only the one where it failed. It is the
+    // read the other two hang off — with no coach id there is no list to ask
+    // for — and a coach looking at "your list could not be read" is pulling
+    // precisely because they want it tried again. Cheap, and it is the only
+    // thing on this screen that could otherwise stay wrong for the life of a
+    // mount that is never torn down.
+    readWhoami(),
     ...(uid && picked && askable ? [load(uid, picked), loadTicks(picked)] : []),
-  ]), [r, uid, picked, askable, load, loadTicks]));
+  ]), [r, uid, picked, askable, load, loadTicks, readWhoami]));
 
   // Both reads have to be whole before a single figure is drawn. A truncated or
   // failed list of items means unknown denominators; a truncated or failed read

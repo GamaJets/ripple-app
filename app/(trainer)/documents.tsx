@@ -44,6 +44,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
+import { signedInUid } from '../../src/lib/signedInUid';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 // How many people have accepted each document, on the document — the answer
@@ -144,12 +145,19 @@ export default function CoachDocumentsScreen() {
       // agreements were not on file. They are; we simply had nobody to ask as.
       // 'error' means UNKNOWN (src/ui/loadStatus.ts), which is exactly what
       // this is, and the render already draws it as "could not be read".
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setStatus('error'); noCounts(); return; }
-      const { data: auth, error: authErr } = await supabase.auth.getUser();
-      if (authErr) { setStatus('error'); noCounts(); return; }
-      const id = auth?.user?.id ?? null;
-      if (!id) { setStatus('error'); noCounts(); return; }
+      /* One question, asked once. This was a `getSession()` whose `error` was
+       * not on the line — so a stored session that could not be read came back
+       * as `{ data: { session: null }, error }` and was indistinguishable here
+       * from having none — followed by a `getUser()` that did name its error
+       * and reached the same three lines. The three branches always agreed, so
+       * nothing visible was ever wrong; what was wrong is that the agreement
+       * was a coincidence of four hand-written lines rather than a rule, and
+       * the discarded error was on scripts/check-reads.mjs's ratchet for
+       * exactly that reason. `signedInUid` is the rule, written once in
+       * src/lib/authedUid.ts and tested there. */
+      const me = await signedInUid('coachDocs.whoami');
+      if (me.uid === null) { setStatus('error'); noCounts(); return; }
+      const id = me.uid;
       setUid(id);
       const { data, error } = await supabase.from('coach_documents')
         .select('id, coach_id, title, path, mime, bytes, required, retired_at, created_at')

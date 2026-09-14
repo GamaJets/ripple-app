@@ -195,8 +195,41 @@ for (const f of readdirSync(PARTS).sort()) {
   const src = readFileSync(join(PARTS, f), 'utf8');
   if (!src.includes('insert into public.exercise_translations')) continue;
   for (const block of src.matchAll(/insert into public\.exercise_translations[\s\S]*?\bvalues\b([\s\S]*?)\non conflict/g)) {
-    for (const m of block[1].matchAll(/\n?\s*\('([a-z0-9-]*)',\s*'([^']*)',\s*'((?:[^']|'')*)'/g)) {
+    // The id is captured as `[^']*` and NOT as `[a-z0-9-]*`, which is what it
+    // used to be. That looks like the tighter spelling and was the looser one,
+    // because a capture that cannot match does not FLAG the row — it fails to
+    // match the whole tuple, and the tuple is then skipped in silence.
+    //
+    // Measured, not supposed. A row reading ('ab-wheel-rollout-TYPO', 'de', …)
+    // made this file print `ok … 1166 rows` over a file holding 1165, and exit
+    // 0. So did an underscored id, a spaced id and a title-cased one — which is
+    // exactly the typo you get pasting an id out of a spreadsheet or a vendor
+    // pack, and exactly what rule 1 of this file's header promises to catch.
+    // The consequence it promises to prevent is the one that then happened:
+    // the foreign key aborts part way through applying the part and takes the
+    // rest of that language with it.
+    //
+    // Parsing every id and letting the `live.has(r.id)` rule below judge it is
+    // the right division of labour. A regex decides what IS a row; the rules
+    // decide whether a row is WRONG. Putting a judgement in the shape of the
+    // pattern means the rows that fail it never reach the judge.
+    let tuples = 0;
+    for (const _ of block[1].matchAll(/\n\s*\(/g)) tuples++;
+    let parsed = 0;
+    for (const m of block[1].matchAll(/\n?\s*\('([^']*)',\s*'([^']*)',\s*'((?:[^']|'')*)'/g)) {
       rows.push({ file: f, id: m[1], locale: m[2], name: m[3].replace(/''/g, "'") });
+      parsed++;
+    }
+    // And the general form of the same fault: a tuple this parser did not read
+    // at all — a fourth column, an unquoted value, a nested function call. The
+    // count above is the only thing that can see one, because a row that never
+    // becomes an object is invisible to every rule in this file.
+    if (parsed < tuples) {
+      fail(
+        `${f}: ${tuples} translation tuples are written and only ${parsed} could be read. `
+        + 'A tuple this file cannot parse is not a tuple it can check — it is dropped, and the row count '
+        + 'printed at the end is then a claim about rows nobody looked at.',
+      );
     }
   }
 }

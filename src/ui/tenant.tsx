@@ -18,7 +18,7 @@
 // down the happy path. Every owner screen then told a gym owner they do not
 // belong to a gym, and `role` came back null so some of them offered to set one
 // up. `status` distinguishes the two.
-import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -27,6 +27,12 @@ import { wholeMoney } from '../lib/coachMoney';
 import type { LoadStatus } from './loadStatus';
 import { classifySetCurrencyError, isCurrencyCode, readSetCurrency, type SetCurrencyOutcome, type SetCurrencyReply } from '../lib/coachCurrency';
 import { useAuthRevision } from './authRevision';
+// `supabase.auth.*` does not reject on a dropped connection — it RESOLVES with
+// `{ data: { user: null }, error }`, and offline, DNS, a captive portal and a
+// 5xx are all branded as one AuthError. src/lib/authReadFate.ts holds the
+// discrimination against the installed library; src/lib/authedUid.ts joins it
+// to a uid. Imported, never restated.
+import { uidFromAuth } from '../lib/authedUid';
 import { useRecoverRead } from './readRefresh';
 import { readMyProfileRow, forgetMyRows } from './myProfile';
 
@@ -235,6 +241,33 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   // re-read rather than the answer the launch already had. A person pulling
   // down is asking the server, not asking us again.
   const refresh = useCallback(() => { forgetMyRows(); setTick((t) => t + 1); }, []);
+  // ── Whose gym is in state ─────────────────────────────────────────────────
+  //
+  // A ref, because the effect below is keyed on `tick` and `authRev` and would
+  // otherwise compare against the uid from the render that started it.
+  //
+  // This provider is mounted at the root and outlives every sign-out, so
+  // `tenant` and `role` are React state that survives an account change unless
+  // something clears them. `tenant` is the gym's NAME, its session fee and its
+  // CURRENCY, and `role` is what a screen decides somebody may do.
+  const whoRef = useRef<string | null>(null);
+  /**
+   * Nobody is signed in, or somebody else is.
+   *
+   * All three fields together, because they are three halves of one answer and
+   * the two exits below each used to clear a different two of them: the
+   * no-session branch cleared `tenant` and `brandMismatch` and left `role`
+   * standing, so the next person to sign in on the handset was 'owner' until
+   * their own read landed; the no-uid branch cleared `tenant` and `role` and
+   * left `brandMismatch`, so a confirmed mismatch outlived the account it was
+   * about. One function, so they cannot disagree again.
+   */
+  const forgetTenant = () => {
+    setTenant(null);
+    setRole(null);
+    setBrandMismatch(null);
+    whoRef.current = null;
+  };
 
   useEffect(() => {
     if (!USE_SUPABASE) { setLoading(false); setStatus('ready'); return; }
@@ -243,18 +276,62 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       setStatus('loading');
       try {
-        const { data: sess } = await supabase.auth.getSession();
+        const sessRes = await supabase.auth.getSession();
         if (cancelled) return;
-        // Signed out is not a failed read of the tenant — there is simply no
-        // user to have one. getUser() rejects with no session, which latched
-        // this at 'error' on the first tick and it never ran again.
-        if (!sess?.session) { setTenant(null); setBrandMismatch(null); setStatus('ready'); setLoading(false); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        // ── the session read's own error, which was being dropped ──────────
+        //
+        // This was `const { data: sess } = await supabase.auth.getSession()`,
+        // and a null session is NOT always a sign-out: auth-js emits one
+        // whenever `getSession()` errors — an access token that expired where
+        // there was no signal to refresh it. The branch underneath then set the
+        // tenant to null and published 'ready', and this file's own type
+        // documentation says what 'ready' with a null tenant means: the user
+        // has no gym. Owner screens act on that by offering to set one up. So a
+        // gym owner on a basement wifi was shown a product with no gym in it
+        // and invited to create the one they already own.
+        //
+        // Signed out is still a true answer rather than a failure — that half
+        // of the old comment stands — but it now has to be ESTABLISHED.
+        // Narrowed on `fate`, never on `!uid`: UidRead's members are told apart
+        // by fate, and `string` includes ''.
+        const sessRead = uidFromAuth({ data: { user: sessRes.data?.session?.user }, error: sessRes.error });
+        if (sessRead.fate !== null) {
+          if (sessRead.fate === 'unreadable') {
+            // Nothing established, so nothing is cleared and nothing is
+            // claimed: an owner keeps the gym on screen, with the status
+            // saying it is not confirmed.
+            reportError('tenant.load.session', new Error('auth read unreadable — who is signed in could not be established'));
+            setStatus('error'); setLoading(false); return;
+          }
+          forgetTenant(); setStatus('ready'); setLoading(false); return;
+        }
+        const whoRes = await supabase.auth.getUser();
         if (cancelled) return;
-        if (authErr) { reportError('tenant.load.auth', authErr); setStatus('error'); setLoading(false); return; }
-        const uid = auth?.user?.id;
-        // Signed out: no tenant, and that is a fact rather than a failure.
-        if (!uid) { setTenant(null); setRole(null); setStatus('ready'); setLoading(false); return; }
+        const who = uidFromAuth(whoRes);
+        if (who.fate !== null) {
+          if (who.fate === 'unreadable') {
+            reportError('tenant.load.auth', new Error('auth read unreadable — who is signed in could not be established'));
+            setStatus('error'); setLoading(false); return;
+          }
+          // Signed out: no tenant, and that is a fact rather than a failure.
+          forgetTenant(); setStatus('ready'); setLoading(false); return;
+        }
+        const uid = who.uid;
+        // ── A DIFFERENT ACCOUNT IS NOT A RE-READ ───────────────────────────
+        //
+        // Dropped on the way IN, before the reads below land and whatever they
+        // decide — the rule src/lib/accountScopedState.ts states, applied to
+        // React state. Without it, an owner switching accounts whose profile
+        // or tenant read then failed kept the PREVIOUS gym on screen: its name,
+        // its session fee and its currency, under a status that only says the
+        // answer is unconfirmed. `updateTenant` writes to `tenant.id`, so that
+        // stale row is also the row a Save would have aimed at — refused by
+        // `tenants_owner_rw`, and refused is not the same as never sent.
+        //
+        // The same account refreshing keeps what is on screen, so a pull-down
+        // does not blank the gym for a frame.
+        if (whoRef.current && whoRef.current !== uid) forgetTenant();
+        whoRef.current = uid;
 
         // ONE read of this row per launch, shared with the three other
         // providers that were each reading it for their own columns — and it is
@@ -305,8 +382,15 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         } : null);
         setStatus('ready');
       } catch (e) {
+        // The tenant on screen is LEFT, which is what the other two failure
+        // exits above already do (`!profOut.ok`, `tErr`). This one alone blanked
+        // it, so one thrown request took the gym's name, session fee and
+        // currency off every owner screen at once — for a failure that
+        // established nothing about whether the gym is there. 'error' is what
+        // says the answer is unconfirmed; emptying the fields as well says it
+        // twice and loses the last good one doing it.
         reportError('tenant.load', e);
-        if (!cancelled) { setTenant(null); setStatus('error'); }
+        if (!cancelled) setStatus('error');
       }
       if (!cancelled) setLoading(false);
     })();

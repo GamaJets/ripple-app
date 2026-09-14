@@ -219,6 +219,10 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
           // has nothing to delete. That is the one case where the rule in
           // src/lib/wroteRows.ts does not apply, so it is said rather than
           // left looking like an oversight.
+          // no-count-ok: a member who connected a watch this morning and
+          // unplugged it before any night was stored has nothing to delete,
+          // so zero rows is the outcome rather than the failure. This is the
+          // departure from src/lib/wroteRows.ts that the sentence above names.
           const { error } = await supabase.from('device_sleep_nights')
             .delete().eq('user_id', uid).eq('provider', id);
           if (error) reportError('wearables.forgetSleep', error, { provider: id });

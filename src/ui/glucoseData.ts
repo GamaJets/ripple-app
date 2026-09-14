@@ -59,6 +59,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BRAND } from '../lib/brands';
 import { supabase } from '../lib/supabase';
+// Which of the two reasons there is no session: a device nobody is signed into,
+// or an auth read that did not land. See src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import {
@@ -227,19 +230,36 @@ export function useGlucose(personId?: string): GlucoseData {
     if (personId) return;
     let alive = true;
     (async () => {
-      let session: { user?: { id?: string } } | null = null;
-      try {
-        const { data } = await supabase.auth.getSession();
-        session = (data?.session as { user?: { id?: string } } | null) ?? null;
-      } catch { /* no session on this device; handled as signed out below */ }
+      // The last step of the repair the paragraph above describes. Moving to
+      // `getSession()` stopped the network round-trip from deciding who this
+      // is — but `getSession()` has the SAME defect one layer down: when the
+      // stored access token has expired and the refresh cannot reach the
+      // server it resolves `{ session: null, error: AuthRetryableFetchError }`
+      // (observed in GoTrueClient's `__loadSession`; see
+      // src/lib/authReadFate.ts). The error beside it was discarded and the
+      // `catch` said "handled as signed out below", so the very case this
+      // effect was rewritten for — no signal — still ended on `id = null`.
+      //
+      // And on this screen that branch says something specific: 'ready' on
+      // both statuses, with no readings, is Blood Sugar telling somebody
+      // wearing a continuous glucose monitor that their sensor has recorded
+      // nothing. The header above is explicit that this is the one screen
+      // where "we could not read this" and "your sensor recorded nothing" must
+      // never look the same. They no longer do.
+      const who = await sessionUid('glucose.whoAmI');
       if (!alive) return;
-      const id = session?.user?.id ?? null;
-      setUid(id);
+      setUid(who.uid);
       // Nobody is signed in, or the backend is off. There is no account whose
       // readings could have been withheld, so an empty list here is the whole
       // truth rather than a read that failed — and a status left on 'loading'
       // is a screen that spins for ever, which is the failure this replaces.
-      if (!id || !USE_SUPABASE) { setStatus('ready'); setMealsStatus('ready'); }
+      if (who.fate === 'signed-out' || !USE_SUPABASE) { setStatus('ready'); setMealsStatus('ready'); }
+      // Could not ask. `target` stays null and the refreshers below still
+      // return at their `if (!target)` guard — so this must write a status or
+      // the screen spins for ever, which is the other half of the same bug.
+      // 'error' is the honest one: nothing was read, and an empty table under
+      // it means unknown rather than none.
+      else if (who.fate !== null) { setStatus('error'); setMealsStatus('error'); }
     })();
     return () => { alive = false; };
   }, [personId]);

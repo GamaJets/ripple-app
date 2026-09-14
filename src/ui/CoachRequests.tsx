@@ -15,6 +15,13 @@ import { sp, radius, hairline, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+// A failed auth read is not a signed-out coach. See src/lib/authReadFate.ts:
+// `getUser()` resolves rather than rejecting when the auth host is unreachable,
+// so `!auth?.user?.id` used to mean "nobody is signed in, or we could not ask,
+// and this component cannot tell which".
+import { signedInUid } from '../lib/signedInUid';
+import { authGateMessage } from '../lib/authedUid';
+
 import { readByIds } from '../lib/idLookup';
 import { notifySuccess } from './haptics';
 import { readCoachedMode, COACHED_MODE_SHORT, type CoachedMode } from '../lib/types';
@@ -54,10 +61,22 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) return;
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return;
+      // The bare `if (!uid) return` that stood here was the one outcome the
+      // comment on the read below forbids. An outage resolves `getUser()` with
+      // `user: null` and a discarded retryable error, so this returned before
+      // touching `unread`, the component rendered nothing at all, and nothing
+      // at all is how it says "no client has asked to be coached by you". A
+      // client who asked that morning is on the other side of that silence.
+      //
+      // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+      const who = await signedInUid('coachRequests.load');
+      if (who.fate === 'unreadable') { setUnread(true); return; }
+      // Genuinely signed out: there is no roster to read requests against, and
+      // the auth gate on the screen above is the thing that should speak.
+      if (who.fate !== null) return;
+      const uid = who.uid;
       const { data: rows, error } = await supabase
+
         .from('coach_requests')
         .select('id, client_id, mode, created_at')
         .eq('trainer_id', uid)
@@ -141,10 +160,33 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
   const respond = useCallback(async (r: Req, accept: boolean) => {
     setBusy(r.id);
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return;
+      // ── the tap that did nothing and said nothing ────────────────────────
+      //
+      // This was `if (!uid) return`, and it returned out of the whole callback
+      // — past the `setBusy(null)` at the bottom, which is OUTSIDE the
+      // try/catch and is therefore skipped by an early return. So during an
+      // outage a coach tapped Accept, the button went to its busy state and
+      // stayed there, no alert appeared, and the request was neither accepted
+      // nor declined. The client went on waiting.
+      //
+      // No write happens on either fate — this returns before `link_coaching`
+      // and before the status update — so the 'unreadable' sentence's "nothing
+      // has been changed" is true, and it is worth saying out loud that the
+      // person on the other end has not been told anything either.
+      //
+      // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+      const who = await signedInUid('coachRequests.respond');
+      if (who.fate !== null) {
+        Alert.alert(
+          who.fate === 'signed-out' ? 'Signed out' : 'We couldn’t check your account',
+          `${authGateMessage(who.fate)} ${r.name} has not been told anything either way and is still waiting.`,
+        );
+        setBusy(null);
+        return;
+      }
+      const uid = who.uid;
       if (accept) {
+
         // link_coaching FIRST, and this ordering is the fix rather than a
         // detail. Accepting used to write only coach_clients, which is a
         // roster and nothing more. Every log a coach actually wants —

@@ -37,6 +37,13 @@ import {
   type Ledger, type WriteResult,
 } from '../../src/lib/wearables/appleHealthWrite';
 import { reportError } from '../../src/lib/reportError';
+// Storage-first — it answers offline, which is what this screen needs — and it
+// keeps a dropped connection apart from a sign-out. It replaces a local helper
+// of the same name whose doc comment asserted that `getSession()` "REJECTS for
+// nobody signed in". It does not. See src/lib/authReadFate.ts and the note at
+// the disconnect below for what that mistake was holding up.
+import { sessionUid } from '../../src/lib/sessionUid';
+
 import { readSleepFromDevices } from '../../src/lib/wearables/sleep';
 import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/wearables/liveNotes';
 // One answer to "is this connected", shared with Recovery. See
@@ -379,9 +386,18 @@ export default function Devices() {
  const restoreNights = async (p: WearableProvider) => {
   if (!USE_SUPABASE) return;
   try {
-   const uid = await signedInUid();
-   if (!uid) return;
-   const res = await restoreRetiredNights(supabase, uid, p.meta.id);
+   // Narrowed on `fate`, never on `!who.uid`: `string` includes ''. Both fates
+   // return, and here that is genuinely the same thing: there is nothing to
+   // restore for somebody signed out, and nothing that can be restored when we
+   // could not find out who they are. The difference is only that the second
+   // one is now reported — `sessionUid` hands the fault to `reportError` under
+   // this context — instead of a restore that never ran looking like a member
+   // with no shelf. The comment above already says a failed restore is not
+   // surfaced and the next reconnect tries again; that still holds.
+   const who = await sessionUid('devices.restoreSleep');
+   if (who.fate !== null) return;
+   const res = await restoreRetiredNights(supabase, who.uid, p.meta.id);
+
    if (!res.ok) { reportError('devices.restoreSleep', new Error(res.reason), { provider: p.meta.id }); return; }
    const line = restoredNightsLine(res.nights, p.meta.name);
    // Only when something actually came back. `restoredNightsLine` returns null
@@ -393,17 +409,26 @@ export default function Devices() {
   }
  };
 
- /** Whose account this is, or null. `getSession` reads local storage rather
-  *  than the network and REJECTS for nobody signed in, which is a true answer
-  *  and not a failed read — the same reading src/ui/deviceSleep.tsx makes. */
- const signedInUid = async (): Promise<string | null> => {
-  try {
-   const { data } = await supabase.auth.getSession();
-   return data?.session?.user?.id ?? null;
-  } catch {
-   return null;
-  }
- };
+ // ── a helper that was deleted, and the claim in it that was wrong ────────
+ //
+ // There was a local `signedInUid()` here, documented as: "`getSession` reads
+ // local storage rather than the network and REJECTS for nobody signed in,
+ // which is a true answer and not a failed read". Both halves of that are
+ // false, and they were the licence for the `catch { return null }` under them.
+ //
+ //   · `getSession()` does NOT reject for nobody signed in. It resolves with
+ //     `{ data: { session: null }, error: null }`. Nothing rejected, so the
+ //     catch never ran for the case it was written for.
+ //   · it does NOT stay off the network. It is storage-first, which is why this
+ //     screen is right to prefer it, but when the stored access token has
+ //     EXPIRED it refreshes over the wire — and a refresh that cannot reach the
+ //     server resolves with `session: null` and an `AuthRetryableFetchError`
+ //     beside it, which this helper discarded on its way to returning null.
+ //
+ // So "or null" had two meanings and the callers below could not tell them
+ // apart. `sessionUid` from src/lib/sessionUid.ts makes the same storage-first
+ // call and keeps the reason.
+
 
  // Disconnecting has to drop what the server proved about the token as well as
  // the token itself. A verdict left behind outlives its subject, and would put
@@ -434,9 +459,38 @@ export default function Devices() {
   //
   // See src/lib/retiredSleep.ts for the whole argument and supabase/parts/2650
   // for the shelf itself.
+  // ── the false sign-out that walked straight past the copy ────────────────
+  //
+  // `const uid = await signedInUid()` and then `if (uid) { …keep the nights… }`
+  // — so a null uid did not refuse, it SKIPPED THE BACKUP AND CARRIED ON to
+  // `w.disconnect`, which deletes every `device_sleep_nights` row this provider
+  // measured. The entire "copy before you unlink" order that the paragraphs
+  // above call "the only safe order" was gated on a read that cannot fail
+  // loudly: `getSession()` resolves with `session: null` and a retryable error
+  // when the refresh cannot reach the auth host, and the old helper threw that
+  // error away. An outage did not stop the destruction; it removed the thing
+  // standing in front of it.
+  //
+  // 'unreadable' now refuses, and it borrows `keepFailedLine` because that is
+  // exactly what happened: the nights were not put somewhere safe, so nothing
+  // was disconnected. Its own doc comment asks that "try again in a moment" be
+  // said only of the transient failure, and a dropped connection is the
+  // transient failure.
+  //
+  // 'signed-out' keeps the old path and does not refuse. There is no account,
+  // so there are no server-side nights to shelve and nothing to lose; a cloud
+  // provider's disconnect will fail on its own and Apple Health's local unlink
+  // is the member's to make.
   let kept = false;
-  const uid = USE_SUPABASE ? await signedInUid() : null;
+  const who = USE_SUPABASE ? await sessionUid('devices.disconnect') : null;
+  if (who?.fate === 'unreadable') {
+   Alert.alert(p.meta.name, keepFailedLine(p.meta.name));
+   return;
+  }
+  // Narrowed on `fate` above, never on `!who.uid`: `string` includes ''.
+  const uid = who?.uid ?? null;
   if (uid) {
+
    const keep = await keepNightsBeforeDisconnect(supabase, uid, p.meta.id);
    if (!keep.ok) {
     reportError('devices.keepSleep', new Error(keep.reason), { provider: p.meta.id });

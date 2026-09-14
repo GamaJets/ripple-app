@@ -441,18 +441,38 @@ export default function Revenue() {
           // contributing plans DISAGREE, so the tile was printing a sum across
           // two currencies and labelling the result dirhams. money() withholds
           // it now and the note says which of the reasons it is.
-          text={recurring ? money(recurring.mrrCents, recurring.currency) : null}
-          note={recurring?.mrrCents == null ? forecastNote
-            : !recurring.currency ? 'these plans are priced in more than one currency, so there is no one total'
-            : `forecast, ${recurring.pricedMembers} membership${recurring.pricedMembers === 1 ? '' : 's'}`}
+          // Two pots are stated as two pots rather than as nothing. `potLine`
+          // joins them with a `+` that is deliberately not an addition — it is
+          // the same shape the PT sold tile beside this one has always used —
+          // and the note underneath says outright that they are not added.
+          text={recurring
+            ? (money(recurring.mrrCents, recurring.currency)
+                ?? (recurring.pots.length > 1
+                      ? recurring.pots.map((p) => minorMoney(p.cents, p.currency)).filter(Boolean).join(' + ')
+                      : null))
+            : null}
+          note={!recurring ? forecastNote
+            : recurring.mrrCents != null
+              ? `forecast, ${recurring.pricedMembers} membership${recurring.pricedMembers === 1 ? '' : 's'}`
+            : recurring.pots.length > 1
+              ? `${recurring.pots.length} currencies, not added — ${recurring.pricedMembers} membership${recurring.pricedMembers === 1 ? '' : 's'}`
+              : forecastNote}
         />
         <Kpi
           label={`Taken (${DAYS} days)`}
-          text={cash ? money(cash.totalCents, cash.currency) : null}
-          note={cash?.totalCents == null
-            ? (takingsErr ? 'the payments could not be read' : takingsUnread ? 'still reading' : cash?.reason)
-            : !cash.currency ? 'these payments are in more than one currency, so there is no one total'
-            : `${cash.count} payment${cash.count === 1 ? '' : 's'}`}
+          text={cash
+            ? (money(cash.totalCents, cash.currency)
+                ?? (cash.pots.length > 1
+                      ? cash.pots.map((p) => minorMoney(p.cents, p.currency)).filter(Boolean).join(' + ')
+                      : null))
+            : null}
+          note={!cash
+            ? (takingsErr ? 'the payments could not be read' : takingsUnread ? 'still reading' : undefined)
+            : cash.totalCents != null
+              ? `${cash.count} payment${cash.count === 1 ? '' : 's'}`
+            : cash.pots.length > 1
+              ? `${cash.pots.length} currencies, not added — ${cash.count} payment${cash.count === 1 ? '' : 's'}`
+              : (takingsErr ? 'the payments could not be read' : takingsUnread ? 'still reading' : cash.reason)}
         />
         <Kpi
           label="Active memberships"
@@ -520,8 +540,30 @@ interface RecurringView {
   lines: PlanLine[];
   mrrCents: number | null;
   /** The single currency the forecast is in, or null when the contributing
-   *  plans disagree — in which case there is no total to state. */
+   *  plans disagree — in which case there is no ONE total to state. */
   currency: string | null;
+  /**
+   * The forecast per currency — one pot for each money the contributing plans
+   * are priced in, largest first.
+   *
+   * `mrrCents` above is the single-pot answer and stays exactly as it was: it
+   * is the denominator every per-plan share on this page is taken against, and
+   * a share of a figure spanning two currencies is not a share. This is the
+   * separate thing — what there is to SAY when there is more than one pot.
+   *
+   * It exists because withholding was doing more work than it should. A gym
+   * priced in AED and GBP had `mrrCents` come back null with "the contributing
+   * plans are priced in more than one currency" beside a dash, and that is a
+   * true sentence attached to no figure at all: the owner of a gym taking AED
+   * 6,000 and GBP 400 a month was shown neither number. Refusing to ADD them is
+   * right and is kept — this app holds no rate between any two monies and never
+   * will. Refusing to say them is a different decision and it was the wrong one.
+   *
+   * The tile two sections down already knew this: PT sold renders
+   * `potLine(packSummary.total)` and prints both pots side by side. This is the
+   * same answer given by the two tiles beside it.
+   */
+  pots: Array<{ currency: string; cents: number }>;
   /** Why mrrCents is null, in words, when it is. */
   reason: string | undefined;
   activeMembers: number;
@@ -598,11 +640,25 @@ function buildRecurring(plans: MembershipPlan[], memberships: Membership[]): Rec
       ? null
       : contributing.reduce((a, l) => a + (l.contributionCents ?? 0), 0);
 
+  // One pot per currency, over the same `contributing` set the single total is
+  // taken over — so the pots and `mrrCents` can never be answers to two
+  // different questions. Folded the way sharedCurrency folds, so ' gbp ' and
+  // 'GBP' are one pot.
+  const byCurrency = new Map<string, number>();
+  for (const l of contributing) {
+    const c = (l.currency ?? '').trim().toUpperCase();
+    if (!c || l.contributionCents == null) continue;
+    byCurrency.set(c, (byCurrency.get(c) ?? 0) + l.contributionCents);
+  }
+  const pots = [...byCurrency.entries()]
+    .map(([c, cents]) => ({ currency: c, cents }))
+    .sort((a, b) => b.cents - a.cents || a.currency.localeCompare(b.currency));
+
   const reason =
     contributing.length === 0
       ? 'no active membership sits on a priced, recurring plan'
       : currency == null
-        ? 'the contributing plans are priced in more than one currency'
+        ? 'the contributing plans are priced in more than one currency, and this app holds no rate between them'
         : undefined;
 
   const pricedMembers = contributing.reduce((a, l) => a + l.members, 0);
@@ -615,6 +671,7 @@ function buildRecurring(plans: MembershipPlan[], memberships: Membership[]): Rec
     lines,
     mrrCents,
     currency,
+    pots,
     reason,
     activeMembers: active.length,
     pricedMembers,
@@ -676,7 +733,19 @@ function Recurring({ r, state }: { r: RecurringView | null; state: Unread }) {
       {r ? (
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
-            {r.mrrCents == null ? (
+            {r.mrrCents == null && r.pots.length > 1 ? (
+              // Two currencies is not an unknown. It is two knowns, and they
+              // are both stated. What is refused is the single number over
+              // them, and the sentence says so rather than leaving a reader to
+              // add the two figures themselves.
+              <>
+                <strong>{r.pots.map((p) => minorMoney(p.cents, p.currency)).filter(Boolean).join(' + ')}</strong>{' '}
+                per month across {r.pricedMembers} active membership{r.pricedMembers === 1 ? '' : 's'}.
+                These are separate amounts of money in separate currencies and they are deliberately
+                not added: {r.reason}. A yearly plan is shown at a twelfth of its price so it can sit
+                in the same column as a monthly one; nobody is billed that amount in any given month.
+              </>
+            ) : r.mrrCents == null ? (
               <>
                 No monthly figure is stated: {r.reason}. That is an unknown, not a
                 nil — the memberships below are real whether or not they can be priced.
@@ -767,6 +836,19 @@ interface CashView {
   /** How many rows were corrections rather than sales. */
   refunds: number;
   currency: string | null;
+  /**
+   * What the gym holds, one pot per currency — the same net figure as
+   * `totalCents`, said for a till that took two monies instead of withheld.
+   *
+   * `totalCents` above stays the single-pot answer and is still the only thing
+   * this page calls the total: every `share()` on this screen is taken against
+   * it, and a share of a figure spanning two currencies is not a share. This is
+   * only what there is to SAY when there is more than one pot, and it is the
+   * same repair the Recurring tile carries — a gym that took AED 6,000 and GBP
+   * 400 in the window was shown neither figure, on the tile that answers "what
+   * came in". Not adding them is right; not saying them was not.
+   */
+  pots: Array<{ currency: string; cents: number }>;
   /** Sales, not rows. A refund is not a payment and used to be counted as one. */
   count: number;
   unpriced: number;
@@ -807,9 +889,24 @@ function buildCash(rows: Taking[]): CashView {
     currency: oneCurrency(rs.filter((r) => r.amountCents != null)),
   }));
 
+  // Net, per currency: sales less refunds inside each money, over the same
+  // rows `totalCents` is taken over, so the two can never disagree about what
+  // is counted. A row with no amount is left out of every pot rather than
+  // counted as nothing — `unpriced` above is where it is reported.
+  const netByCurrency = new Map<string, number>();
+  for (const r of rows) {
+    const c = (r.currency ?? '').trim().toUpperCase();
+    if (!c || r.amountCents == null) continue;
+    netByCurrency.set(c, (netByCurrency.get(c) ?? 0) + r.amountCents);
+  }
+  const pots = [...netByCurrency.entries()]
+    .map(([c, cents]) => ({ currency: c, cents }))
+    .sort((a, b) => b.cents - a.cents || a.currency.localeCompare(b.currency));
+
   return {
     byMethod,
     totalCents,
+    pots,
     grossCents: totalOf(sales),
     // Positive, because it is read as an amount handed back rather than as a
     // negative amount taken. The sign lives in the ledger, not in the sentence.
@@ -872,7 +969,19 @@ function Cash({ c, state }: { c: CashView | null; state: Unread }) {
       {c ? (
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
-            {c.totalCents == null ? (
+            {c.totalCents == null && c.pots.length > 1 ? (
+              // Two tills' worth of money, both stated. The only thing withheld
+              // is the single number over them, and the sentence names that as
+              // the choice it is rather than leaving a dash to be read as a
+              // quarter in which nothing came in.
+              <>
+                <strong>{c.pots.map((p) => minorMoney(p.cents, p.currency)).filter(Boolean).join(' + ')}</strong>{' '}
+                across {c.count} payment{c.count === 1 ? '' : 's'}. This is money the gym holds.
+                These are separate amounts in separate currencies and they are deliberately not
+                added: {c.reason}, and this app holds no rate between them.
+                {c.unpriced ? ` ${c.unpriced} payment${c.unpriced === 1 ? ' carries' : 's carry'} no amount and ${c.unpriced === 1 ? 'is' : 'are'} left out of them rather than added as nothing.` : ''}
+              </>
+            ) : c.totalCents == null ? (
               <>No total is stated: {c.reason}.</>
             ) : (
               <>

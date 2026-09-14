@@ -136,13 +136,33 @@ export async function fetchMarks(sb: Queryable, tenantId: string): Promise<MarkI
  * to choose between. The conflict target is named explicitly because PostgREST
  * will otherwise pick the primary key, which never collides, and every change
  * of mind would silently become a new row.
+ *
+ * The COUNT is checked, like `clearMark` below it and like `saveTrainerPay` in
+ * src/lib/gymPay.ts, which carries the long form of this argument.
+ *
+ * The narrow defence for `error` alone was sound as far as it went, and it is
+ * worth writing down rather than deleting, because it is the reason
+ * scripts/check-writes.mjs never reported this line: an upsert is outside that
+ * gate's count rule on the stated grounds that neither half of one can silently
+ * match nothing. An INSERT refused by `gym_reconcile_marks_owner`'s WITH CHECK
+ * raises 42501, and the `ON CONFLICT DO UPDATE` path raises too rather than
+ * skipping when the policy's USING clause fails the existing row. So the
+ * ordinary RLS refusal does arrive as an `error` here.
+ *
+ * It is not the whole set of ways nothing gets written. A policy later rewritten
+ * as a filter, a trigger returning NULL, a conflict target that stops naming the
+ * constraint it was written for: each is a 2xx with no row touched and a null
+ * `error`. On this screen that is an exception moving to "Explained" — off the
+ * reconciliation, with the owner's typed reason beside it — because the call
+ * came back. A row the gym then believes is settled, in the register an auditor
+ * reads. Counting costs one word and removes the whole class.
  */
 export async function markException(
   sb: Queryable,
   tenantId: string,
   m: { subjectKind: MarkSubject; subjectId: string; state: MarkState; note: string; markedBy: string | null },
 ): Promise<void> {
-  const { error } = await sb
+  const r = await sb
     .from('gym_reconcile_marks')
     .upsert({
       tenant_id: tenantId,
@@ -152,8 +172,9 @@ export async function markException(
       note: m.note.trim() || null,
       marked_by: m.markedBy,
       marked_at: new Date().toISOString(),
-    }, { onConflict: 'tenant_id,subject_kind,subject_id' });
-  if (error) throw error;
+    }, { onConflict: 'tenant_id,subject_kind,subject_id', count: 'exact' });
+  if (r.error) throw r.error;
+  assertWrote(m.state === 'accepted' ? 'That explanation' : 'That flag', r);
 }
 
 /**

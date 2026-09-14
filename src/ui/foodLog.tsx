@@ -45,6 +45,11 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+// A storage-first read of who is signed in that says WHICH kind of nobody it
+// found. `getSession()` answers `session: null` for an unreachable auth server
+// as well as for a signed-out device (src/lib/authReadFate.ts), and on this
+// provider the two decide whether a client's day of meals is shown as empty.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { FoodFigures } from '../lib/entryEdit';
@@ -398,15 +403,22 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // No session is a true answer, not a failed check. getUser() REJECTS when
-      // nobody is signed in, and treating that as an error latched this provider
-      // into 'error' on the first tick — before anybody had signed in — where it
-      // stayed, because the effect never ran a second time.
-      let id: string | null = null;
-      try {
-        const { data: sess } = await supabase.auth.getSession();
-        id = sess?.session?.user?.id ?? null;
-      } catch { /* no local session; treated as signed out below */ }
+      // No session is a true answer, not a failed check. Treating "nobody is
+      // signed in" as an error latched this provider into 'error' on the first
+      // tick — before anybody had signed in — where it stayed, because the
+      // effect never ran a second time.
+      //
+      // The `catch` this replaces said "no local session; treated as signed out
+      // below", and so did the discarded `error` beside the call: an auth
+      // server that could not be reached produced `session: null`, `id` fell to
+      // null, and the block below wiped the screen to an empty day under
+      // 'ready'. That is the sentence "you have not logged anything today",
+      // printed over an unread day — and it is worse than the usual shape of
+      // that bug, because the same branch ALSO skips the device's own cache
+      // (see below: a cache key needs an account). So the one condition where
+      // the offline copy exists to be shown is the condition that threw it
+      // away, and a client in a basement gym watched their morning disappear.
+      const who = await sessionUid('foodLog.today');
       if (cancelled) return;
 
       cacheable.current = true;
@@ -414,10 +426,19 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       // Signed out, or a build with no backend: nothing is read from the cache,
       // because a cache key needs an account and there is no account. What is on
       // screen is authoritative and there is no absent server to misreport.
-      if (!id || !USE_SUPABASE) {
+      if (who.fate === 'signed-out' || !USE_SUPABASE) {
         uidRef.current = null; setUid(null); owedRef.current = [];
         setEntries([], null); setStatus('ready'); return;
       }
+      // Could not ask. Nothing is known about who this is, so the cache key
+      // cannot be formed either — but the day already on screen is NOT cleared
+      // and NOT called empty. 'error' is what this provider's own contract
+      // (src/ui/loadStatus.ts) means by "the list you are looking at was not
+      // confirmed", and it is what the reads below already set when the food
+      // read itself fails. Same outcome for the same kind of failure, one call
+      // earlier.
+      if (who.fate !== null) { setStatus('error'); return; }
+      const id = who.uid;
       uidRef.current = id;
       setUid(id);
 
@@ -525,18 +546,23 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       // already 'ready'. There is no absent server to misreport, so this is an
       // answer rather than a silence — the same reading useFoodHistory gives.
       if (!USE_SUPABASE) { setEverRead(false); return; }
-      let id: string | null = null;
-      try {
-        const { data: sess } = await supabase.auth.getSession();
-        id = sess?.session?.user?.id ?? null;
-      } catch { /* no local session; treated as signed out below */ }
+      const who = await sessionUid('foodLog.everLogged');
       if (cancelled) return;
       // Only a CHANGE of account discards what we know. Clearing on every
       // reload would flash a dash onto a settled tick each time somebody pulls
       // to refresh, which is churn dressed as honesty.
-      if (everForRef.current !== id) { everForRef.current = id; setEverRead(null); }
+      if (everForRef.current !== who.uid) { everForRef.current = who.uid; setEverRead(null); }
       // Signed out is a true answer about an empty history, not a failed read.
-      if (!id) { setEverRead(false); return; }
+      if (who.fate === 'signed-out') { setEverRead(false); return; }
+      // An outage is not. `false` here is the flag that means "this person has
+      // never logged a meal" and it is what the first-run prompt reads to
+      // decide whether to offer somebody their first entry — so a dropped
+      // connection greeted a client of two years with the empty-handed
+      // welcome, over their own history, on the evidence of a read that never
+      // happened. `null` is this hook's "not known", which is what it is, and
+      // the line above has already cleared it for a changed account.
+      if (who.fate !== null) { setEverRead(null); return; }
+      const id = who.uid;
       try {
         const raw = await AsyncStorage.getItem(everKey(id));
         if (raw === '1') {
@@ -872,14 +898,18 @@ export function useFoodHistory(days: number = 14): FoodHistory {
     (async () => {
       if (!USE_SUPABASE) { setRows([]); setStatus('ready'); return; }
       setStatus('loading');
-      let id: string | null = null;
-      try {
-        const { data: sess } = await supabase.auth.getSession();
-        id = sess?.session?.user?.id ?? null;
-      } catch { /* no local session; treated as signed out below */ }
+      const who = await sessionUid('foodLog.history');
       if (cancelled) return;
       // Signed out is a true answer about an empty history, not a failed read.
-      if (!id) { setRows([]); setStatus('ready'); return; }
+      if (who.fate === 'signed-out') { setRows([]); setStatus('ready'); return; }
+      // An outage is neither. `rows: []` under 'ready' is a fortnight of meals
+      // reported as a fortnight of none — and this hook's own comment two
+      // screens down says why that cannot be papered over with today's cache:
+      // "inventing one from today's would show a week made of one day". The
+      // same refusal belongs at the auth read, which is the earlier of the two
+      // places this list can come back unknown.
+      if (who.fate !== null) { setRows([]); setStatus('error'); return; }
+      const id = who.uid;
       const from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - (Math.max(1, days) - 1));
       try {
         const { data, error } = await supabase.from('food_logs')

@@ -261,7 +261,6 @@ const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/components', 'studio-
  */
 const KNOWN = new Map([
   ['app/(client)/coach.tsx', { count: 2, fix: '`Bullets` and `Disclosure`, and `Disclosure` renders `<Bullets/>` — two nested types rebuilt together. Both are static text; lift them to module scope and pass `t`.' }],
-  ['app/(trainer)/client-intake.tsx', { count: 1, fix: '`Line` — a label/value pair used a dozen times in one screen. Lift to module scope.' }],
   ['app/(trainer)/payments.tsx', { count: 3, fix: '`Pick` (Pressable, role="button"), `Pots` and `Made`. This screen is 2,900 lines and re-renders on every figure that lands, so all three are rebuilt repeatedly. Convert to calls.' }],
 ]);
 

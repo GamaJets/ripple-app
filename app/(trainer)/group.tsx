@@ -71,6 +71,11 @@ import { num } from '../../src/lib/format';
 import type { Program } from '../../src/lib/programs';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+// `getUser()` resolves rather than rejecting when the auth host is unreachable,
+// so `!auth?.user?.id` meant "signed out, or we could not ask". See
+// src/lib/authReadFate.ts.
+import { signedInUid } from '../../src/lib/signedInUid';
+
 import { notifySuccess } from '../../src/ui/haptics';
 // ── the day the block begins, for everybody in the group at once ──────────
 //
@@ -324,9 +329,23 @@ export default function Groups() {
   // it looks exactly like a coach who never knew.
   const recordChoice = async (clientId: string, movements: { exercise: string; area: string; severity: string }[]): Promise<boolean> => {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return false;
+      // Both fates return false, and that is the answer rather than a
+      // fallback — the same one `recordInjuryChoice` in app/(trainer)/builder
+      // .tsx takes, for the same reason stated above this function: this
+      // client's programme is then abandoned rather than sent with no record
+      // of the coach's decision behind it. Refusing on an outage is the
+      // correct refusal, and nothing is written under a missing trainer id.
+      //
+      // The defect was that the two were indistinguishable afterwards: a
+      // `false` returned because the auth host was down looked exactly like a
+      // coach who was not signed in. `signedInUid` reports the first under this
+      // context and stays quiet about the second.
+      //
+      // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+      const who = await signedInUid('group.injuryChoice');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
+
       const { data, error } = await supabase.from('program_injury_acknowledgements')
         .insert({ trainer_id: uid, client_id: clientId, movements })
         .select('id');

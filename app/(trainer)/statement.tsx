@@ -52,6 +52,11 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { signedInUid } from '../../src/lib/signedInUid';
+import { useNow } from '../../src/ui/today';
+import {
+  cacheForAccount, cacheHydrated, mayWriteCache, type DeviceCache,
+} from '../../src/lib/deviceAccountCache';
 import { monthNamesShort } from '../../src/lib/format';
 import { shareDoc, shareTextFile, pdfExportAvailable, fileShareBlocker } from '../../src/lib/exportShare';
 import {
@@ -132,7 +137,35 @@ const MONTH_NAMES = monthNamesShort();
  * coach's tax affairs that this app stores and could be read as having
  * verified. It has not verified it and cannot.
  */
-const YEAR_START_KEY = 'repple.coach.statementYearStart';
+/**
+ * The prefix, and it carries the ':' that `accountCacheKey` requires — so the
+ * legacy key below cannot be mistaken for a member of this family.
+ *
+ * This was a bare `'repple.coach.statementYearStart'`, with no account in it.
+ * The paragraph above argues that the preference belongs on the DEVICE rather
+ * than in a column, and that argument still stands; it says nothing about WHOSE
+ * device preference it is, and that was the half that was wrong. A gym handset
+ * on the desk is signed in and out all day (src/lib/deviceAccountCache.ts opens
+ * on exactly that), and one unqualified key is a key the next account inherits:
+ * a coach whose year runs 6 April to 5 April sets it, signs out, and the coach
+ * who signs in next opens Statement and is handed a period they never chose.
+ * The heading says which period it is, so this is not a silent number — but it
+ * is somebody else's tax year on a document about their money, offered as the
+ * default, on the screen whose output goes to an accountant.
+ */
+const YEAR_START_PREFIX = 'repple.coach.statementYearStart:';
+
+/**
+ * The unqualified key this screen used to write, removed UNREAD.
+ *
+ * Never migrated into the signed-in account. Nothing on the device says whose
+ * year start it is — this coach's from last month, or the previous coach's from
+ * this morning — so reading it in is the guess that produces the defect above,
+ * performed once, deliberately. The cost of dropping it is one coach re-picking
+ * a date from a six-item sheet; the cost of guessing wrong is a statement built
+ * over a stranger's fiscal year.
+ */
+const LEGACY_YEAR_START_KEY = 'repple.coach.statementYearStart';
 
 export default function StatementOfRecord() {
   const t = useTheme();
@@ -141,7 +174,17 @@ export default function StatementOfRecord() {
 
   // The three most recent calendar years, from the device's own clock. A coach
   // doing last year's paperwork in January is the whole point of this screen.
-  const thisYear = new Date().getFullYear();
+  //
+  // `useNow`, not a bare `new Date()` in the render body. This screen is
+  // registered `href: null` inside <Tabs>, so it mounts once and is never torn
+  // down, and a render body is only re-read when something else happens to
+  // redraw — which, on a screen a coach leaves sitting on a figure, is nothing.
+  // A coach who opened this on 30 December and came back to it on 2 January was
+  // offered 2025, 2024 and 2023: the year they are now IN is not in the row at
+  // all, and January's month pill would build a period in a year the pills
+  // cannot name. `useNow` moves on the local day rolling over, on the app
+  // returning to the foreground, and on this screen being focused.
+  const thisYear = useNow().getFullYear();
   const years = [thisYear, thisYear - 1, thisYear - 2];
 
   const [year, setYear] = useState(thisYear);
@@ -170,16 +213,68 @@ export default function StatementOfRecord() {
   const [input, setInput] = useState<StatementInput | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Read once on mount, and a value that will not parse is ignored rather than
-  // half-applied: a stored `{ month: 4 }` with no day would otherwise produce a
-  // year starting on the first of April for a coach whose starts on the sixth,
-  // which is a whole statement for the wrong five days at each end.
+  /**
+   * The account this screen's stored preference belongs to, and whether a read
+   * of that key has come back.
+   *
+   * `cacheForAccount` returns `hydrated: false` and there is no way to build one
+   * of these with it true — that is the flag-survives-a-key-change trap closed
+   * by construction rather than by remembering to clear it. Reset on the way IN,
+   * before the read: this screen is registered `href: null` inside <Tabs>
+   * (app/(trainer)/_layout.tsx), so it mounts once and is never torn down, and
+   * the departing coach's `start` would otherwise still be in React state under
+   * the next coach's name while their read was in flight — or forever, if it
+   * failed.
+   */
+  const [cache, setCache] = useState<DeviceCache>(() => cacheForAccount(YEAR_START_PREFIX, null));
+
+  // Who is signed in, asked once. `signedInUid` classifies the two ways there
+  // can be no answer; neither of them is an account, and `accountCacheKey`
+  // refuses both along with the literal 'unknown'.
   useEffect(() => {
     let live = true;
     void (async () => {
+      const me = await signedInUid('coachStatement.whoami');
+      if (!live) return;
+      setCache(cacheForAccount(YEAR_START_PREFIX, me.uid));
+    })();
+    return () => { live = false; };
+  }, []);
+
+  // The unqualified key, removed unread, once per mount. Not migrated — see
+  // LEGACY_YEAR_START_KEY.
+  useEffect(() => {
+    void AsyncStorage.removeItem(LEGACY_YEAR_START_KEY).catch(() => {});
+  }, []);
+
+  /* Read when the account's key is known, and a value that will not parse is
+   * ignored rather than half-applied: a stored `{ month: 4 }` with no day would
+   * otherwise produce a year starting on the first of April for a coach whose
+   * starts on the sixth, which is a whole statement for the wrong five days at
+   * each end.
+   *
+   * The start is set back to the calendar year BEFORE the read, every time the
+   * key changes. An empty store for this account is a coach who has never
+   * picked one, and the calendar year is what that means; leaving the previous
+   * account's April sitting there would be the whole defect, merely re-keyed. */
+  useEffect(() => {
+    const key = cache.key;
+    if (!key) return;
+    let live = true;
+    setStart(CALENDAR_YEAR_START);
+    void (async () => {
+      let raw: string | null = null;
       try {
-        const raw = await AsyncStorage.getItem(YEAR_START_KEY);
-        if (!raw || !live) return;
+        raw = await AsyncStorage.getItem(key);
+      } catch {
+        // A read that THREW is not a read that landed, so the cache stays
+        // un-hydrated and nothing is written over bytes nobody managed to read.
+        return;
+      }
+      if (!live) return;
+      setCache((c) => (c.key === key ? cacheHydrated(c) : c));
+      if (!raw) return;
+      try {
         const v = JSON.parse(raw) as Partial<YearStart>;
         if (Number.isFinite(v?.month) && Number.isFinite(v?.day)) {
           setStart({ month: Number(v.month), day: Number(v.day) });
@@ -187,15 +282,21 @@ export default function StatementOfRecord() {
       } catch { /* a preference that cannot be read is the calendar year, which is stated on the page either way */ }
     })();
     return () => { live = false; };
-  }, []);
+  }, [cache.key]);
 
   const chooseStart = useCallback((next: YearStart) => {
     setStart(next);
+    // `mayWriteCache`, not `if (key)`. Nobody signed in means there is no
+    // account to file this under and the unqualified key is not a fallback; a
+    // read that has not come back means this session's pick would be written on
+    // top of bytes nobody has seen. In both cases the choice stands for this
+    // sitting and is not kept, which is the smaller loss.
+    //
     // Failing to persist a display preference changes nothing about the
-    // document, so it is swallowed rather than reported: the period is printed
-    // in full on everything this screen produces.
-    void AsyncStorage.setItem(YEAR_START_KEY, JSON.stringify(next)).catch(() => {});
-  }, []);
+    // document, so a rejected write is swallowed rather than reported: the
+    // period is printed in full on everything this screen produces.
+    if (mayWriteCache(cache)) void AsyncStorage.setItem(cache.key, JSON.stringify(next)).catch(() => {});
+  }, [cache]);
 
   /**
    * The period, or the fallback when the coach has typed half a custom range.

@@ -68,6 +68,7 @@ import { capLimit, capped } from '../../src/lib/rowCap';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue,
+  deadlineTally, deadlineNote,
   GOAL_METRIC, MIN_TREND_DAYS,
   type GoalTarget, type MeasuredKind, type Point,
 } from '../../src/lib/goalTargets';
@@ -87,6 +88,7 @@ import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSu
 import { localDate } from '../../src/lib/localDate';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useNow } from '../../src/ui/today';
 import { BACK_ICON } from '../../src/ui/direction';
 import { num2 } from '../../src/lib/format';
 
@@ -121,8 +123,8 @@ const shortDate = (iso: string) => {
 /** The client's trend in a sentence, addressed to their coach, or null when
  *  there is no honest one to write. Every branch here is a named member of
  *  `Projection`; none of them is inferred on this screen. */
-function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: string): string | null {
-  const p = projectionOf(goal, series, Date.now());
+function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: string, nowMs: number): string | null {
+  const p = projectionOf(goal, series, nowMs);
   if (!p) return null;
   const kind = goal.kind as MeasuredKind;
   const unit = goalUnit(kind, wu);
@@ -206,6 +208,9 @@ export default function ClientGoals() {
   // a screen left open over midnight cannot quietly age a reading under the
   // coach's eyes while they are looking at it. Same as client-week.tsx.
   const [todayISO, setTodayISO] = useState<string>(() => isoToday(new Date()));
+  /** The instant every judgement about a target DATE is made against. Kept
+   *  current for the life of the mount — see the note at `goalCard`. */
+  const nowMs = useNow().getTime();
 
   // The client whose reads are allowed to reach the screen. Tapping through a
   // book of clients starts a read per tap and they do not come back in order,
@@ -467,9 +472,24 @@ export default function ClientGoals() {
     const measured = isMeasured(g);
     const kind = measured ? (g.kind as MeasuredKind) : null;
     const unit = kind ? goalUnit(kind, wu) : '';
-    const overdue = isOverdue(g, Date.now());
+    /* `nowMs` from `useNow`, never a bare `Date.now()` here.
+     *
+     * This line, and the `projectionOf` behind the one under it, both read the
+     * clock in a render body. A render body is not a safe place for one on this
+     * screen: app/(trainer)/_layout.tsx registers client-goals `href: null`
+     * inside <Tabs>, so it mounts once and is never torn down — not by
+     * navigating away and not by backgrounding the app — and nothing on it
+     * re-renders on a timer. A coach who opened a client's goals on Sunday
+     * evening and came back to the app on Wednesday was still being told "By
+     * Sep 13" about a target date that had passed on the Monday, with no warn
+     * dot and the pale ink that means nothing needs them.
+     *
+     * `useNow` moves on the two moments that matter and on no others: the local
+     * day rolling over, and the app coming back to the foreground. See
+     * src/ui/today.ts — the same fix credentials.tsx took for expiry dates. */
+    const overdue = isOverdue(g, nowMs);
     const proj = kind && isWhole(readingStatus(kind))
-      ? projectionLine(g, seriesFor(series, kind), wu, who)
+      ? projectionLine(g, seriesFor(series, kind), wu, who, nowMs)
       : null;
     return (
       <View key={g.id} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
@@ -665,6 +685,31 @@ export default function ClientGoals() {
                           app/(trainer)/checklists.tsx its "N showing". */}
                       <SectionHead title={client?.name ?? 'Their Goals'}
                         note={isWhole(goalStatus) ? `${board.open.length} open` : undefined} />
+                      {/* Deadline pressure, said once at the top.
+                       *
+                       * The overdue mark was on the individual cards and nowhere
+                       * else, so on a client with eleven goals "has anything
+                       * slipped" was a question a coach answered by scrolling.
+                       * TrueCoach, Trainerize, Everfit and PT Distinction all
+                       * lead their goal board with this; it needs no read this
+                       * screen was not already making.
+                       *
+                       * Gated on `isWhole(goalStatus)`, the same gate as the
+                       * "N open" note beside the title and for the same reason:
+                       * under 'partial' these counts are of a truncated page,
+                       * and "nothing is late" drawn from a prefix is the worst
+                       * sentence on the screen. The Flag further down says the
+                       * read was cut; it cannot un-say an all-clear.
+                       *
+                       * `deadlineNote` names the open goals it could not judge
+                       * and how many, so the figures are never an all-clear over
+                       * an empty set. `nowMs` is `useNow()` — see goalCard. */}
+                      {isWhole(goalStatus) ? (() => {
+                        const line = deadlineNote(deadlineTally(board.open, nowMs));
+                        return line ? (
+                          <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.sm }}>{line}</Text>
+                        ) : null;
+                      })() : null}
                       {board.open.map(goalCard)}
                     </Section>
 

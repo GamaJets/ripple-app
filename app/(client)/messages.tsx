@@ -631,7 +631,14 @@ export default function Messages() {
             ) : null}
           </View>
           {searchLine ? (
-            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{searchLine}</Text>
+            // A live region, because the thread below changes under the
+            // member's thumb as they type and nothing else would tell a screen
+            // reader that it had. The label carries the count and says the rest
+            // of the conversation is hidden; the visible sentence carries the
+            // denominator.
+            <Text accessibilityLiveRegion="polite"
+              accessibilityLabel={[threadSearchA11y({ query, matched: found.length }), searchLine].filter(Boolean).join(' ')}
+              style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{searchLine}</Text>
           ) : null}
         </View>
       ) : null}
@@ -648,6 +655,10 @@ export default function Messages() {
         <ScrollView ref={scRef} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }}
           onContentSizeChange={() => {
             if (heldPosition.current) { heldPosition.current = false; return; }
+            // Results are read from the TOP: the oldest match is as likely to be
+            // the one somebody is looking for as the newest, and jumping to the
+            // end of a three-row list looks like the screen lost the other two.
+            if (searchOn) return;
             scRef.current?.scrollToEnd({ animated: true });
           }}
           // Whether the newest message is actually in front of the reader.
@@ -672,7 +683,7 @@ export default function Messages() {
               Said ABOVE the oldest bubble, which is where the missing part
               actually is, and with the control beside the sentence rather than
               a sentence on its own. */}
-          {hasOlder || status === 'partial' ? (
+          {!searchOn && (hasOlder || status === 'partial') ? (
             <View style={{ marginBottom: sp.lg, gap: sp.sm }}>
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
                 {hasOlder
@@ -688,7 +699,14 @@ export default function Messages() {
               {olderError ? <Flag tone={t.warn}>{olderError}</Flag> : null}
             </View>
           ) : null}
-          {msgs.map((m) => {
+          {/* The results, or the conversation. `found` IS `msgs` when nothing is
+              being searched, so there is one list here and no second render
+              path that could drift from this one. Deliberately NOT wrapped in
+              an `accessible` group: that would collapse every bubble into one
+              element and a member using VoiceOver would hear the count instead
+              of the messages. The count is announced by the live region above
+              the list, which is where a statement about the list belongs. */}
+          {found.map((m) => {
             const mine = m.sender === 'client';
             // A bubble the server refused is on this phone and nowhere else.
             // Left unmarked it reads as delivered, which is the belief the send
@@ -787,8 +805,13 @@ export default function Messages() {
               </Pressable>
             );
           })}
-          {/* An empty thread that failed to load is not an empty thread. */}
-          {msgs.length === 0 && status !== 'loading' ? (
+          {/* An empty thread that failed to load is not an empty thread — and an
+              empty RESULT is not an empty thread either, which is why this is
+              still asked of `msgs`. "No messages yet. Say hello." over a search
+              that found nothing would be the screen forgetting its own
+              conversation; `searchLine` above owns that case and names the set
+              it looked at. */}
+          {!searchOn && msgs.length === 0 && status !== 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xxl }}>
               {status === 'error' ? 'We could not load this conversation, so we cannot say whether there are messages in it.' : 'No messages yet. Say hello.'}
             </Text>
@@ -807,7 +830,7 @@ export default function Messages() {
               their coach's app has recorded opening it, and the fact that a
               conversation this old is at the top of that app's messages
               list. */}
-          {waiting.kind !== 'silent' ? (
+          {!searchOn && waiting.kind !== 'silent' ? (
             <View style={{ marginTop: sp.xl, paddingHorizontal: sp.md }}>
               <Text style={{ ...ty.caption, color: t.ink2, textAlign: 'center' }}>{waiting.note}</Text>
             </View>

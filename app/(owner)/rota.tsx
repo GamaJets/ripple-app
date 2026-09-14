@@ -58,6 +58,7 @@ import { fetchGymZone } from '../../src/lib/gymZone';
 import { calendarDateText } from '../../src/lib/gymWhen';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { num, numUpTo } from '../../src/lib/format';
+import { useNow } from '../../src/ui/today';
 
 const ROLES: { key: ShiftRole; label: string }[] = [
   { key: 'floor', label: 'Floor' },
@@ -421,7 +422,16 @@ export default function OwnerRota() {
     ]);
   };
 
-  const thisWeek = weekStartOf(Date.now(), zone);
+  // Subscribed, not read once. This screen is `href: null`, so it mounts on
+  // the first visit and is never torn down — a bare Date.now() here stayed at
+  // whatever day the owner first opened Rota. The cost is not a stale label:
+  // `thisWeek` is what decides whether the row reads "This week", and the
+  // Today button is hidden while `week === thisWeek`. So an owner who left
+  // this open on Sunday was told on Monday that last week was this week, with
+  // the one control that would take them out of it absent, over a hero saying
+  // how many hours had work booked and nobody rostered — for a week that had
+  // already run.
+  const thisWeek = weekStartOf(useNow().getTime(), zone);
   const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12 } as const;
   const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
 

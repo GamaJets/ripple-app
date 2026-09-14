@@ -84,7 +84,11 @@ import { useMonthTick } from '@/lib/monthTick';
 // The gym's own clock, read as its own three-state answer: set, not set, and
 // could not be asked. The third must never be drawn as the second.
 import { fetchGymZone } from '@lib/gymZone';
-import { toCsv } from '@lib/gymExport';
+// `minorToDecimal` beside `toCsv`, from the same module and for the same file:
+// it is what turns a stored integer into the figure a person writes, by asking
+// the row's OWN currency how many places it has rather than dividing by a
+// hundred. See the paragraph above the export's first table.
+import { toCsv, minorToDecimal } from '@lib/gymExport';
 import { readTenant } from '@/lib/currency';
 import { gymLink, noGymNote } from '@lib/gymLink';
 import { saveText } from '@/lib/save';
@@ -666,6 +670,25 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
       ? 'What this gym says about tax could not be read, so it is not stated here. That is not a statement that it has said nothing.\n'
       : 'What this gym says about tax had not come back when this file was written, so it is not stated here. That is not a statement that it has said nothing — export it again once the page has finished reading.\n');
 
+    // ── every amount, twice ────────────────────────────────────────────────
+    //
+    // Every table below stated its amounts in MINOR UNITS ALONE, beside a bare
+    // currency code. That is a file an accountant works a return from, and the
+    // integer is only legible to somebody who already knows how many places
+    // that currency has: a Tokyo gym's `50000` in a JPY column is ¥50,000 and
+    // reads as ¥500 to anybody who assumes a hundred, and a Kuwaiti gym's
+    // `50000` is KD 50.000 rather than KD 500.00. The factor is a property of
+    // the currency on the row — none for JPY, two for GBP, three for KWD — and
+    // there is no hundred anywhere in this product.
+    //
+    // /accounting and /close already state both columns and say so once at the
+    // top. This page is the third file that leaves the product for the same
+    // desk, and it was the one that did not. `minorToDecimal` asks
+    // `currencyDecimals` for the places and returns an EMPTY cell rather than
+    // guessing when the row names no currency — the stored integer beside it is
+    // still exact, which is the whole reason both columns are here.
+    parts.push('Every table below states each amount twice: "Amount" as it is written, and "Amount (minor units)" as the database stores it. How many decimal places lie between the two is a property of the currency on that row — none for JPY, two for GBP, three for KWD — so neither column may be derived from the other by assuming a hundred. An empty "Amount" cell means the row states no currency this file could scale it by; the stored integer beside it is still exact.\n');
+
     parts.push(head('TAKEN — payments recorded in the period, gross'));
     // `!== null` and not `=== 'failed'`. `Unread` has THREE values, and the
     // third is 'loading' — a slice still in flight fell through to
@@ -676,9 +699,10 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
     parts.push(books.payments.state !== null
       ? unreadable('the payments taken', books.payments.state, books.payments.why)
       : toCsv(
-          ['Taken at', 'Member', 'Amount (minor units)', 'Currency', 'Method', 'Kind', 'Note'],
+          ['Taken at', 'Member', 'Amount', 'Amount (minor units)', 'Currency', 'Method', 'Kind', 'Note'],
           (books.payments.rows ?? []).map((r) => [
-            r.takenAt, r.memberName, r.amountCents, r.currency,
+            r.takenAt, r.memberName,
+            minorToDecimal(r.amountCents, r.currency), r.amountCents, r.currency,
             (r.method ?? '').replace('_', ' '), r.kind, r.note,
           ]),
           false));
@@ -687,17 +711,21 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
     parts.push(books.invoices.state !== null
       ? unreadable('the invoice register', books.invoices.state, books.invoices.why)
       : toCsv(
-          ['Number', 'Issued', 'Due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status'],
-          raised.map((i) => [i.number, i.issuedOn, i.dueOn, i.memberName, i.amountCents, i.currency, i.status]),
+          ['Number', 'Issued', 'Due', 'Billed to', 'Amount', 'Amount (minor units)', 'Currency', 'Status'],
+          raised.map((i) => [
+            i.number, i.issuedOn, i.dueOn, i.memberName,
+            minorToDecimal(i.amountCents, i.currency), i.amountCents, i.currency, i.status,
+          ]),
           false));
 
     parts.push(head('PAID OUT — costs recorded in the period'));
     parts.push(books.costs.state !== null
       ? unreadable('the recorded costs', books.costs.state, books.costs.why)
       : toCsv(
-          ['Paid on', 'What for', 'Paid to', 'Category', 'Amount (minor units)', 'Currency', 'Note'],
+          ['Paid on', 'What for', 'Paid to', 'Category', 'Amount', 'Amount (minor units)', 'Currency', 'Note'],
           (books.costs.rows ?? []).map((c) => [
-            c.paidOn, c.description, c.supplier, c.category, c.amountCents, c.currency, c.note,
+            c.paidOn, c.description, c.supplier, c.category,
+            minorToDecimal(c.amountCents, c.currency), c.amountCents, c.currency, c.note,
           ]),
           false));
 

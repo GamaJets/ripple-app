@@ -24,6 +24,19 @@ import type { Me } from '@/lib/supabase';
 import { supabase } from '@/lib/supabase';
 import { fetchOwnedSites } from '@/lib/sites';
 import { siteRailLine, type SiteScope } from '@lib/ownedSites';
+// The rail's Sign out used to be
+// `supabase.auth.signOut().then(() => location.reload())` — the error discarded
+// and the page reloaded either way, so a refused sign-out looked exactly like a
+// successful one. On the front-desk machine three people share, that is the
+// whole reason the button exists failing invisibly.
+//
+// "Reload only when there is no error" is the wrong repair, and `@lib/signOutFate`
+// is the file that says why at length: `supabase.auth.*` resolves rather than
+// rejects, auth-js brands an outage and a real refusal as the same kind of
+// error, and the two leave the machine in opposite states. The classification
+// and the sentence both live there, imported rather than restated, so they are
+// assertable without a browser — see src/lib/signOutFate.test.ts.
+import { signOutOutcome, SIGN_OUT_UNCONFIRMED } from '@lib/signOutFate';
 
 export type NavContext = 'gym' | 'mine';
 
@@ -449,6 +462,29 @@ export function Shell({
    * belongs beside the figures rather than in a label strip.
    */
   const [own, setOwn] = useState<SiteScope>({ status: 'loading', sites: [] });
+
+  /**
+   * Sign out, and reload only where the session is actually gone.
+   *
+   * `'going'` disables the button rather than hiding it: a second POST while
+   * the first is in flight is the same unreadable answer twice.
+   *
+   * The `catch` is not decoration. `signOut()` re-throws anything that is not
+   * an AuthError, and a lock acquisition that times out lands here too. A throw
+   * establishes even less than an error does, so it takes the same branch —
+   * which is also what `signOutOutcome` returns for a plain Error, the same
+   * answer reached from the other side.
+   */
+  const [signOut, setSignOut] = useState<'idle' | 'going' | 'unconfirmed'>('idle');
+  const endSession = async () => {
+    setSignOut('going');
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (signOutOutcome(error) === 'ended') { location.reload(); return; }
+    } catch { /* falls through to the same unconfirmed state */ }
+    setSignOut('unconfirmed');
+  };
+
   const askSites = !sites && me.role === 'owner';
   useEffect(() => {
     if (!askSites) return;
@@ -642,16 +678,32 @@ export function Shell({
           <div className="mono" style={{ fontSize: 9.5, color: 'var(--ink3)', textTransform: 'lowercase', marginTop: 2 }}>
             {role ?? (me.roleUnknown ? 'role not read' : 'no role')}
           </div>
+          {/* The notice, above the button, so the next thing under the cursor
+              is the retry. `role="alert"` because nothing else on the page
+              changes: a reader who pressed Sign out and heard nothing would
+              have every reason to believe it worked. */}
+          {signOut === 'unconfirmed' && (
+            <div
+              role="alert"
+              style={{ marginTop: 9, fontSize: 10.5, lineHeight: 1.45, color: 'var(--crit)' }}
+            >
+              {SIGN_OUT_UNCONFIRMED}
+            </div>
+          )}
           <button
-            onClick={() => supabase.auth.signOut().then(() => location.reload())}
+            onClick={() => { void endSession(); }}
+            disabled={signOut === 'going'}
             className="mono"
             style={{
-              marginTop: 9, background: 'transparent', color: 'var(--ink3)',
-              border: '1px solid var(--ring)', borderRadius: 0, padding: '4px 9px',
-              fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
+              marginTop: 9, background: 'transparent',
+              color: signOut === 'unconfirmed' ? 'var(--crit)' : 'var(--ink3)',
+              border: `1px solid ${signOut === 'unconfirmed' ? 'var(--crit)' : 'var(--ring)'}`,
+              borderRadius: 0, padding: '4px 9px',
+              fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase',
+              cursor: signOut === 'going' ? 'default' : 'pointer',
             }}
           >
-            Sign out
+            {signOut === 'going' ? 'Signing out' : signOut === 'unconfirmed' ? 'Try again' : 'Sign out'}
           </button>
         </div>
       </aside>

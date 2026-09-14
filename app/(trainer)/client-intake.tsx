@@ -60,6 +60,40 @@ import { BACK_ICON } from '../../src/ui/direction';
 const labelOf = (list: { id: string; label: string }[], id: string | null): string | null =>
   id == null ? null : (list.find((x) => x.id === id)?.label ?? id);
 
+/**
+ * A line of the document, or nothing at all where they left it blank.
+ *
+ * An em-dash in a paragraph of somebody's own words reads as an answer they
+ * gave; a missing line reads as a question they skipped, which is what it is.
+ *
+ * ── why it is out here and not in the render body ─────────────────────────
+ *
+ * It was declared inside `ClientIntakeScreen` and used twenty times as
+ * `<Line/>`. A component declared in a render body is a NEW function identity
+ * on every render, so React cannot reconcile it with the one it drew last time:
+ * it unmounts the whole subtree and mounts a fresh one. On this screen that is
+ * not a performance note. Every one of these twenty is a Text node holding a
+ * client's own words, and a VoiceOver cursor sitting on one — a coach reading
+ * an intake aloud, or reading it at all without sight — is thrown back to the
+ * top of the scroll view each time anything on the screen changes, including
+ * the roster provider settling underneath it.
+ *
+ * The theme comes in as a prop, which is the shape `Row` in
+ * app/(trainer)/client-report.tsx already uses for the same reason. That is the
+ * only thing this closed over.
+ */
+function Line({ t, label, value }: {
+  t: ReturnType<typeof useTheme>; label: string; value: string | null;
+}) {
+  if (!value || !value.trim()) return null;
+  return (
+    <View style={{ marginTop: sp.lg }}>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+      <Text style={{ ...ty.body, color: t.ink, marginTop: sp.xs }}>{value.trim()}</Text>
+    </View>
+  );
+}
+
 export default function ClientIntakeScreen() {
   const t = useTheme();
   const router = useRouter();
@@ -119,18 +153,6 @@ export default function ClientIntakeScreen() {
       Alert.alert('Could not open the dialler', DIAL_UNAVAILABLE_NOTE);
     });
   };
-
-  /** A line of the document, or nothing at all where they left it blank. An
-   *  em-dash in a paragraph of somebody's own words reads as an answer they
-   *  gave; a missing line reads as a question they skipped, which is what it
-   *  is. */
-  const Line = ({ label, value }: { label: string; value: string | null }) =>
-    value && value.trim() ? (
-      <View style={{ marginTop: sp.lg }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
-        <Text style={{ ...ty.body, color: t.ink, marginTop: sp.xs }}>{value.trim()}</Text>
-      </View>
-    ) : null;
 
   // No `!id` branch any more: with nobody chosen the screen shows the picker
   // below rather than a sentence about a link. Every branch here is about a
@@ -259,9 +281,9 @@ export default function ClientIntakeScreen() {
             <Rule />
             <Section>
               <SectionHead title="What They Want" />
-              <Line label="In their words" value={intake.want.headline} />
-              <Line label="By when" value={intake.want.by} />
-              <Line label="Why now" value={intake.want.why} />
+              <Line t={t} label="In their words" value={intake.want.headline} />
+              <Line t={t} label="By when" value={intake.want.by} />
+              <Line t={t} label="Why now" value={intake.want.why} />
               {!intake.want.headline.trim() ? (
                 <Text style={{ ...ty.body, color: t.ink2 }}>{who} has not answered this part yet.</Text>
               ) : null}
@@ -271,13 +293,13 @@ export default function ClientIntakeScreen() {
             <Rule />
             <Section>
               <SectionHead title="What They Have Done" />
-              <Line label="Training behind them" value={labelOf(TRAINING_YEARS, intake.history.years)} />
-              <Line label="Kinds"
+              <Line t={t} label="Training behind them" value={labelOf(TRAINING_YEARS, intake.history.years)} />
+              <Line t={t} label="Kinds"
                 value={intake.history.kinds.length
                   ? intake.history.kinds.map((k) => labelOf(TRAINING_KINDS, k)).filter(Boolean).join(', ')
                   : null} />
-              <Line label="Doing at the moment" value={intake.history.doingNow} />
-              <Line label="Coached before"
+              <Line t={t} label="Doing at the moment" value={intake.history.doingNow} />
+              <Line t={t} label="Coached before"
                 value={intake.history.coachedBefore == null ? null : intake.history.coachedBefore === 'yes' ? 'Yes' : 'No'} />
             </Section>
 
@@ -285,9 +307,9 @@ export default function ClientIntakeScreen() {
             <Rule />
             <Section>
               <SectionHead title="What They Have Tried" />
-              <Line label="Worked" value={intake.tried.worked} />
-              <Line label="Did not" value={intake.tried.didnt} />
-              <Line label="Will not do again" value={intake.tried.wont} />
+              <Line t={t} label="Worked" value={intake.tried.worked} />
+              <Line t={t} label="Did not" value={intake.tried.didnt} />
+              <Line t={t} label="Will not do again" value={intake.tried.wont} />
               {intake.tried.wont.trim() ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                   Worth taking literally. Somebody who says this and then finds it in week one of
@@ -300,38 +322,38 @@ export default function ClientIntakeScreen() {
             <Rule />
             <Section>
               <SectionHead title="When They Can Train" />
-              <Line label="Days a week"
+              <Line t={t} label="Days a week"
                 value={intake.availability.daysPerWeek == null ? null : String(intake.availability.daysPerWeek)} />
-              <Line label="Session length"
+              <Line t={t} label="Session length"
                 value={intake.availability.sessionMins == null ? null : `${intake.availability.sessionMins} minutes`} />
-              <Line label="Times that suit"
+              <Line t={t} label="Times that suit"
                 value={intake.availability.times.length
                   ? intake.availability.times.map((w) => labelOf(TIME_WINDOWS, w)).filter(Boolean).join(', ')
                   : null} />
-              <Line label="Where" value={labelOf(TRAINING_PLACES, intake.availability.place)} />
-              <Line label="Equipment they can reach" value={intake.availability.equipment} />
+              <Line t={t} label="Where" value={labelOf(TRAINING_PLACES, intake.availability.place)} />
+              <Line t={t} label="Equipment they can reach" value={intake.availability.equipment} />
             </Section>
 
             {/* ── the rest of their week ───────────────────────────────── */}
             <Rule />
             <Section>
               <SectionHead title="Their Week" />
-              <Line label="Their days" value={labelOf(WORK_KINDS, intake.practical.work)} />
+              <Line t={t} label="Their days" value={labelOf(WORK_KINDS, intake.practical.work)} />
               {/* `fig` on the hours, because a client answers this with a
                   half — "About 7.5 hours" — and a bare interpolation writes an
                   English full stop on a coach's handset whatever its language.
                   `intake.ts` reads the field with `numOrNull`, so nothing here
                   is integral by construction. */}
-              <Line label="Sleep"
+              <Line t={t} label="Sleep"
                 value={intake.practical.sleepHours == null ? null : `About ${fig(intake.practical.sleepHours)} hours`} />
-              <Line label="Anything else" value={intake.practical.anythingElse} />
+              <Line t={t} label="Anything else" value={intake.practical.anythingElse} />
             </Section>
 
             {/* ── emergency contact ────────────────────────────────────── */}
             <Rule />
             <Section>
               <SectionHead title="Who To Call" />
-              <Line label="Name" value={intake.emergency.name} />
+              <Line t={t} label="Name" value={intake.emergency.name} />
               {/* ── the one line on this screen that gets read in a hurry ──
                   This was a `<Line>`: a number in a Text node, four taps deep,
                   on a screen a coach opens BEFORE a first session and not
@@ -354,9 +376,9 @@ export default function ClientIntakeScreen() {
                   <Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Call</Text>
                 </Pressable>
               ) : (
-                <Line label="Number" value={intake.emergency.phone} />
+                <Line t={t} label="Number" value={intake.emergency.phone} />
               )}
-              <Line label="Relationship" value={intake.emergency.relation} />
+              <Line t={t} label="Relationship" value={intake.emergency.relation} />
               {!intake.emergency.name.trim() || !intake.emergency.phone.trim() ? (
                 <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
                   {who} has not given an emergency contact. Ask before you train them in person.

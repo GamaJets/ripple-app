@@ -53,6 +53,7 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { signedInUid } from '../../src/lib/signedInUid';
 import { isoToday } from '../../src/lib/dayPlan';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
@@ -179,19 +180,43 @@ export default function ClientReport() {
       return;
     }
 
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id ?? null;
+    /* Who the coach is, with the failure kept rather than collapsed.
+     *
+     * This was `const { data: auth } = await supabase.auth.getUser()` — `error`
+     * not on the line, therefore discarded — and the sessions read below then
+     * fell back to `uid ?? '00000000-0000-0000-0000-000000000000'`. That is the
+     * defect src/lib/authReadFate.ts exists for, wearing a document a coach
+     * hands to a client: `getUser()` does not reject on a dropped connection,
+     * it RESOLVES with `{ data: { user: null }, error }`, so a dead gym wifi and
+     * a genuine sign-out both arrived here as `uid === null`. The read then ran
+     * against a uuid no coach has, PostgREST answered zero rows with NO error,
+     * `sesRes.error` was null, and this screen filed that as
+     * `status: 'ready'` — a report stating, at full confidence, that somebody
+     * who trains twice a week has never had a session.
+     *
+     * `signedInUid` is the one call that asks and classifies — no second copy
+     * of the discrimination here, which is what src/lib/authedUid.ts was
+     * written to stop, and it is what reports the outage (and stays silent
+     * about a plain sign-out, which is not a fault). With no uid the read is
+     * not ATTEMPTED: it is handed the fate as an error, which is the one branch
+     * below that prints "not read" instead of a number. */
+    const me = await signedInUid('clientReport.whoami');
 
     const [sesRes, woRes, scanRes, measRes, cliRes] = await Promise.all([
       // Scoped to this coach as well as this client. RLS already narrows it,
       // and the extra predicate is about WHICH sessions belong on the document:
       // a client who has trained with two coaches in the same gym has sessions
       // that are not this coach's to report.
-      supabase.from('sessions').select(SESSION_COLS)
-        .eq('trainer_id', uid ?? '00000000-0000-0000-0000-000000000000')
-        .eq('client_id', id)
-        .order('starts_at', { ascending: false })
-        .limit(capLimit()),
+      me.uid !== null
+        ? supabase.from('sessions').select(SESSION_COLS)
+          .eq('trainer_id', me.uid)
+          .eq('client_id', id)
+          .order('starts_at', { ascending: false })
+          .limit(capLimit())
+        : Promise.resolve({
+          data: null,
+          error: { message: `the signed-in coach could not be established (${me.fate})` },
+        }),
       supabase.from('workouts').select(WORKOUT_COLS)
         .eq('user_id', id)
         .order('performed_at', { ascending: false }).order('id', { ascending: false })

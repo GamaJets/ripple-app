@@ -48,7 +48,12 @@ import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+// Storage-first, so it answers in a gym with no signal — and it keeps the
+// outage apart from the sign-out, which is the distinction `signedOut` below
+// was declared to make and could not. See src/lib/authReadFate.ts.
+import { sessionUid } from '../../src/lib/sessionUid';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+
 import { useReadDeadline } from '../../src/ui/readDeadline';
 import { AGREEMENT_LABEL } from '../../src/lib/gymDocs';
 import {
@@ -123,12 +128,36 @@ export default function ClientGymAgreementsScreen() {
       // that entitles this screen to say the gym is asking for nothing, and a
       // session that had merely expired must never land in it — that sentence,
       // said to somebody with an unsigned waiver, is the whole failure mode.
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setSignedOut(true); setStatus('error'); return; }
-      const { data: auth, error: authErr } = await supabase.auth.getUser();
-      const uid = auth?.user?.id ?? null;
-      if (authErr || !uid) { setSignedOut(true); setStatus('error'); return; }
+      //
+      // ── and 'signed out' is not 'could not ask' either ───────────────────
+      //
+      // Both of those were already true and neither was being told apart. This
+      // was `if (!sess?.session)` followed by `if (authErr || !uid)`, and BOTH
+      // branches set `signedOut` — so an outage put this sentence in front of a
+      // signed-in member: "Your gym's paperwork is only readable once you are
+      // signed in." The declaration of `signedOut` above says in as many words
+      // that a wire failure deserves a different sentence; the code underneath
+      // it gave them the same one. `getSession()` resolves with `session: null`
+      // and a retryable error when the stored token has expired and the refresh
+      // cannot reach the server, and `getUser()` does the same with
+      // `user: null` — see src/lib/authReadFate.ts.
+      //
+      // One call now, not two. `sessionUid` answers from device storage, which
+      // is the read this screen wants in a gym basement, and the uid it hands
+      // back is the one PostgREST will scope the reads below to anyway — so the
+      // second, network-only `getUser()` round trip was buying nothing but a
+      // second chance to say the wrong sentence.
+      //
+      // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+      const who = await sessionUid('gymAgreements.load');
+      if (who.fate !== null) {
+        setSignedOut(who.fate === 'signed-out');
+        setStatus('error');
+        return;
+      }
+      const uid = who.uid;
       setSignedOut(false);
+
 
       const { data: prof, error: profErr } = await supabase
         .from('profiles').select('tenant_id').eq('id', uid).maybeSingle();

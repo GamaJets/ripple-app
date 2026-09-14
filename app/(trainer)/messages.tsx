@@ -578,7 +578,15 @@ export default function Messages() {
             this screen may imply. */}
         {status === 'partial' ? (
           <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
-            <PartialRead what="clients on your book" shown={conversations.length + unstarted.length} onPress={() => { refresh(); }} />
+            {/* "clients on your book" was wrong about its own set, and wrong in
+                the direction that reassures. `coach_threads()` reads
+                `from clients c where c.trainer_id = auth.uid()`
+                (supabase/parts/148), so every row here is a client WITH AN
+                ACCOUNT; a hand-added `coach_clients` row is in no part of it.
+                A coach with twelve hand-added clients was told a number about
+                their book that counted none of them. `threadsEmptyNote` says
+                the same thing for the empty case. */}
+            <PartialRead what="clients with an account" shown={conversations.length + unstarted.length} onPress={() => { refresh(); }} />
           </View>
         ) : null}
 
@@ -741,9 +749,15 @@ export default function Messages() {
             <Section>
               <SectionHead
                 title="Message Someone Else"
+                // Same denominator, same reason: this counts clients with an
+                // account, and a hand-added client cannot be messaged at all
+                // until they join — which is what `sendCoachMessages` tells a
+                // coach who tries. Saying "3 clients you have not written to"
+                // to somebody looking at fifteen on the Clients tab reads as a
+                // roster that has lost twelve people.
                 note={shownUnstarted.length === 1
-                  ? 'One client you have not written to yet'
-                  : `${shownUnstarted.length} clients you have not written to yet`}
+                  ? 'One client with an account you have not written to yet'
+                  : `${shownUnstarted.length} clients with an account you have not written to yet`}
               />
               {/* A coach who has typed a name is looking for that person, so the
                   matches are drawn rather than hidden behind the button — the

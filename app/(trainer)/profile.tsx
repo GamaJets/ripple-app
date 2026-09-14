@@ -15,7 +15,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Image, Alert } from 'reac
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useAuth } from '../../src/ui/auth';
+import { useAuth, useSignOutAndSay } from '../../src/ui/auth';
 import { reportError } from '../../src/lib/reportError';
 import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
@@ -115,6 +115,12 @@ export default function CoachProfile() {
   const t = useTheme();
   const router = useRouter();
   const auth = useAuth();
+  // Signing out is a network call that can fail, and until now every caller
+  // navigated to /welcome regardless — telling somebody they were signed out
+  // without establishing it. This awaits the fate and says so when it is not
+  // 'ended'. See src/lib/signOutFate.ts for why the two failures cannot be
+  // told apart from the resolved value.
+  const leaveNow = useSignOutAndSay('trainerProfile');
   /** The signed-in coach, for the avatar upload. The bucket's policy scopes a
    *  write by the first folder of the key being `auth.uid()`, so an empty id
    *  here is refused with a sentence rather than a 403 nobody can read. */
@@ -124,7 +130,7 @@ export default function CoachProfile() {
   const signOut = () => {
     Alert.alert('Sign out of Repple Coach?', 'You will need your password to sign back in.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('trainerProfile.signOut', e); } } },
+      { text: 'Sign out', style: 'destructive', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
   const p = useMyTrainerProfile();

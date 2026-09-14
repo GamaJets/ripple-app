@@ -64,6 +64,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
+import { signedInUid } from '../../src/lib/signedInUid';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { useAuthRevision } from '../../src/ui/authRevision';
@@ -125,13 +126,22 @@ function useFoodLogHome(): { home: FoodLogHome; reload: () => void } {
     let cancelled = false;
     (async () => {
       try {
-        const { data: sess } = await supabase.auth.getSession();
+        /* `signedInUid`, and not a bare getSession whose result is destructured
+         * for its data alone.
+         *
+         * The line that stood here discarded `error`, and getSession resolves with
+         * `{ data: { session: null }, error }` when the stored session cannot be
+         * read at all — so "nobody is signed in" and "we could not find out"
+         * arrived as the same missing session. Both land on 'unknown' here, and
+         * that is the right answer for both: it is the only one of the four that
+         * neither tells a coach their logging is broken nor promises them it
+         * works. What changes is that the outage is now REPORTED, and that the
+         * discrimination lives in src/lib/authedUid.ts rather than in a
+         * truthiness test on this line. */
+        const me = await signedInUid('myNutrition.foodLogHome');
         if (cancelled) return;
-        // Signed out. Nothing is readable and nothing is writable, and saying
-        // "your account has no profile" to nobody in particular would be
-        // a claim about an account we have not identified.
-        if (!sess?.session) { setHome('unknown'); return; }
-        const uid = sess.session.user.id;
+        if (me.uid === null) { setHome('unknown'); return; }
+        const uid = me.uid;
         const { data, error } = await supabase.from('profiles').select('id').eq('id', uid).maybeSingle();
         if (cancelled) return;
         if (error) { reportError('myNutrition.foodLogHome', error); setHome('unknown'); return; }

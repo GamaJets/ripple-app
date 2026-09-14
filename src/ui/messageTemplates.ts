@@ -19,6 +19,11 @@
 // may ignore. A template editor that cannot say "not saved" will say "saved",
 // and the coach finds out when they open the picker in front of a client.
 import { supabase } from '../lib/supabase';
+// Who is signed in, which of the two reasons nobody is, and the sentence each
+// of those two deserves. `getUser()` resolves on a dropped connection rather
+// than rejecting — see src/lib/authReadFate.ts.
+import { signedInUid } from '../lib/signedInUid';
+import { authGateMessage } from '../lib/authedUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
@@ -46,9 +51,18 @@ const toTemplate = (r: any): MessageTemplate => ({
 export async function fetchMyTemplates(): Promise<TemplatesRead> {
   if (!USE_SUPABASE) return { rows: [], status: 'ready' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { rows: [], status: 'ready' };
+    // The error beside this call was discarded, so an outage arrived as the
+    // same absent uid a sign-out does (src/lib/authReadFate.ts) and took the
+    // 'ready' branch. Read the note on the database error below: 'error' is
+    // there precisely so the screen "draws no library at all rather than an
+    // empty one with an offer of starters under it". `rows: []` under 'ready'
+    // IS that empty library with the starters offer, put in front of a coach
+    // who has written eleven templates, because their phone could not reach
+    // the auth server for a second.
+    const who = await signedInUid('messageTemplates.read');
+    if (who.fate === 'signed-out') return { rows: [], status: 'ready' };
+    if (who.fate !== null) return { rows: [], status: 'error' };
+    const uid = who.uid;
     const { data, error } = await supabase
       .from('coach_message_templates')
       .select('id, title, body, position')
@@ -85,9 +99,25 @@ export type SaveResult =
 export async function saveTemplate(t: { id: string | null; title: string; body: string; position: number }): Promise<SaveResult> {
   if (!USE_SUPABASE) return { ok: false, error: 'Not connected to the server.' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { ok: false, error: 'You are not signed in, so nothing was saved.' };
+    // ── the sentence, not just the branch ─────────────────────────────────
+    //
+    // This is the shape the asymmetry is about. "You are not signed in, so
+    // nothing was saved." was returned for BOTH answers, and the discarded
+    // error is what made them one: `getUser()` resolves rather than rejects
+    // when the auth server cannot be reached, so a coach who was signed in the
+    // whole time read a flat statement that they were not — over a template
+    // they had just written — and the only action it suggests is to go and
+    // re-enter a password that was never the problem.
+    //
+    // `authGateMessage` says the true one for each fate, and its 'unreadable'
+    // sentence carries the clause this call site earns: nothing has been
+    // changed. The write below is not reached on either branch — `coach_id` is
+    // the payload's own column and the `.eq('coach_id', uid)` scopes the
+    // update — so the template is still exactly as the server had it, and the
+    // coach's words are still in the form in front of them.
+    const who = await signedInUid('messageTemplates.save');
+    if (who.fate !== null) return { ok: false, error: authGateMessage(who.fate) };
+    const uid = who.uid;
     const payload = {
       coach_id: uid,
       title: t.title.trim(),

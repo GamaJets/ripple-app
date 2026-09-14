@@ -50,9 +50,32 @@ import { readAll, capLimit } from '@lib/rowCap';
 // row cap — see `fetchEvents`. src/lib/idLookup.ts is the one chunk size.
 import { chunkIds, uniqueIds } from '@lib/idLookup';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+// The console's own CSV writer and its download, as used by /tax, /members,
+// /export and /close. Nothing new is installed for this.
+import { toCsv } from '@lib/gymExport';
+import { saveText } from '@/lib/save';
 import { parseGymZone, gymDay, gymTimeLabel, NO_ZONE_NOTE } from '@lib/gymZone';
 
 const DAY = 86_400_000;
+
+/**
+ * UTC's own calendar day and clock time, for the gym that has set no timezone.
+ *
+ * Named with UTC in it because that is the only honest thing to call it, and
+ * because an unnamed `.toISOString().slice(0, 10)` is the expression that dates
+ * a 23:40 event into the wrong month for half the world — check-utc-day.mjs
+ * flags it on sight and is right to. Here it is not a guess at somebody's local
+ * day: it is the fallback the whole screen already uses, it is reached only
+ * when `gymDay` returns null because `tenants.timezone` is unset, and every
+ * row that takes it carries 'UTC' in its own Clock column beside it, so nobody
+ * reading the file can mistake whose day it is.
+ *
+ * The alternative — the READER's day, via isoDay — would be worse in a file:
+ * the CSV outlives the browser that made it, and a day cut on whichever desk
+ * pressed the button is a fact about that desk rather than about the gym.
+ */
+const utcCalendarDay = (iso: string): string => new Date(iso).toISOString().slice(0, 10);
+const utcClockTime = (iso: string): string => new Date(iso).toISOString().slice(11, 16);
 
 /** How far back the log can be asked for. Bounded at both ends of the list on
  *  purpose: "everything" over a table written by a trigger on every payment is
@@ -184,10 +207,33 @@ export default function Activity() {
   );
   const note = searchNote(q, shown.length, byKind.length);
 
-  const people = useMemo(
-    () => new Set((rows ?? []).map((e) => e.actorId).filter((x): x is string => !!x)).size,
-    [rows],
-  );
+  /**
+   * The signed-in accounts in this window, and the entries no account did.
+   *
+   * Counted together because the tile's own note promised the second one — it
+   * read "signed-in accounts; automated writes are counted separately", and
+   * nothing on this screen counted them anywhere. An owner told a figure is
+   * held back "separately" goes looking for it; there was nothing to find, and
+   * the sentence was the only evidence the entries existed at all.
+   *
+   * They are a real and separate population rather than a rounding error:
+   * `Event.actorId` is null for a webhook, a scheduled job and the service role
+   * — Stripe settling an invoice writes one, and so does every trigger fired
+   * with no session behind it. Two gyms with the same "People who did them"
+   * figure and very different automated halves are not the same gym, and on the
+   * audit screen that difference is the answer to "who did this" being
+   * "nobody — the system did".
+   */
+  const actors = useMemo(() => {
+    if (!rows) return null;
+    const people = new Set<string>();
+    let automated = 0;
+    for (const e of rows) {
+      if (e.actorId) people.add(e.actorId);
+      else automated += 1;
+    }
+    return { people: people.size, automated };
+  }, [rows]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx.
@@ -229,6 +275,67 @@ export default function Activity() {
       </Shell>
     );
   }
+
+  // Bound here rather than read off `me` inside the closure below: the
+  // narrowing the guard above performed does not survive into one, and a
+  // receipt filed against a null gym would be a row nobody can attribute.
+  const tenantId = me.tenantId;
+
+  /**
+   * The log on screen, as a file — with what was asked for written at the top.
+   *
+   * Three things travel with it, and each of them is a thing a reader six weeks
+   * later cannot otherwise recover:
+   *
+   *  · the window, the kind filter and the search that produced it. A CSV of
+   *    eleven rows headed nothing at all is indistinguishable from a gym that
+   *    did eleven things;
+   *  · WHOSE CLOCK the day and the hour are on. The gym's where it has set a
+   *    timezone, and UTC where it has not, stated per row in its own column
+   *    rather than assumed — a price change at 23:40 on the 31st belongs to a
+   *    different month depending on the answer, and this is the file somebody
+   *    argues that from;
+   *  · that a null actor is not an unknown person. It is nobody signed in — a
+   *    webhook, a scheduled job, the service role — and an empty cell would be
+   *    read as a name that went missing.
+   *
+   * The summary line is never recomputed from the file. It is composed here,
+   * beside the filters it describes, for the same reason each row's own
+   * sentence is: a record says what was true when it was made.
+   */
+  const download = () => {
+    if (!rows || !tenantId) return;
+    const clock = zone ? `the gym's own clock (${zone})` : "UTC, because this gym has not set a timezone";
+    const asked = [
+      `the last ${span.label}`,
+      kind ? `kind "${kind}"` : 'every kind',
+      q.trim() ? `matching "${q.trim()}"` : 'no search',
+    ].join(', ');
+    const head =
+      `Activity — ${gymName ?? 'this gym'}\n`
+      + `${shown.length} of ${rows.length} recorded entr${rows.length === 1 ? 'y' : 'ies'}: ${asked}.\n`
+      + `Days and times below are on ${clock}.\n`
+      + 'Each sentence was composed when the thing happened and is never recomputed, which is what makes this a record rather than a view. An entry with no account against it was not done by an unknown person — it was done by nothing signed in: a webhook, a scheduled job or the service role.\n\n';
+    saveText(
+      head + toCsv(
+        ['Day', 'Time', 'Clock', 'What', 'Detail', 'By', 'Account id', 'Recorded at (UTC)'],
+        shown.map((e) => [
+          gymDay(e.at, zone) ?? utcCalendarDay(e.at),
+          gymTimeLabel(e.at, zone) ?? utcClockTime(e.at),
+          zone ?? 'UTC',
+          e.kind,
+          e.summary,
+          // Three states, kept apart in words, because two of them are empty
+          // cells otherwise and they mean opposite things.
+          e.actorId ? (e.actorName ?? 'name could not be read') : 'not a signed-in person',
+          e.actorId ?? '',
+          e.at,
+        ]),
+      ),
+      `${(gymName ?? 'gym').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'gym'}-activity-${span.days}d.csv`,
+    );
+    void logActivityExport(me, tenantId, shown.length, rows.length, asked);
+  };
 
   const cols: Column<Event>[] = [
     { key: 'at', header: 'When', value: (e) => e.at,
@@ -275,8 +382,18 @@ export default function Activity() {
              note={rows ? (rows.length === 0 ? 'nothing in this window' : span.label.toLowerCase()) : why ? 'not read' : undefined} />
         <Kpi label="Kinds of thing" text={rows ? String(kinds.length) : null}
              note={rows && kinds.length === 0 ? 'nothing to count' : undefined} />
-        <Kpi label="People who did them" text={rows ? String(people) : null}
-             note={rows ? 'signed-in accounts; automated writes are counted separately' : undefined} />
+        <Kpi label="People who did them" text={actors ? String(actors.people) : null}
+             note={actors ? 'signed-in accounts' : why ? 'not read' : undefined} />
+        {/* The other half of the sentence the tile beside this one used to make
+            on its own. Zero here is a real reading and not an absence — it says
+            every entry in the window has a person behind it — so it is drawn
+            whenever the log read, and withheld when it did not. */}
+        <Kpi label="Not a person" text={actors ? String(actors.automated) : null}
+             note={actors
+               ? (actors.automated === 0
+                   ? 'every entry has an account behind it'
+                   : 'a webhook, a scheduled job or the service role')
+               : why ? 'not read' : undefined} />
       </div>
 
       <Fetched at={readAt} busy={reading} onRefresh={refresh}
@@ -324,6 +441,31 @@ export default function Activity() {
             {NO_ZONE_NOTE} &mdash; times below are stated in UTC rather than guessed at.
           </span>
         )}
+        {/*
+          ── the audit trail, off the screen ──────────────────────────────────
+
+          GAP ANALYSIS. Mindbody, Zen Planner and Clubworx all let an operator
+          take their audit or change log OUT of the product; this console could
+          only show it. That matters more here than on a report screen, because
+          the argument this log settles — who changed that price, who cancelled
+          that membership, who deleted the September cost — is had with an
+          accountant, an ex-employee or a landlord, none of whom have a login.
+          The answer was readable by exactly the person who least needed it.
+
+          Nothing new is read for this. `shown` is already in the browser — the
+          window, the kind filter and the search have all been applied to it —
+          and the file says which of those were on, because a filtered export
+          that does not name its filter is a shorter log wearing a whole one's
+          name. `toCsv` and `saveText` are the console's, already imported by
+          six other screens.
+        */}
+        <button
+          onClick={download}
+          disabled={rows === null}
+          style={{ ...field, cursor: rows === null ? 'default' : 'pointer', opacity: rows === null ? 0.5 : 1 }}
+        >
+          {rows === null ? 'Nothing to export yet' : `Export ${shown.length} entr${shown.length === 1 ? 'y' : 'ies'} (CSV)`}
+        </button>
       </div>
 
       {rows === null ? (
@@ -358,6 +500,36 @@ export default function Activity() {
       </p>
     </Shell>
   );
+}
+
+/**
+ * Record that a copy of the audit log left the platform.
+ *
+ * The sibling of `logRosterExport` in /members and `logExport` in /export, and
+ * swallowed for the same reason both of those are: the file is on the owner's
+ * disk by the time this runs, so reporting a logging failure as an export
+ * failure would be false, and refusing a download over a logging table would be
+ * a worse product for a worse reason. A gap in the log is visible as a gap.
+ *
+ * The note says what was actually in the file rather than just naming the
+ * screen. "An activity export" cannot answer "which entries, over what window"
+ * when somebody reads this row back a year later, and that is the whole
+ * question an export receipt exists to answer.
+ */
+async function logActivityExport(
+  me: Me, tenantId: string, taken: number, held: number, asked: string,
+): Promise<void> {
+  if (!tenantId) return;
+  // eslint-disable-next-line -- no-error-ok: the CSV is already on the owner's disk; a logging failure must not be reported as an export failure, and a refusal here would be a console that cannot hand over its own audit trail
+  await supabase.from('gym_export_runs').insert({
+    tenant_id: tenantId,
+    scope: 'gym',
+    member_id: null,
+    parts: ['activity'],
+    rows_exported: taken,
+    taken_by: me.id,
+    note: `Activity CSV from /activity — ${taken} of ${held} entries read (${asked}), with the day, time, kind, sentence and the account behind each one.`,
+  });
 }
 
 /* ── the read ──────────────────────────────────────────────────────────────── */

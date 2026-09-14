@@ -35,6 +35,10 @@
 // that nobody is playing (src/ui/loadStatus.ts).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+// Who is signed in, and which of the two reasons nobody is. A `getSession()`
+// that could not reach the auth server answers `session: null`, exactly as a
+// signed-out device does — see src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
@@ -89,16 +93,24 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
     // is the true answer, not an error.
     if (!USE_SUPABASE) { setChallenges([]); setStatus('ready'); return; }
 
-    let signedIn = false;
-    try {
-      // getSession, not getUser: getUser REJECTS with no session, and reading
-      // that as a failure is how sibling providers used to latch into 'error'
-      // before anybody had signed in.
-      const { data: sess } = await supabase.auth.getSession();
-      signedIn = !!sess?.session?.user?.id;
-    } catch { /* no local session; treated as signed out below */ }
+    // getSession, not getUser: it answers from device storage and therefore
+    // answers offline, and reading "nobody is signed in" as a failure is how
+    // sibling providers used to latch into 'error' before anybody had signed
+    // in.
+    //
+    // `signedIn` was a boolean, and that was the defect: the two ways to not
+    // be signed in collapsed into one `false`. An unreachable auth server
+    // resolves `getSession()` with `session: null` (src/lib/authReadFate.ts),
+    // so it took this branch and cleared the list under 'ready' — which is
+    // precisely what the `if (error)` arm eight lines below refuses to do, in
+    // its own words, because "clearing it here would tell a client their gym
+    // is running nothing". Same false sentence, reached one call earlier.
+    const who = await sessionUid('challenges.read');
     if (run !== runRef.current) return;
-    if (!signedIn) { setChallenges([]); setStatus('ready'); return; }
+    if (who.fate === 'signed-out') { setChallenges([]); setStatus('ready'); return; }
+    // Could not ask. The list stays exactly as it was and the status says it
+    // was not checked — the treatment the RPC failure already gets.
+    if (who.fate !== null) { setStatus('error'); return; }
 
     try {
       const { data, error } = await supabase.rpc('my_challenges');
@@ -120,9 +132,15 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
   const join = useCallback(async (id: string): Promise<boolean> => {
     if (!USE_SUPABASE || !id) return false;
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess?.session?.user?.id;
-      if (!uid) return false;
+      // A WRITE, and the uid is the row's own `user_id` — so a false sign-out
+      // here does not merely skip the insert, it decides who a leaderboard
+      // entry belongs to. It is refused rather than attempted on either fate:
+      // `false` is this function's "you are not on the challenge", the screen
+      // says so, and the client taps Join again. The alternative was an insert
+      // built on an id nobody established.
+      const who = await sessionUid('challenges.join');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
       // `.select('challenge_id')` so a row RLS refused cannot arrive looking
       // like a success: a zero-row write is not an error in PostgREST, and the
       // insert that was quietly refused is exactly the one this must catch.
@@ -139,9 +157,16 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
   const leave = useCallback(async (id: string): Promise<boolean> => {
     if (!USE_SUPABASE || !id) return false;
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess?.session?.user?.id;
-      if (!uid) return false;
+      // The same refusal on the way out, and it matters more: this uid is the
+      // `.eq('user_id', …)` that SCOPES a delete. An unclassified auth failure
+      // could only ever have produced `undefined` here and stopped at the
+      // guard — but the guard is the only thing that stood between a dropped
+      // connection and a delete whose scope had not been established, and a
+      // guard that cannot say which failure it caught is one edit away from
+      // being loosened by somebody who thinks it only means "signed out".
+      const who = await sessionUid('challenges.leave');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
       const { data, error } = await supabase
         .from('challenge_participants')
         .delete().eq('challenge_id', id).eq('user_id', uid)

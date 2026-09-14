@@ -6,6 +6,13 @@
 import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
+// The money path's own auth read, already centralised here for connect.ts and
+// subscriptions.ts. `getUser()` resolves rather than rejecting when the auth
+// host is unreachable — see src/lib/authReadFate.ts — so `!uid` was two
+// different facts wearing one sentence.
+import { signedInUid } from './signedInUid';
+import { authGateMessage } from './authedUid';
+
 // `currencyDecimals` is the one place that answers "how many minor units make a
 // whole one", and it answers **null** rather than 2 when nobody said which
 // money it is — or said something that is not a currency code. This file used
@@ -62,9 +69,29 @@ export async function openBillingPortal(): Promise<{ ok: boolean; error?: string
  */
 export async function fetchMySubscription(): Promise<{ sub: Subscription | null; error: string | null }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { sub: null, error: 'Not signed in.' };
+    // ── 'Not signed in.' on a paying trainer's billing screen ───────────────
+    //
+    // The doc comment above is about exactly this defect one layer down — a
+    // failed read rendering the subscribe state at somebody who is already
+    // paying — and the auth read in front of it was doing the same thing with
+    // a sentence instead of a null. `getUser()` resolves with `user: null` and
+    // an `AuthRetryableFetchError` for an unreachable auth host, so an outage
+    // returned the literal string 'Not signed in.', which app/(trainer)/
+    // billing.tsx prints verbatim under a Flag that says the opposite: "If you
+    // are already subscribed you still are." A coach reading those two
+    // sentences together is being told the app has lost their session, on the
+    // screen where the remedy on offer is to buy the plan again.
+    //
+    // `authGateMessage` says whichever of the two is true. Both are still
+    // `{ sub: null, error }`, which the screen already renders as "we could not
+    // read your subscription" rather than as having none.
+    //
+    // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+    const who = await signedInUid('billing.fetchMySubscription');
+    if (who.fate !== null) return { sub: null, error: authGateMessage(who.fate) };
+    const uid = who.uid;
     const { data, error } = await supabase.from('subscriptions').select('*').eq('trainer_id', uid).maybeSingle();
+
     if (error) return { sub: null, error: error.message };
     return { sub: (data as Subscription) ?? null, error: null };
   } catch (e) { return { sub: null, error: (e as Error).message }; }

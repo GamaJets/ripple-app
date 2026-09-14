@@ -54,7 +54,7 @@
 // only — the empty state shows no hero of zeros), the bordered KPI grid became
 // hairline-divided KPI rows, the flag boxes became a hairline-divided list with
 // a tone dot beside ink-coloured text, and the Georgia serif header is gone.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Alert, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -78,6 +78,27 @@ import { wholeFromMinor, NO_CURRENCY_CHECK_NOTE } from '../../src/lib/wholeUnits
 // What money a SUM is in — the rule this screen held and breached six lines
 // apart. See the header of src/lib/sumCurrency.ts.
 import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE, type TotalMoney } from '../../src/lib/sumCurrency';
+// Whose figures these are. The key the eight numbers below live under carries
+// the account; the legacy unqualified one is removed unread. See the header of
+// src/lib/ownerFinancialsCache.ts for what the shared key did on a handset two
+// gyms sign into, and src/lib/deviceAccountCache.ts for the rule it breached.
+import {
+  LEGACY_OWNER_FINANCIALS_KEY, ownerFinancialsCache,
+  parseOwnerFinancials, ownerFinancialsBlob, readFinancialsDraft, reviewBlocker,
+  type EnteredFields,
+} from '../../src/lib/ownerFinancialsCache';
+import { cacheHydrated, mayWriteCache, type DeviceCache } from '../../src/lib/deviceAccountCache';
+// What a MOUNTED screen does when the account under it changes. This one is
+// registered `href: null`, so it mounts once and is never torn down — the wipe
+// happens on the way IN, before the read lands and whatever it decides.
+import { accountStateStep } from '../../src/lib/accountScopedState';
+// Who is signed in, with the failure kept rather than collapsed into "signed
+// out". `supabase.auth.getUser()` resolves on a dropped connection, so a
+// discarded error is an outage read as a sign-out.
+import { signedInUid } from '../../src/lib/signedInUid';
+import { type AuthReadFate } from '../../src/lib/authReadFate';
+import { useAuthRevision } from '../../src/ui/authRevision';
+import { USE_SUPABASE } from '../../src/lib/config';
 import { num, num1 } from '../../src/lib/format';
 // The calendar month, not a rolling thirty days. See the note on `basisMonth`.
 //
@@ -125,7 +146,17 @@ import { MonthCloseCard } from '../../src/ui/MonthCloseCard';
 import { useOwnerCosts } from '../../src/ui/ownerCosts';
 import { GymCostEntry } from '../../src/ui/GymCostEntry';
 
-const KEY = 'repple.owner.financials';
+/*
+ * The key these figures live under is no longer a constant at module scope,
+ * because it is no longer one key. It is `repple.owner.financials:<uid>`, built
+ * per account by `ownerFinancialsCache`, and the unqualified
+ * `repple.owner.financials` that used to be here is now
+ * LEGACY_OWNER_FINANCIALS_KEY, removed unread. src/lib/ownerFinancialsCache.ts
+ * carries the argument; the short version is that a key with no account in it
+ * is a key the next account inherits, and what this one holds is one gym's
+ * books, redrawn in the next gym's currency, graded, and offered for
+ * overwriting from the next gym's register.
+ */
 // One formatter for the whole owner app, rather than 'AED ' typed here and '$'
 // typed on Revenue — the two screens read the same gym, and a demo that tabs
 // between them showed one business in two currencies. Every figure on this
@@ -178,6 +209,22 @@ export default function Financials() {
   const costs = useOwnerCosts(monthClose.zone, monthClose.closes);
   const { refresh: refreshCosts } = costs;
   const [fin, setFin] = useState<FinInputs>(emptyFinances);
+  /**
+   * WHICH of the eight the owner actually typed.
+   *
+   * `FinInputs` is eight `number`s with no null in it and the form says "Leave
+   * a field blank if you don't track it", so the figures alone cannot tell a
+   * blank from a zero — and this screen used to resolve that with `n ?? 0`.
+   * src/lib/ownerFinancialsCache.ts carries the argument and the numbers; the
+   * short version is that an owner who typed revenue 30,000 and nothing else
+   * was shown a health score of 100, a Grade A, and the sentence "Your gym is
+   * in strong financial health (A). 30,000/mo profit on a 100% margin, low
+   * churn and positive growth" — a margin built from expenses nobody entered,
+   * and churn and growth over member counts nobody entered either.
+   *
+   * Empty is the honest start: before a read lands, nothing has been entered.
+   */
+  const [entered, setEntered] = useState<EnteredFields>(() => new Set());
   const [hydrated, setHydrated] = useState(false);
   /**
    * The stored P&L could not be READ back.
@@ -190,6 +237,35 @@ export default function Financials() {
    * becomes true by having been said.
    */
   const [hydrateFailed, setHydrateFailed] = useState(false);
+  /**
+   * Which account's cache this screen may read and write, and whether a read of
+   * THAT key has come back.
+   *
+   * A ref rather than state because nothing on screen is derived from it and it
+   * has to be settable synchronously, before the first `await` of the effect
+   * below: the window between "the account changed" and "the new account's read
+   * landed" is precisely the window in which a write must not fire.
+   *
+   * `hydrated` on this record is not the `hydrated` useState above. That one
+   * gates the RENDER — whether there is anything to show yet. This one gates
+   * the WRITE, and `cacheForAccount` hands it back false with no setter that
+   * leaves the old flag standing.
+   */
+  const store = useRef<DeviceCache>(ownerFinancialsCache(null));
+  /** The key of the account whose figures are in `fin` right now — null when
+   *  the screen holds nobody's. What `accountStateStep` compares against. */
+  const onScreenKey = useRef<string | null>(null);
+  /**
+   * Why there is no account to scope the figures to, when there is not.
+   *
+   * Two answers and not one. src/lib/authReadFate.ts is the long version:
+   * `supabase.auth.getUser()` RESOLVES on a dropped connection with
+   * `{ data: { user: null }, error }`, so an outage and a genuine sign-out
+   * arrive as the same null. Telling an owner in a basement that their figures
+   * are gone, over a read that never happened, is the sentence that file exists
+   * to stop.
+   */
+  const [noAccount, setNoAccount] = useState<AuthReadFate | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
 
@@ -578,45 +654,181 @@ export default function Financials() {
   const revenueCheck = derivedFailed ? unreadable(fin.revenue) : reconcile(fin.revenue, derivedRevenue);
   const newCheck = derivedFailed ? unreadable(fin.newMembers) : reconcile(fin.newMembers, derivedNew);
 
+  /* ── whose figures these are ─────────────────────────────────────────────
+   *
+   * Keyed on the auth revision, not on mount. Two separate reasons, and this
+   * screen had both:
+   *
+   *   · `useEffect(…, [])` runs once, when the screen mounts, which under
+   *     expo-router is when the owner portal is first opened. Registered
+   *     `href: null`, this screen is then NEVER torn down — not by a sign-out,
+   *     not by backgrounding the app — so that one read was the only read of
+   *     the whole life of the process.
+   *   · and it read `repple.owner.financials`, a key with no account in it. The
+   *     two together are what put one gym's revenue, expenses and member counts
+   *     on screen under the next owner's name, formatted in the next gym's
+   *     currency, graded, and offered for overwriting from the next gym's
+   *     register. src/lib/ownerFinancialsCache.ts has the full account.
+   *
+   * `useAuthRevision` moves whenever the signed-in account does, so this now
+   * runs on every sign-in and every sign-out rather than once at launch.
+   */
+  const rev = useAuthRevision();
   useEffect(() => {
+    let cancelled = false;
+    /**
+     * Whether what is on screen RIGHT NOW has somewhere to have gone — read
+     * before the line below empties the record it is a fact about.
+     *
+     * The order matters and getting it wrong is silent. `store.current` is
+     * blanked to the cache-for-nobody on the next line, and
+     * `mayWriteCache(cacheForAccount(prefix, null))` is false by construction —
+     * so asking the question after the blanking always answers "no", which
+     * `accountStateStep` reads as "the screen is holding the only copy", which
+     * is always `hold`. `forget` becomes unreachable, and a sign-out then
+     * leaves the departing owner's eight typed figures sitting in `fin` and
+     * their key in `onScreenKey` for the life of the process — hidden behind
+     * the `hydrated` render gate rather than dropped.
+     */
+    const wasSaved = mayWriteCache(store.current);
+    // Synchronously, before anything is awaited: the cache record for nobody,
+    // un-hydrated, so nothing can be written under the departing account's key
+    // while the new one is being resolved.
+    store.current = ownerFinancialsCache(null);
+    setHydrated(false);
+    setHydrateFailed(false);
+    setNoAccount(null);
     (async () => {
+      // Removed UNREAD, and removed first. The unqualified blob carries no
+      // account — nothing on the device says whether it is this owner's August
+      // or the last owner's — so reading it into the signed-in account is the
+      // defect performed once, deliberately, with a letter grade on the end.
+      // A failure to remove it is not worth a sentence to the owner: the key is
+      // no longer read by anything, so the only cost is bytes.
+      try { await AsyncStorage.removeItem(LEGACY_OWNER_FINANCIALS_KEY); }
+      catch (e) { reportError('financials.legacyKey', e); }
+      if (cancelled) return;
+
+      // Without a backend there is no account to scope anything to and nothing
+      // is persisted. The form still works for the session; `store` stays
+      // un-hydrated, so `save` says so rather than writing to a shared key.
+      if (!USE_SUPABASE) { setHydrated(true); return; }
+
+      // `signedInUid` names `error` and classifies it. A discarded error is an
+      // outage read as a sign-out — see src/lib/authReadFate.ts — and on this
+      // screen that would wipe a month of typed figures off the display of
+      // somebody who is still perfectly signed in.
+      const who = await signedInUid('financials.auth');
+      if (cancelled) return;
+      const cache = ownerFinancialsCache(who.uid);
+      const step = accountStateStep({
+        key: cache.key,
+        onScreenKey: onScreenKey.current,
+        // The same flag that gates the write: whether what is on screen has
+        // somewhere to have gone. An unarmed screen is holding the only copy.
+        // Captured at the top of this effect, BEFORE `store.current` was
+        // emptied — see `wasSaved`.
+        onScreenSaved: wasSaved,
+      });
+
+      if (step.do === 'hold') {
+        // No account, and what is on screen is not on the device. Read nothing,
+        // write nothing, change nothing. `noAccount` is what puts a sentence
+        // under the blank instead of leaving it unexplained.
+        setNoAccount(who.fate ?? 'unreadable');
+        return;
+      }
+      if (step.do === 'forget') {
+        // The account is gone and the device has its own copy under its own
+        // key. Dropped from memory, never from storage: that is the departing
+        // owner's work and it is unreadable to whoever signs in next.
+        onScreenKey.current = null;
+        setFin(emptyFinances());
+        setEntered(new Set());
+        setNoAccount(who.fate ?? 'signed-out');
+        return;
+      }
+
+      // `load`. The wipe happens on the way IN — before the read lands and
+      // whatever it decides — so a read that is slow, that fails, or that is
+      // refused cannot leave the previous owner's figures on screen under the
+      // new owner's name.
+      if (step.forget) { setFin(emptyFinances()); setEntered(new Set()); }
+      onScreenKey.current = step.key;
+      store.current = cache;
       try {
-        const raw = await AsyncStorage.getItem(KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          const next = emptyFinances();
-          for (const f of FIELDS) if (typeof parsed?.[f.key] === 'number') next[f.key] = parsed[f.key];
-          setFin(next);
-        }
+        const raw = await AsyncStorage.getItem(step.key);
+        if (cancelled) return;
+        // Hydrated only on a read that RETURNED. An empty store is a read that
+        // landed; a read that threw is not, and leaving the flag false is what
+        // stops this session writing over bytes nobody could read.
+        store.current = cacheHydrated(cache);
+        const stored = parseOwnerFinancials(raw);
+        // Null is "this account has never typed anything", which is already
+        // what `fin` and an empty `entered` hold between them. The two are set
+        // together, always: figures without the record of which are figures is
+        // the pair that produced the Grade A above.
+        if (stored) { setFin(stored.figures); setEntered(stored.entered); }
       } catch (e) {
         reportError('financials.hydrate', e);
-        setHydrateFailed(true);
+        if (!cancelled) setHydrateFailed(true);
       }
-      setHydrated(true);
+      if (!cancelled) setHydrated(true);
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [rev]);
 
   const openEditor = useCallback(() => {
     const d: Record<string, string> = {};
-    for (const f of FIELDS) d[f.key] = fin[f.key] ? String(fin[f.key]) : '';
+    // `entered.has`, not `fin[f.key] ?` — truthiness put a deliberate 0 back
+    // into the form as a BLANK box, so an owner who had told this screen their
+    // expenses were nil re-opened the editor, saw nothing there, pressed Save,
+    // and un-entered the field they had entered. A blank stays blank and a zero
+    // stays a zero, which is the same distinction the storage now keeps.
+    for (const f of FIELDS) d[f.key] = entered.has(f.key) ? String(fin[f.key]) : '';
     setDraft(d);
     setEditing(true);
-  }, [fin]);
+  }, [fin, entered]);
 
   const save = useCallback(async () => {
-    const next = emptyFinances();
-    for (const f of FIELDS) {
-      // `replace(/[^0-9.]/g, '')` deleted the decimal COMMA and closed the gap,
-      // so an owner in Berlin typing 16,5 had 165 filed — and every ratio the
-      // review below draws was then built on it. These boxes are decimal pads;
-      // the comma on them is a decimal point, not a separator to throw away.
-      const n = readNumber(draft[f.key] ?? '');
-      next[f.key] = n ?? 0;
-    }
+    // ── a blank box is not a zero ────────────────────────────────────────
+    //
+    // This loop was:
+    //
+    //     const n = readNumber(draft[f.key] ?? '');
+    //     next[f.key] = n ?? 0;
+    //
+    // directly beneath a form that says "Leave a field blank if you don't track
+    // it." See `entered` above for what that `?? 0` put in front of an owner.
+    // `readFinancialsDraft` is the same loop with the substitution removed and
+    // a test under plain node; `readNumber` is still the reader, passed in.
+    const { figures: next, entered: nextEntered } = readFinancialsDraft(draft, readNumber);
+    // `readNumber` and not `replace(/[^0-9.]/g, '')`, which deleted the decimal
+    // COMMA and closed the gap — so an owner in Berlin typing 16,5 had 165
+    // filed, and every ratio the review below draws was then built on it. These
+    // boxes are decimal pads; the comma on them is a decimal point, not a
+    // separator to throw away.
     setFin(next);
+    setEntered(nextEntered);
     setEditing(false);
+    // Two conditions, and neither is an "ignore": no key means there is no
+    // account to file these under, and not hydrated means the read of this
+    // account's key has not come back or came back refused. In both cases the
+    // figures are on screen for this session and are not kept \u2014 which is a
+    // smaller loss than writing them to a key the next owner inherits, or on
+    // top of bytes nobody managed to read. src/lib/deviceAccountCache.ts.
+    const cache = store.current;
+    if (!mayWriteCache(cache)) {
+      Alert.alert(
+        'Not saved on this phone',
+        'Your figures are on screen, but this could not confirm which account to file them '
+        + 'under, so nothing has been written. They will not survive closing the app. '
+        + 'Nothing has been sent anywhere, and nothing already saved has been changed.',
+      );
+      return;
+    }
     try {
-      await AsyncStorage.setItem(KEY, JSON.stringify(next));
+      await AsyncStorage.setItem(cache.key, ownerFinancialsBlob(next, nextEntered));
       // Whatever could not be read a moment ago has now been written over by
       // something the owner typed deliberately, so the warning stops being true.
       setHydrateFailed(false);
@@ -646,7 +858,16 @@ export default function Financials() {
   }, []);
   const sites = siteNotice(scope);
 
-  const ready = hasFigures(fin);
+  /**
+   * Why no review can be given, or null when one can.
+   *
+   * `hasFigures` gates on REVENUE, which src/lib/finReview.ts argues out at
+   * length. `reviewBlocker` is the same argument applied to the other field
+   * every derived figure on this screen is made of — EXPENSES — which that file
+   * never gated and this screen therefore reported as nought. See `entered`.
+   */
+  const blocker = reviewBlocker(entered);
+  const ready = hasFigures(fin) && !blocker;
   // The review quotes amounts inside its sentences, so it needs the currency
   // rather than a formatter: with null it writes the same analysis in
   // percentages and leaves the figures out, which is the only honest version
@@ -654,17 +875,46 @@ export default function Financials() {
   const r = useMemo(() => (ready ? reviewFinances(fin, cur) : null), [fin, ready, cur]);
   const toneColor = (tone: FinFlag['tone']) => (tone === 'good' ? t.good : tone === 'watch' ? t.warn : t.crit);
 
+  /* ── every tile is a dash unless the figures under it were entered ───────
+   *
+   * `r` being non-null used to be the whole guard, and `r` only needs revenue
+   * and expenses. The other six tiles quoted whatever `emptyFinances()` had
+   * left behind:
+   *
+   *   · MRR and PT + classes printed a formatted "0.00" for a gym that does not
+   *     track them here — a stated amount of money, in the gym's own currency,
+   *     that nobody had stated;
+   *   · Members printed "0" for a gym with two thousand of them;
+   *   · and Churn and Net growth quoted `r.churnPct` and `r.growthPct`, which
+   *     `reviewFinances` pins to 0 by its own divide-guard when no member count
+   *     was entered. finReview.ts closed that trap INSIDE the review — its
+   *     `membersKnown` comment says so, in those words — and this row, which
+   *     sits directly above the review and is read first, was left quoting the
+   *     pinned zeros: "Churn 0.0%" and "Net growth No change" over a gym that
+   *     had reported no member numbers at all.
+   *
+   * A dash, and the caption below the row says what a dash means here. */
+  const dash = '—';
+  const has = (...keys: (keyof FinInputs)[]) => keys.every((k) => entered.has(k));
+  // Churn and growth are rates over members, so they need a member count that
+  // is both entered AND non-zero — `reviewFinances` uses the same test, and a
+  // rate over nought members is not a low rate, it is no rate.
+  const membersKnown = entered.has('members') && fin.members > 0;
   const kpis: [string, string][] = r ? [
     ['Revenue / mo', money(fin.revenue)],
     ['Net profit', money(r.netProfit)],
     ['Margin', num(r.marginPct) + '%'],
-    ['MRR', money(fin.mrr)],
-    ['Members', fin.members.toLocaleString()],
-    ['Churn', num1(r.churnPct) + '%'],
+    ['MRR', has('mrr') ? money(fin.mrr) : dash],
+    ['Members', entered.has('members') ? fin.members.toLocaleString() : dash],
+    ['Churn', membersKnown ? num1(r.churnPct) + '%' : dash],
     // A gym that neither grew nor shrank reads "No change", not "+0.0%". The
     // `>= 0` arm put a plus on a month in which nothing happened.
-    ['Net growth', deltaLabel(r.growthPct, { since: null, unit: '%' })],
-    ['PT + classes', money(fin.ptRevenue + fin.classRevenue)],
+    ['Net growth', membersKnown && has('newMembers', 'churnedMembers')
+      ? deltaLabel(r.growthPct, { since: null, unit: '%' })
+      : dash],
+    ['PT + classes', has('ptRevenue', 'classRevenue')
+      ? money(fin.ptRevenue + fin.classRevenue)
+      : dash],
   ] : [];
 
   const G = layout.gutter;
@@ -764,6 +1014,34 @@ export default function Financials() {
         />
 
         <Rule />
+
+        {/* ── no account, so no figures ─────────────────────────────────────
+            The figures below belong to an account, and until this screen knows
+            which one it shows none. Two sentences, because there are two
+            reasons and the difference between them is the difference between
+            "sign in again" and "this is our end": src/lib/authReadFate.ts.
+
+            Said rather than left blank. Before this the P&L section simply
+            rendered nothing behind the `hydrated` gate, so an owner whose auth
+            read was refused on gym wifi opened Financials, found the whole
+            lower half of the screen missing, and had nothing to tell them
+            whether their month had been lost. */}
+        {noAccount ? (
+          <Section>
+            <Notice
+              tone={t.warn}
+              kicker="Your monthly figures"
+              title={noAccount === 'signed-out' ? 'Not shown while you are signed out' : 'We could not check your account'}
+              note={noAccount === 'signed-out'
+                ? 'Your figures are saved on this phone under your own account, so they are not '
+                  + 'shown while nobody is signed in. Nothing has been deleted. Sign in again and '
+                  + 'they come back.'
+                : 'This could not establish which account is signed in, so it cannot tell whose '
+                  + 'figures to show and is showing none. That is our end rather than your sign-in. '
+                  + 'Nothing has been changed and nothing has been deleted.'}
+            />
+          </Section>
+        ) : null}
 
         {!hydrated ? null : editing ? (
           /* ── entry form ───────────────────────────────────────────────── */
@@ -898,6 +1176,27 @@ export default function Financials() {
                   anything here: saving now writes over whatever is still stored.
                 </Text>
               </>
+            ) : hasFigures(fin) && blocker ? (
+              /* ── revenue is in and something the review needs is not ─────
+                  A fourth person, and the branch below would have told them
+                  "Revenue Is Missing" over the revenue they had just typed.
+
+                  This is the state the `?? 0` above used to hide: the review
+                  ran, took the blank as nought, and handed back a 100% margin
+                  and a Grade A. The figure is not invented and it is not
+                  silently withheld either — the sentence says which field is
+                  blank, what it would have been used for, and what the old
+                  answer would have been, so an owner can see that the dash is
+                  the honest one. src/lib/ownerFinancialsCache.ts writes it. */
+              <>
+                <SectionHead title="No Score Yet" />
+                <Text style={{ ...ty.body, color: t.ink2 }}>{blocker}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {storageNote()}
+                </Text>
+                <View style={{ height: sp.lg }} />
+                <Cta label="Fill It In" wide onPress={openEditor} />
+              </>
             ) : (<>
             <SectionHead title={anyEntered(fin) ? 'Revenue Is Missing' : 'No Figures Yet'} />
             <Text style={{ ...ty.body, color: t.ink2 }}>
@@ -1008,6 +1307,17 @@ export default function Financials() {
                   <KpiRow items={kpis.slice(i, i + 2).map(([l, v]) => ({ label: l, value: v }))} />
                 </View>
               ))}
+              {/* What a dash on this row means, said once beneath it. Without
+                  it a withheld tile and a tile reading 0.00 look equally like
+                  an answer, and the whole point of withholding is that one of
+                  them is not. Only shown when there IS a dash. */}
+              {kpis.some(([, v]) => v === dash) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                  A dash is a figure you have not entered, not a nought. Leaving a box blank is a
+                  perfectly good answer — it only means this row and the score above it stop
+                  speaking for that line rather than reporting it as nothing.
+                </Text>
+              ) : null}
             </Section>
 
             {r.strengths.length > 0 ? (<>

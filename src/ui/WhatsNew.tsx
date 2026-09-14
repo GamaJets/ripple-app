@@ -44,6 +44,12 @@ import {
 } from '../lib/releaseNotes';
 import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
+// This one call wants `created_at`, not a uid, so it cannot go through
+// `signedInUid` — but the classification is the same classification, and it is
+// imported rather than restated. See src/lib/authReadFate.ts.
+import { authReadFate } from '../lib/authReadFate';
+import { authGateFault } from '../lib/authedUid';
+
 
 /** One key per account. See the header for why this is not one key per device. */
 const seenKey = (userId: string) => `repple.whatsNew.lastSeen:${userId}`;
@@ -268,14 +274,40 @@ export function useWhatsNew(userId: string | null, hold = false) {
         // the changelog was the one release nobody was ever shown.
         let createdAt: string | null = null;
         try {
-          const { data } = await supabase.auth.getUser();
+          const { data, error } = await supabase.auth.getUser();
           createdAt = data?.user?.created_at ?? null;
-        } catch {
-          // Unknown age. firstRunReleases treats that as "stamp silently",
-          // which is the harmless direction: the cost is one missed changelog,
-          // and the cost of guessing the other way is a sheet in front of every
-          // new signup.
+          // ── the failure does not arrive in the catch ────────────────────
+          //
+          // The comment that used to sit in the `catch` below said "unknown
+          // age" as though a failed read landed there. It does not, and almost
+          // never did: `getUser()` RESOLVES on a dropped connection, with
+          // `{ data: { user: null }, error }`, so an outage came down the
+          // SUCCESS path, `created_at` was undefined, and `?? null` quietly
+          // put it in the same bucket by accident.
+          //
+          // The outcome of that accident is right, and is left exactly as it
+          // is: `firstRunReleases(null, …)` returns `[]`, and the stamp two
+          // branches below is guarded on `createdAt` being non-null, so
+          // nothing is shown and — the part that matters — nothing is written
+          // down as read. An unanswered question costs one `getUser()` on the
+          // next launch, which is what the note there already says.
+          //
+          // What was missing is the trace. "Nobody in this build ever saw the
+          // changelog" is a report somebody has to diagnose, and an auth host
+          // that was refusing every launch left no mark anywhere. A genuine
+          // sign-out is not a fault and is not reported — though it barely
+          // happens here, since this effect is gated on `userId` above.
+          if (error) {
+            const fault = authGateFault(authReadFate(error));
+            if (fault) reportError('whatsNew.accountAge', fault);
+          }
+        } catch (e) {
+          // A throw from `getUser()` is a non-AuthError — a bug rather than a
+          // network, per authReadFate.ts. Same harmless direction for the
+          // reader, and worth a line in the log.
+          reportError('whatsNew.accountAge', e);
         }
+
         if (off) return;
         const first = firstRunReleases(createdAt, CURRENT_RELEASE, MY_AUDIENCE);
         // Stamped now only when there is nothing to show. When there IS, the

@@ -71,6 +71,11 @@ import {
   type LoggedFoodLike, type RememberedFood,
 } from '../../src/lib/foodMemory';
 import { useAuthRevision } from '../../src/ui/authRevision';
+// Storage-first, and it keeps a dropped connection apart from a sign-out. See
+// src/lib/authReadFate.ts; the note at the pinned-list read below says what
+// that separation is worth on this particular screen.
+import { sessionUid } from '../../src/lib/sessionUid';
+
 import { supabase } from '../../src/lib/supabase';
 import { notifySuccess } from '../../src/ui/haptics';
 import { useToast } from '../../src/ui/toast';
@@ -718,22 +723,59 @@ export default function FoodLog() {
  // somebody loses the lot — `readFavourites` returns the pair for that reason,
  // and the star is withheld rather than offered over a read that failed.
  const [favsRead, setFavsRead] = useState(false);
+ // Whether the pinned list could not even be LOOKED for, because who this is
+ // could not be established. Its own flag rather than folded into `favsRead`:
+ // that one is about the bytes under the key, this one is about not having a
+ // key. Both withhold the star; only this one owes the member a sentence,
+ // because the difference between "you have pinned nothing" and "we could not
+ // find your pinned list" is invisible when the section simply stops drawing.
+ const [favsUnknown, setFavsUnknown] = useState(false);
+
  useEffect(() => {
   let cancelled = false;
   (async () => {
    try {
-    // getSession, not getUser: getUser REJECTS when nobody is signed in, and
-    // signed out is a true answer here rather than a failed read.
-    const { data: sess } = await supabase.auth.getSession();
-    const id = sess?.session?.user?.id ?? null;
+    // getSession, not getUser, and that choice is right — this screen is opened
+    // in gyms with no signal and `getSession()` answers from device storage.
+    // The REASON written here was not: it said "getUser REJECTS when nobody is
+    // signed in". It does not. It resolves with `{ user: null, error:
+    // AuthSessionMissingError }`, and so does `getSession()` with
+    // `session: null` — which is the defect this line had, not the one it was
+    // guarding against.
+    //
+    // ── the branch that threw away the only copy ─────────────────────────
+    //
+    // `const id = sess?.session?.user?.id ?? null; if (!id) { setFavs([]) }`.
+    // A member's pinned foods are on THIS PHONE, under `favouritesKey(uid)` —
+    // the key names the account — so the one condition where the offline copy
+    // is the only copy was the condition that walked past it. `getSession()`
+    // goes to the network to refresh an access token that has expired, and a
+    // refresh that cannot reach the server resolves with `session: null` and a
+    // retryable error this line discarded. The yogurt they eat every morning
+    // disappeared off the top of the screen, the heart disappeared with it, and
+    // nothing said why: the Pinned group renders `null` when it is empty, so
+    // the loss is silent rather than wrong.
+    //
+    // The uid still cannot be recovered — no uid, no key — so the list still
+    // cannot be opened. What changes is that this stops being told as
+    // "nothing pinned". Narrowed on `fate`, never on `!who.uid`: `string`
+    // includes ''.
+    const who = await sessionUid('foodLog.favourites');
     if (cancelled) return;
-    setUid(id);
-    if (!id) { setFavs([]); setFavsRead(false); return; }
-    const raw = await AsyncStorage.getItem(favouritesKey(id));
+    setUid(who.uid);
+    if (who.fate !== null) {
+     // Neither fate may write: `favsRead` false is what stops `pinFood`
+     // storing an empty list over bytes nobody read. Only the outage is
+     // explained, because only the outage is a thing the member did not do.
+     setFavs([]); setFavsRead(false); setFavsUnknown(who.fate === 'unreadable');
+     return;
+    }
+    const raw = await AsyncStorage.getItem(favouritesKey(who.uid));
     if (cancelled) return;
     const r = readFavourites(raw);
-    setFavs(r.foods); setFavsRead(r.read);
-   } catch { if (!cancelled) { setFavs([]); setFavsRead(false); } }
+    setFavs(r.foods); setFavsRead(r.read); setFavsUnknown(false);
+   } catch { if (!cancelled) { setFavs([]); setFavsRead(false); setFavsUnknown(false); } }
+
   })();
   return () => { cancelled = true; };
  }, [authRev]);
@@ -1127,6 +1169,17 @@ export default function FoodLog() {
  These are drawn from the part of your log we could read. Something you eat often may be missing from them.
  </Flag>
  ) : null}
+ {/* The pinned list is kept on this phone under a key that names the
+     account, so when the account could not be read it cannot be opened at
+     all. Said out loud: an absent Pinned group is otherwise
+     indistinguishable from having pinned nothing, and a member who pinned
+     their breakfast would reasonably conclude it had been lost. */}
+ {favsUnknown ? (
+ <Flag tone={t.warn}>
+ We couldn’t check your account just now, so we can’t show your pinned foods or let you pin one. Nothing has been unpinned — this is our end rather than your sign-in.
+ </Flag>
+ ) : null}
+
  {favRows.map((g) => (g.rows.length ? (
  <View key={g.title} style={{ marginTop: sp.md }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>{g.title}</Text>

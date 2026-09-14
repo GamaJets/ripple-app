@@ -100,6 +100,11 @@ import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+// `getUser()` resolves rather than rejecting when the auth host is unreachable,
+// so `!auth?.user?.id` meant "signed out, or we could not ask". See
+// src/lib/authReadFate.ts.
+import { signedInUid } from '../../src/lib/signedInUid';
+
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
@@ -1921,9 +1926,24 @@ export default function Builder() {
   ): Promise<boolean> => {
     if (!movements.length) return true;
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) return false;
+      // Both fates return false, and that is the ANSWER rather than a
+      // fallback. `false` here means the acknowledgement was not recorded, and
+      // the caller turns that into this client's programme not being sent —
+      // which is the order this function's doc comment argues for at length: a
+      // programme that went out while the record of the coach's decision did
+      // not is worse than no record at all. Refusing on an outage is the
+      // correct refusal, and nothing is written under a missing trainer id.
+      //
+      // What was wrong was only that the two could not be told apart
+      // afterwards. A `false` returned because the auth host was down looked,
+      // in the logs, exactly like a coach who was not signed in; `signedInUid`
+      // reports the first under this context and stays quiet about the second.
+      //
+      // Narrowed on `fate`, never on `!who.uid`: `string` includes ''.
+      const who = await signedInUid('builder.injuryChoice');
+      if (who.fate !== null) return false;
+      const uid = who.uid;
+
       // The row is counted, not merely un-errored. This record is the only
       // thing that will ever say the coach knew, and "no error" is not the same
       // sentence as "it is there" — a manually-added client has no `profiles`

@@ -98,17 +98,39 @@ export async function connectVendor(id: ProviderId): Promise<void> {
   }
 
   // Hand the code to the server for the secret-bearing token exchange.
-  const { data: auth } = await supabase.auth.getUser();
-  const userId = auth?.user?.id;
+  //
+  // ── the auth read here has been DELETED, not repaired ────────────────────
+  //
+  // There was a `const { data: auth } = await supabase.auth.getUser()` on this
+  // line, discarding its error in the usual way, and its only purpose was to
+  // fill a `user_id` field in the body below. That field is read by nothing.
+  // supabase/functions/wearable-oauth/index.ts takes the caller's id from the
+  // JWT and from nothing else — its header says so at length, and says why:
+  // `body.user_id` used to be the authorisation with the JWT merely overwriting
+  // it, and since the project's anon key is a valid JWT that resolves to no
+  // user and ships in this bundle, anybody could have posted somebody else's
+  // uuid and replaced their vendor token. The function names this app as the
+  // sender that "still sends it and it is simply ignored".
+  //
+  // So there was nothing here to fate-check. A field that decides nothing does
+  // not need a better answer, it needs to stop existing: while the app keeps
+  // sending a `user_id` the server has taken care to ignore, the next reader of
+  // this call has every reason to think it is load-bearing, and reinstating the
+  // fallback is one small edit away. The `getUser()` round trip it cost on the
+  // connect path goes with it.
+  //
+  // The exchange is authorised by the Authorization header `functions.invoke`
+  // attaches from the session, which is the only thing that was ever
+  // authorising it.
   const { data, error } = await supabase.functions.invoke('wearable-oauth', {
     body: {
       provider: id,
       code: result.params.code,
       code_verifier: request.codeVerifier ?? null,
       redirect_uri: redirectUri,
-      user_id: userId,
     },
   });
+
   if (error || (data as any)?.error) {
     const detail = (data as any)?.error || (error as any)?.message || 'unknown';
     reportError('wearables.connect.tokenExchange', detail, { provider: id });
