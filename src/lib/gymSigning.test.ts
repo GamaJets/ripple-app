@@ -312,10 +312,10 @@ void (async () => {
 //     leave a member who withdrew and then changed their mind unable to consent
 //     to anything again.
 //   · The absent table reads as 'absent' and nothing else reads as 'absent'.
-//     The part is not applied as this ships, so a read that assumed the table
-//     existed would take the paperwork screen down for every member of every
-//     gym — and a read that FAILED must never be mistaken for a member who has
-//     withdrawn nothing.
+//     The part is applied to this project's database and to no other, so a read
+//     that assumed the table existed would take the paperwork screen down for
+//     every member of every gym that has not had it — and a read that FAILED
+//     must never be mistaken for a member who has withdrawn nothing.
 //   · The copy says what withdrawing does NOT do. A control implying a deletion
 //     it cannot perform is worse than no control.
 
@@ -543,7 +543,7 @@ ok(/next version|tell your gym/i.test(WITHDRAW_CANNOT_BE_UNDONE),
 // found by mutating `mayWithdraw` — a screen that decides whether to draw the
 // button from the ROW alone draws a live control on every photo consent in the
 // product, and every one of those taps is a 42P01 under a member's thumb while
-// part 3030 is unapplied. The button has to be asked of the READ.
+// part 3030 has not reached that gym. The button has to be asked of the READ.
 {
   const screen = readFileSync(join('app', '(client)', 'agreements.tsx'), 'utf8');
   ok(/fetchMyRevocations\(/.test(screen),

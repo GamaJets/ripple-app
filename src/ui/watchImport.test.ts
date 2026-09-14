@@ -234,13 +234,29 @@ const reset = () => {
   // proved directly and more strongly: `readRecent` does not merely throw
   // instead of returning [], it has no `samples` field on the 'failed' variant
   // at all, so the empty-list reading is refused by the compiler.
-  await test('every provider failing is a read with nothing to lose, and says so', async () => {
-    const r = await wi.readRecent({ whoop: 'connected' }, 14);
+  // The assertion that stood here drove `fetchRecent`, which has since been
+  // removed — both screens moved to `readRecent` and the wrapper went with the
+  // second of them, as its own note said it should.
+  //
+  // What it proved — that an all-failed read does not hand back an empty list —
+  // is already proved above ('every provider failing is "none"'). What is NOT
+  // proved above, and is the only reason this stays, is that the failure is
+  // NAMED: `failed` carries the provider and `readNote` puts its name in the
+  // sentence. An all-failed read that said "none" without saying WHO refused
+  // would pass every assertion above it and still leave a member with no idea
+  // which device to go and reconnect.
+  await test('an all-failed read names the provider that refused', async () => {
+    reset();
+    catalogue.list = [
+      provider('apple', 'Apple Health', new Error('HealthKit')),
+      provider('whoop', 'WHOOP', new Error('401')),
+    ];
+    const r = await wi.readRecent(connected, 14);
     assert.strictEqual(r.reach, 'none');
-    assert.strictEqual(r.samples.length, 0);
     assert.ok(r.failed.length > 0, 'the failure is named, not swallowed');
-    assert.strictEqual(r.emptyAndWhole, false, 'nothing whole was read, so nothing may be called empty');
-    assert.ok(/WHOOP/.test(wi.readNote(r, '14 days', 'your devices') ?? ''), 'the sentence names the provider that refused');
+    const note = wi.readNote(r, '14 days', 'your devices') ?? '';
+    assert.ok(/WHOOP/.test(note), 'the sentence names the provider that refused');
+    assert.ok(!/no workouts found/i.test(note), 'and never calls a failed read an empty one');
   });
 
   // Was 'fetchRecent still returns the samples it can, for the callers not yet

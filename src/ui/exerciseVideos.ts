@@ -279,6 +279,20 @@ export function useExerciseVideos() {
   // deliberately. See the header of src/lib/handsetClips.ts.
   useEffect(() => { AsyncStorage.removeItem(LEGACY_HANDSET_CLIPS_KEY).catch(() => {}); }, []);
 
+  // The same question for the half of the list that is not on the device.
+  //
+  // `remote` is the previous account's server rows, and nothing cleared it:
+  // signing out does not unmount this provider, so the next coach saw the
+  // previous one's library until their own read came back — and a read that
+  // FAILED never came back at all, which left one coach's clip names on
+  // another's screen for as long as they stayed on it. `exvid_read` decides
+  // what each person MAY see, and it was doing so correctly; what was wrong is
+  // that nobody asked it again before the rows stayed on screen.
+  //
+  // Keyed on the account rather than folded into `load`, so a pull-to-refresh
+  // does not blank the list it is refreshing.
+  useEffect(() => { setRemote([]); setStatus('loading'); }, [uid]);
+
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
