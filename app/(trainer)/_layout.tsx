@@ -1,18 +1,14 @@
-// Trainer portal tabs — Clients · Schedule · Videos · Analytics · Profile
+// Trainer portal tabs — Clients · Programs · Schedule · Videos · Analytics · Profile
 //
 // Configuration, not layout: every Tabs.Screen, name, href, title and the order
-// they appear in is untouched. Only the tab label and the bar's padding moved
-// onto the scale (`src/theme/scale`); the dead emoji TabIcon is gone.
+// they appear in is untouched. The primary bar stays six items; everything else
+// in this group is a detail screen registered with `href: null`.
 //
-// The bar is SIX items and stays six. Everything else in this group is a detail
-// screen registered with `href: null` — reachable by navigation, absent from the
-// bar. A seventh bar item does not simply appear at the end: it squeezes the six
-// that matter, which is how "Programs" came to render as "Progra…" the one time
-// a route was added without it. `my-training`, `my-nutrition` and `my-progress`
-// — the coach's own workout log, food log and body record — are three of those
-// detail screens, reached from the Coaching Tools row on the Clients tab. They
-// are deliberately not bar items: the bar is about clients, and the coach's own
-// tracking is the one thing in this group that is not.
+// The bar now follows the same accessibility rules as the client app: its
+// content height grows with Dynamic Type and it gets out of the way while the
+// keyboard is open. That matters on Coach because several primary tabs open
+// dense forms and scheduling tools, and a fixed 56pt bar was the one navigation
+// surface that still clipped large labels while Client already scaled correctly.
 //
 // A `<Tabs.Screen>` list is walked by expo-router rather than rendered, so keep
 // commentary out from between the entries — notes about a route belong here, or
@@ -22,7 +18,7 @@ import { groupAllowed } from '../../src/lib/variant';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { sp, type as ty } from '../../src/theme/scale';
+import { sp, type as ty, grown } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 import { FloorQueueSync } from '../../src/ui/floorQueue';
@@ -44,80 +40,89 @@ export default function TrainerLayout() {
   const whatsNew = useWhatsNew(user?.id ?? null);
   return (
     <>
-    <Tabs
-      backBehavior="history"
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: 56 + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
-        tabBarActiveTintColor: t.brand,
-        tabBarInactiveTintColor: t.ink3,
-        tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' },
-        sceneStyle: { backgroundColor: t.bg },
-      }}
-    >
-      <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
-      <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color }) => <Icon name="train" size={23} color={color} /> }} />
-      <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color }) => <Icon name="calendar" size={23} color={color} /> }} />
-      <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ color }) => <Icon name="video" size={23} color={color} /> }} />
-      <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color }) => <Icon name="chart" size={23} color={color} /> }} />
-            <Tabs.Screen name="sessions" options={{ href: null, title: 'Mark Sessions' }} />
-<Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
-      <Tabs.Screen name="client-attendance" options={{ href: null, title: 'Their Attendance' }} />
-      <Tabs.Screen name="my-register" options={{ href: null, title: 'Your Register' }} />
-      <Tabs.Screen name="referrals" options={{ href: null, title: 'Who Brings You Clients' }} />
-      <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
-      <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
-      <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a Session' }} />
-      <Tabs.Screen name="my-training" options={{ href: null, title: 'My Training' }} />
-      <Tabs.Screen name="my-nutrition" options={{ href: null, title: 'My Nutrition' }} />
-      <Tabs.Screen name="my-progress" options={{ href: null, title: 'My Progress' }} />
-      <Tabs.Screen name="checklists" options={{ href: null, title: 'Their Checklists' }} />
-      <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working Toward' }} />
-      <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress Photos' }} />
-      <Tabs.Screen name="client-week" options={{ href: null, title: 'Their Week' }} />
-      <Tabs.Screen name="client" options={{ href: null, title: 'Client' }} />
-      <Tabs.Screen name="client-body" options={{ href: null, title: 'Body Composition' }} />
-      <Tabs.Screen name="client-training" options={{ href: null, title: 'Their Training' }} />
-      <Tabs.Screen name="templates" options={{ href: null, title: 'Program Templates' }} />
-      <Tabs.Screen name="exercise" options={{ href: null, title: 'Exercise' }} />
-      <Tabs.Screen name="library" options={{ href: null, title: 'Exercise Library' }} />
-      <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
-      <Tabs.Screen name="billing" options={{ href: null, title: 'Billing & Subscription' }} />
-      <Tabs.Screen name="payments" options={{ href: null, title: 'Payments' }} />
-      <Tabs.Screen name="ad-spend" options={{ href: null, title: 'Ad Spend' }} />
-      <Tabs.Screen name="leads" options={{ href: null, title: 'Enquiries' }} />
-      <Tabs.Screen name="classes" options={{ href: null, title: 'Classes' }} />
-      <Tabs.Screen name="class-checkin" options={{ href: null, title: 'Class Check-in' }} />
-      <Tabs.Screen name="broadcast" options={{ href: null, title: 'Broadcast' }} />
-      <Tabs.Screen name="broadcast-session" options={{ href: null, title: 'Broadcast a Session' }} />
-      <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
-      <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
-      <Tabs.Screen name="client-intake" options={{ href: null, title: 'Their Intake' }} />
-      <Tabs.Screen name="client-nutrition" options={{ href: null, title: 'Their Nutrition' }} />
-      <Tabs.Screen name="group" options={{ href: null, title: 'Group Programme' }} />
-      <Tabs.Screen name="share-kit" options={{ href: null, title: 'Share Kit' }} />
-      <Tabs.Screen name="documents" options={{ href: null, title: 'Documents' }} />
-      <Tabs.Screen name="invoices" options={{ href: null, title: 'Invoices' }} />
-      <Tabs.Screen name="receipts" options={{ href: null, title: 'Cash and Transfers' }} />
-      <Tabs.Screen name="costs" options={{ href: null, title: 'What It Costs You' }} />
-      <Tabs.Screen name="nudges" options={{ href: null, title: 'Nudges' }} />
-      <Tabs.Screen name="client-report" options={{ href: null, title: 'Their Record' }} />
-      <Tabs.Screen name="credentials" options={{ href: null, title: 'Credentials' }} />
-      <Tabs.Screen name="messages" options={{ href: null, title: 'Messages' }} />
-      <Tabs.Screen name="money" options={{ href: null, title: 'Money' }} />
-      <Tabs.Screen name="brand" options={{ href: null, title: 'Branding' }} />
-      <Tabs.Screen name="statement" options={{ href: null, title: 'Statement' }} />
-      <Tabs.Screen name="getting-started" options={{ href: null, title: 'Getting Started' }} />
-      <Tabs.Screen name="assistant" options={{ href: null, title: 'Assistant' }} />
-      <Tabs.Screen name="templates-messages" options={{ href: null, title: 'Saved Messages' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
-    </Tabs>
-    <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
-    {/* Renders nothing. Reads this coach's unsent floor queue — attendance
-        ticks, session outcomes, logged sessions — off the device once, so the
-        app's reconnect and foreground triggers can empty it without the coach
-        having to reopen one of the three screens that own it. */}
-    <FloorQueueSync uid={user?.id ?? null} />
+      <Tabs
+        backBehavior="history"
+        screenOptions={{
+          headerShown: false,
+          tabBarHideOnKeyboard: true,
+          // Keep the phone's safe-area inset literal, but grow the part that
+          // actually contains the icon + label with the reader's text size.
+          tabBarStyle: {
+            backgroundColor: t.surface,
+            borderTopColor: t.ring,
+            minHeight: grown(56) + bottomPad,
+            paddingTop: sp.sm,
+            paddingBottom: bottomPad,
+          },
+          tabBarActiveTintColor: t.brand,
+          tabBarInactiveTintColor: t.ink3,
+          tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' },
+          sceneStyle: { backgroundColor: t.bg },
+        }}
+      >
+        <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
+        <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color }) => <Icon name="train" size={23} color={color} /> }} />
+        <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color }) => <Icon name="calendar" size={23} color={color} /> }} />
+        <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ color }) => <Icon name="video" size={23} color={color} /> }} />
+        <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color }) => <Icon name="chart" size={23} color={color} /> }} />
+        <Tabs.Screen name="sessions" options={{ href: null, title: 'Mark Sessions' }} />
+        <Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
+        <Tabs.Screen name="client-attendance" options={{ href: null, title: 'Their Attendance' }} />
+        <Tabs.Screen name="my-register" options={{ href: null, title: 'Your Register' }} />
+        <Tabs.Screen name="referrals" options={{ href: null, title: 'Who Brings You Clients' }} />
+        <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
+        <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
+        <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a Session' }} />
+        <Tabs.Screen name="my-training" options={{ href: null, title: 'My Training' }} />
+        <Tabs.Screen name="my-nutrition" options={{ href: null, title: 'My Nutrition' }} />
+        <Tabs.Screen name="my-progress" options={{ href: null, title: 'My Progress' }} />
+        <Tabs.Screen name="checklists" options={{ href: null, title: 'Their Checklists' }} />
+        <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working Toward' }} />
+        <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress Photos' }} />
+        <Tabs.Screen name="client-week" options={{ href: null, title: 'Their Week' }} />
+        <Tabs.Screen name="client" options={{ href: null, title: 'Client' }} />
+        <Tabs.Screen name="client-body" options={{ href: null, title: 'Body Composition' }} />
+        <Tabs.Screen name="client-training" options={{ href: null, title: 'Their Training' }} />
+        <Tabs.Screen name="templates" options={{ href: null, title: 'Program Templates' }} />
+        <Tabs.Screen name="exercise" options={{ href: null, title: 'Exercise' }} />
+        <Tabs.Screen name="library" options={{ href: null, title: 'Exercise Library' }} />
+        <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
+        <Tabs.Screen name="billing" options={{ href: null, title: 'Billing & Subscription' }} />
+        <Tabs.Screen name="payments" options={{ href: null, title: 'Payments' }} />
+        <Tabs.Screen name="ad-spend" options={{ href: null, title: 'Ad Spend' }} />
+        <Tabs.Screen name="leads" options={{ href: null, title: 'Enquiries' }} />
+        <Tabs.Screen name="classes" options={{ href: null, title: 'Classes' }} />
+        <Tabs.Screen name="class-checkin" options={{ href: null, title: 'Class Check-in' }} />
+        <Tabs.Screen name="broadcast" options={{ href: null, title: 'Broadcast' }} />
+        <Tabs.Screen name="broadcast-session" options={{ href: null, title: 'Broadcast a Session' }} />
+        <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
+        <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
+        <Tabs.Screen name="client-intake" options={{ href: null, title: 'Their Intake' }} />
+        <Tabs.Screen name="client-nutrition" options={{ href: null, title: 'Their Nutrition' }} />
+        <Tabs.Screen name="group" options={{ href: null, title: 'Group Programme' }} />
+        <Tabs.Screen name="share-kit" options={{ href: null, title: 'Share Kit' }} />
+        <Tabs.Screen name="documents" options={{ href: null, title: 'Documents' }} />
+        <Tabs.Screen name="invoices" options={{ href: null, title: 'Invoices' }} />
+        <Tabs.Screen name="receipts" options={{ href: null, title: 'Cash and Transfers' }} />
+        <Tabs.Screen name="costs" options={{ href: null, title: 'What It Costs You' }} />
+        <Tabs.Screen name="nudges" options={{ href: null, title: 'Nudges' }} />
+        <Tabs.Screen name="client-report" options={{ href: null, title: 'Their Record' }} />
+        <Tabs.Screen name="credentials" options={{ href: null, title: 'Credentials' }} />
+        <Tabs.Screen name="messages" options={{ href: null, title: 'Messages' }} />
+        <Tabs.Screen name="money" options={{ href: null, title: 'Money' }} />
+        <Tabs.Screen name="brand" options={{ href: null, title: 'Branding' }} />
+        <Tabs.Screen name="statement" options={{ href: null, title: 'Statement' }} />
+        <Tabs.Screen name="getting-started" options={{ href: null, title: 'Getting Started' }} />
+        <Tabs.Screen name="assistant" options={{ href: null, title: 'Assistant' }} />
+        <Tabs.Screen name="templates-messages" options={{ href: null, title: 'Saved Messages' }} />
+        <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
+      </Tabs>
+      <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
+      {/* Renders nothing. Reads this coach's unsent floor queue — attendance
+          ticks, session outcomes, logged sessions — off the device once, so the
+          app's reconnect and foreground triggers can empty it without the coach
+          having to reopen one of the three screens that own it. */}
+      <FloorQueueSync uid={user?.id ?? null} />
     </>
   );
 }
