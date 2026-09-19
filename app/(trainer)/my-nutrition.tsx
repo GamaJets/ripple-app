@@ -61,8 +61,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, Field, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import Svg, { Circle } from 'react-native-svg';
 import { supabase } from '../../src/lib/supabase';
 import { signedInUid } from '../../src/lib/signedInUid';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -86,7 +87,6 @@ import type { Diet, Goal } from '../../src/lib/types';
 import { readFoodEdit } from '../../src/lib/entryEdit';
 import { searchCommonFoods, type CommonFood } from '../../src/lib/foods';
 import { num } from '../../src/lib/format';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * Whether this account has anywhere to PUT a meal.
@@ -487,18 +487,10 @@ export default function MyNutrition() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-          {/* ── header. Whose day this is, said before anything else ──────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Your own meals, not a client&rsquo;s</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Nutrition</Text>
-            </View>
-          </View>
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-            Everything on this screen is food you logged for yourself, under your own account. No
-            client&rsquo;s meals appear here, and nothing you log here reaches a client&rsquo;s record.
-          </Text>
+          {/* ── header. Whose day this is, said before anything else ────────
+              The board's pushed-page head; the subtitle is the one line that
+              keeps this screen from being mistaken for a client's. */}
+          <PageHead title="My Nutrition" subtitle="Your own meals, not a client’s" />
 
           {/* ── can what follows be trusted? ─────────────────────────────── */}
           {fl.status === 'error' ? (
@@ -531,16 +523,43 @@ export default function MyNutrition() {
 
           <Rule />
 
-          {/* ── the day ──────────────────────────────────────────────────── */}
-          <Hero
-            label={heroLabel}
-            figure={heroFigure}
-            unit="kcal"
-            note={heroNote}
-            arc={whole && target && target.kcal ? fl.consumed.kcal / target.kcal : undefined}
-            arcLabel="of today’s calories eaten"
-            tone={left && left.net < 0 ? t.crit : undefined}
-          />
+          {/* ── the day ──────────────────────────────────────────────────────
+              The ring card the client's Meals tab draws, so coach and client
+              read one figure the same way: what has been eaten inside the
+              ring, the target under it, and what is left as the sentence
+              beneath. The withholding is the old Hero's: under an unread or
+              truncated log every figure is a dash and the ring is an empty
+              track — never a zero, which on this screen would read as "you
+              have eaten nothing today". No arc without a target: an empty
+              ring drawn for a target we do not have is a figure invented to
+              fill a slot. */}
+          <Section>
+            <Text style={{ ...ty.micro, color: t.ink3, textAlign: 'center' }}>Nutrition Today</Text>
+            <View accessible
+              accessibilityLabel={whole
+                ? `${num(fl.consumed.kcal)} calories eaten today${target ? ` of ${num(target.kcal)}` : ''}. ${heroLabel}, ${heroFigure} kcal. ${heroNote}`
+                : `Today’s calories could not be counted. ${heroNote}`}
+              style={{ width: 156, height: 156, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginTop: sp.md }}>
+              <Svg width={156} height={156} viewBox="0 0 156 156" style={{ position: 'absolute' }}
+                accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <Circle cx="78" cy="78" r="68" fill="none" stroke={t.surface3} strokeWidth={11} />
+                {whole && target && target.kcal ? (
+                  <Circle cx="78" cy="78" r="68" fill="none" stroke={left && left.net < 0 ? t.crit : t.brand} strokeWidth={11} strokeLinecap="round"
+                    strokeDasharray={2 * Math.PI * 68} strokeDashoffset={2 * Math.PI * 68 * (1 - Math.min(1, fl.consumed.kcal / target.kcal))}
+                    transform="rotate(-90 78 78)" />
+                ) : null}
+              </Svg>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(30), color: t.ink }}>{whole ? num(fl.consumed.kcal) : fig(null)}</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{target ? `of ${num(target.kcal)} kcal` : 'kcal eaten'}</Text>
+            </View>
+            <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
+              {!whole ? 'Calories not counted' : left ? `${heroFigure} kcal ${left.net >= 0 ? 'left' : 'over'}` : `${heroFigure} kcal eaten`}
+            </Text>
+            {/* Over is said in the ring's colour and in the word; crit as
+                caption ink is under AA on the light palettes, so the sentence
+                stays in its own ink. */}
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: 3 }}>{heroNote}</Text>
+          </Section>
 
           {/* Only when it is actually costing something: there is a target to
               spend against, and no burn came back to spend it on. Connected and

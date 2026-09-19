@@ -48,8 +48,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost, fig, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Ghost, fig, Flag } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
 import { classRoster, UNLINKED_CLASS, type RosterMember } from '../../src/lib/classAttendance';
 import { parseRate, rateText, payEstimate, rateFieldNote } from '../../src/lib/coachPrefs';
@@ -63,7 +63,6 @@ import {
 import { countRegister, registerArc, registerLine } from '../../src/lib/classRegister';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function ClassCheckin() {
   const t = useTheme();
@@ -393,25 +392,47 @@ export default function ClassCheckin() {
             it trailed, which put the one control that leaves this screen in the
             top-RIGHT corner — where iOS has never put it and where the rest of
             this app does not put it — and without `a11yLabel` a screen reader
-            announced it as "button". The house form is in
-            src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{title}{branch ? ' · ' + branch : ''}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Check-in</Text>
-          </View>
-        </View>
+            announced it as "button". The house form is now `PageHead`, which
+            carries the whole argument; the class is the subtitle. */}
+        <PageHead title="Check-in" subtitle={`${title}${branch ? ' · ' + branch : ''}`} />
 
-        {/* ── the hero: the count payroll is built from ───────────────────── */}
-        <Hero
-          label="Checked In"
-          figure={fig(counted ? present : null)}
-          unit={counted ? '/ ' + booked : undefined}
-          note={unlinked ? 'No class was passed to this screen — this is not a count.' : loading ? 'Still reading the roster.' : registerLine(reg, counted)}
-          arc={!counted ? undefined : registerArc(reg) ?? undefined}
-          arcLabel="of those booked checked in"
-        />
+        {/* ── the figure: the count payroll is built from ───────────────────
+            The board's figure card in place of the Hero: the count at the
+            board's figure size, those booked beside it, and how far through
+            the register this is as a bar in the pill idiom. `counted` is the
+            gate — no class, a failed read or a roster still in flight is a
+            dash and an empty track, never a nought. */}
+        {(() => {
+          const arc = counted ? registerArc(reg) : null;
+          const pct = arc == null ? null : Math.round(Math.max(0, Math.min(1, arc)) * 100);
+          const note = unlinked ? 'No class was passed to this screen — this is not a count.' : loading ? 'Still reading the roster.' : registerLine(reg, counted);
+          return (
+            <Section>
+              <SectionHead title="Checked In" note={counted ? `${fig(booked)} booked` : undefined} />
+              {/* `present` and `booked` are plain counts under `counted`, so
+                  they go into the sentence as digits; the dash is only ever
+                  drawn under the label, never spoken mid-sentence. */}
+              <View accessible accessibilityLabel={`Checked in, ${counted ? `${present} of ${booked}` : 'not counted'}. ${note}`}>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                  <Text style={{ ...value(32), color: t.ink }}>{fig(counted ? present : null)}</Text>
+                  {counted ? (
+                    <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{'/ ' + booked}</Text>
+                  ) : null}
+                </View>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{note}</Text>
+              </View>
+              {pct != null ? (
+                <View
+                  accessibilityRole="progressbar"
+                  accessibilityLabel={`${pct}% of those booked checked in`}
+                  accessibilityValue={{ min: 0, max: 100, now: pct }}
+                  style={{ height: 8, borderRadius: radius.pill, backgroundColor: t.surface2, marginTop: sp.md, overflow: 'hidden' }}>
+                  <View style={{ width: `${pct}%`, height: '100%', borderRadius: radius.pill, backgroundColor: t.brand }} />
+                </View>
+              ) : null}
+            </Section>
+          );
+        })()}
 
 
         {/* ── the trainer's own estimate ──────────────────────────────────── */}

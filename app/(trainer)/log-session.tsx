@@ -133,7 +133,7 @@ import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { liftIn, plain, readLift, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
 import { sp, layout, radius, hairline, elevation, numeric, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
@@ -216,7 +216,6 @@ import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { dayLabel as historyDayLabel } from '../../src/lib/adherence';
 import { num } from '../../src/lib/format';
 import type { WorkoutEntry } from '../../src/lib/mockData';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
@@ -1295,35 +1294,30 @@ export default function LogSession() {
           keyboardDismissMode="interactive"
           refreshControl={pull}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg }}>
-            <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back"
-              style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name={BACK_ICON} size={18} color={t.ink} />
-            </Pressable>
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Log a session</Text>
-              {/* The person's name once there is one, and an honest heading
-                  before that. It used to read "Client" over a screen that had
-                  nobody and could not be given anybody. */}
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }} numberOfLines={1}>{pickedName || 'Log a Session'}</Text>
-            </View>
-            {/* ── Finish, where it can always be reached ────────────────────
-                Reported as missing entirely: "how does a coach save a session
-                they have logged for a client as there is no save logged
-                session button for them to tap". The button at the foot of the
-                form was real, but it was below the fold at the end of a long
-                sheet and drawn in two greys. Giving its disabled state an edge
-                made it visible; putting a second one HERE makes it findable,
-                which is a different problem and the one that was actually
-                reported.
-                Both press `save`. There is no second write path and no second
-                set of guards — `ready` is the same predicate, so the two cannot
-                disagree about whether this session may be filed. */}
-            <Cta label={busy ? 'Saving…' : 'Finish'} disabled={!ready || busy} onPress={save}
-              a11yLabel={!picked ? 'Finish — pick a client first'
-                : !clientLoggable ? `Finish — ${first} has no Repple account for this to be logged to`
-                : `Finish and log this session to ${first}'s record`} />
-          </View>
+          {/* ── the board's head: back, the title on the centre line, and
+              the person's name under it once there is one. It used to read
+              "Client" over a screen that had nobody and could not be given
+              anybody; now it says nothing until it can say a name.
+
+              ── Finish, where it can always be reached ────────────────────
+              Reported as missing entirely: "how does a coach save a session
+              they have logged for a client as there is no save logged
+              session button for them to tap". The button at the foot of the
+              form was real, but it was below the fold at the end of a long
+              sheet and drawn in two greys. Giving its disabled state an edge
+              made it visible; putting a second one HERE, in the head's one
+              trailing slot, makes it findable, which is a different problem
+              and the one that was actually reported.
+              Both press `save`. There is no second write path and no second
+              set of guards — `ready` is the same predicate, so the two cannot
+              disagree about whether this session may be filed. */}
+          <PageHead title="Log a Session" subtitle={pickedName || undefined}
+            trailing={
+              <Cta label={busy ? 'Saving…' : 'Finish'} disabled={!ready || busy} onPress={save}
+                a11yLabel={!picked ? 'Finish — pick a client first'
+                  : !clientLoggable ? `Finish — ${first} has no Repple account for this to be logged to`
+                  : `Finish and log this session to ${first}'s record`} />
+            } />
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
             {/* Not a promise this screen can keep for everybody on the book. A
                 hand-added client has no record for a session to go into, and

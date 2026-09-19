@@ -68,7 +68,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -105,7 +105,6 @@ import {
   programmeCaveat, planNote, DAYS_AHEAD, DAYS_BEHIND,
   type CoachPlanDay, type ScheduledFocus,
 } from '../../src/lib/coachWeek';
-import { BACK_ICON } from '../../src/ui/direction';
 
 // Written out here, on one line, rather than imported from the library beside
 // the logic that consumes them. scripts/check-schema.mjs resolves a select list
@@ -449,6 +448,39 @@ export default function ClientWeek() {
     backgroundColor: on ? t.brand : t.surface2,
   });
 
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens a record page on the client's week and not on a list of
+   * names. The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {/* `isWhole`, not `!== 'error'`. The error case already has its own
+          Notice above, so the status this gate was really letting
+          through was 'loading': a coach opening this screen with a full
+          book was told "Nobody is on your book yet" for as long as the
+          roster took to arrive. An empty list is a claim, and it may
+          only be made once the read has finished and come back whole. */}
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there are no weeks to look at" />
+      ) : r.roster.length === 0 && r.status === 'loading' ? (
+        <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
   /** One marked day. Past days are drawn quieter than future ones; that is the
    *  only difference, because it is the only difference we can honestly draw —
    *  a day that has gone is still nothing more than what they intended. */
@@ -490,18 +522,11 @@ export default function ClientWeek() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Their Week</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          The days a client has marked ahead of time — training, rest, a deload, or a note about
-          being away. Every line here is what they intend, never a record of what they did, and
-          none of it is yours to change.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Their Week" subtitle={client?.name || undefined} />
 
         {!USE_SUPABASE ? (
           <Section>
@@ -517,30 +542,7 @@ export default function ClientWeek() {
               </Section>
             ) : null}
 
-            <Section>
-              <SectionHead title="Client" />
-              {/* `isWhole`, not `!== 'error'`. The error case already has its own
-                  Notice above, so the status this gate was really letting
-                  through was 'loading': a coach opening this screen with a full
-                  book was told "Nobody is on your book yet" for as long as the
-                  roster took to arrive. An empty list is a claim, and it may
-                  only be made once the read has finished and come back whole. */}
-              {r.roster.length === 0 && isWhole(r.status) ? (
-                <EmptyRoster lacks="there are no weeks to look at" />
-              ) : r.roster.length === 0 && r.status === 'loading' ? (
-                <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {r.roster.map((c) => (
-                    <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                      accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                      accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                      <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </Section>
+            {!picked ? picker : null}
 
             {picked && !askable ? (
               /* ── the third answer ──────────────────────────────────────────
@@ -817,8 +819,18 @@ export default function ClientWeek() {
                 ) : null}
               </View>
             ) : null}
+
+            {picked ? picker : null}
           </>
         )}
+
+        {/* What this page is, said once and below the record: the board opens
+            on the week, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          The days a client has marked ahead of time — training, rest, a deload, or a note about
+          being away. Every line here is what they intend, never a record of what they did, and
+          none of it is yours to change.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

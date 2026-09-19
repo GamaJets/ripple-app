@@ -43,7 +43,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, grown, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
@@ -71,7 +71,6 @@ import {
   type CoachClientReportDoc,
   type CoachSessionRow, type ReportScan, type ReportMeasureEntry, type ReportInjury,
 } from '../../src/lib/coachClientReport';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
 // Written out here rather than imported from a shared constant:
@@ -499,25 +498,15 @@ export default function ClientReport() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{fullName || 'Pick a client'}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their record</Text>
-          </View>
-        </View>
-
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="Everything on record, on one page"
-            note="Sessions, logged training, scans, tape measurements and anything they have disclosed. It carries no rating, no percentage and no assessment — only what was entered, and by whom. Anything that could not be read says so on the page."
-          />
-        </View>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them takes the page while nobody
+            is chosen. */}
+        <PageHead title="Report" subtitle={fullName || undefined} />
 
         {!picked ? (
           <Section>
-            <SectionHead title="Who is it for?" />
+            <SectionHead title="Who Is It For?" />
             {r.status === 'error' ? (
               <Flag>Your client list could not be read, so this is not a list of everyone you coach.</Flag>
             ) : null}
@@ -554,8 +543,8 @@ export default function ClientReport() {
               <Notice kicker="No account" title={`${fullName || 'This client'} has no Repple account`}
                 note={`You added ${who} to your book by hand, so there is no account for sessions, training, scans or measurements to belong to — and so there is nothing to put on a page. That is not a record that could not be read, and a document saying it could not be read would be wrong on every line. Invite them from your client list and this becomes a real report from the day they join.`} />
             </Section>
-            <View style={{ marginTop: layout.section }}>
-              <Cta label="Someone Else" tone={t.surface2} wide onPress={() => { setPicked(null); setNote(''); }} />
+            <View style={{ marginTop: layout.section, flexDirection: 'row' }}>
+              <Ghost label="Someone Else" onPress={() => { setPicked(null); setNote(''); }} />
             </View>
           </>
         ) : (
@@ -563,7 +552,7 @@ export default function ClientReport() {
             <Rule />
 
             <Section>
-              <SectionHead title="What will be on it" note={`Printed in ${pick.unit} and ${lengthUnit}`} />
+              <SectionHead title="What Will Be on It" note={`Printed in ${pick.unit} and ${lengthUnit}`} />
               <Row t={t} label="Sessions booked with you"
                 value={reads.sessions.status === 'error' ? 'not read'
                   : reads.sessions.status === 'loading' ? '…'
@@ -621,7 +610,7 @@ export default function ClientReport() {
             <Rule />
 
             <Section>
-              <SectionHead title="Anything you want to say" note="Optional. Printed in your own words, attributed to you." />
+              <SectionHead title="Anything You Want to Say" note="Optional. Printed in your own words, attributed to you." />
               <TextInput value={note} onChangeText={setNote} multiline
                 placeholder={`Twelve weeks with ${who}. What you would want the next coach to know.`}
                 placeholderTextColor={t.ink3}
@@ -632,16 +621,28 @@ export default function ClientReport() {
               </Text>
             </Section>
 
-            <View style={{ marginTop: layout.section, flexDirection: 'row', gap: sp.md }}>
-              <View style={{ flex: 1 }}>
-                <Cta label="Someone Else" tone={t.surface2} wide onPress={() => { setPicked(null); setNote(''); }} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Cta label="Send It" wide disabled={overall === 'loading'} onPress={send} />
-              </View>
+            {/* One primary action, full width, the board's way; switching
+                client is the quiet form under it rather than a second green
+                button beside the one that sends. */}
+            <View style={{ marginTop: layout.section }}>
+              <Cta label="Send It" wide disabled={overall === 'loading'} onPress={send} />
+            </View>
+            <View style={{ marginTop: sp.md, flexDirection: 'row' }}>
+              <Ghost label="Someone Else" onPress={() => { setPicked(null); setNote(''); }} />
             </View>
           </>
         )}
+
+        {/* What the document is, below the counts: the board opens a record
+            page on the record, and this explains it once the coach has seen
+            what is in it. */}
+        <View style={{ marginTop: sp.lg }}>
+          <Notice
+            kicker="What this is"
+            title="Everything on record, on one page"
+            note="Sessions, logged training, scans, tape measurements and anything they have disclosed. It carries no rating, no percentage and no assessment — only what was entered, and by whom. Anything that could not be read says so on the page."
+          />
+        </View>
       </ScrollView>
 
       {/* ── the document, on the screen, before it goes ───────────────────
@@ -661,12 +662,11 @@ export default function ClientReport() {
           let the reads move underneath an approved document. */}
       <Modal visible={!!preview} animationType="slide" onRequestClose={() => setPreview(null)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingTop: sp.md }}>
-            <Ghost icon={BACK_ICON} a11yLabel="Back to the report" onPress={() => setPreview(null)} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Before you send it</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>The Document</Text>
-            </View>
+          <View style={{ paddingHorizontal: layout.gutter }}>
+            {/* The same head as the page under it. The back control returns
+                to the report, and says so. */}
+            <PageHead title="The Document" subtitle="Before you send it"
+              backLabel="Back to the report" onBack={() => setPreview(null)} />
           </View>
 
           {preview ? (

@@ -69,7 +69,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Spark, Cta, Ghost, Notice, PartialRead, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Spark, Cta, Notice, PartialRead, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value as valueType } from '../../src/theme/scale';
 import { useCheckIns, type CheckIn } from '../../src/ui/checkins';
 import { useMeasurements, METRICS, type MeasureEntry } from '../../src/ui/measurements';
@@ -94,7 +94,7 @@ import { ScanCadencePanel } from '../../src/ui/ScanCadencePanel';
 import { useToday } from '../../src/ui/today';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { num1 } from '../../src/lib/format';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 
 // The range a human weighs, in the kilograms this app stores. Metric because
 // the record is metric; the bounds are converted for whichever unit the coach
@@ -459,18 +459,10 @@ export default function MyProgress() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-          {/* ── header. Whose body this is, said before anything else ─────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Your own body, not a client&rsquo;s</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Progress</Text>
-            </View>
-          </View>
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-            Every figure on this screen was measured by you, for you, under your own account. No
-            client&rsquo;s readings appear here, and nothing you log here reaches a client&rsquo;s record.
-          </Text>
+          {/* ── header. Whose body this is, said before anything else ───────
+              The board's pushed-page head; the subtitle is the one line that
+              keeps this screen from being mistaken for a client's. */}
+          <PageHead title="My Progress" subtitle="Your own body, not a client’s" />
 
           {/* ── can what follows be trusted? ─────────────────────────────── */}
           {bodyStatus === 'error' ? (
@@ -497,11 +489,12 @@ export default function MyProgress() {
               same figures can go straight back into the boxes below. The
               movement in the note beside it prints through the same function,
               so this row cannot show a comma and a full stop at once. */}
-          <Hero
-            label="Your Latest Weight"
-            figure={shownWeight == null ? fig(null) : plain(shownWeight)}
-            unit={shownWeight == null ? undefined : wu}
-            note={shownWeight == null
+          {(() => {
+            // The board's figure card in place of the Hero: the same label,
+            // figure, unit and sentence, in a Section at the board's figure
+            // size, as client-body.tsx draws each of its metrics.
+            const figure = shownWeight == null ? fig(null) : plain(shownWeight);
+            const moved = shownWeight == null
               ? (ci.status === 'loading'
                 ? 'Reading your record…'
                 : !weighKnown
@@ -517,12 +510,27 @@ export default function MyProgress() {
                 unit: wu,
                 noChange: 'Unchanged',
                 noBaseline: 'First weigh-in',
-              })} · measured ${dayLabel(latest!.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
-          />
-          {staleNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{staleNote}</Text> : null}
-          {weightNote && shownWeight != null ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{weightNote}</Text>
-          ) : null}
+              })} · measured ${dayLabel(latest!.at)}${latestAgo ? ` · ${latestAgo}` : ''}`;
+            return (
+              <Section>
+                <SectionHead title="Your Latest Weight" note={shownWeight != null && latest ? dayLabel(latest.at) : undefined} />
+                {/* One stop for the ear: label, figure, movement. */}
+                <View accessible accessibilityLabel={`Your latest weight, ${shownWeight == null ? 'no reading' : `${figure} ${wu}`}. ${moved}`}>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                    <Text style={{ ...valueType(32), color: t.ink }}>{figure}</Text>
+                    {shownWeight != null ? (
+                      <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{wu}</Text>
+                    ) : null}
+                  </View>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{moved}</Text>
+                </View>
+                {staleNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{staleNote}</Text> : null}
+                {weightNote && shownWeight != null ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text>
+                ) : null}
+              </Section>
+            );
+          })()}
 
           <Rule />
 

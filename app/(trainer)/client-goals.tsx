@@ -57,8 +57,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
 import { supabase } from '../../src/lib/supabase';
@@ -89,7 +89,6 @@ import { localDate } from '../../src/lib/localDate';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useNow } from '../../src/ui/today';
-import { BACK_ICON } from '../../src/ui/direction';
 import { num2 } from '../../src/lib/format';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
@@ -468,6 +467,37 @@ export default function ClientGoals() {
     backgroundColor: on ? t.brand : t.surface2,
   });
 
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens a record page on the client's figure and not on a list of
+   * names. The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there are no goals to look at" />
+      ) : r.roster.length === 0 && r.status === 'loading' ? (
+        /* An empty chip row while the roster lands reads as a coach
+           with nobody on their book — the same claim `EmptyRoster`
+           above is gated on `isWhole` to avoid making. Said in words
+           instead, exactly as app/(trainer)/client-week.tsx says it. */
+        <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
   const goalCard = (g: GoalTarget, i: number) => {
     const measured = isMeasured(g);
     const kind = measured ? (g.kind as MeasuredKind) : null;
@@ -557,18 +587,11 @@ export default function ClientGoals() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Working Toward</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          What each client is aiming at, in their own words and numbers, how far along they are,
-          and what the tape says. You can read these; you can&rsquo;t change them — a goal is theirs
-          to set and theirs to call done, and a measurement is theirs to take.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Goals" subtitle={client?.name || undefined} />
 
         {!USE_SUPABASE ? (
           <Section>
@@ -584,28 +607,7 @@ export default function ClientGoals() {
               </Section>
             ) : null}
 
-            <Section>
-              <SectionHead title="Client" />
-              {r.roster.length === 0 && isWhole(r.status) ? (
-                <EmptyRoster lacks="there are no goals to look at" />
-              ) : r.roster.length === 0 && r.status === 'loading' ? (
-                /* An empty chip row while the roster lands reads as a coach
-                   with nobody on their book — the same claim `EmptyRoster`
-                   above is gated on `isWhole` to avoid making. Said in words
-                   instead, exactly as app/(trainer)/client-week.tsx says it. */
-                <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {r.roster.map((c) => (
-                    <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                      accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                      accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                      <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </Section>
+            {!picked ? picker : null}
 
             {picked && !askable ? (
               /* ── the third answer ────────────────────────────────────────
@@ -659,19 +661,47 @@ export default function ClientGoals() {
                   </Section>
                 ) : (
                   <>
-                    {lead ? (
-                      <View>
-                        <Hero
-                          label={`${who} · ${goalLabel(lead.goal)}`}
-                          figure={fig(goalValue(lead.prog.current, lead.kind, wu))}
-                          unit={goalUnit(lead.kind, wu)}
-                          arc={lead.prog.pct / 100}
-                          arcLabel="of the way to the goal"
-                          note={`${lead.prog.pct}% of the way · ${fig(Math.abs(goalDelta(lead.prog.remaining, lead.kind, wu)))} ${goalUnit(lead.kind, wu)} to go`}
-                        />
-                        <Rule />
-                      </View>
-                    ) : null}
+                    {lead ? (() => {
+                      /* ── the board's figure card ─────────────────────────
+                         The goal to lead with, as one card: the goal's name
+                         over the current reading at the board's figure size,
+                         how far along it is as a bar, and what is left. The
+                         Hero's ring said the same percentage; the bar says it
+                         in the pill idiom the rest of the board uses. `lead`
+                         is already gated on a WHOLE read of the series, so
+                         the percentage is never a figure off a truncated
+                         page. */
+                      const unit = goalUnit(lead.kind, wu);
+                      const figure = fig(goalValue(lead.prog.current, lead.kind, wu));
+                      const left = `${fig(Math.abs(goalDelta(lead.prog.remaining, lead.kind, wu)))} ${unit} to go`;
+                      const pct = Math.round(Math.max(0, Math.min(100, lead.prog.pct)));
+                      return (
+                        <Section>
+                          <SectionHead title={goalLabel(lead.goal)} note={`${pct}% of the way`} />
+                          {/* One stop for the ear: goal, reading, how far, what
+                              is left. Four Texts were four unrelated facts. */}
+                          <View accessible accessibilityLabel={`${goalLabel(lead.goal)}, ${figure} ${unit}. ${pct}% of the way to the goal, ${left}.`}>
+                            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                              <Text style={{ ...value(32), color: t.ink }}>{figure}</Text>
+                              <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{unit}</Text>
+                            </View>
+                            <View
+                              accessibilityRole="progressbar"
+                              accessibilityValue={{ min: 0, max: 100, now: pct }}
+                              style={{ height: 8, borderRadius: radius.pill, backgroundColor: t.surface2, marginTop: sp.md, overflow: 'hidden' }}>
+                              <View style={{ width: `${pct}%`, height: '100%', borderRadius: radius.pill, backgroundColor: t.brand }} />
+                            </View>
+                            {/* The same strip of figures the goal rows print —
+                                "58% of the way · 4 kg to go" — off a progress
+                                object `lead` has already built whole. */}
+                            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+                              {`${pct}% of the way · ${fig(Math.abs(goalDelta(lead.prog.remaining, lead.kind, wu)))} ${unit} to go`}
+                              {lead.goal.targetValue != null ? ` · target ${fig(goalValue(lead.goal.targetValue, lead.kind, wu))} ${unit}` : ''}
+                            </Text>
+                          </View>
+                        </Section>
+                      );
+                    })() : null}
 
                     <Section>
                       {/* `isWhole(goalStatus)`, not the bare length. A count is
@@ -822,8 +852,18 @@ export default function ClientGoals() {
                 ) : null}
               </View>
             ) : null}
+
+            {picked ? picker : null}
           </>
         )}
+
+        {/* What this page is, said once and below the record: the board opens
+            on the figure, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          What each client is aiming at, in their own words and numbers, how far along they are,
+          and what the tape says. You can read these; you can&rsquo;t change them — a goal is theirs
+          to set and theirs to call done, and a measurement is theirs to take.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

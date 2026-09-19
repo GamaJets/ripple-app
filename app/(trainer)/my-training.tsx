@@ -47,7 +47,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Notice, PartialRead, Field, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Notice, PartialRead, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
@@ -93,7 +93,6 @@ import { num } from '../../src/lib/format';
 import { localDate } from '../../src/lib/localDate';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { appLocale } from '../../src/lib/locale';
-import { BACK_ICON } from '../../src/ui/direction';
 // ── the four things a coach could do for everybody except themselves ──────
 //
 // The client app has a Lifting Tools screen, a Personal Records board, a Trends
@@ -570,18 +569,10 @@ export default function MyTraining() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-          {/* ── header. Whose log this is, said before anything else ─────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Your own log, not a client&rsquo;s</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Training</Text>
-            </View>
-          </View>
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-            Everything on this screen is training you logged for yourself, under your own account. No
-            client&rsquo;s sessions appear here, and nothing you log here reaches a client&rsquo;s record.
-          </Text>
+          {/* ── header. Whose log this is, said before anything else ───────
+              The board's pushed-page head; the subtitle is the one line that
+              keeps this screen from being mistaken for a client's. */}
+          <PageHead title="My Training" subtitle="Your own log, not a client’s" />
 
           {/* ── can what follows be trusted? ─────────────────────────────── */}
           {status === 'error' ? (

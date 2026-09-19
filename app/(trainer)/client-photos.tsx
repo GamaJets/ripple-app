@@ -101,7 +101,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -122,7 +122,6 @@ import {
 import {
   timeline, spanNote, undatedCount, pairOf, pairNote,
 } from '../../src/lib/photoTimeline';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** How often the screen wakes up. It re-renders the tiles (so a link that has
  *  just lapsed stops being drawn the moment it lapses rather than at the next
@@ -352,6 +351,40 @@ export default function ClientPhotos() {
     backgroundColor: on ? t.brand : t.surface2,
   });
 
+  /** One segment of the board's bar: an ink fill under the chosen word, the
+   *  ground colour for the word itself — the same pill client-body.tsx draws
+   *  its range bar with, so every record page reads one control. */
+  const seg = (on: boolean) => ({
+    flex: 1, minHeight: 40, borderRadius: radius.pill,
+    alignItems: 'center' as const, justifyContent: 'center' as const,
+    backgroundColor: on ? t.ink : 'transparent',
+  });
+
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the photographs once somebody is, because
+   * the board opens a record page on the client and not on a list of names.
+   * The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there is nobody to compare photos for" />
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
   /** The picture, or the reason there isn't one. An expired signature and a
    *  file that would not sign are different states with different futures, so
    *  they say different things rather than sharing a grey box. */
@@ -376,17 +409,11 @@ export default function ClientPhotos() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Sent to you</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Progress Photos</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          You see a photo here because the client sent you that photo. Being their coach shows you
-          none of the others, and they can take any of these back at any time.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Progress Photos" subtitle={client?.name || undefined} />
 
         {r.status === 'error' ? (
           <Section>
@@ -395,22 +422,7 @@ export default function ClientPhotos() {
           </Section>
         ) : null}
 
-        <Section>
-          <SectionHead title="Client" />
-          {r.roster.length === 0 && isWhole(r.status) ? (
-            <EmptyRoster lacks="there is nobody to compare photos for" />
-          ) : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-              {r.roster.map((c) => (
-                <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                  accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                  accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                  <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-        </Section>
+        {!picked ? picker : null}
 
         {picked ? (
           <View>
@@ -457,17 +469,21 @@ export default function ClientPhotos() {
                       that does nothing, and this screen has enough to read
                       already. */}
                   {inbox.photos.length > 1 ? (
-                    <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-                      {([['sent', 'As Sent'], ['timeline', 'Timeline']] as const).map(([key, label]) => (
-                        <Pressable key={key} onPress={() => setView(key)}
-                          accessibilityRole="button" accessibilityState={{ selected: view === key }}
-                          accessibilityLabel={key === 'sent'
-                            ? 'Order by when each photo was sent to you'
-                            : 'Order by when each photo was taken'}
-                          style={chip(view === key)}>
-                          <Text style={{ ...ty.micro, color: view === key ? t.brandInk : t.ink2 }}>{label}</Text>
-                        </Pressable>
-                      ))}
+                    <View accessibilityRole="tablist"
+                      style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginBottom: sp.md }}>
+                      {([['sent', 'As Sent'], ['timeline', 'Timeline']] as const).map(([key, label]) => {
+                        const on = view === key;
+                        return (
+                          <Pressable key={key} onPress={() => setView(key)}
+                            accessibilityRole="tab" accessibilityState={{ selected: on }}
+                            accessibilityLabel={key === 'sent'
+                              ? 'Order by when each photo was sent to you'
+                              : 'Order by when each photo was taken'}
+                            style={seg(on)}>
+                            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
+                          </Pressable>
+                        );
+                      })}
                     </View>
                   ) : null}
 
@@ -486,7 +502,7 @@ export default function ClientPhotos() {
                       of it. */}
                   {compare ? (
                     <View style={{ marginBottom: sp.lg }}>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>Side by side</Text>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>Side by Side</Text>
                       <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                         {[compare.earlier, compare.later].map((p) => (
                           <View key={p.id} style={{ flex: 1 }}>
@@ -615,6 +631,15 @@ export default function ClientPhotos() {
             </Section>
           </View>
         ) : null}
+
+        {picked ? picker : null}
+
+        {/* What this page is, said once and below the photographs: the board
+            opens on the record, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          You see a photo here because the client sent you that photo. Being their coach shows you
+          none of the others, and they can take any of these back at any time.
+        </Text>
       </ScrollView>
 
       {/* ── one photo, larger ────────────────────────────────────────────────
@@ -626,17 +651,12 @@ export default function ClientPhotos() {
         <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
           {opened ? (
             <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingBottom: sp.xl }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <Ghost icon={BACK_ICON} a11yLabel="Close photo" onPress={() => setOpen(null)} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Sent by {firstName}</Text>
-                  <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>
-                    Taken {dates(opened).taken}
-                  </Text>
-                </View>
-              </View>
+              {/* The same head as the page under it. The back control closes
+                  the photo, and says so. */}
+              <PageHead title={`Taken ${dates(opened).taken}`} subtitle={`Sent by ${firstName}`}
+                backLabel="Close photo" onBack={() => setOpen(null)} />
 
-              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: sp.md }}>
                 {liveUrl(opened.link, now) ? (
                   <Image source={{ uri: liveUrl(opened.link, now) as string }}
                     accessible accessibilityLabel={spoken(opened)} resizeMode="contain"

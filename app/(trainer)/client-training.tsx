@@ -57,8 +57,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAuth } from '../../src/ui/auth';
 import { useSettings } from '../../src/ui/settings';
@@ -154,7 +154,6 @@ import { agePhrase } from '../../src/lib/freshness';
 import { appLocale } from '../../src/lib/locale';
 import { historyBoard, historyLine, blockSpanLine } from '../../src/lib/programHistory';
 import { reviewProgram, checksLine, type Finding } from '../../src/lib/programReview';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 // Written out here, on one line, rather than imported from the library beside
@@ -184,11 +183,14 @@ const UNIT_COLS = 'weight_unit';
  * screen that quietly showed twelve weeks would be answering a different
  * question from the one it did yesterday without saying so.
  */
-const RANGES: { days: number | null; label: string }[] = [
-  { days: 84, label: '12 Weeks' },
-  { days: 182, label: '6 Months' },
-  { days: 365, label: '12 Months' },
-  { days: null, label: 'Everything' },
+/** `short` is what the segment shows; `label` is what it says aloud. Four
+ *  words in one pill bar do not survive a larger text size, and "12W" read
+ *  out as "twelve W" is not a range. */
+const RANGES: { days: number | null; label: string; short: string }[] = [
+  { days: 84, label: '12 Weeks', short: '12W' },
+  { days: 182, label: '6 Months', short: '6M' },
+  { days: 365, label: '12 Months', short: '12M' },
+  { days: null, label: 'Everything', short: 'All' },
 ];
 
 /** How the attribution reads as a chip: short, and tinted only when it is not
@@ -757,10 +759,60 @@ export default function ClientTraining() {
   };
 
   const G = layout.gutter;
+
+  /** One segment of the board's bar: an ink fill under the chosen word, the
+   *  ground colour for the word itself — the same pill client-body.tsx draws
+   *  its range bar with, so every record page reads one control. */
+  const seg = (on: boolean) => ({
+    flex: 1, minHeight: 40, borderRadius: radius.pill,
+    alignItems: 'center' as const, justifyContent: 'center' as const,
+    backgroundColor: on ? t.ink : 'transparent',
+  });
+
   const chip = (on: boolean) => ({
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
     backgroundColor: on ? t.brand : t.surface2,
   });
+
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens a record page on the client's figure and not on a list of
+   * names. The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {/* Three sentences, and there was one. `r.status !== 'error'` let
+          'loading' AND 'partial' fall into "Nobody is on your book yet",
+          so that sentence flashed on every single open of this screen,
+          for every coach, however full their book — and it is the exact
+          sentence app/(trainer)/log-session.tsx names in its own header
+          as the one that makes a coach put the phone away: "a coach
+          standing on a gym floor being shown 'you have no clients'".
+          app/(trainer)/builder.tsx handles the identical condition
+          correctly and this screen sits beside it.
+
+          'partial' gets the list and no claim about it: the rows are
+          real and may be picked from, and `isWhole` is what says the
+          set is not the book. */}
+      {r.roster.length === 0 && r.status === 'loading' ? (
+        <Text style={{ ...ty.body, color: t.ink3 }}>Reading your roster…</Text>
+      ) : r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there is no training to look at" />
+      ) : r.roster.length === 0 ? null : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
 
   /** One exercise inside a session: the movement and what was done to it. */
   const exerciseRow = (e: WorkoutEntry, i: number) => {
@@ -912,18 +964,11 @@ export default function ClientTraining() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{fullName || 'Your book'}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Their Training</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Every day {who} has trained, newest first — what they logged themselves and what was
-          logged for them, with the exercises, sets, reps and loads as they were recorded.
-          Read-only: this is their record, and nothing on this screen changes it.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Training" subtitle={fullName || undefined} />
 
         {!USE_SUPABASE ? (
           <Section>
@@ -939,37 +984,7 @@ export default function ClientTraining() {
               </Section>
             ) : null}
 
-            <Section>
-              <SectionHead title="Client" />
-              {/* Three sentences, and there was one. `r.status !== 'error'` let
-                  'loading' AND 'partial' fall into "Nobody is on your book yet",
-                  so that sentence flashed on every single open of this screen,
-                  for every coach, however full their book — and it is the exact
-                  sentence app/(trainer)/log-session.tsx names in its own header
-                  as the one that makes a coach put the phone away: "a coach
-                  standing on a gym floor being shown 'you have no clients'".
-                  app/(trainer)/builder.tsx handles the identical condition
-                  correctly and this screen sits beside it.
-
-                  'partial' gets the list and no claim about it: the rows are
-                  real and may be picked from, and `isWhole` is what says the
-                  set is not the book. */}
-              {r.roster.length === 0 && r.status === 'loading' ? (
-                <Text style={{ ...ty.body, color: t.ink3 }}>Reading your roster…</Text>
-              ) : r.roster.length === 0 && isWhole(r.status) ? (
-                <EmptyRoster lacks="there is no training to look at" />
-              ) : r.roster.length === 0 ? null : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {r.roster.map((c) => (
-                    <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                      accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                      accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                      <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </Section>
+            {!picked ? picker : null}
 
             {picked ? (
               <View>
@@ -989,14 +1004,18 @@ export default function ClientTraining() {
                     the one it answered yesterday without saying so. */}
                 <Section>
                   <SectionHead title="How Far Back" note={status === 'partial' ? 'The read is at its limit' : undefined} />
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                    {RANGES.map((rg) => (
-                      <Pressable key={rg.label} onPress={() => setRangeDays(rg.days)}
-                        accessibilityRole="button" accessibilityState={{ selected: rangeDays === rg.days }}
-                        accessibilityLabel={rg.label} style={chip(rangeDays === rg.days)}>
-                        <Text style={{ ...ty.micro, color: rangeDays === rg.days ? t.brandInk : t.ink2 }}>{rg.label}</Text>
-                      </Pressable>
-                    ))}
+                  <View accessibilityRole="tablist"
+                    style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3 }}>
+                    {RANGES.map((rg) => {
+                      const on = rangeDays === rg.days;
+                      return (
+                        <Pressable key={rg.label} onPress={() => setRangeDays(rg.days)}
+                          accessibilityRole="tab" accessibilityState={{ selected: on }}
+                          accessibilityLabel={rg.label} style={seg(on)}>
+                          <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{rg.short}</Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                   {status === 'partial' ? (
                     <Flag tone={t.warn} style={{ marginTop: sp.md }}>
@@ -1384,40 +1403,64 @@ export default function ClientTraining() {
                 ) : (
                   <>
                     {/* ── the figures, and a dash wherever the read cannot
-                        support one ─────────────────────────────────────── */}
-                    <Hero
-                      label="Days Trained"
-                      figure={fig(board.dayCount)}
-                      unit={board.dayCount != null ? (board.dayCount === 1 ? 'day' : 'days') : undefined}
-                      note={board.dayCount == null
-                        ? 'Their training came back at the row limit, so how much of it there is cannot be counted from here. Everything listed below is real.'
-                        : board.newestDay
-                          ? `Last trained ${dayLabel(board.newestDay)}.`
-                          : 'Nothing on record carries a date this build can read.'}
-                      tone={board.dayCount == null ? t.warn : undefined}
-                    />
-                    <KpiRow items={[
-                      { label: 'Sets', value: num(board.sets) },
-                      {
-                        label: 'Volume',
-                        value: board.volumeKg == null ? '—' : num(volumeIn(board.volumeKg, unit)),
-                        unit: board.volumeKg == null ? undefined : unit,
-                      },
-                      { label: 'Last', value: board.newestDay ? dayLabel(board.newestDay) : '—' },
-                    ]} />
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                      {board.dayCount == null
-                        ? 'Every total here is a dash on purpose: the read came back at its row limit, so a sum over what arrived would be a subtotal wearing a total’s label.'
-                        : board.volumeKg == null
-                          ? 'Across everything on record. Nothing carried a load, so there is no tonnage to total — a dash rather than a nought.'
-                          : 'Across everything on record, over sets that carried a load. Bodyweight sets count on the left and contribute no tonnage.'}
-                      {board.entryCount != null && board.dayCount != null && board.entryCount > board.dayCount
-                        ? ` Those ${board.dayCount} day${board.dayCount === 1 ? '' : 's'} were logged in ${board.entryCount} separate entries — some days hold more than one, and the days that do say so.`
-                        : ''}
-                    </Text>
-                    {pick.note ? (
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{pick.note}</Text>
-                    ) : null}
+                        support one ───────────────────────────────────────
+                        The board's figure card: days trained at the board's
+                        figure size, the sets, tonnage and last day under it
+                        at the KPI size, and the sentence that qualifies
+                        them. `board.dayCount` is null under a truncated read
+                        and `fig` draws the dash; nothing here counts what
+                        arrived as what there is. */}
+                    <Section>
+                      <SectionHead title="Days Trained"
+                        note={board.dayCount != null && board.newestDay ? `last ${dayLabel(board.newestDay)}` : undefined} />
+                      <View accessible
+                        accessibilityLabel={`Days trained, ${board.dayCount == null ? 'not counted' : `${fig(board.dayCount)} ${board.dayCount === 1 ? 'day' : 'days'}`}. ${board.dayCount == null
+                          ? 'Their training came back at the row limit, so how much of it there is cannot be counted from here.'
+                          : board.newestDay ? `Last trained ${dayLabel(board.newestDay)}.` : 'Nothing on record carries a date this build can read.'}`}>
+                        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                          <Text style={{ ...value(32), color: t.ink }}>{fig(board.dayCount)}</Text>
+                          {board.dayCount != null ? (
+                            <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{board.dayCount === 1 ? 'day' : 'days'}</Text>
+                          ) : null}
+                        </View>
+                        {/* The warn tone the Hero carried on a truncated read
+                            goes in a dot beside the sentence, as client-body.tsx
+                            does with a stale reading: warn as caption ink is
+                            under AA on the light palettes. */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: sp.xs }}>
+                          {board.dayCount == null ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                          <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
+                            {board.dayCount == null
+                              ? 'Their training came back at the row limit, so how much of it there is cannot be counted from here. Everything listed below is real.'
+                              : board.newestDay
+                                ? `Last trained ${dayLabel(board.newestDay)}.`
+                                : 'Nothing on record carries a date this build can read.'}
+                          </Text>
+                        </View>
+                      </View>
+                      <KpiRow items={[
+                        { label: 'Sets', value: num(board.sets) },
+                        {
+                          label: 'Volume',
+                          value: board.volumeKg == null ? '—' : num(volumeIn(board.volumeKg, unit)),
+                          unit: board.volumeKg == null ? undefined : unit,
+                        },
+                        { label: 'Last', value: board.newestDay ? dayLabel(board.newestDay) : '—' },
+                      ]} />
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                        {board.dayCount == null
+                          ? 'Every total here is a dash on purpose: the read came back at its row limit, so a sum over what arrived would be a subtotal wearing a total’s label.'
+                          : board.volumeKg == null
+                            ? 'Across everything on record. Nothing carried a load, so there is no tonnage to total — a dash rather than a nought.'
+                            : 'Across everything on record, over sets that carried a load. Bodyweight sets count on the left and contribute no tonnage.'}
+                        {board.entryCount != null && board.dayCount != null && board.entryCount > board.dayCount
+                          ? ` Those ${board.dayCount} day${board.dayCount === 1 ? '' : 's'} were logged in ${board.entryCount} separate entries — some days hold more than one, and the days that do say so.`
+                          : ''}
+                      </Text>
+                      {pick.note ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{pick.note}</Text>
+                      ) : null}
+                    </Section>
 
                     {status === 'partial' ? (
                       <Section>
@@ -1807,10 +1850,19 @@ export default function ClientTraining() {
                 </>) : null}
               </View>
             ) : null}
+
+            {picked ? picker : null}
           </>
         )}
 
+        {/* What this page is, said once and below the record: the board opens
+            on the figure, not on a paragraph. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          Every day {who} has trained, newest first — what they logged themselves and what was
+          logged for them, with the exercises, sets, reps and loads as they were recorded.
+          Read-only: this is their record, and nothing on this screen changes it.
+        </Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
           Grouped by the day it was done on, in your own timezone. Inside a day, each entry is the
           exercises saved together in one go — a client who logs a movement at a time makes several,
           and a day that holds more than one says so above them rather than reading as several

@@ -76,8 +76,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { isWhole } from '../../src/ui/loadStatus';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { num } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
@@ -93,7 +93,6 @@ import {
   COACH_SCOPE_NOTE, NOT_A_VERDICT_NOTE,
   type CancelAction, type Cancellation,
 } from '../../src/lib/sessionCancellations';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** A timestamp as the day it happened, on the coach's own clock — the same call
  *  app/(trainer)/client-attendance.tsx makes and for the same reason: the
@@ -197,6 +196,37 @@ export default function ClientCancellationsScreen() {
 
   const G = layout.gutter;
 
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens a record page on the client's figure and not on a list of
+   * names. The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {/* `isWhole`, not `!== 'error'`. The failed read is announced by the
+          Notice above it, so what this gate would otherwise admit is 'loading'
+          — and "Nobody is on your book yet" is a claim about a coach's own
+          livelihood made before anything has been read. */}
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there is no record to open" />
+      ) : r.roster.length === 0 && r.status === 'loading' ? (
+        <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((x) => (
+            <Pressable key={x.id} onPress={() => setPicked(x.id === picked ? null : x.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === x.id }}
+              accessibilityLabel={x.name} style={chip(picked === x.id)}>
+              <Text style={{ ...ty.micro, color: picked === x.id ? t.brandInk : t.ink2 }}>{x.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
   /** One hour, inside the action that removed it. */
   const hourRow = (row: Cancellation, first: boolean) => {
     const when = `${dayLabel(row.startsAt)}${timeLabel(row.startsAt) ? ` · ${timeLabel(row.startsAt)}` : ''}`;
@@ -265,17 +295,11 @@ export default function ClientCancellationsScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Sessions They Cancelled</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Hours that were booked with you and then were not, newest first — who ended each one, and
-          how long before it was due to start. {NOT_A_VERDICT_NOTE}
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Cancellations" subtitle={client?.name || undefined} />
 
         {/* ── who ──────────────────────────────────────────────────────────── */}
         {r.status === 'error' ? (
@@ -285,28 +309,7 @@ export default function ClientCancellationsScreen() {
           </Section>
         ) : null}
 
-        <Section>
-          <SectionHead title="Client" />
-          {/* `isWhole`, not `!== 'error'`. The failed read is announced by the
-              Notice above, so what this gate would otherwise admit is 'loading'
-              — and "Nobody is on your book yet" is a claim about a coach's own
-              livelihood made before anything has been read. */}
-          {r.roster.length === 0 && isWhole(r.status) ? (
-            <EmptyRoster lacks="there is no record to open" />
-          ) : r.roster.length === 0 && r.status === 'loading' ? (
-            <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
-          ) : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-              {r.roster.map((x) => (
-                <Pressable key={x.id} onPress={() => setPicked(x.id === picked ? null : x.id)}
-                  accessibilityRole="button" accessibilityState={{ selected: picked === x.id }}
-                  accessibilityLabel={x.name} style={chip(picked === x.id)}>
-                  <Text style={{ ...ty.micro, color: picked === x.id ? t.brandInk : t.ink2 }}>{x.name}</Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-        </Section>
+        {!picked ? picker : null}
 
         {!picked ? (
           <>
@@ -377,40 +380,35 @@ export default function ClientCancellationsScreen() {
               <Section><PartialRead what="cancellations" shown={c.rows.length} onPress={() => { void c.reload(); }} /></Section>
             ) : null}
 
-            {/* ── the figures, and the one that cannot exist ──────────────── */}
+            {/* ── the figures, and the one that cannot exist ────────────────
+                The board's figure card: the count of cancellations is the
+                headline, at the board's figure size, with the hours it
+                removed beside it in the head. The middle notice keeps its
+                smaller figure under it — a second hero is no hero. */}
             <Section>
-              <SectionHead title="What the record holds" />
-
-              {/* Above the figures rather than under them. The number a coach
-                  arrives on this page looking for is a percentage, and it has
-                  to be refused before they have finished reading the tiles —
-                  not in a footnote they reach afterwards. */}
-              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{NO_RATE_NOTE}</Text>
+              <SectionHead title="Cancellations"
+                note={countable ? `${num(tally.sessions)} ${tally.sessions === 1 ? 'hour' : 'hours'}` : undefined} />
 
               {c.status === 'loading' ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>Reading their cancellations…</Text>
               ) : (
                 <>
-                  <View style={{ flexDirection: 'row', gap: sp.xl }}>
-                    <View>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>Hours</Text>
-                      <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                        {countable ? num(tally.sessions) : fig(null)}
-                      </Text>
-                    </View>
-                    <View>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>Cancellations</Text>
-                      <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                        {countable ? num(tally.actions) : fig(null)}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>Middle notice</Text>
-                      <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                        {countable && tally.medianNoticeMin != null
-                          ? noticeWords(tally.medianNoticeMin) : fig(null)}
-                      </Text>
-                    </View>
+                  <Text style={{ ...value(32), color: t.ink }}>
+                    {countable ? num(tally.actions) : fig(null)}
+                  </Text>
+
+                  {/* Directly under the figure rather than in a footnote. The
+                      number a coach arrives on this page looking for is a
+                      percentage, and it has to be refused before they have
+                      finished reading the figure — not afterwards. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{NO_RATE_NOTE}</Text>
+
+                  <View style={{ marginTop: sp.lg }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>Middle Notice</Text>
+                    <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
+                      {countable && tally.medianNoticeMin != null
+                        ? noticeWords(tally.medianNoticeMin) : fig(null)}
+                    </Text>
                   </View>
 
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -423,7 +421,7 @@ export default function ClientCancellationsScreen() {
 
                   {/* ── who, split four ways and never added up ───────────── */}
                   <View style={{ marginTop: sp.xl }}>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>Who ended them</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>Who Ended Them</Text>
                     <Text style={{ ...ty.body, color: t.ink, marginTop: sp.sm }}>
                       {countable
                         ? `${who}: ${num(tally.byClient)} · You: ${num(tally.byCoach)} · Somebody else: ${num(tally.byOther)} · Not recorded: ${num(tally.unattributed)}`
@@ -441,7 +439,7 @@ export default function ClientCancellationsScreen() {
 
                   {/* ── how close to the hour ─────────────────────────────── */}
                   <View style={{ marginTop: sp.xl }}>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>How much notice</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>How Much Notice</Text>
                     <Text style={{ ...ty.body, color: t.ink, marginTop: sp.sm }}>
                       {countable
                         ? `A day or more: ${num(tally.over24h)} · Under a day: ${num(tally.under24h)} · After it started: ${num(tally.after)}${tally.noticeUnknown ? ` · Not known: ${num(tally.noticeUnknown)}` : ''}`
@@ -497,6 +495,15 @@ export default function ClientCancellationsScreen() {
             </Section>
           </>
         )}
+
+        {picked ? picker : null}
+
+        {/* What this page is, said once and below the record: the board opens
+            on the figure, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          Hours that were booked with you and then were not, newest first — who ended each one, and
+          how long before it was due to start. {NOT_A_VERDICT_NOTE}
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

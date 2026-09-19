@@ -69,8 +69,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { isWhole } from '../../src/ui/loadStatus';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { num, fmtClock, fmtAxisDay } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
@@ -86,7 +86,6 @@ import {
   dwellMinutes, staffScopeNote, STAFF_RECORD_NOTE,
   type AttendanceEvent, type ClassOutcome,
 } from '../../src/lib/attendance';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** A timestamp as the day it happened, in the coach's own zone — they are the
  *  reader, the same call app/(trainer)/leaderboard.tsx makes about units. */
@@ -331,6 +330,38 @@ export default function ClientAttendanceScreen() {
 
   const G = layout.gutter;
 
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens a record page on the client's figure and not on a list of
+   * names. The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {/* `isWhole`, not `!== 'error'`. The failed read is already announced
+          by the Notice above it, so what this gate was really admitting was
+          'loading' — and "Nobody is on your book yet" is a claim about a
+          coach's own livelihood being made before anything has been read.
+          Loading, failed and genuinely empty are three sentences. */}
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there is no record to open" />
+      ) : r.roster.length === 0 && r.status === 'loading' ? (
+        <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
   const row = (e: AttendanceEvent, first: boolean) => {
     const o = outcomeWords(e.outcome);
     const mins = dwellMinutes(e.visit);
@@ -377,19 +408,11 @@ export default function ClientAttendanceScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their Attendance</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Their classes and every time your gym recorded them coming through the door — the register
-          and the door log, folded together so one visit is one line. A class with nothing marked
-          against it means nobody took the register. It is not a missed session, and nothing here
-          counts it as one.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record; the picker that names them is below the fold once
+            somebody is chosen, as on client-body.tsx. */}
+        <PageHead title="Attendance" subtitle={client?.name || undefined} />
 
         {/* ── who ──────────────────────────────────────────────────────────── */}
         {r.status === 'error' ? (
@@ -399,29 +422,7 @@ export default function ClientAttendanceScreen() {
           </Section>
         ) : null}
 
-        <Section>
-          <SectionHead title="Client" />
-          {/* `isWhole`, not `!== 'error'`. The failed read is already announced
-              by the Notice above, so what this gate was really admitting was
-              'loading' — and "Nobody is on your book yet" is a claim about a
-              coach's own livelihood being made before anything has been read.
-              Loading, failed and genuinely empty are three sentences. */}
-          {r.roster.length === 0 && isWhole(r.status) ? (
-            <EmptyRoster lacks="there is no record to open" />
-          ) : r.roster.length === 0 && r.status === 'loading' ? (
-            <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
-          ) : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-              {r.roster.map((c) => (
-                <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                  accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                  accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                  <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-        </Section>
+        {!picked ? picker : null}
 
         {!picked ? (
           <>
@@ -495,18 +496,39 @@ export default function ClientAttendanceScreen() {
               <Section><PartialRead what="bookings and visits" shown={a.events.length} onPress={() => { void a.reload(); }} /></Section>
             ) : null}
 
-            {/* ── how often, and only where the record supports saying ────── */}
+            {/* ── how often, and only where the record supports saying ──────
+                The board's figure card: one headline figure under a quiet
+                head, the note that qualifies it, and the strip below. The
+                rate is the figure because it is the one thing a coach acts
+                on; the day count sits beside it at the smaller size. */}
             <Section>
               <SectionHead
-                title="How often they come"
-                note={countable && a.rhythm.perWeek != null ? `${a.rhythm.perWeek} a week` : undefined}
+                title="Days a Week"
+                note={countable ? `${num(a.days.length)} ${a.days.length === 1 ? 'day' : 'days'} on record` : undefined}
               />
 
               {a.status === 'loading' ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>Reading their attendance…</Text>
               ) : (
                 <>
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 76, marginTop: sp.sm }}>
+                  {/* A dash, never a zero. `countable` is the whole-read gate
+                      and `perWeek` is null until there is a finished week to
+                      average; either way a rate nobody can stand behind is
+                      not drawn as a rate. */}
+                  <Text style={{ ...value(32), color: t.ink }}>
+                    {countable && a.rhythm.perWeek != null ? a.rhythm.perWeek : fig(null)}
+                  </Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                    {!countable
+                      ? 'No average while the record is incomplete. A rate over part of it is a figure about a gym they may not even go to.'
+                      : a.rhythm.perWeek == null
+                        ? (a.rhythm.firstDay
+                          ? `Your record of them starts ${shortDay(a.rhythm.firstDay)}. There is not yet a finished week inside it to average, so no rate is shown.`
+                          : 'Nothing recorded yet, so there is no average. A zero here would be a claim, not a blank.')
+                        : `Averaged over the ${a.rhythm.countedWeeks} finished week${a.rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(a.rhythm.firstDay as string)}. This week is left out — it is not over.`}
+                  </Text>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 76, marginTop: sp.lg }}>
                     {strip.map((w) => {
                       // An uncovered week is a hollow slot, not a zero bar. A bar
                       // of height zero claims they came in no times that week;
@@ -531,30 +553,6 @@ export default function ClientAttendanceScreen() {
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     {`Days they were recorded at a gym, week by week, over the last ${RHYTHM_WEEKS} weeks. A dashed slot is a week before your record of them starts — not a week they stayed away. The last bar is this week and is not finished.`}
-                  </Text>
-
-                  <View style={{ flexDirection: 'row', gap: sp.xl, marginTop: sp.lg }}>
-                    <View>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>Days on record</Text>
-                      <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                        {countable ? num(a.days.length) : fig(null)}
-                      </Text>
-                    </View>
-                    <View>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>Days a week</Text>
-                      <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                        {countable && a.rhythm.perWeek != null ? a.rhythm.perWeek : fig(null)}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    {!countable
-                      ? 'No average while the record is incomplete. A rate over part of it is a figure about a gym they may not even go to.'
-                      : a.rhythm.perWeek == null
-                        ? (a.rhythm.firstDay
-                          ? `Your record of them starts ${shortDay(a.rhythm.firstDay)}. There is not yet a finished week inside it to average, so no rate is shown.`
-                          : 'Nothing recorded yet, so there is no average. A zero here would be a claim, not a blank.')
-                        : `Averaged over the ${a.rhythm.countedWeeks} finished week${a.rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(a.rhythm.firstDay as string)}. This week is left out — it is not over.`}
                   </Text>
                 </>
               )}
@@ -648,6 +646,17 @@ export default function ClientAttendanceScreen() {
             </Section>
           </>
         )}
+
+        {picked ? picker : null}
+
+        {/* What this page is, said once and below the record: the board opens
+            on the figure, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          Their classes and every time your gym recorded them coming through the door — the register
+          and the door log, folded together so one visit is one line. A class with nothing marked
+          against it means nobody took the register. It is not a missed session, and nothing here
+          counts it as one.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

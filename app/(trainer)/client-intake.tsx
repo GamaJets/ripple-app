@@ -34,7 +34,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Ghost, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useRoster } from '../../src/ui/roster';
@@ -51,7 +51,6 @@ import { fmtDay } from '../../src/lib/format';
 // and it was a plain <Text>. `telUrl` decides what may be offered as a call —
 // never a handle, never a number with an extension welded on.
 import { telUrl, DIAL_UNAVAILABLE_NOTE } from '../../src/lib/dialling';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** A label out of one of the option lists, or the raw id where a document
  *  written by a later build carries something this one does not know. Printing
@@ -167,24 +166,16 @@ export default function ClientIntakeScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Before you train them</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }} numberOfLines={1}>
-              {fullName ? `${fullName}'s Intake` : 'Their Intake'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Only where the coach chose on this screen. Arriving from a client's
-            own page, the way back is Back — a second control that undoes the
-            navigation would be two answers to one gesture. */}
-        {id && !param ? (
-          <View style={{ alignItems: 'flex-start', marginTop: sp.md }}>
-            <Ghost label="Someone Else" onPress={() => setPicked(null)} />
-          </View>
-        ) : null}
+        {/* ── the board's head: back, and the title on the centre line ────
+            The client's name sits under it because this is one person's
+            record. The one trailing control is "someone else", and only
+            where the coach chose on this screen: arriving from a client's
+            own page, the way back is Back — a second control that undoes
+            the navigation would be two answers to one gesture. */}
+        <PageHead title="Intake" subtitle={fullName || undefined}
+          trailing={id && !param
+            ? <Ghost icon="people" a11yLabel="Pick someone else" onPress={() => setPicked(null)} />
+            : undefined} />
 
         {/* Nobody chosen. The same picker client-report.tsx shows, and for the
             same reason: this screen is reachable from Explore with no params,
@@ -192,7 +183,7 @@ export default function ClientIntakeScreen() {
             use rather than on a sentence about a missing link. */}
         {!id ? (
           <Section>
-            <SectionHead title="Whose intake?" />
+            <SectionHead title="Whose Intake?" />
             {r.status === 'error' ? (
               <Flag>Your client list could not be read, so this is not a list of everyone you coach.</Flag>
             ) : null}
@@ -215,23 +206,26 @@ export default function ClientIntakeScreen() {
             <Flag tone={t.ink3}>{unasked}</Flag>
           </Section>
         ) : (
-          <>
+          /* The state of the form as the first card, the way the board opens
+             every record page on a card rather than on loose text. */
+          <Section>
+            <SectionHead title="Their Form" note={intake && intake.updatedAt ? fmtDay(intake.updatedAt) : undefined} />
             {ci.status === 'error' ? (
-              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{intakeLine(ci.state, ci.progress, who)}</Flag>
+              <Flag tone={t.warn}>{intakeLine(ci.state, ci.progress, who)}</Flag>
             ) : (
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              <Text style={{ ...ty.body, color: t.ink2 }}>
                 {ci.state === 'unknown' && ci.status === 'loading'
                   ? `Reading ${who}'s intake.`
                   : intakeLine(ci.state, ci.progress, who)}
               </Text>
             )}
             {intake && intake.updatedAt ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 Last changed by {who} on {fmtDay(intake.updatedAt)}. Only they can change it — you
                 cannot, deliberately, because an intake a coach can edit is not a disclosure.
               </Text>
             ) : null}
-          </>
+          </Section>
         )}
 
         {!unasked && ci.state !== 'unknown' && intake ? (

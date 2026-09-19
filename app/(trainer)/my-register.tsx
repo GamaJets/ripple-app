@@ -36,7 +36,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { num } from '../../src/lib/format';
@@ -77,7 +77,6 @@ import { missingRegisters, peopleWaiting, gapsHeading, gapsNote, gapLine } from 
 // urgency.
 import { useMyCloseQueue } from '../../src/ui/coachClose';
 import { CoachCloseQueue } from '../../src/ui/CoachCloseQueue';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** The three windows, in days. Rolling, and the labels come from the module so
  *  the heading and the query cannot disagree about which one is on screen. */
@@ -195,10 +194,14 @@ export default function MyRegister() {
   // happen — the exact mistake `countable` exists on this screen to prevent.
   const gaps = useMemo(() => (countable ? missingRegisters(rows ?? [], now) : []), [countable, rows, now]);
 
-  const chip = (on: boolean) => ({
-    paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
-    minHeight: MIN_TARGET, justifyContent: 'center' as const,
-    backgroundColor: on ? t.brand : t.surface2,
+  /** One segment of the board's bar: an ink fill under the chosen word, the
+   *  ground colour for the word itself — the same pill client-body.tsx draws
+   *  its range bar with, so every coach page reads one control. `MIN_TARGET`
+   *  tall, as the chips it replaces were. */
+  const seg = (on: boolean) => ({
+    flex: 1, minHeight: MIN_TARGET, borderRadius: radius.pill,
+    alignItems: 'center' as const, justifyContent: 'center' as const,
+    backgroundColor: on ? t.ink : 'transparent',
   });
 
   const G = layout.gutter;
@@ -207,17 +210,8 @@ export default function MyRegister() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your classes</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Register</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          What the registers you took actually say. These are the same figures your gym reads off
-          your check-ins, in front of the person who took them.
-        </Text>
+        {/* ── the board's head: back, and the title on the centre line ──── */}
+        <PageHead title="Your Register" subtitle="Your classes" />
 
         {/* Two bare percentages sit below this, on the screen a coach opens to
             check they have been paid right. */}
@@ -229,17 +223,20 @@ export default function MyRegister() {
         <CoachCloseQueue queue={closeQueue} />
 
 
-        <Section>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-            {RANGES.map((d) => (
+        {/* The range, as the board's segmented bar. */}
+        <View accessibilityRole="tablist"
+          style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.md }}>
+          {RANGES.map((d) => {
+            const on = range === d;
+            return (
               <Pressable key={d} onPress={() => setRange(d)}
-                accessibilityRole="button" accessibilityState={{ selected: range === d }}
-                accessibilityLabel={`The last ${d} days`} style={chip(range === d)}>
-                <Text style={{ ...ty.micro, color: range === d ? t.brandInk : t.ink2 }}>{`${d} days`}</Text>
+                accessibilityRole="tab" accessibilityState={{ selected: on }}
+                accessibilityLabel={`The last ${d} days`} style={seg(on)}>
+                <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{`${d} Days`}</Text>
               </Pressable>
-            ))}
-          </View>
-        </Section>
+            );
+          })}
+        </View>
 
         {status === 'error' ? (
           <Section>
@@ -253,7 +250,7 @@ export default function MyRegister() {
 
         {/* ── the figures, over the classes that can support them ─────────── */}
         <Section>
-          <SectionHead title="What your register says" note={window?.label} />
+          <SectionHead title="What Your Register Says" note={window?.label} />
 
           {status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your classes…</Text>
@@ -376,7 +373,7 @@ export default function MyRegister() {
 
         {/* ── the classes themselves ──────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Class by class" note={countable && rows.length ? num(rows.length) : undefined} />
+          <SectionHead title="Class by Class" note={countable && rows.length ? num(rows.length) : undefined} />
 
           {status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your classes…</Text>
@@ -440,6 +437,13 @@ export default function MyRegister() {
             <Ghost label="Take a Register" onPress={() => router.push('/(trainer)/classes')} />
           </View>
         </Section>
+
+        {/* What this page is, said once and below the figures: the board
+            opens on the figure, not on a paragraph. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          What the registers you took actually say. These are the same figures your gym reads off
+          your check-ins, in front of the person who took them.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );
