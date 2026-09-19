@@ -22,8 +22,22 @@ import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, fig } from '../../src/ui/kit';
+import { BACK_ICON } from '../../src/ui/direction';
 import { sp, layout, radius, hairline, elevation, type as ty, value, fontScale } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+// The three figures under the name — board page 19's "Clients · Rating ·
+// Years" — each from the read that owns it, and each withheld to a dash until
+// that read is whole. The roster is the provider every coach screen shares;
+// the rating is the same `coach_review_summary` the directory shows strangers;
+// the years are counted from the day the account was made.
+import { useRoster } from '../../src/ui/roster';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { fetchRatingSummaries } from '../../src/ui/reviews';
+import { ratingDisplay, formatAverage, ratingLine, type RatingSummary } from '../../src/lib/reviews';
+import { supabase } from '../../src/lib/supabase';
+import { USE_SUPABASE } from '../../src/lib/config';
+import { useToday } from '../../src/ui/today';
+import { dateParts } from '../../src/lib/localDate';
 import { trainerAccessNote } from '../../src/lib/trainerProfileAccess';
 import { useDeliveryFact } from '../../src/ui/coachDelivery';
 import { DeliveryModeChoice } from '../../src/ui/DeliveryModeChoice';
@@ -60,6 +74,30 @@ import {
   publicPageState, publicPageStateNote, publishOutcome,
   PUBLISHED_FIELDS, WITHHELD_FIELDS, HANDLE_MAX,
 } from '../../src/lib/publicProfile';
+
+/**
+ * Whole years between an instant and today, in the reader's own zone.
+ *
+ * `profiles.created_at` is a timestamptz, so this is NOT `ageFromDob`, which
+ * takes a bare `YYYY-MM-DD` and would need the instant cut to one — and
+ * `slice(0, 10)` on a timestamptz is the UTC day, the defect the settings
+ * screen's `day()` helper is about. The instant is read with local getters and
+ * compared to the local day `useToday` keeps current, the same arithmetic
+ * `ageFromDob` does once it has its parts. Never negative: a clock set behind
+ * the server's is a coach with no years yet, not minus one.
+ */
+function wholeYearsSince(iso: string | null, todayKey: string): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  const now = dateParts(todayKey);
+  if (!Number.isFinite(ms) || !now) return null;
+  const d = new Date(ms);
+  const [y, m, day] = now;
+  let years = y - d.getFullYear();
+  const dm = m - d.getMonth();
+  if (dm < 0 || (dm === 0 && day < d.getDate())) years--;
+  return Math.max(0, years);
+}
 
 function Field({ t, label, value: val, onChangeText, placeholder, multiline, keyboardType }: { t: Theme; label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'numeric' | 'decimal-pad' }) {
   return (
@@ -149,14 +187,75 @@ export default function CoachProfile() {
   // coach's public identity and it is not theirs to write. The only write
   // policy on `gym_trainer_pay` is the owner's.
   const payTerms = useMyPayTerms();
+
+  /* ── the three figures under the name ─────────────────────────────────
+   *
+   * Clients is the roster's length, and only under a whole read: 'partial'
+   * is a roster that may be browsed and may not be counted, and 'error' is an
+   * empty array with a reason beside it (src/ui/roster.tsx). Both draw the
+   * dash rather than a 0 that would tell a coach with twenty clients they have
+   * none.
+   *
+   * Rating is the same summary the directory shows a stranger, read for this
+   * one coach. `ratingDisplay` decides what may be said: an average only over
+   * MIN_FOR_AVERAGE reviews with a readable sum, a count where there are too
+   * few to average, nothing over a failed read. The figure is the average or
+   * the dash; the count-only sentence is spoken and not drawn, because "2" in
+   * a slot labelled Rating reads as two stars.
+   *
+   * Years is counted from the account's own `created_at`. It is years ON THIS
+   * APP and the spoken label says so — a coach who has trained people for a
+   * decade and signed up in March is not told they have been coaching for a
+   * year. Read here rather than added to the profile provider: that provider
+   * is the coach's editable identity, and this column is a fact about the row
+   * nobody edits. */
+  const roster = useRoster();
+  const today = useToday();
+  const [rating, setRating] = useState<{ summary: RatingSummary | null; status: LoadStatus }>({ summary: null, status: 'loading' });
+  const [since, setSince] = useState<{ at: string | null; status: LoadStatus }>({ at: null, status: 'loading' });
+  const loadRating = useCallback(async () => {
+    if (!uid) return;
+    const r = await fetchRatingSummaries([uid]);
+    setRating({ summary: r.rows[uid] ?? null, status: r.status });
+  }, [uid]);
+  const loadSince = useCallback(async () => {
+    if (!uid) return;
+    if (!USE_SUPABASE) { setSince({ at: null, status: 'ready' }); return; }
+    const { data, error } = await supabase.from('profiles').select('created_at').eq('id', uid).maybeSingle();
+    if (error) {
+      reportError('trainerProfile.since', error);
+      setSince({ at: null, status: 'error' });
+      return;
+    }
+    setSince({ at: typeof data?.created_at === 'string' ? data.created_at : null, status: 'ready' });
+  }, [uid]);
+  useEffect(() => { void loadRating(); void loadSince(); }, [loadRating, loadSince]);
+
+  const clientsFig = isWhole(roster.status) ? String(roster.roster.length) : fig(null);
+  const ratingShown = ratingDisplay(rating.summary, rating.status);
+  const ratingFig = ratingShown.kind === 'average' ? formatAverage(ratingShown.average) : fig(null);
+  const years = isWhole(since.status) ? wholeYearsSince(since.at, today) : null;
+  const yearsFig = years == null ? fig(null) : String(years);
+
+  /* ── the editor, behind the Edit Profile row ──────────────────────────
+   *
+   * Board page 19 is an identity and four rows; the form this screen has
+   * always been sits behind the first of them. Folded by default and opened
+   * by the row, not removed: every field, switch and sentence below is the
+   * same, in the same order. What stays OUTSIDE the fold is the save flag,
+   * because a failed autosave must not be hidden by folding the form that
+   * produced it. */
+  const [editing, setEditing] = useState(false);
+
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
-   * Three reads: the profile provider (`profiles` and `trainers`), the
-   * cancellation policy, which is deliberately not part of it, and the pay
-   * terms their gym set. The third is here because it is the one on this
+   * Five reads: the profile provider (`profiles` and `trainers`), the
+   * cancellation policy, which is deliberately not part of it, the pay
+   * terms their gym set, and the two figures under the name that this screen
+   * reads for itself. The third is here because it is the one on this
    * screen a coach has a reason to pull on: a rate their gym has just changed
    * lands on the next read and nowhere else, and its own failure sentence
-   * offers the same retry.
+   * offers the same retry. The roster refreshes through its own provider.
    *
    * `p.reload` flushes a pending edit BEFORE re-reading — see its docstring
    * in src/ui/coachProfile.tsx. That ordering is what makes this gesture safe
@@ -164,8 +263,8 @@ export default function CoachProfile() {
    * lands on top of the coach's own values rather than on top of a debounced
    * edit that had not gone out yet. */
   const pull = usePullToRefresh(useCallback(
-    () => Promise.all([p.reload(), Promise.resolve(lc.reload()), Promise.resolve(payTerms.refresh())]),
-    [p, lc, payTerms],
+    () => Promise.all([p.reload(), Promise.resolve(lc.reload()), Promise.resolve(payTerms.refresh()), loadRating(), loadSince()]),
+    [p, lc, payTerms, loadRating, loadSince],
   ));
   const [newOffer, setNewOffer] = useState('');
   const [newSpec, setNewSpec] = useState('');
@@ -290,17 +389,105 @@ export default function CoachProfile() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* ── header. No hero — a profile has no single live number ─────────
-            Settings at the trailing edge, as the board draws it: the one
-            control a coach reaches for from here that is not about how
-            clients see them. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your profile</Text>
-            <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginTop: 5 }}>How Clients See You</Text>
-          </View>
+        {/* ── header, as board page 19 draws it ─────────────────────────────
+            A back chevron at the leading edge and nothing else in the bar —
+            the identity block under it is the title. Settings keeps the
+            trailing edge: the one control a coach reaches for from here that
+            is not about how clients see them. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <Ghost icon="settings" a11yLabel="Open settings" onPress={() => router.push('/(trainer)/settings')} />
         </View>
+
+        {/* ── who this is: a large centred avatar, the name, the tagline ────
+            Drawn from the provider whatever `access` says, because a name and
+            a photo are the coach's own and the frozen blank under 'loading'
+            reads as loading — it is the PREVIEW ("what a client sees") that
+            may not be drawn over an unsettled read, and that now lives inside
+            the editor fold with the note that explains why. */}
+        <View style={{ alignItems: 'center', paddingTop: sp.lg, paddingBottom: sp.md }}>
+          {/* `avatarSource` and not `p.photo`: a row still carrying a device
+              path from before this was fixed draws as the monogram every
+              client sees, rather than as a photo only this phone can open. */}
+          {avatarSource(p.photo) ? (
+            <Image source={{ uri: avatarSource(p.photo) as string }} accessibilityIgnoresInvertColors
+              style={{ width: 96, height: 96, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
+          ) : (
+            <View style={{ width: 96, height: 96, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+              {initials
+                ? <Text style={{ ...value(30), color: t.brand }}>{initials}</Text>
+                : <Icon name="me" size={40} color={t.ink3} />}
+            </View>
+          )}
+          {/* Whole, never cut to a line: a name is the one thing on a profile
+              that must not be truncated, and centred text wraps well. */}
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginTop: sp.lg, textAlign: 'center' }}>
+            {p.access === 'loading' ? 'Loading…' : (p.name || 'Your name')}
+          </Text>
+          <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.xs, textAlign: 'center' }}>
+            {p.access === 'loading' ? 'Reading your profile' : (p.tagline || 'No tagline yet')}
+          </Text>
+        </View>
+
+        {/* ── Clients · Rating · Years ────────────────────────────────────────
+            See the note on the three reads above. Each slot is spoken with
+            its state: "not read" for a dash, the rating sentence where there
+            is a count but no average, and "years on the app" so the third
+            figure is not heard as years of coaching. */}
+        <Section>
+          <View style={{ flexDirection: 'row' }}>
+            {[
+              { label: 'Clients', value: clientsFig, spoken: clientsFig === fig(null) ? 'not read' : clientsFig },
+              { label: 'Rating', value: ratingFig, spoken: ratingLine(ratingShown) ?? 'not read' },
+              { label: 'Years', value: yearsFig, spoken: years == null ? 'on the app, not read' : `on the app, ${years}` },
+            ].map((item, index) => (
+              <View key={item.label} accessible accessibilityLabel={`${item.label}, ${item.spoken}`}
+                style={{ flex: 1, alignItems: 'center', borderStartWidth: index ? hairline : 0, borderStartColor: t.ring }}>
+                <Text style={{ ...value(22), color: t.ink }}>{item.value}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        </Section>
+
+        {/* ── the four rows ───────────────────────────────────────────────────
+            Edit Profile opens the editor below; the other three open the
+            screens the board names. Credentials is the same row that used to
+            sit under its own "Credentials & Reviews" heading further down —
+            outside the `p.access` branch then and now, because a coach whose
+            profile row failed is exactly the coach who needs to check whether
+            a client can see a review they have not answered. Availability is
+            the Schedule tab, where `trainer_availability` is set; Share
+            Profile is the Share Kit, and the page link is in the editor. */}
+        <Section>
+          <ListRow icon="pencil" title="Edit Profile"
+            note={editing ? 'Open below — tap to fold it away' : 'Photo, name, bio, rate and your page on the web'}
+            onPress={() => setEditing((v) => !v)} />
+          <ListRow icon="trophy" title="Credentials"
+            note="Your qualifications and insurance, and your right of reply to reviews"
+            onPress={() => router.push('/(trainer)/credentials')} />
+          <ListRow icon="calendar" title="Availability"
+            note="The hours clients can book you, on your schedule"
+            onPress={() => router.push('/(trainer)/calendar')} />
+          <ListRow icon="share" title="Share Profile"
+            note="A graphic to post, and the link to your page on the web"
+            onPress={() => router.push('/(trainer)/share-kit')} />
+        </Section>
+
+        {/* ── did that save? ─────────────────────────────────────────────────
+            Outside the fold on purpose (see `editing`), and above it, because
+            this screen commits on change with no Save button and the one
+            thing a coach cannot otherwise find out is whether what they just
+            typed reached the server. Nothing is drawn before the first edit: a
+            permanent "Saved" badge over an untouched screen is exactly the
+            reassurance people stop reading. */}
+        {saveNote ? (
+          <Section>
+            <Flag tone={p.save.state === 'failed' ? t.crit : p.save.state === 'pending' ? t.ink3 : t.good}>{saveNote}</Flag>
+          </Section>
+        ) : null}
+
+        {editing ? (<>
 
         {/* ── live preview: the one surface on this screen that groups ──────
             Withheld until the read has settled, and that is not tidiness. This
@@ -312,7 +499,7 @@ export default function CoachProfile() {
             withheld until the read lands; the preview above it is the half that
             makes a claim, and it was not. */}
         {p.access !== 'ok' ? (
-          <Card style={{ marginBottom: sp.lg }}>
+          <Card style={{ marginTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               {trainerAccessNote(p.access) ?? 'There is no profile to preview on this app.'}
             </Text>
@@ -322,30 +509,13 @@ export default function CoachProfile() {
             </Text>
           </Card>
         ) : (
-        <Card style={{ marginBottom: sp.lg }}>
-          <View style={{ flexDirection: 'row', gap: sp.lg, alignItems: 'center' }}>
-            {/* `avatarSource` and not `p.photo`: a row still carrying a device
-                path from before this was fixed draws as the monogram every
-                client sees, rather than as a photo only this phone can open. */}
-            {avatarSource(p.photo) ? (
-              <Image source={{ uri: avatarSource(p.photo) as string }} style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
-            ) : (
-              <View style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...value(20), color: t.brand }}>{initials}</Text>
-              </View>
-            )}
-            <View style={{ flex: 1, minWidth: 0 }}>
-              {/* Whole at the larger sizes rather than cut to one line: a name
-                  is the one thing on a profile that must not be truncated. */}
-              <Text style={{ ...ty.head, color: t.ink }} numberOfLines={fontScale >= 1.35 ? undefined : 1}>{p.name || 'Your name'}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{p.tagline || 'No tagline yet'}</Text>
-            </View>
-          </View>
+        <Card style={{ marginTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>What a client sees</Text>
 
           {/* Three figures a client would count. The rate is the coach's own
               figure and is printed as it is; a dash where none is set, never
               a zero that would read as free. */}
-          <View style={{ flexDirection: 'row', marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+          <View style={{ flexDirection: 'row', marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
             {[
               { label: 'Offers', value: String(p.offers.length) },
               { label: 'Specialties', value: String(p.specialties.length) },
@@ -407,11 +577,8 @@ export default function CoachProfile() {
         </Card>
         )}
 
-        {/* The two places a coach goes from their profile most, as rows. */}
-        <View style={{ marginBottom: sp.lg }}>
-          <ListRow icon="message" title="Messages" note="Client conversations and replies" onPress={() => router.push('/(trainer)/messages')} />
-          <ListRow icon="settings" title="Settings" note="Account, notifications, privacy and appearance" onPress={() => router.push('/(trainer)/settings')} />
-        </View>
+        {/* The Messages and Settings rows that stood here are the Messages
+            section below and the Ghost in the header — one way in each. */}
 
 
         {/* Everything below this line writes to the signed-in user's own
@@ -439,20 +606,9 @@ export default function CoachProfile() {
         ) : (
         <>
 
-        {/* ── did that save? ─────────────────────────────────────────────────
-            Above the fields, not under them. This screen commits on change with
-            no Save button, so the one thing a coach cannot otherwise find out is
-            whether what they just typed reached the server — and they look for
-            that where they are typing.
-
-            Nothing is drawn before the first edit: a permanent "Saved" badge
-            over an untouched screen is exactly the reassurance people stop
-            reading, which is the failure this is fixing. */}
-        {saveNote ? (
-          <Section>
-            <Flag tone={p.save.state === 'failed' ? t.crit : p.save.state === 'pending' ? t.ink3 : t.good}>{saveNote}</Flag>
-          </Section>
-        ) : null}
+        {/* The save flag used to open this branch. It sits above the fold now
+            — see the note on `editing` — so a failed autosave is on screen
+            whether or not the form is. */}
 
         {/* ── photo ──────────────────────────────────────────────────────── */}
         <Section>
@@ -974,6 +1130,8 @@ export default function CoachProfile() {
         </>
         )}
 
+        </>) : null}
+
 
         {/* ── who is waiting on a reply ──────────────────────────────────── */}
         {/* Its own section, above everything else here, because it is the thing
@@ -998,23 +1156,11 @@ export default function CoachProfile() {
 
 
         {/* ── what a stranger judges you on ──────────────────────────────── */}
-        {/* Directly under the directory opt-in, because this is what the
-            directory SHOWS — the toggle above decides whether clients can see
-            you, and this row is the rest of what they see when they do.
-
-            Outside the `p.access !== 'ok'` branch on purpose. That branch
-            withholds the profile EDITOR when this coach's own `trainers` row
-            could not be read, which is right for a form that would silently
-            drop what is typed into it. Credentials and reviews are different
-            reads with their own three-state handling, and a coach whose profile
-            row failed is exactly the coach who needs to check whether a client
-            can see a review they have not answered. */}
-        <Section>
-          <SectionHead title="Credentials & Reviews" />
-          <ListRow icon="trophy" title="Credentials & Reviews"
-            note="Your qualifications and insurance, and your right of reply to what clients wrote"
-            onPress={() => router.push('/(trainer)/credentials')} />
-        </Section>
+        {/* The Credentials & Reviews row is the third of the four rows under
+            the name now, where board page 19 puts it; its reasoning — outside
+            the `p.access !== 'ok'` branch, because credentials and reviews
+            are different reads with their own three-state handling — is
+            carried in the comment on those rows. */}
 
 
         {/* ── what your clients see around your coaching ─────────────────── */}

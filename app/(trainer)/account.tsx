@@ -223,14 +223,17 @@ export default function CoachAccount() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* The header the board gives every Settings-family page (17, 20): a
+            back chevron at the leading edge, the title centred, and a spacer
+            the width of the round Ghost so the title sits on the true centre
+            line. The one-line description stays, centred under it, because
+            "Account & Sign-in" alone does not say which of the two this is. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Settings</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Account &amp; Sign-in</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Account &amp; Sign-in</Text>
+          <View style={{ width: 38 }} />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
           The password you sign in with, and the address a reset would go to
         </Text>
 

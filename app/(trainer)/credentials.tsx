@@ -242,16 +242,17 @@ export default function TrainerCredentials() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 48 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+        {/* The header the board gives the Profile family: a back chevron at
+            the leading edge and the title centred, with a spacer the width of
+            the round Ghost so the title sits on the true centre line. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your profile</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Credentials & Reviews</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
-              What you are qualified to do, and what your clients have said.
-            </Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Credentials & Reviews</Text>
+          <View style={{ width: 38 }} />
         </View>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
+          What you are qualified to do, and what your clients have said.
+        </Text>
 
         {/* ── the honesty notice, first, before anything is typed ───────── */}
         <View style={{ marginTop: sp.lg }}>
@@ -319,6 +320,12 @@ export default function TrainerCredentials() {
               <View key={c.id}>
                 {i > 0 ? <Rule /> : null}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                  {/* A circle at the leading edge, as the board draws every
+                      row's icon (page 13) and as `ListRow` draws it. Lapsed
+                      cover is a mark in the Flag below, not a red icon. */}
+                  <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="trophy" size={17} color={t.brand} />
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
                     {detail ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{detail}</Text> : null}

@@ -70,13 +70,14 @@
 // believes it is doing — and there are two dozen sendPush() call sites, none of
 // them this file's to edit, any one of which a call-site check would have been
 // forgotten at. src/ui/settings.tsx carries the long note.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Alert, Pressable, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useTheme } from '../../src/ui/components';
-import type { Theme } from '../../src/theme/tokens';
+import { useTheme, useThemeControls } from '../../src/ui/components';
+import { metaByKey, paletteForScheme, type Theme } from '../../src/theme/tokens';
+import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, ListRow, Ghost, Flag, fig } from '../../src/ui/kit';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
@@ -89,6 +90,9 @@ import { lockSettingNote } from '../../src/lib/appLock';
 import { useTenant } from '../../src/ui/tenant';
 import { CURRENCY_CHOICES, setCurrencyLine, WHY_NOT_A_REPRICE, type SetCurrencyOutcome } from '../../src/lib/coachCurrency';
 import { fetchMyCurrency, setMyCoachCurrency } from '../../src/lib/myCurrency';
+// The plan name for the Subscription row's caption, and nothing else — the
+// billing screen owns everything that can be done about it.
+import { fetchMySubscription } from '../../src/lib/billing';
 import { myCurrencyLine, type MyCurrency } from '../../src/lib/currencySource';
 import {
   exportMyDataDetailed, readMyFile, requestAccountDeletion, withdrawAccountDeletion,
@@ -415,6 +419,53 @@ export default function TrainerSettings() {
 
   const { tenant, role, status: tenantStatus, loading: tenantLoading, refresh: refreshTenant, updateTenant, setOwnCurrency } = useTenant();
 
+  // ── Appearance, as the board's three radio rows ─────────────────────────
+  //
+  // Board page 20 draws Settings with Light / Dark / System under an
+  // "Appearance" heading. The coach app never had a palette screen of its own;
+  // the SETTING has always existed — `AppThemeProvider` in src/ui/components.tsx
+  // holds the member's chosen palette and whether to follow the phone — so
+  // these three rows are a view onto that and not a second store. "System" is
+  // the follow; "Light" and "Dark" turn the follow off and move the chosen
+  // palette to its counterpart of that scheme (`paletteForScheme`), which is
+  // exactly what the client's Match System toggle resolves to. The coach's
+  // own palette is never rewritten to a different family: a coach on Mono
+  // Noir who taps Light lands on Swiss Ivory, its declared counterpart.
+  const theme = useThemeControls();
+  const appearance: 'light' | 'dark' | 'system' = theme.follow ? 'system' : metaByKey(theme.palette).light ? 'light' : 'dark';
+  const chooseAppearance = (k: 'light' | 'dark' | 'system') => {
+    if (k === 'system') { theme.setFollow(true); return; }
+    theme.setFollow(false);
+    theme.setPalette(paletteForScheme(theme.palette, k));
+  };
+
+  // The plan name under the Subscription row, read once. Null is "not known"
+  // — a refused read, no backend, or no subscription row — and the caption
+  // then describes the screen rather than stating a plan. It never says "no
+  // plan": `fetchMySubscription` returns `sub: null` for a refused read as
+  // well as for a coach who has not subscribed, and only the billing screen
+  // tells those apart with its own sentences.
+  const [plan, setPlan] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { sub, error } = await fetchMySubscription();
+      if (!live || error) return;
+      setPlan(sub?.plan ?? null);
+    })();
+    return () => { live = false; };
+  }, []);
+
+  // The Notifications row on the board opens a preferences screen. This app's
+  // notification preferences live on THIS screen — the push switch, the six
+  // categories and quiet hours — so the row scrolls to them rather than
+  // opening a second copy. `notifY` is the section's offset within the scroll
+  // content, measured on layout, so a longer or shorter Signed-in card above
+  // it cannot put the jump in the wrong place.
+  const scrollRef = useRef<ScrollView>(null);
+  const notifY = useRef(0);
+  const jumpToNotifications = () => scrollRef.current?.scrollTo({ y: notifY.current, animated: true });
+
   // ── The currency, and the reason this control is on the COACH's screen ──
   //
   // Six screens in this app withhold every money figure when
@@ -714,18 +765,104 @@ export default function TrainerSettings() {
           The padding stays at 40: the field sits well above the end of this screen, and the
           inset iOS adds already gives the focused row the room it needs to rise. Padding it
           out to a keyboard's height here would only scroll into empty space. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
+      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* ── the header, as board page 17 draws it ─────────────────────────
+            A back chevron at the leading edge and "Settings" centred over the
+            rows — no eyebrow and no subtitle. The trailing spacer is the width
+            of the round Ghost so the title sits on the true centre line rather
+            than the centre of what is left beside the button. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Settings</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Settings</Text>
+          <View style={{ width: 38 }} />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Who you are signed in as, your data & this build</Text>
+
+
+        {/* ── the five rows the board opens with ────────────────────────────
+            Profile, Notifications, Subscription, Integrations, Help & Support,
+            in that order, each a round icon, a title, a caption and a chevron.
+            Every caption is either a description of the screen it opens or a
+            value that was READ: the name under Profile is the session's, the
+            plan under Subscription is the subscriptions row's or absent. The
+            board's sample captions ("Pro Plan", "Apple Health, MyFitnessPal")
+            are not reproduced as text. */}
+        <Section>
+          <ListRow icon="me" title="Profile"
+            note={auth.loading ? 'Checking…' : (auth.user?.name || 'How clients see you')}
+            onPress={() => router.push('/(trainer)/profile')} />
+          <ListRow icon="bell" title="Notifications"
+            note="Push, what you are told about, and quiet hours"
+            onPress={jumpToNotifications} />
+          <ListRow icon="chart" title="Subscription"
+            note={plan ? `${plan} Plan` : 'Your plan, payment method and invoices'}
+            onPress={() => router.push('/(trainer)/billing')} />
+          <ListRow icon="heart" title="Integrations"
+            note="Your watch and the apps that feed your day"
+            onPress={() => router.push('/(trainer)/devices')} />
+          <ListRow icon="message" title="Help & Support"
+            note="Tell us what to improve, or ask for help"
+            onPress={() => router.push('/(trainer)/feedback')} />
+        </Section>
+
+
+        {/* ── Log Out, in its own card under the rows ───────────────────────
+            Where the board puts it, and the same `useSignOutAndSay` fate the
+            Ghost at the foot of the old Signed-in card went through — the
+            confirmation and the "could not be ended" sentence are unchanged.
+            The board draws the words in red. This app does not: `t.crit` as
+            ink measures 3.03–4.05:1 on every palette (scripts/check-contrast.mjs),
+            so the mark carries the colour and the label stays ink, the same
+            split every Flag on this screen makes. No chevron, because it is an
+            action and not a screen. */}
+        <Section>
+          <Pressable onPress={signOut} accessibilityRole="button" accessibilityLabel="Log out"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+            <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="lock" size={17} color={t.crit} />
+            </View>
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>Log Out</Text>
+          </Pressable>
+        </Section>
+
+
+        {/* ── Appearance: Light / Dark / System (board page 20) ─────────────
+            Three radio rows over the one theme setting, see `chooseAppearance`
+            above. The sentence under them says what "System" is doing right
+            now, in the client Appearance screen's own words, because a row
+            called System that does not say which way the phone went is a
+            switch nobody can check. */}
+        <Section>
+          <SectionHead title="Appearance" />
+          {([
+            { key: 'light', label: 'Light', icon: 'sun' },
+            { key: 'dark', label: 'Dark', icon: 'moon' },
+            { key: 'system', label: 'System', icon: 'settings' },
+          ] as const).map((row, i) => {
+            const on = appearance === row.key;
+            return (
+              <Pressable key={row.key} onPress={() => chooseAppearance(row.key)}
+                accessibilityRole="radio" accessibilityState={{ selected: on }}
+                accessibilityLabel={`${row.label} appearance`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={row.icon} size={17} color={on ? t.brand : t.ink3} />
+                </View>
+                <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: t.ink, flex: 1 }}>{row.label}</Text>
+                {on ? <Icon name="check" size={19} color={t.brand} /> : null}
+              </Pressable>
+            );
+          })}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {appearance === 'system'
+              ? (theme.scheme
+                ? `Your phone is in ${theme.scheme} mode, so this shows ${metaByKey(theme.shownPalette).name}.`
+                : 'Your phone has not said whether it is in light or dark mode, so nothing changes until it does.')
+              : `${metaByKey(theme.palette).name}, in both of your phone's modes.`}
+          </Text>
+        </Section>
 
 
         {/* The permanent way back to the first-run list. The row on the Clients
@@ -742,15 +879,15 @@ export default function TrainerSettings() {
         </Section>
 
 
+        {/* The Sign Out Ghost that closed this card is the Log Out row above
+            now — one control, where the board puts it, rather than the same
+            fate offered twice on one screen. */}
         <Section>
           <SectionHead title="Signed in as" />
           <Line t={t} first label="Name" value={auth.loading ? 'Checking…' : fig(auth.user?.name)} />
           <Line t={t} label="Email" value={auth.loading ? 'Checking…' : fig(auth.user?.email)} />
           <Line t={t} label="Role" value={auth.loading ? 'Checking…' : fig(auth.user ? ROLE_LABEL[auth.user.role] ?? auth.user.role : null)} />
           <Line t={t} label="Gym" value={tenantLoading ? 'Checking…' : fig(tenant?.name)} />
-          <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-            <Ghost label="Sign Out" onPress={signOut} />
-          </View>
 
           {/* A phone left on a bench is a phone left on a bench, whichever of
               the three apps is installed. */}
@@ -770,6 +907,7 @@ export default function TrainerSettings() {
             removes this handset's row from `push_tokens`, which is the table
             the send-push edge function resolves recipients from, so it reaches
             every sender at once rather than each of two dozen call sites. */}
+        <View onLayout={(e) => { notifY.current = e.nativeEvent.layout.y; }}>
         <Section>
           <SectionHead title="Notifications" />
           <SwitchRow t={t} first label="Push Notifications"
@@ -920,6 +1058,7 @@ export default function TrainerSettings() {
             </>)}
           </View>
         </Section>
+        </View>
 
 
         {/* How often Quiet Clients may raise the same person. See the long note
