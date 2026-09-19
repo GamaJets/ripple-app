@@ -102,7 +102,7 @@ const HAND_ROLLED = /[<>]=?\s*0\b[^\n]{0,90}\?[^\n]{0,60}['"`][+−▲▼]/;
  * describing the tree — the same contract as KNOWN in check-currency.mjs.
  */
 const KNOWN = new Map([
-  ['app/(client)/scans.tsx', { count: 4, why:
+  ['app/(client)/scans.tsx', { count: 2, why:
     'The screen the defect was found on, and the one it was fixed on. Its four remaining sites ' +
     'are the reference wording for the rest of the app: the hero has an explicit `=== 0` arm ' +
     'reading "No change since <day>", the trend note and the movement chip each carry their own ' +

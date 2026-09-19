@@ -89,9 +89,10 @@ import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
 import { useGlucose } from '../../src/ui/glucoseData';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -1602,33 +1603,131 @@ export default function ClientScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
+        {/* ── the record's head, the board's way ──────────────────────────
+            Back, the client's initials, their name, and the one line the
+            roster already holds about them; the message control at the
+            trailing edge, because writing to them is what a coach does from
+            here most. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs, textTransform: 'capitalize' }} numberOfLines={1}>
-              {fullName || 'Client'}
+          <Ghost icon={BACK_ICON} a11yLabel="Back to clients" onPress={() => router.back()} />
+          <View style={{ width: 46, height: 46, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}
+            accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>
+              {(fullName || 'Client').split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}
             </Text>
           </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>
+              {fullName || 'Client'}
+            </Text>
+            {/* The row's own facts, which the roster already holds.
+                `lastActive` is the roster's string and is printed as it is.
+
+                `next` is NOT here, and its absence is the point.
+                `RosterClient.next` is set to the literal '—' in all three
+                places src/ui/roster.tsx constructs a client and is computed
+                nowhere. The real answer is a section of its own below —
+                src/lib/nextUp.ts — because it is worth more than the tail of
+                a summary line. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
+              {client ? `${client.goal} · ${COACHED_MODE_SHORT[client.mode]} · last active ${client.lastActive}` : 'Your book'}
+            </Text>
+          </View>
+          {id ? <Ghost icon="message" a11yLabel={`Message ${who}`} onPress={go('/(trainer)/chat')} /> : null}
         </View>
 
-        {/* The row's own facts, which the roster already holds. `lastActive` is
-            the roster's string and is printed as it is.
-
-            `next` is NOT here any more, and its absence is the point.
-            `RosterClient.next` is set to the literal '—' in all three places
-            src/ui/roster.tsx constructs a client and is computed nowhere, so
-            this line ended in the words "next —" for every client this app has
-            ever had: a labelled field that reads as a value we tried to load
-            and could not, on the screen a coach opens before a session, about
-            the one thing they came to find out. The real answer is a section of
-            its own below — src/lib/nextUp.ts — because it is worth more than
-            the tail of a summary line. */}
+        {/* Three figures off the roster row, which is the only read this
+            strip needs. A dash where the row cannot answer: a client with no
+            submitted check-in is not at 0% adherence, and an unread count
+            the read did not return is not none. */}
         {client ? (
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-            {client.goal} · {COACHED_MODE_SHORT[client.mode]} · last active {client.lastActive}
-          </Text>
+          <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+            <KpiRow items={[
+              { label: 'Adherence', value: client.adherence == null ? fig(null) : String(client.adherence), unit: client.adherence == null ? undefined : '%' },
+              { label: 'Last Active', value: client.lastActive },
+              { label: 'Unread', value: fig(client.unread ?? null) },
+            ]} />
+          </View>
         ) : null}
+
+        {/* The four screens a coach opens from a record most, as tiles rather
+            than as rows at the bottom of a long page. Each already exists and
+            takes the same clientId and name this screen was opened with; the
+            full list of ways in, with what is in each, is still below. */}
+        {id ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+            {([
+              ['grid', 'Program', '/(trainer)/builder'],
+              ['train', 'Training', '/(trainer)/client-training'],
+              ['chart', 'Progress', '/(trainer)/client-body'],
+              ['meals', 'Nutrition', '/(trainer)/client-nutrition'],
+            ] as const).map(([icon, label, path]) => (
+              <Pressable key={label} onPress={go(path)} accessibilityRole="button"
+                accessibilityLabel={`Open ${who}'s ${label.toLowerCase()}`}
+                style={{ flex: 1, minWidth: 72, alignItems: 'center', gap: 6, paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+                <Icon name={icon} size={18} color={t.brand} />
+                <Text style={{ ...ty.caption, color: t.ink2 }} numberOfLines={1}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
+        {/* ── the one thing worth knowing first ───────────────────────────
+            Led with, before the administration behind it. This was a hero
+            figure halfway down the page; it is the same real drift read the
+            roster ranks by, as a status row under the record's head. Unknown,
+            refused and partial reads stay unknown rather than becoming a
+            reassuring zero. */}
+        <View accessible
+          accessibilityLabel={drift?.quietDays == null
+            ? `Activity status unknown. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`
+            : `Activity status, ${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
+          <View style={{ width: 9, height: 9, borderRadius: radius.pill, backgroundColor: driftTone }} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Activity status</Text>
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.ink, marginTop: 2 }}>
+              {drift?.quietDays == null ? 'Recent activity unknown' : `${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record`}
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{unasked ?? lastSeenLine(drift, driftFailed, who)}</Text>
+          </View>
+        </View>
+        {!unasked && drift && drift.status !== 'on_track' ? (
+          <Flag tone={driftTone}>
+            {DRIFT_LABEL[drift.status]} — check-ins, logged workouts, completed sessions and gym visits, over the last {DEFAULT_WINDOWS.historyDays} days.
+          </Flag>
+        ) : null}
+
+        <Rule />
+
+        {/* ── what is outstanding ─────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Needs You" />
+          {unasked ? (
+            <Flag tone={t.ink3}>
+              {unasked} Nothing is outstanding on this screen because nothing was asked for — which
+              is not the same as there being nothing.
+            </Flag>
+          ) : null}
+          {!unasked && attn.items.length === 0 && !attn.blind ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              Nothing outstanding that this screen can see: no unread messages, no goal past its
+              target date, and nothing marked ahead that argues with your programme.
+            </Text>
+          ) : null}
+          {(unasked ? [] : attn.items).map((line, i) => (
+            <View key={line} style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+              <Flag tone={t.warn}>{line}</Flag>
+            </View>
+          ))}
+          {/* An empty list above cannot be allowed to read as an all-clear when
+              a read that would have filled it never landed. */}
+          {!unasked && attn.blind ? (
+            <View style={{ marginTop: attn.items.length ? sp.md : 0 }}>
+              <Flag tone={t.ink3}>{attn.blind}</Flag>
+            </View>
+          ) : null}
+        </Section>
 
         {/* Three different reasons there is no client here, and they are not
             the same sentence. A refused roster read is not an empty book. */}
@@ -2090,21 +2189,18 @@ export default function ClientScreen() {
               </Text>
             ) : (
               <>
-                <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
-                  {[
-                    { label: 'Latest', v: gl.summary.latest ? num1(gl.summary.latest.mmol) : null },
-                    { label: 'Average', v: gl.summary.averageMmol == null ? null : num1(gl.summary.averageMmol) },
-                    { label: 'Highest', v: gl.summary.highestMmol == null ? null : num1(gl.summary.highestMmol) },
-                    { label: 'In range', v: gl.summary.inTypicalPct == null ? null : `${gl.summary.inTypicalPct}%` },
-                  ].map((k) => (
-                    <View key={k.label} style={{ flex: 1 }}>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>{k.label}</Text>
-                      <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>{fig(k.v)}</Text>
-                    </View>
-                  ))}
+                {/* The kit's row, so each figure is one spoken sentence and
+                    the unit sits beside the value rather than in a footnote. */}
+                <View style={{ marginTop: sp.sm }}>
+                  <KpiRow items={[
+                    { label: 'Latest', value: fig(gl.summary.latest ? num1(gl.summary.latest.mmol) : null), unit: gl.summary.latest ? 'mmol/L' : undefined },
+                    { label: 'Average', value: fig(gl.summary.averageMmol == null ? null : num1(gl.summary.averageMmol)), unit: gl.summary.averageMmol == null ? undefined : 'mmol/L' },
+                    { label: 'Highest', value: fig(gl.summary.highestMmol == null ? null : num1(gl.summary.highestMmol)), unit: gl.summary.highestMmol == null ? undefined : 'mmol/L' },
+                    { label: 'In Range', value: fig(gl.summary.inTypicalPct), unit: gl.summary.inTypicalPct == null ? undefined : '%' },
+                  ]} />
                 </View>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                  mmol/L, last 14 days. {gl.summary.count} reading{gl.summary.count === 1 ? '' : 's'}.
+                  Last 14 days. {gl.summary.count} reading{gl.summary.count === 1 ? '' : 's'}.
                 </Text>
 
                 {/* Meals with a reading either side. Shown because it is the
@@ -2175,53 +2271,6 @@ export default function ClientScreen() {
             )}
           </Section>
         ) : null}
-
-        <Rule />
-
-        {/* ── the hero: the one thing worth knowing first ─────────────────── */}
-        <Hero
-          label="Days Since Anything on Record"
-          figure={fig(drift?.quietDays ?? null)}
-          unit={drift?.quietDays != null ? (drift.quietDays === 1 ? 'day' : 'days') : undefined}
-          note={unasked ?? lastSeenLine(drift, driftFailed, who)}
-          tone={driftTone}
-        />
-        {!unasked && drift && drift.status !== 'on_track' ? (
-          <Flag tone={driftTone}>
-            {DRIFT_LABEL[drift.status]} — check-ins, logged workouts, completed sessions and gym visits, over the last {DEFAULT_WINDOWS.historyDays} days.
-          </Flag>
-        ) : null}
-
-        <Rule />
-
-        {/* ── what is outstanding ─────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Needs You" />
-          {unasked ? (
-            <Flag tone={t.ink3}>
-              {unasked} Nothing is outstanding on this screen because nothing was asked for — which
-              is not the same as there being nothing.
-            </Flag>
-          ) : null}
-          {!unasked && attn.items.length === 0 && !attn.blind ? (
-            <Text style={{ ...ty.body, color: t.ink2 }}>
-              Nothing outstanding that this screen can see: no unread messages, no goal past its
-              target date, and nothing marked ahead that argues with your programme.
-            </Text>
-          ) : null}
-          {(unasked ? [] : attn.items).map((line, i) => (
-            <View key={line} style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-              <Flag tone={t.warn}>{line}</Flag>
-            </View>
-          ))}
-          {/* An empty list above cannot be allowed to read as an all-clear when
-              a read that would have filled it never landed. */}
-          {!unasked && attn.blind ? (
-            <View style={{ marginTop: attn.items.length ? sp.md : 0 }}>
-              <Flag tone={t.ink3}>{attn.blind}</Flag>
-            </View>
-          ) : null}
-        </Section>
 
         <Rule />
 

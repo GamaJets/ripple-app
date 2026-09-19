@@ -69,7 +69,7 @@ import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, Hero, KpiRow, Card, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -2129,9 +2129,45 @@ export default function Train() {
       <ScrollView ref={pageScroll} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }} numberOfLines={1}>{coachProgram ? 'Coach plan' : program.title}</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Train</Text>
+        <ScreenHeader eyebrow={coachProgram ? 'Coach plan' : 'Your training'} title="My Program" subtitle={program.title} />
+
+        {/* ── the programme, as the board opens it ─────────────────────────
+            A demo of the first movement, the session's name, how much of it
+            there is, and a way into the whole block. The demo is the same
+            <SessionDemo> the runner shows, off the same library read, so a
+            movement with no clip draws the same placeholder here as there.
+            "View Program" is the quiet control on purpose: the day strip
+            below picks the session and Start Workout under it is the one
+            primary action on this screen. */}
+        <Card style={{ marginTop: sp.lg }}>
+          {exercises[0] ? (
+            <View style={{ marginBottom: sp.md, borderRadius: radius.md, overflow: 'hidden', backgroundColor: t.surface2 }}>
+              <SessionDemo t={t} name={nameOf(exercises[0])} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} />
+            </View>
+          ) : (
+            <View style={{ height: 112, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.md }}
+              accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <Icon name="train" size={34} color={t.brand} />
+            </View>
+          )}
+          <Text style={{ ...ty.micro, color: t.ink3 }}>{coachProgram ? 'Assigned by your coach' : program.title}</Text>
+          <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>{workout.focus}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+            {exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`} · {heroNote}
+          </Text>
+          <View style={{ marginTop: sp.lg }}><Ghost label="View Program" icon="grid" onPress={() => router.push('/(client)/week')} /></View>
+        </Card>
+
+        {/* Current and past, as the board draws them. Past is the training
+            history screen, which already exists and already answers it. */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
+          <View accessibilityRole="tab" accessibilityState={{ selected: true }} style={{ flex: 1, minHeight: 38, borderRadius: radius.sm, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Current</Text>
+          </View>
+          <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Past workouts" onPress={() => router.push('/(client)/history')}
+            style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Past</Text>
+          </Pressable>
         </View>
 
         {/* ── whose copy of the coach's plan is being trained ──────────────
@@ -2170,22 +2206,6 @@ export default function Train() {
             )}
           </View>
         ) : null}
-
-
-        {/* One tip, at most once every twenty hours. Renders nothing the rest
-            of the time — asked for as "once a workout session or once few
-            days", and a card that greets you every visit is an interruption. */}
-        <View style={{ marginTop: sp.lg }}>
-          <DidYouKnow />
-        </View>
-        <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
-          <View style={{ flex: 1 }}>
-            <Ghost label="Month Calendar" icon="calendar" onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setCalShift(0); setShowCal(true); }} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Ghost label="Book Session" icon="plus" onPress={() => router.push('/(client)/calendar')} />
-          </View>
-        </View>
 
         {/* ── day strip ──────────────────────────────────────────────────── */}
         {/* Which week these seven days are, and the way out of it. Before this
@@ -2380,11 +2400,37 @@ export default function Train() {
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{start.note}</Text>
         ) : null}
 
+        {/* Calendar, booking and the tip are useful context and secondary to
+            choosing and starting today's session. They used to sit above the
+            day strip, so a returning member scanned past three unrelated
+            controls before they could train; they follow the primary action
+            now. Wrapped, not squeezed, at the larger text sizes. */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.lg }}>
+          <View style={{ flex: 1, minWidth: 140 }}>
+            <Ghost label="Month Calendar" icon="calendar" onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setCalShift(0); setShowCal(true); }} />
+          </View>
+          <View style={{ flex: 1, minWidth: 140 }}>
+            <Ghost label="Book Session" icon="plus" onPress={() => router.push('/(client)/calendar')} />
+          </View>
+        </View>
+        {/* One tip, at most once every twenty hours. Renders nothing the rest
+            of the time — asked for as "once a workout session or once few
+            days", and a card that greets you every visit is an interruption. */}
+        <View style={{ marginTop: sp.lg }}>
+          <DidYouKnow />
+        </View>
+
         <Rule />
 
         {/* ── what you're logging ────────────────────────────────────────── */}
         <Section>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: layout.section }}>
+          {/* Modes are choices, not fixed-width columns. Six on one row
+              forced the widest label — "Mobility" — under the size it needs
+              at 13pt on a 375pt phone, and the fix was to shrink the type
+              below the member's chosen size. Each pill keeps its label whole
+              and the group wraps to a second line when it needs one; every
+              pill is 44pt tall, so no slop is needed to reach the target. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: layout.section }}>
             {WTYPES.map(([id, label]) => {
               const on = mode === id;
               return (
@@ -2394,23 +2440,11 @@ export default function Train() {
                 // which of the six is live, and the form below — sets and
                 // reps, or distance and time — changes completely with it. A
                 // member who picks wrong logs a run as a lift.
-                //
-                // 9 + 18 + 9 is 36pt, four short of the minimum, and the six
-                // sit in one row with 24pt of air under it: the slop goes on
-                // the vertical only, exactly as `Cta` does, because horizontal
-                // slop here would reach into the neighbouring chip.
                 <Pressable key={id} onPress={() => { setMode(id); if (isSessionKind(id)) setCtype(SESSION_TYPES[id][0]); }}
                   accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: on }}
-                  hitSlop={{ top: hitSlopFor(36), bottom: hitSlopFor(36), left: 0, right: 0 }}
-                  style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
-                  {/* One line, shrunk to fit. A sixth chip took the widest label
-                      — "Mobility" — under the width it needs at 13pt on a 375pt
-                      phone, and the default is to wrap: five chips one line tall
-                      beside one that is two, with the row's baseline pulled
-                      down. `adjustsFontSizeToFit` gives up a point of size on
-                      the two longest rather than the layout. */}
-                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
-                    style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.ink : t.ink3 }}>{label}</Text>
+                  style={{ minHeight: 44, paddingHorizontal: sp.md, paddingVertical: 10, borderRadius: radius.pill,
+                    alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
+                  <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.ink : t.ink3 }}>{label}</Text>
                 </Pressable>
               );
             })}

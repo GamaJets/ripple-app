@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Field, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Field, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { insideNoticeWindow, feeAmountLine, unstatedCurrencyCoach, noticeLabel, openSlotWindow, slotWindowLine, weeklyFromSlots, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
 // "I work Tuesdays 7 to 7", said once instead of forty-eight times. See that
@@ -190,6 +190,7 @@ import {
 import { BRAND } from '../../src/lib/brands';
 import { fmtDay, fmtTime, monthNames, monthNamesShort, weekdayNameShort } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
+import { ScheduleOperations } from '../../src/ui/coach/ScheduleOperations';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 // ── the weekday, the month and the clock, in the reader's own language ─────
@@ -2930,98 +2931,12 @@ export default function TrainerSchedule() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching week</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Schedule</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Tap a day to see sessions · add or cancel any time</Text>
-        </View>
-
-        {/* Three different things are drawn on one grid — an open slot, a
-            booking, and blocked time — and a coach who reads a blocked hour as
-            an offer withdraws availability they never had. One dismissible row;
-            src/lib/screenHelp.ts holds the words. */}
-        <ScreenHelp screen="coach-schedule" />
-
-        {/* ── the hero: how much of the schedule is spoken for ────────────── */}
-        <Hero
-          label="Booked"
-          figure={countable ? fig(booked.length) : fig(null)}
-          unit={countable && booked.length === 1 ? 'session' : 'sessions'}
-          note={!known
-            ? 'Your calendar could not be read, so this is not a count of your week — it is a dash because the number is unknown. Nothing has been cancelled. Pull down to refresh.'
-            : sessionsStatus === 'loading'
-              ? 'Reading your calendar…'
-              : !countable
-                ? 'Only part of your calendar loaded, so it cannot be counted. The days below show what did come back.'
-                : totalSlots === 0
-                  ? 'Nothing scheduled yet — add a session or set your weekly availability.'
-                  // `sharePercent`, not `Math.round(… * 100)`. On a device
-                  // this block read "Booked · 1 session" over "248 open slots ·
-                  // 0% of your slots are filled" — one booking in 249 slots
-                  // rounds to nought, so the screen said in one breath that a
-                  // session was booked and that none of the slots were. See
-                  // src/lib/sharePercent.ts: a percentage may print 0% only
-                  // when the count is actually nought.
-                  : `${open.length} open slot${open.length === 1 ? '' : 's'}${
-                      // The clause is dropped rather than dashed. `totalSlots
-                      // === 0` is already answered above, so a null here can
-                      // only mean a total this screen could not read — and
-                      // "— of your slots are filled" is a sentence with a hole
-                      // in it, not a measurement (check:prose).
-                      sharePercent(booked.length, totalSlots)
-                        ? ` · ${sharePercent(booked.length, totalSlots)} of your slots are filled`
-                        : ''}`}
-          // The ring is a proportion, which is a figure like any other. Drawn
-          // from a partial read it would show a coach a filled-up week off a
-          // fraction of it.
-          arc={countable && totalSlots ? booked.length / totalSlots : undefined}
-          // Said as "of today's slots booked", and the ring measures nothing of
-          // the kind: `booked` and `open` are filtered from the WHOLE loaded
-          // calendar (this screen pages through months), so the proportion is
-          // over every slot the coach has, not over one day. The visible note
-          // beside it already says "of your slots are filled", with no day in
-          // it — so the sighted reading and the spoken one disagreed, and only
-          // the spoken one was wrong. arcLabel is the screen reader's entire
-          // sentence for this ring ("33% of today's slots booked"), which makes
-          // it the one place a scope can be misstated with nothing on screen to
-          // contradict it.
-          arcLabel="of your slots booked"
+        <ScreenHeader
+          eyebrow="Your coaching week"
+          title="Schedule"
+          subtitle="Tap a day to see sessions · add or cancel any time"
+          actions={<Ghost icon="plus" a11yLabel="Add a session" onPress={() => { setAddClient(null); setAddOpen(true); }} />}
         />
-
-        {/* ── the diary running out, said before it does ──────────────────
-            Open slots are written four weeks at a time by a button somebody has
-            to remember to press, and when the window empties the failure is
-            silent and total: every client opens the booking screen, sees
-            nothing, and is told nothing. A coach back from three weeks away
-            reads the empty diary as a demand problem.
-
-            Nothing here is drawn on a calendar that could not be read — an
-            unread diary is 'unknown', not empty, and `generateSlots` refuses
-            to run on one for the same reason. */}
-        {slotLine ? (
-          <View style={{ paddingTop: sp.md }}>
-            <Notice tone={t.warn} kicker="Bookings"
-              title={slotWindow.state === 'never-set' ? 'Your clients cannot book you'
-                : slotWindow.state === 'empty' ? 'Nobody can book you'
-                  : 'Your open slots are running out'}
-              note={slotLine}>
-              <View style={{ marginTop: sp.md }}>
-                {/* Same sheet, different label, and the label is the fix. A
-                    coach who has never set weekly hours cannot generate
-                    anything — `generateSlots` refuses them with "No
-                    availability set. Add at least one weekly slot first." —
-                    so offering them a button named after the second step is
-                    offering them a refusal. Under 'never-set' the button is
-                    named after the step they are actually missing. */}
-                <Ghost
-                  label={slotWindow.state === 'never-set' ? 'Set Your Weekly Hours' : 'Generate Open Slots'}
-                  onPress={() => setAvailOpen(true)} />
-              </View>
-            </Notice>
-          </View>
-        ) : null}
-
-        <Rule />
 
         {/* ── month grid ─────────────────────────────────────────────────── */}
         <Section>
@@ -3066,6 +2981,16 @@ export default function TrainerSchedule() {
                 const hasBlocked = daySess.some((s) => s.status === 'blocked');
                 return (
                   <Pressable key={i} onPress={() => setSelKey(k)} accessibilityRole="button" accessibilityState={{ selected: isSel }}
+                    // The date in full, plus what the dots under it mean. A
+                    // bare "14" is not a day to a screen reader, and the dots
+                    // were colour alone.
+                    accessibilityLabel={[
+                      new Date(viewYear, viewMonth, d).toLocaleDateString(appLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+                      isToday ? 'Today' : null,
+                      hasBooked ? 'Booked session' : null,
+                      hasOpen ? 'Open availability' : null,
+                      hasBlocked ? 'Blocked time' : null,
+                    ].filter(Boolean).join(', ')}
                     style={{ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
                     {/* Selected reads as the accent; today reads as weight and
                         accent ink — no border pretending to be a state. */}
@@ -3110,6 +3035,72 @@ export default function TrainerSchedule() {
           {monthNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{monthNote}</Flag> : null}
         </Section>
 
+        {/* ── how much of the schedule is spoken for ───────────────────────
+            Under the grid rather than a hero over it, as the board draws it.
+            The same three honesty rules the hero carried: nothing is counted
+            off a read that failed or came back short, and the filled share
+            goes through `sharePercent`, which prints 0% only when the count
+            is actually nought — one booking in 249 slots is not "0% filled"
+            (src/lib/sharePercent.ts). The proportion is over every slot the
+            coach has loaded, not over one day, and the label says so. */}
+        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+          <KpiRow items={[
+            { label: 'Booked', value: countable ? fig(booked.length) : fig(null), unit: countable ? (booked.length === 1 ? 'session' : 'sessions') : undefined },
+            { label: 'Open', value: countable ? fig(open.length) : fig(null), unit: countable ? (open.length === 1 ? 'slot' : 'slots') : undefined },
+            { label: 'Filled', value: countable && totalSlots ? (sharePercent(booked.length, totalSlots) ?? fig(null)) : fig(null), delta: countable && totalSlots ? 'of your slots' : undefined },
+          ]} />
+          {!known || sessionsStatus === 'loading' || !countable || totalSlots === 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {!known
+                ? 'Your calendar could not be read, so these are not counts of your week — they are dashes because the numbers are unknown. Nothing has been cancelled. Pull down to refresh.'
+                : sessionsStatus === 'loading'
+                  ? 'Reading your calendar…'
+                  : !countable
+                    ? 'Only part of your calendar loaded, so it cannot be counted. The days above show what did come back.'
+                    : 'Nothing scheduled yet — add a session or set your weekly availability.'}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* Three different things are drawn on one grid — an open slot, a
+            booking, and blocked time — and a coach who reads a blocked hour as
+            an offer withdraws availability they never had. One dismissible row;
+            src/lib/screenHelp.ts holds the words. */}
+        <ScreenHelp screen="coach-schedule" />
+
+        {/* ── the diary running out, said before it does ──────────────────
+            Open slots are written four weeks at a time by a button somebody has
+            to remember to press, and when the window empties the failure is
+            silent and total: every client opens the booking screen, sees
+            nothing, and is told nothing. A coach back from three weeks away
+            reads the empty diary as a demand problem.
+
+            Nothing here is drawn on a calendar that could not be read — an
+            unread diary is 'unknown', not empty, and `generateSlots` refuses
+            to run on one for the same reason. */}
+        {slotLine ? (
+          <View style={{ paddingTop: sp.md }}>
+            <Notice tone={t.warn} kicker="Bookings"
+              title={slotWindow.state === 'never-set' ? 'Your clients cannot book you'
+                : slotWindow.state === 'empty' ? 'Nobody can book you'
+                  : 'Your open slots are running out'}
+              note={slotLine}>
+              <View style={{ marginTop: sp.md }}>
+                {/* Same sheet, different label, and the label is the fix. A
+                    coach who has never set weekly hours cannot generate
+                    anything — `generateSlots` refuses them with "No
+                    availability set. Add at least one weekly slot first." —
+                    so offering them a button named after the second step is
+                    offering them a refusal. Under 'never-set' the button is
+                    named after the step they are actually missing. */}
+                <Ghost
+                  label={slotWindow.state === 'never-set' ? 'Set Your Weekly Hours' : 'Generate Open Slots'}
+                  onPress={() => setAvailOpen(true)} />
+              </View>
+            </Notice>
+          </View>
+        ) : null}
+
         <Rule />
 
         {/* ── the things you do from here ─────────────────────────────────
@@ -3119,93 +3110,54 @@ export default function TrainerSchedule() {
             they were acting on, and the caption named whatever date happened
             to be selected already. The order now matches the order of the
             decision: pick the day, then do the thing. */}
-        <Section>
-          <SectionHead title="Manage" />
-          <ListRow icon="plus" title="Add a Session"
-            note={`Book a client or open a slot on ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`}
-            onPress={() => { setAddClient(null); setAddOpen(true); }} />
-          {/* Three notes, not two. "Set the times you offer every week" is an
-              instruction, and giving it to a coach whose week we simply could
-              not read sends them to re-enter times that are already on the
-              server — where the unique index refuses each one. */}
-          <ListRow icon="clock" title="Weekly Availability"
-            note={!availKnown
-              ? (availStatus === 'loading' ? 'Reading the times you offer…' : 'Your weekly times could not be read in full — this is not "none set"')
-              : availSlots.length
-                ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
-                : 'Set the times you offer every week'}
-            onPress={() => setAvailOpen(true)} />
-          <ListRow icon="clock" title="Block Out Time"
-            note={`Mark ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]} as unavailable so nobody can book it`}
-            onPress={() => setBlockOpen(true)} />
-          {/* The row is offered on every build, including the ones that cannot
-              do it. HAS_NATIVE_CALENDAR is false on every install made before
-              expo-calendar landed — the version was deliberately not moved, so
-              those installs receive this JavaScript and none of the native
-              half — and hiding the row there would leave a coach reading a
-              release note about a feature they cannot find. The note says what
-              is missing instead, and the sheet says it again in full. */}
-          {/* ── a row that says the feature is not here, drawn as though
-                 it were ────────────────────────────────────────────────────
-              There were two of these, adjacent — this one and Google Calendar
-              — both saying the thing does not exist on this build, both
-              drawing the brand-coloured icon and the same chevron as every
-              working row above them. A coach read two live-looking rows that
-              led nowhere and concluded the screen was broken rather than the
-              build old. Google Calendar has since been withdrawn entirely
-              (see below), because in its case no build was coming.
-
-              This one stays, because a newer build genuinely does fix it and
-              one already exists: expo-calendar is compiled into 1.3.0. It
-              stays tappable — the sheet says it in full — but the icon goes
-              to the quiet ink, which is the difference between "here is a
-              thing you can do" and "here is a thing you cannot do yet, and
-              here is why". The chevron stays because there IS somewhere to
-              go: the explanation. */}
-          <ListRow icon="calendar" title="Block Time From Your Calendar"
-            tone={HAS_NATIVE_CALENDAR ? undefined : t.ink3}
-            note={HAS_NATIVE_CALENDAR
-              ? 'Read when your phone says you are busy, times only, and pick what to block'
-              : 'Needs a newer build of the app. Blocking time by hand is unaffected'}
-            onPress={openBusySheet} />
-          {/* ── WITHDRAWN, not hidden-because-broken ─────────────────────
-              Rendered only when a client id is actually configured, which
-              today is nowhere. The row used to be offered on every build with
-              the note "Not available in this version of Repple yet", and that
-              sentence was wrong in the way that matters: it tells a coach to
-              wait for an update. No update can fix it. Nothing was missing
-              from the build — `EXPO_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID` has
-              never been set in .env, eas.json, app.json or the EAS
-              environment, so no version has ever had it and none was coming.
-
-              Not deleted, because the integration is real and finished: the
-              OAuth consent screen, the Calendar API and an iOS client all
-              exist on the Google project as of 2026-09-04. What stopped it
-              shipping is that the redirect is a custom URL scheme, which is
-              native config and therefore a new binary, and that the consent
-              screen sits in Testing — capped at 100 users, tokens expiring
-              every 7 days — until Google verifies a sensitive scope, which
-              takes weeks. It is roadmap work, so the app stops advertising
-              it and says nothing at all instead.
-
-              Setting the env var brings the row back with no other change,
-              which is why this is a condition and not a deletion. */}
-          {CALENDAR_SYNC_CONFIGURED ? (
-            <ListRow icon="calendar" title="Google Calendar"
-              note={syncStatus === 'error'
-                ? 'Your connection could not be read, so this is not "not connected"'
-                : syncStatus === 'loading'
-                  ? 'Checking your connection…'
-                  : LINK_NOTES[linkState({ configured: CALENDAR_SYNC_CONFIGURED, connecting: false, link: syncLink })]}
-              onPress={() => setSyncOpen(true)} />
-          ) : null}
-          <ListRow icon="people" title="Group Classes" note="Schedule & fill classes across branches"
-            onPress={() => router.push('/(trainer)/classes')} />
-          {booked.length > 0 ? (
-            <ListRow icon="share" title="Export Schedule" note="Send your booked sessions to your calendar app"
-              onPress={exportSchedule} />
-          ) : null}
-        </Section>
+        <ScheduleOperations
+          selectedDay={`${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`}
+          // Three notes, not two. "Set the times you offer every week" is an
+          // instruction, and giving it to a coach whose week we simply could
+          // not read sends them to re-enter times that are already on the
+          // server — where the unique index refuses each one.
+          availabilityNote={!availKnown
+            ? (availStatus === 'loading' ? 'Reading the times you offer…' : 'Your weekly times could not be read in full — this is not "none set"')
+            : availSlots.length
+              ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
+              : 'Set the times you offer every week'}
+          // Offered on every build, including the ones that cannot do it.
+          // HAS_NATIVE_CALENDAR is false on every install made before
+          // expo-calendar landed, and hiding the row there would leave a coach
+          // reading a release note about a feature they cannot find. The note
+          // says what is missing instead, and the sheet says it again in full.
+          deviceCalendarAvailable={HAS_NATIVE_CALENDAR}
+          deviceCalendarNote={HAS_NATIVE_CALENDAR
+            ? 'Read when your phone says you are busy, times only, and pick what to block'
+            : 'Needs a newer build of the app. Blocking time by hand is unaffected'}
+          // ── WITHDRAWN, not hidden-because-broken ─────────────────────
+          // Null — no row — unless a client id is actually configured, which
+          // today is nowhere. The row used to say "Not available in this
+          // version of Repple yet", which tells a coach to wait for an update
+          // no update can bring: `EXPO_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID` has
+          // never been set anywhere. The integration is real and finished on
+          // the Google side (2026-09-04); what stops it shipping is a custom
+          // URL scheme (a new binary) and a consent screen in Testing until
+          // Google verifies the scope. Setting the env var brings the row back
+          // with no other change, which is why this is a condition and not a
+          // deletion.
+          googleCalendarNote={CALENDAR_SYNC_CONFIGURED
+            ? (syncStatus === 'error'
+              ? 'Your connection could not be read, so this is not "not connected"'
+              : syncStatus === 'loading'
+                ? 'Checking your connection…'
+                : LINK_NOTES[linkState({ configured: CALENDAR_SYNC_CONFIGURED, connecting: false, link: syncLink })])
+            : null}
+          canExport={booked.length > 0}
+          onAddSession={() => { setAddClient(null); setAddOpen(true); }}
+          onAvailability={() => setAvailOpen(true)}
+          onBlockTime={() => setBlockOpen(true)}
+          onDeviceCalendar={openBusySheet}
+          onGoogleCalendar={() => setSyncOpen(true)}
+          onSessionOutcomes={() => router.push('/(trainer)/sessions')}
+          onClasses={() => router.push('/(trainer)/classes')}
+          onExport={exportSchedule}
+        />
 
         <Rule />
 

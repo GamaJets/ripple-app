@@ -1,3 +1,10 @@
+// The things a coach does from the Schedule tab, in the order of the decision:
+// book the selected day first, then the schedule-wide tools underneath.
+//
+// Lifted out of app/(trainer)/calendar.tsx so the tab reads as one operating
+// surface rather than a calendar with a Manage list under it. Every note is
+// composed by the screen, which is the only thing that knows the read states
+// behind them — this component draws what it is handed and decides nothing.
 import { View, Text } from 'react-native';
 import { Cta, ListRow, Section, SectionHead } from '../kit';
 import { useTheme } from '../components';
@@ -7,6 +14,7 @@ export function ScheduleOperations({
   selectedDay,
   availabilityNote,
   deviceCalendarNote,
+  deviceCalendarAvailable,
   googleCalendarNote,
   canExport,
   onAddSession,
@@ -21,7 +29,16 @@ export function ScheduleOperations({
   selectedDay: string;
   availabilityNote: string;
   deviceCalendarNote: string;
-  googleCalendarNote: string;
+  /** False on a build without the native half: the row stays tappable — the
+   *  sheet says why in full — but its icon goes to the quiet ink, which is
+   *  the difference between "here is a thing you can do" and "here is a thing
+   *  you cannot do yet, and here is why". */
+  deviceCalendarAvailable: boolean;
+  /** Null WITHDRAWS the row. Google Calendar is only offered when a client id
+   *  is configured, which today is nowhere; a row saying "not available in
+   *  this version yet" tells a coach to wait for an update that no update can
+   *  bring. See the note in calendar.tsx. */
+  googleCalendarNote: string | null;
   canExport: boolean;
   onAddSession: () => void;
   onAvailability: () => void;
@@ -40,12 +57,15 @@ export function ScheduleOperations({
       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
         Book the selected day first. Availability, time off, calendars and classes stay underneath as schedule-wide tools.
       </Text>
-      <Cta wide label={`Add Session · ${selectedDay}`} onPress={onAddSession} />
+      <Cta wide label={`Add a Session · ${selectedDay}`} a11yLabel={`Add a session on ${selectedDay}`} onPress={onAddSession} />
       <View style={{ height: sp.md }} />
       <ListRow icon="clock" title="Weekly Availability" note={availabilityNote} onPress={onAvailability} />
       <ListRow icon="clock" title="Block Out Time" note={`Mark ${selectedDay} as unavailable so nobody can book it`} onPress={onBlockTime} />
-      <ListRow icon="calendar" title="Block Time From Your Calendar" note={deviceCalendarNote} onPress={onDeviceCalendar} />
-      <ListRow icon="calendar" title="Google Calendar" note={googleCalendarNote} onPress={onGoogleCalendar} />
+      <ListRow icon="calendar" title="Block Time From Your Calendar" tone={deviceCalendarAvailable ? undefined : t.ink3}
+        note={deviceCalendarNote} onPress={onDeviceCalendar} />
+      {googleCalendarNote != null ? (
+        <ListRow icon="calendar" title="Google Calendar" note={googleCalendarNote} onPress={onGoogleCalendar} />
+      ) : null}
       <ListRow icon="check" title="Session Outcomes" note="Mark completed, missed and cancelled sessions in one queue" onPress={onSessionOutcomes} />
       <ListRow icon="people" title="Group Classes" note="Schedule and fill classes across branches" onPress={onClasses} />
       {canExport ? (

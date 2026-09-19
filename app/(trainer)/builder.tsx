@@ -50,7 +50,7 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -133,6 +133,7 @@ import {
 import { useAuth } from '../../src/ui/auth';
 import { notifySuccess } from '../../src/ui/haptics';
 import { WEEK_DAYS } from '../../src/lib/weekStart';
+import { ProgramBuilderFlow } from '../../src/ui/coach/ProgramBuilderFlow';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { useBackTo } from '../../src/ui/backTo';
 import { backDestination } from '../../src/lib/backTo';
@@ -2251,20 +2252,44 @@ export default function Builder() {
           the drag both claim the same vertical movement, and the list scrolls
           under the finger while the row tries to follow it — which reads as
           the drag being broken rather than as two gestures competing. */}
-      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
+      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 112 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ paddingTop: sp.md }}>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
-            {cameFrom ? (
-              <Ghost icon={BACK_ICON} onPress={goBack} a11yLabel="Back" />
-            ) : null}
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Programmes</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Programme Builder</Text>
-            </View>
-          </View>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Build a weekly plan, save it as a template, and assign it to as many clients as you like.</Text>
+        <ScreenHeader
+          eyebrow="Programmes"
+          title="Programme Builder"
+          subtitle="Build a weekly plan, save it as a template, and assign it to as many clients as you like."
+          leading={cameFrom ? <Ghost icon={BACK_ICON} onPress={goBack} a11yLabel="Back" /> : null}
+          actions={<Ghost label="Templates" icon="grid" onPress={() => router.push('/(trainer)/templates')} />}
+        />
+
+        {/* ── the block at a glance, as the board opens it ─────────────────
+            Weeks, days and exercises off the builder's own state — nothing
+            here is read, so nothing here can be unknown. `blockExercises`
+            rather than `totalExercises`, because the assign gate below counts
+            the block and this strip must agree with it. Under the strip, the
+            week's days as pills: each opens or folds its section below, which
+            is how the board's "Workout Days" circles behave here, and the plus
+            adds one. */}
+        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+          <KpiRow items={[
+            { label: 'Weeks', value: String(blockWeeks.length) },
+            { label: 'Days', value: String(days.length), unit: blockWeeks.length > 1 ? 'this week' : undefined },
+            { label: 'Exercises', value: num(blockExercises) },
+          ]} />
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.sm }}>
+            {days.map((day, index) => (
+              <Pressable key={`${day.day}-${index}`} onPress={() => toggleDay(index)} accessibilityRole="button"
+                accessibilityState={{ expanded: !foldedDays[index] }}
+                accessibilityLabel={`${day.day}, ${day.focus || 'training day'}, ${day.exercises.length === 1 ? '1 exercise' : `${day.exercises.length} exercises`}`}
+                style={{ minHeight: 40, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, justifyContent: 'center', backgroundColor: foldedDays[index] ? t.surface2 : t.brand }}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: foldedDays[index] ? t.ink2 : t.brandInk }}>{day.day}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Ghost icon="plus" a11yLabel="Add a training day" onPress={addDay} />
         </View>
 
         {/* ── client ─────────────────────────────────────────────────────── */}
@@ -2363,6 +2388,20 @@ export default function Builder() {
             </Text>
           ) : null}
         </Section>
+
+        {/* Where the coach is in the build — Build, Review, Assign — stated
+            once, off the same figures the sections below act on. The Assign
+            step reads "current" when its prerequisites are met and never
+            "complete": an untouched draft must not look delivered before the
+            real Assign button below has been pressed. */}
+        <ProgramBuilderFlow
+          subject={client?.name.split(' ')[0] ?? null}
+          dayCount={days.length}
+          exerciseCount={blockExercises}
+          findingCount={review.findings.length}
+          recipientCount={pickedIds.length}
+          readyToAssign={canAssign}
+        />
 
         <Rule />
 
@@ -4041,6 +4080,25 @@ export default function Builder() {
         </Section>
 
       </ScrollView>
+
+      {/* ── the one action, always in reach ──────────────────────────────
+          The board keeps a Save Program button on screen. Here the action is
+          Assign, because that is what this builder does — a template is saved
+          from its own section above — and it carries the same label, the same
+          gate and the same handler as the button at the foot of the page,
+          which keeps its captions saying WHY it is off. The scroll pads for
+          it, so nothing on the page hides underneath. */}
+      <View pointerEvents="box-none" style={{ position: 'absolute', start: G, end: G, bottom: sp.md }}>
+        <View style={{ opacity: canAssign ? 1 : 0.55, ...elevation.e1 }} pointerEvents={canAssign && !assignBusy ? 'auto' : 'none'}>
+          <Cta wide label={assignCtaLabel({
+            busy: assignBusy,
+            picked: pickedIds.length,
+            exercises: blockExercises,
+            planLabel: plan.label,
+            soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
+          })} onPress={assign} />
+        </View>
+      </View>
 
       {/* ── the start day, as a month ─────────────────────────────────────
           Dismissing it is a cancel and writes nothing: a picker that committed

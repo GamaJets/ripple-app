@@ -97,7 +97,7 @@ import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc,
 import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, Field, fig, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ActionCard, Cta, Ghost, Spark, Field, fig, Flag, ChipGrid } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
@@ -608,6 +608,11 @@ export default function Scans() {
   // the member's own body record. Same provider, same status, same rule.
   const scansWhole = isWhole(cd.scansStatus);
   const scansReading = cd.scansStatus === 'loading';
+  // The board's Progress opens on one metric at a time with a range under
+  // it. Which metric and which range are this screen's, not the account's:
+  // they reset with the tab, like a chart's zoom.
+  const [progressMetric, setProgressMetric] = useState<'weight' | 'bodyfat'>('weight');
+  const [progressRange, setProgressRange] = useState<'1M' | '3M' | '6M' | '1Y'>('1Y');
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
   // A figure that arrived in kilograms — from the vision reader, from the OCR
@@ -1502,8 +1507,6 @@ export default function Scans() {
   // now draws for the coach — assembled once in src/lib/inbodyMetrics.ts rather
   // than filtered into shape here and again there.
   const mByGroup = trendsByGroup(cd.scans);
-  const wDelta = wsv.length > 1 ? +(wsv[wsv.length - 1] - wsv[0]).toFixed(1) : null;
-  const wDeltaShown = weightDeltaIn(wDelta, wu);
   // `scans.taken_at` is a bare postgres DATE, and this used to be
   // `new Date(iso)` — UTC midnight, which is the previous day for every client
   // west of Greenwich, so a scan taken on the 1st was captioned "31/7" in New
@@ -1700,12 +1703,23 @@ export default function Scans() {
   // as today's.
   const mNow = latestBodyReading(cd.muscleSeries, scanCount);
   const wWas = priorOf(wReads), bfWas = priorOf(bfReads), mWas = priorOf(mReads);
-  // The same weight series in the client's unit, converted point by point
-  // because each point is a reading rather than a change. Taken from `wReads`
-  // rather than from the raw series so the chart and the date labels beside it
-  // are the same list — a point dropped from one and not the other would put
-  // every date on the wrong reading.
-  const wsvShown = wReads.map((r) => weightIn(r.value, wu)).filter((v): v is number => v != null);
+  /* ── the trend the top of the screen draws ─────────────────────────────
+   *
+   * The chosen metric's readings, cut to the chosen range. Off `muscleNow`,
+   * the screen's one clock, so the window moves with the day rather than
+   * with the moment the tab was first opened. A reading with an unparseable
+   * stamp is dropped rather than dated to the epoch. Under a read that was
+   * not whole the series is the most recent part of the record — which is
+   * what a range chart is anyway — and the caption under it says so. */
+  const rangeDays = progressRange === '1M' ? 31 : progressRange === '3M' ? 93 : progressRange === '6M' ? 186 : 366;
+  const progressCutoff = muscleNow.getTime() - rangeDays * 86_400_000;
+  const progressReads = progressMetric === 'weight' ? wReads : bfReads;
+  const progressTrendReads = progressReads.filter((reading) => {
+    const at = Date.parse(reading.at);
+    return Number.isFinite(at) && at >= progressCutoff;
+  });
+  const progressNow = progressMetric === 'weight' ? wNow : bfNow;
+  const progressWas = progressMetric === 'weight' ? wWas : bfWas;
   // Said once above the row rather than three times inside it, and only when
   // the figures genuinely have different dates or different instruments behind
   // them — a client whose every number came off one scan is told nothing.
@@ -1727,14 +1741,6 @@ export default function Scans() {
     if (shown == null) return null;
     return `${d < 0 ? '▼' : d > 0 ? '▲' : ''} ${Math.abs(shown)} ${wu}`.trim();
   };
-  // The hero's movement line, measured between the two most recent body-fat
-  // READINGS rather than between the current figure and the second-newest scan.
-  // The old line subtracted `prev.bodyFatPct` — a scan two steps back — from
-  // whatever `cd.bodyFatPct` currently was, and then captioned the result
-  // "since your previous scan". When the current figure came from a logged
-  // weigh-in that sentence named the wrong instrument, the wrong two readings
-  // and the wrong interval, all at once.
-  const bfMove = (bfNow && bfWas) ? +(bfNow.value - bfWas.value).toFixed(1) : null;
   // How long ago the newest SCAN was — used only where the subject really is
   // the scan itself. Every figure below carries its own date instead.
   const ago = latest ? (agoLabel(latest.takenAt, today) ?? 'on an unreadable date') : null;
@@ -1759,45 +1765,120 @@ export default function Scans() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>InBody · body composition</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Progress</Text>
-          </View>
-          {/* Labelled, not a bare icon: TF-21 was written by somebody who
-              could not tell what the icon would do until they had done it. */}
-          <Ghost icon="share" label="Share" onPress={shareProgress} />
+        <ScreenHeader
+          eyebrow="Your results"
+          title="Progress"
+          // Labelled, not a bare icon: TF-21 was written by somebody who
+          // could not tell what the icon would do until they had done it.
+          actions={<Ghost icon="share" label="Share" onPress={shareProgress} />}
+        />
+
+        {/* ── one metric at a time, as the board draws it ─────────────────
+            Weight and body fat are tabs over one figure and one chart;
+            Photos is the compare screen, which already exists. */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
+          {([['weight', 'Weight'], ['bodyfat', 'Body Fat']] as const).map(([key, label]) => {
+            const selected = progressMetric === key;
+            return (
+              <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected }} accessibilityLabel={label} onPress={() => setProgressMetric(key)}
+                style={{ flex: 1, minHeight: 38, borderRadius: radius.sm, backgroundColor: selected ? t.surface : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.label, fontWeight: selected ? '600' : '400', color: selected ? t.ink : t.ink3 }}>{label}</Text>
+              </Pressable>
+            );
+          })}
+          <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Photos" onPress={() => router.push('/(client)/compare')}
+            style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Photos</Text>
+          </Pressable>
         </View>
 
-        {/* ── the hero: one number leads the screen ───────────────────────── */}
-        <ScreenHelp screen="progress" />
+        {/* ── the figure the screen leads with ─────────────────────────────
+            The latest reading of the chosen metric, dated. `measuredNote`
+            names the instrument, the day and the age, in that order, and the
+            movement clause names the day it is measured FROM rather than
+            saying "your previous reading" and hoping. Through `deltaLabel`,
+            which is the one place a sign is decided: a reading that has not
+            moved is "No change", never "−0". */}
+        <Pressable onPress={() => router.push('/(client)/body-trends')} accessibilityRole="button"
+          accessibilityLabel={`${progressMetric === 'weight' ? 'Weight' : 'Body fat'}, ${progressNow
+            ? `${progressMetric === 'weight' ? fig(weightIn(progressNow.value, wu)) + ' ' + wu : fig(progressNow.value) + ' percent'}. ${measuredNote(progressNow, today)}`
+            : 'no reading yet'}. Open body composition`}
+          style={{ paddingTop: sp.xl, paddingBottom: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>{progressMetric === 'weight' ? 'Weight' : 'Body Fat'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: sp.sm }}>
+            <Text style={{ ...value(32), color: t.ink }}>
+              {progressMetric === 'weight' ? fig(weightIn(wNow?.value, wu)) : fig(bfNow?.value)}
+            </Text>
+            {progressNow ? (
+              <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{progressMetric === 'weight' ? wu : '%'}</Text>
+            ) : null}
+          </View>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+            {progressNow
+              ? `${progressWas
+                  ? deltaLabel(
+                      progressMetric === 'weight'
+                        ? weightDeltaIn(progressNow.value - progressWas.value, wu)
+                        : +(progressNow.value - progressWas.value).toFixed(1),
+                      { since: bodyDayLabel(progressWas.at), unit: progressMetric === 'weight' ? wu : '%' },
+                    )
+                  : 'First reading'} · ${measuredNote(progressNow, today)}`
+              : scansReading ? 'Reading your scans…'
+              : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
+              : progressMetric === 'weight' ? 'No weight on record yet — add a check-in or an InBody scan.'
+              : 'No scans yet — add your InBody report to start tracking.'}
+          </Text>
+        </Pressable>
 
-        <Hero
-          label="Body Fat"
-          figure={bfNow ? String(bfNow.value) : '—'}
-          unit={bfNow ? '%' : undefined}
-          // The date is not an ornament under the hero: this is the figure the
-          // whole screen leads with, and until build 35 it carried a caption
-          // that said "scanned N days ago" whatever had actually measured it.
-          // `measuredNote` names the instrument, the day and the age, in that
-          // order, and the movement clause names the day it is measured FROM
-          // rather than saying "your previous scan" and hoping.
-          note={bfNow
-            // Zero is its own case. `bfMove <= 0` put a minus sign in front of
-            // it, so a reading that had not moved at all rendered as "−0%
-            // since Aug 25" — which reads as a small drop, and is the kind of
-            // small drop somebody is pleased about. There is no such thing as
-            // negative nothing.
-            ? (bfMove !== null && bfWas
-                ? (bfMove === 0
-                    ? `No change since ${bodyDayLabel(bfWas.at)} · `
-                    : `${bfMove < 0 ? '−' : '+'}${Math.abs(bfMove)}% since ${bodyDayLabel(bfWas.at)} · `)
-                : 'First reading · ') + measuredNote(bfNow, today)
-            : scansReading ? 'Reading your scans…'
-            : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
-            : 'No scans yet — add your InBody report to start tracking.'}
-          onPress={() => router.push('/(client)/body-trends')}
-        />
+        {/* The trend over the chosen range. `labels` is what puts a DATE on
+            the readout when the member touches the line — the chart answers
+            "when" as well as "what". Two readings are the least a line can be
+            drawn from; under that the line says what it is waiting for. */}
+        {progressTrendReads.length > 1 ? (
+          <Spark
+            data={progressTrendReads.map((reading) => (progressMetric === 'weight' ? weightIn(reading.value, wu) : reading.value)).filter((v): v is number => v != null)}
+            unit={progressMetric === 'weight' ? ` ${wu}` : '%'}
+            labels={progressTrendReads.map((reading) => reading.at)}
+          />
+        ) : (
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+            {scansReading ? 'Reading your history…'
+              : progressReads.length > 1 ? `Nothing in the last ${progressRange === '1M' ? 'month' : progressRange === '3M' ? '3 months' : progressRange === '6M' ? '6 months' : 'year'} — widen the range to see the trend.`
+              : `Add another ${progressMetric === 'weight' ? 'weight' : 'body-fat'} reading to draw this trend.`}
+          </Text>
+        )}
+        {/* "First 3 Mar" is a claim about the member's whole record. The scan
+            read is ordered `taken_at desc` and capped, so under 'partial' the
+            earliest point on this chart is the earliest of the most recent
+            thousand — not the member's first, and there is no way to tell
+            from inside the page. The count is only named when the read was
+            whole, and the sentence says what the chart actually starts at
+            rather than calling it a first. */}
+        {progressTrendReads.length > 1 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.md }}>
+            {scansWhole
+              ? `${readingsLabel(progressReads)} · from ${bodyDayLabel(progressTrendReads[0].at)}`
+              : cd.scansStatus === 'partial'
+                ? `You have more readings on record than we can read at once, so they aren’t counted here. This chart starts at ${bodyDayLabel(progressTrendReads[0].at)}, which isn’t necessarily your first.`
+                : `Not all of your readings could be read, so they aren’t counted here. This chart starts at ${bodyDayLabel(progressTrendReads[0].at)}, which isn’t necessarily your first.`}
+          </Text>
+        ) : null}
+
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginBottom: sp.lg }}>
+          {(['1M', '3M', '6M', '1Y'] as const).map((range) => {
+            const selected = progressRange === range;
+            return (
+              <Pressable key={range} accessibilityRole="tab" accessibilityState={{ selected }}
+                accessibilityLabel={range === '1M' ? 'Last month' : range === '3M' ? 'Last 3 months' : range === '6M' ? 'Last 6 months' : 'Last year'}
+                onPress={() => setProgressRange(range)}
+                style={{ flex: 1, minHeight: 36, borderRadius: radius.sm, backgroundColor: selected ? t.surface : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.caption, ...numeric, fontWeight: selected ? '600' : '400', color: selected ? t.ink : t.ink3 }}>{range}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <ScreenHelp screen="progress" />
         {/* ── What they are aiming at ─────────────────────────────────────
             Two targets, on the two figures this screen leads with. The Goals
             screen has stored these for months and no body screen has ever read
@@ -1890,62 +1971,6 @@ export default function Scans() {
             {bodyMixNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{bodyMixNote}</Text> : null}
             {stalenessNote(wNow, today) ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{stalenessNote(wNow, today)}</Text> : null}
           </View>
-        </Section>
-
-        <Rule />
-
-        {/* ── weight trend ───────────────────────────────────────────────── */}
-        <Section>
-          {wsv.length > 1 ? (<>
-            {/* "N check-ins" was wrong in both directions — most of these points
-                are InBody scans, and the ones that are not are weigh-ins.
-                `readingsLabel` counts each kind and names it.
-
-                And it is only named at all when the scan read was whole. This
-                screen asks `scansWhole` in nine places — the Scans KPI two
-                sections up is `scansWhole ? fig(scans.length) : fig(null)`, and
-                the scan-history line at the foot of the screen is
-                `scansWhole ? "N scans" : "not all read"` — and this
-                heading was the one count that did not ask. Under 'partial'
-                (cd.scansStatus, from a read that came back at PostgREST's
-                ceiling) it printed "1,000 scans" over a chart of the most recent
-                thousand, which is a count over an unknown fraction stated as a
-                total. The caption under the chart says so rather than leaving
-                the heading quietly shorter. */}
-            <SectionHead title={scansWhole ? `Weight · ${readingsLabel(wReads)}` : 'Weight'}
-              note={wDeltaShown !== null ? `${wDeltaShown > 0 ? '+' : wDeltaShown < 0 ? '−' : ''}${Math.abs(wDeltaShown)} ${wu}` : undefined}
-              onPress={() => router.push('/(client)/body-trends')} />
-            {/* `labels` is what puts a DATE on the readout when the client
-                touches the line. Without it the chart answered "what did I
-                weigh" and refused to answer "when", which is exactly what the
-                third report asked for. Spark reads a bare date safely. */}
-            <Spark data={wsvShown} unit={` ${wu}`} labels={wReads.map((r) => r.at)} />
-            {/* "First 3 Mar" is a claim about the member's whole record and was
-                made from the first point in the ARRAY. The scan read is ordered
-                `taken_at desc` and capped, so under 'partial' the earliest point
-                on this chart is the earliest of the most recent thousand — not
-                the member's first reading, and there is no way to tell from
-                inside the page. So the sentence says what the chart actually
-                starts at instead of calling it a first. */}
-            {scansWhole ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                First {bodyDayLabel(wReads[0].at)} · latest {measuredNote(wNow, today)}
-              </Text>
-            ) : (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {cd.scansStatus === 'partial'
-                  ? `You have more readings on record than we can read at once, so they aren’t counted above. This chart starts at ${bodyDayLabel(wReads[0].at)}, which isn’t necessarily your first — latest ${measuredNote(wNow, today)}`
-                  : `Not all of your readings could be read, so they aren’t counted above. This chart starts at ${bodyDayLabel(wReads[0].at)}, which isn’t necessarily your first — latest ${measuredNote(wNow, today)}`}
-              </Text>
-            )}
-          </>) : (<>
-            <SectionHead title="Weight" note="Measurements" onPress={() => router.push('/(client)/measurements')} />
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {scansReading ? 'Reading your weight history…'
-                : !scansWhole ? 'Your weight history could not be read, so there is nothing to chart. It is not gone.'
-                : 'No weight history yet — the trend charts from your second check-in.'}
-            </Text>
-          </>)}
         </Section>
 
         <Rule />
@@ -2396,54 +2421,48 @@ export default function Scans() {
           </Pressable>
         </Section>
 
-        {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
+        {/* ── the rest of the progress story ───────────────────────────────
+            One undifferentiated strip of thirteen destinations recreated the
+            fragmented experience this tab is meant to solve. Body and
+            recovery answer a different question from training progress, so
+            they are two groups — every destination the strip held is still
+            here, wrapped rather than scrolled sideways so nothing sits past
+            the edge unannounced. Ordered by the question being asked, not by
+            when each screen was built. */}
         <Section>
-          <SectionHead title="Go Deeper" />
-          {/* Wrapped, not scrolled sideways — the same fix the Train tab's row
-              needed. Seven destinations in a horizontal strip put three of
-              them past the right edge with nothing to say they were there.
+          <SectionHead title="Body & Recovery" note="From you and your devices" />
+          <ChipGrid items={([
+            ['trending', 'Composition', '/(client)/body-trends'],
+            ['ruler', 'Measurements', '/(client)/measurements'],
+            ['camera', 'Compare Photos', '/(client)/compare'],
+            ['dumbbell', 'Muscles', '/(client)/muscles'],
+            ['heart', 'Recovery', '/(client)/recovery'],
+            ['chart', 'Blood Sugar', '/(client)/glucose'],
+          ] as const).map(([icon, label, route]) => ({ icon, label, key: route, onPress: () => router.push(route as any) }))} />
+        </Section>
 
-              Ordered by the question being asked, rather than by when each
-              screen was built:
+        <Rule />
 
-                the summary      Report
-                the body         Composition · Measurements
-                what you lift    Records · Standards
-                habit and aim    Consistency · Goal */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-            {([
-              ['chart', 'Report', '/(client)/report'],
-              ['camera', 'Compare', '/(client)/compare'],
-              ['trending', 'Composition', '/(client)/body-trends'],
-              ['ruler', 'Measurements', '/(client)/measurements'],
-              ['dumbbell', 'Muscles', '/(client)/muscles'],
-              ['trophy', 'Records', '/(client)/records'],
-              ['chart', 'Standards', '/(client)/standards'],
-              ['flame', 'Consistency', '/(client)/consistency'],
-              ['target', 'Goal', '/(client)/goal'],
-              // ── what a member means by "progress" and could not find here ──
-              //
-              // src/lib/features.ts files SEVENTEEN screens under Progress &
-              // Insights; this list held nine. The eight missing were training
-              // history, the long view, trend graphs, badges, challenges, the
-              // weekly check-in, the activity feed and gym attendance — so
-              // "how often did I actually go" had no route from the tab named
-              // Progress, while "how strong am I" did.
-              //
-              // Four of them are added here rather than all eight: Activity is
-              // already on Train (under the name History, which is its own
-              // problem), and Check-in belongs to the coaching relationship on
-              // Me. These four are the ones a member opens Progress to find.
-              ['clock', 'History', '/(client)/history'],
-              ['trending', 'Trends', '/(client)/trends'],
-              ['trophy', 'Badges', '/(client)/achievements'],
-              ['calendar', 'Attendance', '/(client)/attendance'],
-            ] as const).map(([ic, label, route]) => (
-              <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
-                <Icon name={ic} size={14} color={t.ink2} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
+        <Section>
+          <SectionHead title="Training Progress" note="What changed in your work" />
+          {/* ── what a member means by "progress" and could not find here ──
+              src/lib/features.ts files SEVENTEEN screens under Progress &
+              Insights; this list once held nine. History, Trends, Badges and
+              Attendance are the four a member opens Progress to find —
+              "how often did I actually go" had no route from the tab named
+              Progress, while "how strong am I" did. Activity is on Train and
+              Check-in belongs to the coaching relationship on Me. */}
+          <ChipGrid items={([
+            ['chart', 'Report', '/(client)/report'],
+            ['clock', 'History', '/(client)/history'],
+            ['trending', 'Trends', '/(client)/trends'],
+            ['trophy', 'Records', '/(client)/records'],
+            ['chart', 'Standards', '/(client)/standards'],
+            ['flame', 'Consistency', '/(client)/consistency'],
+            ['target', 'Goal', '/(client)/goal'],
+            ['trophy', 'Badges', '/(client)/achievements'],
+            ['calendar', 'Attendance', '/(client)/attendance'],
+          ] as const).map(([icon, label, route]) => ({ icon, label, key: route, onPress: () => router.push(route as any) }))} />
         </Section>
       </ScrollView>
 
