@@ -23,7 +23,7 @@ import { useTheme } from '../../src/ui/components';
 import {
   buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryFromWeek, planWeek, slotsFor,
   planGaps, mealAllergens, allergenGapNote, allergenLabel, mealRowSpoken,
-  DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen,
+  DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen, type Slot,
 } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
 import { hitSlopFor } from '../../src/lib/a11y';
@@ -411,6 +411,10 @@ export default function Nutrition() {
     AsyncStorage.setItem(swapsKey, writeMealSwaps(override)).catch(() => {});
   }, [override, ovHydrated, swapsKey]);
   const [view, setView] = useState<'today' | 'week'>('today');
+  // The board's meal list is one slot at a time — Breakfast, Lunch, Dinner
+  // segments over the rows. null is "the first slot of the plan", so a plan
+  // rebuilt with fewer meals never points at a slot it no longer has.
+  const [slotPick, setSlotPick] = useState<Slot | null>(null);
   const [showAvoid, setShowAvoid] = useState(false);
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
   const [dayInfo, setDayInfo] = useState(false);
@@ -728,6 +732,9 @@ export default function Nutrition() {
   // commitment. Logging one is what counts it, like any other food.
   const snacks = useMemo(() => snackIdeas(input, 3), [input]);
   const planHasSnacks = plan.some((m) => m.slot === 'Snack');
+  const planSlots = useMemo(() => Array.from(new Set(plan.map((m) => m.slot))), [plan]);
+  const slotSel: Slot | null = slotPick && planSlots.includes(slotPick) ? slotPick : planSlots[0] ?? null;
+  const slotMeals = plan.filter((m) => m.slot === slotSel);
   const coachPick = (pos: number) => coachOverride[pos] != null && override[pos] == null;
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   // The seven days the member is actually shown, decided ONCE and used by both
@@ -989,7 +996,6 @@ export default function Nutrition() {
             "0 of 2,350 kcal eaten · 2,648 kcal burned all day, rest included,
             97 more than your activity level assumes" — and every clause of it
             is true and load-bearing. This row decodes it, once. */}
-        <ScreenHelp screen="meals" />
 
         {/* One card: the ring of today's calories, what is left, the three
             macros against target, and the way to log. The withholding is the
@@ -999,37 +1005,35 @@ export default function Nutrition() {
             for a whole read, and the line under the figure says which read
             is short. undefined arc, not 0: an empty ring drawn for a target
             we do not have is a figure invented to fill a slot. */}
-        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
-            <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
-              accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories could not be counted. Open the food log'}
-              hitSlop={8}
-              style={{ width: 86, height: 86, alignItems: 'center', justifyContent: 'center' }}>
-              <Svg width={86} height={86} viewBox="0 0 86 86" style={{ position: 'absolute' }}
-                accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                <Circle cx="43" cy="43" r="36" fill="none" stroke={t.surface3} strokeWidth={7} />
-                {dayWhole && target.kcal ? (
-                  <Circle cx="43" cy="43" r="36" fill="none" stroke={t.brand} strokeWidth={7} strokeLinecap="round"
-                    strokeDasharray={2 * Math.PI * 36} strokeDashoffset={2 * Math.PI * 36 * (1 - Math.min(1, eaten.kcal / target.kcal))}
-                    transform="rotate(-90 43 43)" />
-                ) : null}
-              </Svg>
-              <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(19), color: t.ink }}>{dayWhole ? num(eaten.kcal) : fig(null)}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
-            </Pressable>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition Today</Text>
-              <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>
-                {dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'left' : 'over'}` : 'Calories not counted'}
-              </Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                {dayWhole ? caloriesNote(cal)
-                  : fl.status === 'loading' ? 'Reading today’s food log…'
-                  : fl.status === 'partial' ? 'You have logged more today than this screen can read in one go, so what is left cannot be worked out from it.'
-                  : 'We couldn’t read today’s food log. What is left depends on what you have eaten, so this is unknown rather than your whole allowance.'}
-              </Text>
-            </View>
-          </View>
+        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg, marginTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3, textAlign: 'center' }}>Nutrition Today</Text>
+          {/* The ring is the figure: eaten inside it, the target under it, the
+              way the board draws it. A tap opens the log. */}
+          <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
+            accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories could not be counted. Open the food log'}
+            hitSlop={8}
+            style={{ width: 156, height: 156, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginTop: sp.md }}>
+            <Svg width={156} height={156} viewBox="0 0 156 156" style={{ position: 'absolute' }}
+              accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <Circle cx="78" cy="78" r="68" fill="none" stroke={t.surface3} strokeWidth={11} />
+              {dayWhole && target.kcal ? (
+                <Circle cx="78" cy="78" r="68" fill="none" stroke={t.brand} strokeWidth={11} strokeLinecap="round"
+                  strokeDasharray={2 * Math.PI * 68} strokeDashoffset={2 * Math.PI * 68 * (1 - Math.min(1, eaten.kcal / target.kcal))}
+                  transform="rotate(-90 78 78)" />
+              ) : null}
+            </Svg>
+            <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(30), color: t.ink }}>{dayWhole ? num(eaten.kcal) : fig(null)}</Text>
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>of {num(target.kcal)} kcal</Text>
+          </Pressable>
+          <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
+            {dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'left' : 'over'}` : 'Calories not counted'}
+          </Text>
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: 3 }}>
+            {dayWhole ? caloriesNote(cal)
+              : fl.status === 'loading' ? 'Reading today’s food log…'
+              : fl.status === 'partial' ? 'You have logged more today than this screen can read in one go, so what is left cannot be worked out from it.'
+              : 'We couldn’t read today’s food log. What is left depends on what you have eaten, so this is unknown rather than your whole allowance.'}
+          </Text>
           {/* Intake against target, not the plan's totals: three figures under
               a sentence about what you have eaten mean what you have eaten. */}
           <View style={{ flexDirection: 'row', marginTop: sp.lg, paddingVertical: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
@@ -1041,11 +1045,11 @@ export default function Nutrition() {
               <View key={macro.label} accessible accessibilityLabel={`${macro.label}, ${dayWhole ? macro.value.replace(' / ', ' of ') : 'not counted'}`}
                 style={{ flex: 1, alignItems: 'center', paddingHorizontal: sp.xs, borderStartWidth: index ? hairline : 0, borderStartColor: t.ring }}>
                 <Text style={{ ...ty.micro, color: t.ink3 }}>{macro.label}</Text>
-                <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginTop: 3 }}>{macro.value}</Text>
+                <Text numberOfLines={1} style={{ ...value(17), color: t.ink, marginTop: 3 }}>{macro.value}</Text>
               </View>
             ))}
           </View>
-          <View style={{ marginTop: sp.md }}><Cta label="Log a Meal" wide onPress={() => router.push('/(client)/foodlog')} /></View>
+          <View style={{ marginTop: sp.md }}><Cta label="Log Meal" wide onPress={() => router.push('/(client)/foodlog')} /></View>
         </View>
 
         {/* The burn named in the sentence above is the last thing the device
@@ -1053,12 +1057,173 @@ export default function Nutrition() {
             into `caloriesNote`, which is shared with screens that know nothing
             about devices — and said in the same words the two Devices screens
             use, so a member who reads both is told one thing. */}
+        <ScreenHelp screen="meals" />
+
         {burnStale ? (
           <Flag tone={t.warn}>
             The calories burned above are the last figures we had, not a current reading — your device could not be reached just now. Pull down to try again.
           </Flag>
         ) : null}
 
+
+        {/* ── the plan: today or the week ────────────────────────────────── */}
+        <Section>
+          {/* The week is one tap from the head of the list rather than a
+              second bar above it: the board goes straight from the figure to
+              the meals. */}
+          <SectionHead title={view === 'today' ? `${plan.length} Meals · ${tot.K.toLocaleString()} kcal` : 'This Week'}
+            note={view === 'today' ? 'This week' : 'Today'} onPress={() => setView((v) => (v === 'today' ? 'week' : 'today'))} />
+
+          {/* An exclusion the engine could not honour, said before the plan
+              rather than buried in it. `poolFilter` falls back to the
+              UNFILTERED pool whenever the exclusions empty a required component
+              list, and nothing on screen told anybody — so somebody who ticked
+              Dairy got a plan with dairy in it, drawn and priced and shopped
+              for. See src/lib/meals.ts.
+
+              ABOVE the Today/This Week switch, not inside the Today arm. It was
+              inside it, so switching to the week made the warning disappear
+              while the meals it was about stayed — and the week is what the
+              shopping list is built from. */}
+          {gapNote ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Flag tone={t.crit}>{gapNote}</Flag>
+            </View>
+          ) : null}
+          {view === 'today' ? (
+            <>
+              {/* One slot at a time, the way the board lists meals. The slots
+                  come from the plan itself, so a 4- or 5-meal day shows its
+                  snacks as a segment rather than losing them. */}
+              <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
+                {planSlots.map((slot) => {
+                  const on = slot === slotSel;
+                  return (
+                    <Pressable key={slot} onPress={() => setSlotPick(slot)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                      style={{ minHeight: 40, paddingHorizontal: sp.lg, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : t.surface2 }}>
+                      <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{slot}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {/* The search row opens the food log's search, the one search
+                  the app has; it is not a second index of the plan. */}
+              <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button" accessibilityLabel="Search foods to log"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                <Icon name="search" size={17} color={t.ink3} />
+                <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Search foods…</Text>
+                <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+              </Pressable>
+              {slotMeals.map((m, i) => {
+                // Read once and used twice — for the mark and for the sentence.
+                // Two reads is how the two come to disagree.
+                const inIt = mealAllergens(m, c.avoid);
+                return (
+                <View key={m.pos}>
+                  {i > 0 ? <Rule /> : null}
+                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
+                    // Not `m.n`. A Pressable is one accessibility element, so a
+                    // label on it REPLACES the lines below rather than adding
+                    // to them — and the line it was replacing hardest is the
+                    // allergen mark. See `mealRowSpoken`.
+                    accessibilityLabel={mealRowSpoken({
+                      slot: m.slot, coachPick: coachPick(m.pos), name: m.n,
+                      allergens: inIt, kcal: String(m.K),
+                    })}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
+                    {/* The dish's own glyph in a circle where the board puts a
+                        photograph. There is no photography of a generated
+                        meal, and none is invented. */}
+                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }} numberOfLines={2}>{m.n}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }} numberOfLines={1}>
+                        {m.ing.slice(0, 3).map((x) => x[0]).join(', ')}{coachPick(m.pos) ? " · Coach's pick" : ''}
+                      </Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(m.K)} kcal · P{m.P} · C{m.C} · F{m.F}</Text>
+                      {/* On the row somebody is about to cook, not only at the
+                          top of the screen. A warning about the plan does not
+                          tell you which dish. crit in the MARK, the words in
+                          ink — colour is never the only channel. */}
+                      {inIt.length ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>
+                            Contains {inIt.map(allergenLabel).join(' and ')}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+                  </Pressable>
+                </View>
+                );
+              })}
+              {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
+                  4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
+                  plan and the macro split immediately. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.lg }}>
+                <Text style={{ ...ty.label, color: t.ink3, marginEnd: 2 }}>Meals per day</Text>
+                {([3, 4, 5] as const).map((n) => {
+                  const on = c.mealsPerDay === n;
+                  return (
+                    <Pressable
+                      key={n}
+                      onPress={() => c.setMealsPerDay(n)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={`${n} meals per day`}
+                      // About 28pt, and a mis-tap rebuilds the day's meals and
+                      // the macro split behind them.
+                      hitSlop={hitSlopFor(28)}
+                      style={{ minWidth: 34, paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                      <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{n}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          ) : (
+            weekPlans.map((wp, d) => (
+              <View key={d} style={{ marginBottom: sp.xl }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>{WEEKD[d]}</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{wp.tot.K.toLocaleString()} kcal</Text>
+                </View>
+                {wp.plan.map((m) => {
+                  // The same per-row mark the Today list carries. This arm drew
+                  // slot, name and kcal and nothing else, so a dish containing
+                  // the thing the member excluded was unmarked on the tab they
+                  // plan and shop from.
+                  const inIt = mealAllergens(m, c.avoid);
+                  return (
+                  <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button"
+                    // The mark this arm was given is on the row and in the
+                    // sentence. See `mealRowSpoken`.
+                    accessibilityLabel={mealRowSpoken({
+                      slot: m.slot, name: m.n, allergens: inIt, kcal: String(m.K),
+                    })}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
+                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{m.n}</Text>
+                      {inIt.length ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>Contains {inIt.map(allergenLabel).join(' and ')}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={{ ...value(15), color: t.ink2 }}>{m.K}</Text>
+                  </Pressable>
+                  );
+                })}
+              </View>
+            ))
+          )}
+        </Section>
 
         {/* ── where that target came from ────────────────────────────────── */}
         <Section>
@@ -1304,149 +1469,7 @@ export default function Nutrition() {
         </>) : null}
 
 
-        {/* ── the plan: today or the week ────────────────────────────────── */}
-        <Section>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: layout.section }}>
-            {(['today', 'week'] as const).map((v) => {
-              const on = view === v;
-              return (
-                <Pressable key={v} onPress={() => setView(v)} accessibilityRole="button" accessibilityState={{ selected: on }}
-                  style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{v === 'today' ? 'Today' : 'This week'}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
 
-          {/* An exclusion the engine could not honour, said before the plan
-              rather than buried in it. `poolFilter` falls back to the
-              UNFILTERED pool whenever the exclusions empty a required component
-              list, and nothing on screen told anybody — so somebody who ticked
-              Dairy got a plan with dairy in it, drawn and priced and shopped
-              for. See src/lib/meals.ts.
-
-              ABOVE the Today/This Week switch, not inside the Today arm. It was
-              inside it, so switching to the week made the warning disappear
-              while the meals it was about stayed — and the week is what the
-              shopping list is built from. */}
-          {gapNote ? (
-            <View style={{ marginBottom: sp.md }}>
-              <Flag tone={t.crit}>{gapNote}</Flag>
-            </View>
-          ) : null}
-          {view === 'today' ? (
-            <>
-              <SectionHead title={`Today's plan · ${plan.length} meals`} note={`${tot.K.toLocaleString()} kcal`} />
-              {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
-                  4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
-                  plan and the macro split immediately. */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, color: t.ink3, marginEnd: 2 }}>Meals per day</Text>
-                {([3, 4, 5] as const).map((n) => {
-                  const on = c.mealsPerDay === n;
-                  return (
-                    <Pressable
-                      key={n}
-                      onPress={() => c.setMealsPerDay(n)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: on }}
-                      accessibilityLabel={`${n} meals per day`}
-                      // About 28pt, and a mis-tap rebuilds the day's meals and
-                      // the macro split behind them.
-                      hitSlop={hitSlopFor(28)}
-                      style={{ minWidth: 34, paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{n}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {plan.map((m, i) => {
-                // Read once and used twice — for the mark and for the sentence.
-                // Two reads is how the two come to disagree.
-                const inIt = mealAllergens(m, c.avoid);
-                return (
-                <View key={m.pos}>
-                  {i > 0 ? <Rule /> : null}
-                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
-                    // Not `m.n`. A Pressable is one accessibility element, so a
-                    // label on it REPLACES the four lines below rather than
-                    // adding to them — and the line it was replacing hardest is
-                    // the allergen mark. See `mealRowSpoken`.
-                    accessibilityLabel={mealRowSpoken({
-                      slot: m.slot, coachPick: coachPick(m.pos), name: m.n,
-                      allergens: inIt, kcal: String(m.K),
-                    })}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>{m.slot}{coachPick(m.pos) ? " · Coach's pick" : ''}</Text>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 4 }} numberOfLines={2}>{m.n}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
-                      {/* On the row somebody is about to cook, not only at the
-                          top of the screen. A warning about the plan does not
-                          tell you which dish. */}
-                      {/* The kit's ListRow idiom: crit in the MARK, which only
-                          has to clear the 3:1 of a dot, and the words in ink.
-                          crit as text is 3.03–4.05:1 on the ten palettes, and
-                          colour is never the only channel — the sentence says
-                          it. */}
-                      {inIt.length ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>
-                            Contains {inIt.map(allergenLabel).join(' and ')}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ ...value(20), color: t.ink }}>{m.K}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
-                    </View>
-                    <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
-                  </Pressable>
-                </View>
-                );
-              })}
-            </>
-          ) : (
-            weekPlans.map((wp, d) => (
-              <View key={d} style={{ marginBottom: sp.xl }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>{WEEKD[d]}</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{wp.tot.K.toLocaleString()} kcal</Text>
-                </View>
-                {wp.plan.map((m) => {
-                  // The same per-row mark the Today list carries. This arm drew
-                  // slot, name and kcal and nothing else, so a dish containing
-                  // the thing the member excluded was unmarked on the tab they
-                  // plan and shop from.
-                  const inIt = mealAllergens(m, c.avoid);
-                  return (
-                  <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button"
-                    // The mark this arm was given is on the row and in the
-                    // sentence. See `mealRowSpoken`.
-                    accessibilityLabel={mealRowSpoken({
-                      slot: m.slot, name: m.n, allergens: inIt, kcal: String(m.K),
-                    })}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
-                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{m.n}</Text>
-                      {inIt.length ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>Contains {inIt.map(allergenLabel).join(' and ')}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <Text style={{ ...value(15), color: t.ink2 }}>{m.K}</Text>
-                  </Pressable>
-                  );
-                })}
-              </View>
-            ))
-          )}
-        </Section>
 
 
         {/* ── snacks ─────────────────────────────────────────────────────── */}
