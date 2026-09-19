@@ -18,7 +18,7 @@ import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { openLegalDoc } from '../src/ui/legal';
 import { USE_SUPABASE } from '../src/lib/config';
-import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
+import { VARIANT, VARIANT_TILE } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
@@ -167,11 +167,18 @@ export default function Welcome() {
 
      Drawn in the theme's own tokens rather than the board's fixed near-black,
      so a white-label brand's palette, a member's chosen palette and the
-     phone's light mode all still hold — the default palette IS the board's
-     dark, so the default install looks like the board. The mark is the same
-     mark the icon carries; the wordmark is the brand's name set plainly,
-     because the board's stylised mark is a raster and cannot be resolved
-     from one — see the handoff. */
+     phone's light mode all still hold — under dark mode the default palette
+     is Repple Dark, which IS the board's ground; under light mode the same
+     lockup sits on white. The mark is the same mark the icon carries; the
+     wordmark is the brand's name set plainly, because the board's stylised
+     mark is a raster and cannot be resolved from one — see the handoff.
+
+     Composed to board page 1: nothing above the lockup, the mark over the
+     wordmark over the one word that tells Coach and Studio apart, the
+     strapline under that, and the two buttons stacked at the foot. The
+     small tile-and-name row that used to sit top-left is gone from the
+     door — it named the app twice on a screen whose whole content is the
+     app's name — and the form below still opens with it. */
   if (!showForm) {
     const clientBuild = VARIANT === 'client';
     const primaryMode: 'in' | 'up' = clientBuild ? 'up' : 'in';
@@ -192,25 +199,23 @@ export default function Welcome() {
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingVertical: sp.xl, justifyContent: 'space-between' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-            <View style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: VARIANT_TILE[VARIANT], alignItems: 'center', justifyContent: 'center' }}>
-              <BrandMark size={26} ink="#ffffff" signal="#22c55e" />
-            </View>
-            <View>
-              <Text style={{ ...ty.head, color: t.ink, letterSpacing: 1.2 }}>{appName.toUpperCase()}</Text>
-              {VARIANT !== 'client' ? (
-                <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{VARIANT === 'trainer' ? 'Coach' : 'Studio'}</Text>
-              ) : null}
-            </View>
-          </View>
+          {/* Nothing above the lockup but ground, as the board leaves it. */}
+          <View />
 
+          {/* The lockup, centred. The wordmark is set in the hero step because
+              it is the one thing this screen says; the -2 tracking that step
+              carries is an optical correction for a 44pt NUMBER and would
+              close a word's letters into each other, so it is opened up here.
+              The variant word is upper-cased the same way the wordmark is —
+              it is part of the lockup, not a label — and set in the brand
+              green as the board sets it. */}
           <View style={{ alignItems: 'center', paddingHorizontal: sp.md }}>
-            <View style={{ width: 82, height: 82, borderRadius: 24, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', marginBottom: sp.xl }}
-              accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <BrandMark size={64} />
-            </View>
-            <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', maxWidth: 300 }}>{strap}</Text>
-            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{VARIANT_LABEL[VARIANT]}</Text>
+            <BrandMark size={72} />
+            <Text accessibilityRole="header" style={{ ...ty.hero, color: t.ink, letterSpacing: 2, textAlign: 'center', marginTop: sp.lg }}>{appName.toUpperCase()}</Text>
+            {VARIANT !== 'client' ? (
+              <Text style={{ ...ty.micro, color: t.brand, letterSpacing: 4, marginTop: sp.xs }}>{(VARIANT === 'trainer' ? 'Coach' : 'Studio').toUpperCase()}</Text>
+            ) : null}
+            <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', maxWidth: 300, marginTop: sp.xxl }}>{strap}</Text>
           </View>
 
           <View style={{ gap: sp.md }}>

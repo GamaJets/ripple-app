@@ -13,6 +13,12 @@
 // bordered boxes, three weights, no raw type sizes. Every route, hook,
 // conditional and handler is unchanged.
 //
+// Opened the approved board's way (client page 18): a centred title, then
+// the six plain rows — Profile, Goals, Notifications, Privacy, Connected
+// Apps, Help & Support — on the ground with a hairline between, and only
+// then the cards of controls this screen has always held, in their old
+// order. The rows are the same six Me carries and go to the same places.
+//
 // Removed in the migration: a hardcoded "What's new" changelog claiming
 // v2.2 / v2.1 / v2.0 and a footer reading "v2.2". The app's real version is
 // 1.0.0 (app.json) — those numbers came from nowhere and sat directly above
@@ -476,14 +482,38 @@ export default function Settings() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* Back on its own line and the title centred under it — board page
+            18, and the way app/(trainer)/client.tsx already opens a record. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Settings</Text>
-          </View>
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Preferences, legal & version</Text>
+        <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.sm }}>Settings</Text>
+
+        {/* ── the board's six rows ───────────────────────────────────────
+            Page 18 opens Settings on a plain list — a round icon, a name, a
+            chevron, a hairline between — and nothing boxed. The six are the
+            same six Me carries (app/(client)/profile.tsx), routed to the same
+            places, because the board draws them on both screens and a member
+            who arrives here from Me has not left the app's map. Profile goes
+            to the Me tab, which is where the photo and the body details are
+            edited; there is no second editor to open from here.
+
+            A plain list on the ground rather than a <Section>, on purpose:
+            the brief for this page is "hairline separated, no section boxes",
+            and every card under it is a group of controls, not a route. */}
+        <View style={{ marginTop: sp.sm }}>
+          <ListRow icon="me" title="Profile" note="Your photo, name and body details" onPress={() => router.push('/(client)/profile')} />
+          <Rule />
+          <ListRow icon="target" title="Goals" note="What you are working toward, and by when" onPress={() => router.push('/(client)/goal')} />
+          <Rule />
+          <ListRow icon="bell" title="Notifications" note="Choose what you are sent, and when" onPress={() => router.push('/(client)/notification-prefs')} />
+          <Rule />
+          <ListRow icon="lock" title="Privacy" note="Your account, your data and who can see it" onPress={() => router.push('/(client)/account')} />
+          <Rule />
+          <ListRow icon="heart" title="Connected Apps" note="Your watch and the apps that feed your day" onPress={() => router.push('/(client)/devices')} />
+          <Rule />
+          <ListRow icon="message" title="Help & Support" note="Tell us what to improve, or ask for help" onPress={() => router.push('/(client)/feedback')} />
+        </View>
 
 
         <Section>
