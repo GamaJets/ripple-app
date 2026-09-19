@@ -63,7 +63,7 @@ import { useTheme } from '../../src/ui/components';
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Notice, Flag, Ghost } from '../../src/ui/kit';
+import { Rule, Notice, Flag, Ghost, PageHead } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
@@ -83,7 +83,6 @@ import {
   COACH_ASK_WHAT_GOES, COACH_ASK_WHAT_NEVER_GOES, COACH_ASK_NOT_ADVICE,
 } from '../../src/lib/coachShare';
 import { useEffect } from 'react';
-import { BACK_ICON } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const SUGGESTIONS = [
@@ -482,20 +481,19 @@ export default function TrainerAssistant() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <View style={{ flex: 1, paddingBottom: lift }}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
-          <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
-            <Icon name={BACK_ICON} size={20} color={t.ink2} />
-          </Pressable>
-          <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="sparkle" size={17} color={t.brandInk} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Assistant</Text>
-            {/* A claim about what the model has, so it answers to the reads. */}
-            <Text style={{ ...ty.caption, color: t.ink3 }}>
-              {figuresWhole ? 'Working from your own figures' : 'Waiting on your figures'}
-            </Text>
-          </View>
+        {/* The board's page head: the round back control, the title on the
+            centre line, and the sparkle plate in the trailing slot where the
+            board puts a page's one mark. The line under the title is a claim
+            about what the model has, so it answers to the reads. */}
+        <View style={{ paddingHorizontal: G, paddingBottom: sp.md }}>
+          <PageHead title="Assistant"
+            subtitle={figuresWhole ? 'Working from your own figures' : 'Waiting on your figures'}
+            trailing={
+              <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+                style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="sparkle" size={17} color={t.brandInk} />
+              </View>
+            } />
         </View>
 
         <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled" refreshControl={pull}>

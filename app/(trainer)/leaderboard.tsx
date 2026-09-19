@@ -60,7 +60,7 @@ import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn } from '../../src/lib/units';
@@ -72,7 +72,6 @@ import { disclosureFact } from '../../src/lib/disclosureFact';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Leaderboard() {
   // The COACH's unit, not the client's. This screen is read by the coach.
@@ -181,13 +180,7 @@ export default function Leaderboard() {
             this app does not put it — and without `a11yLabel` a screen reader
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your roster</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Leaderboard</Text>
-          </View>
-        </View>
+        <PageHead title="Leaderboard" subtitle="Your roster" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Ordered by the last check-in rating each client gave themselves</Text>
 
 

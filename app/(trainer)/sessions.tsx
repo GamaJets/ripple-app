@@ -36,8 +36,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ScreenHeader, Hero, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 // The instant `awaitingOutcome`, `pastSessions` and `windowStart` are ALL judged
 // against, recomputed at local midnight, on foreground and on focus — never
@@ -125,7 +125,6 @@ import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
-import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * The four outcomes, in the order a person would consider them.
@@ -920,28 +919,36 @@ export default function TrainerSessions() {
             beside Invoices and Statement which both draw the circled `‹`
             that every other screen in this app uses.
 
-            `Ghost icon={BACK_ICON}` is that control. It carries the ring, the
-            44pt target and `BACK_ICON`, so it mirrors correctly in RTL
-            without this screen knowing about direction at all — which is the
-            whole point of src/ui/direction. */}
-        <ScreenHeader
-          eyebrow="Session record"
+            PageHead is that control now, with the title on the screen's
+            centre line the way the board opens every pushed page. It draws
+            the ring, the 44pt target and `BACK_ICON`, so it mirrors correctly
+            in RTL without this screen knowing about direction at all — which
+            is the whole point of src/ui/direction. */}
+        <PageHead
           title="Mark Sessions"
-          subtitle="Clear outstanding outcomes first, then use the same screen to review what already happened."
-          leading={<Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />}
+          subtitle="Clear outstanding outcomes first, then review what already happened."
         />
 
-        <Hero
-          label="Waiting on an Outcome"
-          figure={fig(loaded ? rows.length : null)}
-          note={failed
-            ? 'Could not be read — this is not a count of zero.'
-            : !loaded
-              ? 'Reading your sessions…'
-              : rows.length === 0
-                ? (hasGym ? 'Nothing outstanding — payroll can be settled.' : 'Nothing outstanding — every session you have delivered is on the record.')
-                : (hasGym ? 'Payroll cannot be worked out until every one of these is marked.' : 'Your delivered-sessions count is incomplete until every one of these is marked.')}
-        />
+        {/* ── the figure card ──────────────────────────────────────────────
+            The Hero this replaces drew the count on the ground; the board
+            draws every leading figure in a card, label over it and one line
+            under. Same figure and the same rule: a dash unless the read came
+            back, because a failed read is not a queue of zero — and this is
+            the screen a gym settles payroll from. */}
+        <Section>
+          <SectionHead title="Waiting on an Outcome" />
+          <Text accessibilityLabel={`Waiting on an outcome, ${loaded ? rows.length : 'not read'}`}
+            style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(loaded ? rows.length : null)}</Text>
+          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+            {failed
+              ? 'Could not be read — this is not a count of zero.'
+              : !loaded
+                ? 'Reading your sessions…'
+                : rows.length === 0
+                  ? (hasGym ? 'Nothing outstanding — payroll can be settled.' : 'Nothing outstanding — every session you have delivered is on the record.')
+                  : (hasGym ? 'Payroll cannot be worked out until every one of these is marked.' : 'Your delivered-sessions count is incomplete until every one of these is marked.')}
+          </Text>
+        </Section>
 
 
         {/* ── asked, and not yet answered ─────────────────────────────────
@@ -1111,16 +1118,28 @@ export default function TrainerSessions() {
             <Section>
               <SectionHead title="Find" note={narrowed ? 'Filtered' : undefined} />
 
-              <TextInput
-                value={filter.text}
-                onChangeText={(v) => setFilter((f) => ({ ...f, text: v }))}
-                placeholder="Search a client's name"
-                placeholderTextColor={t.ink3}
-                accessibilityLabel="Search these sessions by client name"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }}
-              />
+              {/* The search pill, the same shape Clients and Meals take: a
+                  glass, the field, and a clear control once there is text. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                <Icon name="search" size={17} color={t.ink3} />
+                <TextInput
+                  value={filter.text}
+                  onChangeText={(v) => setFilter((f) => ({ ...f, text: v }))}
+                  placeholder="Search a client's name"
+                  placeholderTextColor={t.ink3}
+                  accessibilityLabel="Search these sessions by client name"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }}
+                />
+                {filter.text ? (
+                  <Pressable onPress={() => setFilter((f) => ({ ...f, text: '' }))} hitSlop={hitSlopFor(24)}
+                    accessibilityRole="button" accessibilityLabel="Clear the client search">
+                    <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+                  </Pressable>
+                ) : null}
+              </View>
 
               {/* One chip per client in the window, with how many sessions are
                   theirs — so a coach can see somebody has one before tapping
@@ -1151,22 +1170,32 @@ export default function TrainerSessions() {
                   cannot see "cancelled late" has no way to learn that none of
                   their sessions is. */}
               {history.length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: who.length > 1 ? 0 : sp.md }}>
-                  {PAST_STATES.map((st) => {
+                /* The board's segment bar — one `surface2` pill, the chosen
+                   segment in ink — rather than a wrap of outlined chips. A
+                   fixed set of five states plus "All" for the no-filter
+                   position the chips used to reach by tapping the lit one
+                   again; it scrolls once the six outgrow the width, and each
+                   keeps its own width rather than squeezing a label to a
+                   syllable. The counts stay, for the reason above. */
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: who.length > 1 ? 0 : sp.md }}
+                  contentContainerStyle={{ flexDirection: 'row', minWidth: '100%', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, gap: 2 }}
+                  accessibilityRole="tablist">
+                  {([null, ...PAST_STATES] as (PastState | null)[]).map((st) => {
                     const on = filter.state === st;
+                    const label = st ? PAST_STATE_LABEL[st] : 'all';
                     return (
-                      <Pressable key={st} hitSlop={4}
-                        onPress={() => setFilter((f) => ({ ...f, state: on ? null : st }))}
-                        accessibilityRole="button" accessibilityState={{ selected: on }}
-                        accessibilityLabel={`${on ? 'Stop showing only sessions' : 'Show only sessions'} ${PAST_STATE_LABEL[st]}, ${counts[st]} of them`}
-                        style={{ borderWidth: hairline, borderColor: on ? t.brand : t.ring, borderRadius: radius.pill, backgroundColor: on ? t.brand : 'transparent', paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                        <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink2 }}>
-                          {PAST_STATE_LABEL[st]} · {counts[st]}
+                      <Pressable key={st ?? 'all'}
+                        onPress={() => setFilter((f) => ({ ...f, state: st }))}
+                        accessibilityRole="tab" accessibilityState={{ selected: on }}
+                        accessibilityLabel={st ? `Show only sessions ${label}, ${counts[st]} of them` : `Show every outcome, ${history.length} sessions`}
+                        style={{ flexGrow: 1, minHeight: 40, paddingHorizontal: sp.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+                        <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', ...numeric, color: on ? t.bg : t.ink2, textTransform: 'capitalize' }}>
+                          {label} · {st ? counts[st] : history.length}
                         </Text>
                       </Pressable>
                     );
                   })}
-                </View>
+                </ScrollView>
               ) : null}
 
               {narrowed ? (

@@ -57,7 +57,7 @@ import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, Notice, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
 import { money } from '../../src/lib/gymRecord';
@@ -77,7 +77,6 @@ import {
 import { worstStatus } from '../../src/ui/loadStatus';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const DASH = '—';
 
@@ -232,13 +231,7 @@ export default function TrainerAdSpend() {
             this app does not put it — and without `a11yLabel` a screen reader
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What your ads cost</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Ad Spend</Text>
-          </View>
-        </View>
+        <PageHead title="Ad Spend" subtitle="What your ads cost" />
         {/* The opening sentence is an offer, and it is only made where the
             offer exists. With no app id supplied for any of the three, the
             original line invited a coach to connect an account that nothing on

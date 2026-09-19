@@ -12,10 +12,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { ListRow, Ghost } from '../../src/ui/kit';
+import { ListRow, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { TRAINER_NAV, searchNav } from '../../src/lib/features';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Explore() {
   const t = useTheme();
@@ -28,19 +27,15 @@ export default function Explore() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Trainer portal</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Explore</Text>
-          </View>
-        </View>
+        <PageHead title="Explore" subtitle="Trainer portal" />
 
         {/* ── the field is the screen ────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg, marginBottom: sp.sm }}>
-          <Icon name="search" size={16} color={t.ink3} />
-          <TextInput value={q} onChangeText={setQ} placeholder="Search…" placeholderTextColor={t.ink3} autoCapitalize="none" accessibilityLabel="Search"
-            style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+        {/* The pill the board draws every search in — the same shape Clients
+            and Meals take. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.lg, marginTop: sp.lg, marginBottom: sp.sm }}>
+          <Icon name="search" size={17} color={t.ink3} />
+          <TextInput value={q} onChangeText={setQ} placeholder="Search…" placeholderTextColor={t.ink3} autoCapitalize="none" accessibilityLabel="Search" returnKeyType="search"
+            style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }} />
           {q ? <Pressable onPress={() => setQ('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search"><Text style={{ ...ty.head, color: t.ink3 }}>×</Text></Pressable> : null}
         </View>
 

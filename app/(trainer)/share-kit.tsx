@@ -116,7 +116,7 @@ import { useRouter } from 'expo-router';
 import Svg, { Rect, Text as SvgText, Line, Image as SvgImage, Defs, ClipPath } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, Notice, Cta, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, Cta, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { useTenant } from '../../src/ui/tenant';
@@ -148,7 +148,6 @@ import {
   chooseInstagramPage, connectInstagram, disconnectInstagram, publishCardToInstagram,
   useMyInstagram, type PageChoice,
 } from '../../src/ui/instagram';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** How far back "my week" looks. Two spans, because a quiet week is a real
  *  thing and a coach should be able to widen the window rather than be told
@@ -733,13 +732,7 @@ export default function ShareKit() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Marketing</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share Kit</Text>
-          </View>
-        </View>
+        <PageHead title="Share Kit" subtitle="Marketing" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           A card from your real numbers. You post it — Repple never posts for you.
         </Text>
@@ -1266,16 +1259,22 @@ function Segmented({ options, value, onChange }: {
   onChange: (key: string) => void;
 }) {
   const t = useTheme();
+  // The board's segment bar: one `surface2` pill, equal segments, the chosen
+  // one filled in ink with the ground's colour for its text. These were
+  // bordered boxes in the accent, which made every choice on the screen look
+  // like the one primary action.
   return (
-    <View style={{ flexDirection: 'row', gap: sp.sm }}>
+    <View accessibilityRole="radiogroup"
+      style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, gap: 2 }}>
       {options.map((o) => {
         const on = o.key === value;
         return (
           <Pressable key={o.key} onPress={() => onChange(o.key)} accessibilityRole="radio" accessibilityState={{ selected: on }}
             accessibilityLabel={o.note ? `${o.label}. ${o.note}` : o.label}
-            style={{ flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.sm, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: hairline, borderColor: on ? t.brand : t.ring }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink }}>{o.label}</Text>
-            {o.note ? <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3, marginTop: 2, opacity: on ? 0.8 : 1 }}>{o.note}</Text> : null}
+            style={{ flex: 1, minHeight: 40, paddingVertical: sp.sm, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
+              style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{o.label}</Text>
+            {o.note ? <Text style={{ ...ty.caption, color: on ? t.bg : t.ink3, marginTop: 2, opacity: on ? 0.8 : 1 }}>{o.note}</Text> : null}
           </Pressable>
         );
       })}

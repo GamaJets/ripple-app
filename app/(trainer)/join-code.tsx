@@ -59,7 +59,7 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, PartialRead, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Cta, Notice, PartialRead, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fetchMyJoinCode, fetchMyJoinCodes, fetchJoinCodeStats, type JoinCodesRead } from '../../src/ui/joinCode';
@@ -72,7 +72,6 @@ import {
 } from '../../src/lib/handOutCode';
 import { codeCountLine } from '../../src/lib/joinCodes';
 import { joinQr, qrPath, QR_QUIET_ZONE } from '../../src/lib/joinQr';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * The QR's two colours, which are deliberately not theme tokens.
@@ -199,13 +198,7 @@ export default function CoachJoinCode() {
         showsVerticalScrollIndicator={false}
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Bring somebody in</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Code</Text>
-          </View>
-        </View>
+        <PageHead title="Your Code" subtitle="Bring somebody in" />
 
         {/* ── the code itself ─────────────────────────────────────────────── */}
         <Section>

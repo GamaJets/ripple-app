@@ -61,7 +61,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Cta, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { brandInkFor } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
@@ -203,11 +203,10 @@ export default function CoachBrand() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Coach</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your Branding</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What your clients see around your coaching — saved to your account, not to this phone</Text>
-        </View>
+        {/* The board's page head, with a back control this screen never had:
+            it is reached from Profile and had no way back but the tab bar. */}
+        <PageHead title="Your Branding" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>What your clients see around your coaching — saved to your account, not to this phone</Text>
 
         {status === 'error' ? (
           <Section>

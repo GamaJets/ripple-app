@@ -68,8 +68,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem, type Visibility } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -764,18 +764,35 @@ export default function TrainerVideos() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>You choose who sees these</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Videos</Text>
-        </View>
+        {/* ── the tab's opening ──────────────────────────────────────────────
+            A tab root, so it opens the way every tab on the board does: the
+            quiet eyebrow, the title, and one round control at the trailing
+            edge. "Video Library" is the board's own name for this screen
+            (coach page 15, Resources, lists it under that name), and the round
+            + is Record — the one thing a coach opens this tab to do — so it is
+            reachable before the coverage card, not only under it. */}
+        <ScreenHeader
+          eyebrow="You choose who sees these"
+          title="Video Library"
+          actions={<Ghost icon="plus" a11yLabel="Record a clip" onPress={() => upload(true)} />}
+        />
 
-        {/* ── the hero ───────────────────────────────────────────────────── */}
-        <Hero
-          label="In Your Library"
-          figure={known ? fig(vids.length) : fig(null)}
-          unit={known ? (vids.length === 1 ? 'clip' : 'clips') : undefined}
-          note={
-            status === 'loading' ? 'Reading your library…'
+        {/* ── the figure card ───────────────────────────────────────────────
+            The Hero this replaces drew the count on the ground; the board draws
+            every leading figure inside a card with its label over it and one
+            line of context under. Same figure, same rules: a dash unless the
+            read was whole, because `vids.length` under 'error' or 'partial' is
+            the size of a prefix, not of the library. */}
+        <Section>
+          <SectionHead title="In Your Library" />
+          <View accessible
+            accessibilityLabel={`In your library, ${known ? `${vids.length} ${vids.length === 1 ? 'clip' : 'clips'}` : 'not counted'}`}
+            style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+            <Text style={{ ...ty.hero, ...numeric, color: t.ink }}>{known ? fig(vids.length) : fig(null)}</Text>
+            {known ? <Text style={{ ...ty.head, color: t.ink3, marginStart: 6 }}>{vids.length === 1 ? 'clip' : 'clips'}</Text> : null}
+          </View>
+          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+            {status === 'loading' ? 'Reading your library…'
               : status === 'error' ? 'Your library could not be read, so we cannot tell you what is in it.'
                 // 'partial' had no branch, so it fell through to the counting
                 // one — "8 of 12 recorded" over a page of a longer library,
@@ -786,9 +803,9 @@ export default function TrainerVideos() {
                 // they have already filmed. src/ui/loadStatus.ts.
                 : status === 'partial' ? 'Your library came back at the row limit, so these are some of your clips rather than all of them, and they cannot be counted.'
                   : vids.length ? `${done} of ${vids.length} recorded · shared with whoever you chose`
-                    : 'Record a clip or paste a link, then choose who gets to watch it.'
-          }
-        />
+                    : 'Record a clip or paste a link, then choose who gets to watch it.'}
+          </Text>
+        </Section>
 
 
         {/* ── what you programme but nobody has filmed ────────────────────

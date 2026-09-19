@@ -39,10 +39,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Card, Ghost, ListRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Ghost, ListRow, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { shareSessionNatively } from '../../src/lib/social';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function ShareSessionClip() {
   const t = useTheme();
@@ -76,13 +75,7 @@ export default function ShareSessionClip() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Marketing</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share a Session</Text>
-          </View>
-        </View>
+        <PageHead title="Share a Session" subtitle="Marketing" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Your clip and your caption, straight into whichever app you post from.
         </Text>

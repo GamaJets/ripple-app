@@ -96,7 +96,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useTenant } from '../../src/ui/tenant';
@@ -120,7 +120,6 @@ import { recipientFact, factsCaption, type Addressed } from '../../src/lib/segme
 import {
   sendOutcome, outcomeLines, outcomeTitle, WHERE_THE_RECORD_IS, type SendOutcome,
 } from '../../src/lib/broadcastOutcome';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Broadcast() {
   const t = useTheme();
@@ -474,13 +473,7 @@ export default function Broadcast() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Broadcast</Text>
-          </View>
-        </View>
+        <PageHead title="Broadcast" subtitle="Your clients" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Send one message to a whole segment of your clients.</Text>
 
         {/* ── the segment ──────────────────────────────────────────────────

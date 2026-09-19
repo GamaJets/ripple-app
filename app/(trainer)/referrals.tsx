@@ -32,7 +32,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachReferrals } from '../../src/ui/coachReferrals';
@@ -41,7 +41,6 @@ import {
   coachSummaryLine, referrerLine, CONVERSION_RULE,
   COACH_REWARD_NOTE, COACH_REFERRAL_PRIVACY_NOTE,
 } from '../../src/lib/referralCredit';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function CoachReferrals() {
   const t = useTheme();
@@ -85,14 +84,8 @@ export default function CoachReferrals() {
         refreshControl={pull}
       >
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Who Brings You Clients</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{summary}</Text>
+        <PageHead title="Who Brings You Clients" subtitle="Your book" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>{summary}</Text>
 
         {status === 'error' ? (
           <Section>
@@ -109,7 +102,7 @@ export default function CoachReferrals() {
 
 
         <Section>
-          <SectionHead title="Your referrers" note={status === 'ready' && rows ? `${rows.length}` : undefined} />
+          <SectionHead title="Your Referrers" note={status === 'ready' && rows ? `${rows.length}` : undefined} />
 
           {/* What "started training" means, said before anybody reads the second
               number as a payment or a renewal. */}
@@ -155,7 +148,7 @@ export default function CoachReferrals() {
 
 
         <Section>
-          <SectionHead title="Thanking them" />
+          <SectionHead title="Thanking Them" />
           <Text style={{ ...ty.label, color: t.ink3 }}>{COACH_REWARD_NOTE}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COACH_REFERRAL_PRIVACY_NOTE}</Text>
           <View style={{ marginTop: sp.lg }}>

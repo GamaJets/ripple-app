@@ -64,7 +64,7 @@
 import { useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { BRAND } from '../../src/lib/brands';
 import { num, num1 } from '../../src/lib/format';
 import { Icon, type IconName } from '../../src/ui/Icon';
@@ -75,7 +75,7 @@ import { tapLight } from '../../src/ui/haptics';
 // are the ones that get printed as fact. `isWhole` is the gate; see
 // src/ui/loadStatus.ts and scripts/check-whole.mjs.
 import { isWhole } from '../../src/ui/loadStatus';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
@@ -85,7 +85,7 @@ import { useDeviceHrv } from '../../src/ui/deviceHrv';
 import { hrvBuildingLine, hrvTrendLine } from '../../src/lib/hrvTrend';
 import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/wearables/liveNotes';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
+import { ProviderMark } from '../../src/ui/wearables/ProviderMark';
 
 /** "3m ago" for the last sync stamp. */
 function ago(ts?: number): string {
@@ -116,7 +116,9 @@ function Reading({ icon, title, note, lit }: { icon: IconName; title: string; no
   return (
     <View accessible accessibilityLabel={`${title}. ${note}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-      <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+      {/* A 36pt circle, as the board draws every row's icon and as the kit's
+          ListRow draws its own. */}
+      <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
         {/* The tile dims when there is no figure. Colour is never the only
             channel here — the note beside it says, in words, that nothing has
             come in and which device owes it. */}
@@ -132,7 +134,6 @@ function Reading({ icon, title, note, lit }: { icon: IconName; title: string; no
 
 export default function TrainerDevices() {
   const t = useTheme();
-  const router = useRouter();
   const w = useWearables();
   // Tonight's HRV and the coach's own baseline for it. Same hook the client
   // screen uses, so the two cannot come to hold different rules about what a
@@ -329,30 +330,38 @@ export default function TrainerDevices() {
         showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your tracking</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; Devices</Text>
-          </View>
-        </View>
+        {/* The board's page head — back at the leading edge, the title on the
+            centre line — the way the member's Wearables page opens. The title
+            is the row's own words (Profile pushes this as "Watch & Devices"),
+            because a page that renames itself on arrival reads as the wrong
+            page; the board's "Connected Apps" is the list's title below. */}
+        <PageHead title="Watch & Devices" subtitle="Your tracking" />
 
         {/* ── what your own devices are reporting today ──────────────────── */}
         {showToday ? (<>
-          <Hero
-            label={energy.kind === 'total' ? 'Energy Today' : 'Active Today'}
-            figure={num(energy.kcal)}
-            unit="kcal"
-            note={energy.kcal == null
-              ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
-              : stale
-                ? `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`
-                : energy.kind === 'total'
-                  ? `Whole day from ${energy.from}, rest included.`
-                  : `Energy above rest, from ${energy.from}.`}
-          />
-
-          <Rule />
+          {/* The figure card, where the Hero used to draw the day's energy on
+              the ground: the board's leading figure is in a card, label over
+              it and one line of provenance under. `num` already draws a dash
+              for a night nothing measured. */}
+          <Section>
+            <SectionHead title={energy.kind === 'total' ? 'Energy Today' : 'Active Today'} />
+            <View accessible
+              accessibilityLabel={`${energy.kind === 'total' ? 'Energy today' : 'Active today'}, ${energy.kcal == null ? 'not measured' : `${num(energy.kcal)} kcal`}`}
+              style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
+                style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{num(energy.kcal)}</Text>
+              <Text style={{ ...ty.head, color: t.ink3, marginStart: 6, flexShrink: 0 }}>kcal</Text>
+            </View>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+              {energy.kcal == null
+                ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
+                : stale
+                  ? `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`
+                  : energy.kind === 'total'
+                    ? `Whole day from ${energy.from}, rest included.`
+                    : `Energy above rest, from ${energy.from}.`}
+            </Text>
+          </Section>
 
           <Section>
             <SectionHead title="Today" note={`${connected.length} ${devicesWord}`} />
@@ -419,7 +428,9 @@ export default function TrainerDevices() {
 
         {/* ── the devices themselves ─────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Your Devices" note={connected.length ? `${connected.length} connected` : undefined} />
+          {/* "Connected Apps", the board's name for this list (client page
+              17), over the same catalogue. */}
+          <SectionHead title="Connected Apps" note={connected.length ? `${connected.length} connected` : undefined} />
           {/* Every row in the catalogue, including the ones that cannot be
               connected in this build. Removing them would be the tidier list
               and the worse screen — see the header of
@@ -433,6 +444,11 @@ export default function TrainerDevices() {
             const busy = !!w.busy[p.meta.id];
             const reason = p.unavailableReason();
             const blocked = !p.isAvailable() && !on;
+            // Connected on the account and unreadable in this build — the
+            // third state, and the member's page carries the whole argument
+            // for it. The chip says Connected only where `on` AND
+            // `isAvailable()` both hold; this row gets a grey one and a flag.
+            const unreadable = on && !p.isAvailable();
             const m = w.metrics[p.meta.id];
             return (
               <View key={p.meta.id} style={{
@@ -440,14 +456,15 @@ export default function TrainerDevices() {
                 borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
               }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name="clock" size={17} color={on ? t.brand : t.ink3} />
-                  </View>
+                  {/* The brand's mark on the brand's plate, as the board colours
+                      each app's icon its own way and as the member's Wearables
+                      page already draws it. This was a clock in a grey square,
+                      which nobody read as Garmin, Fitbit, WHOOP or Oura. The
+                      plate is decorative and hides itself from assistive tech;
+                      the name beside it does the speaking. */}
+                  <ProviderMark id={p.meta.id} size={40} />
                   <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                      {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} /> : null}
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.meta.name}</Text>
-                    </View>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.meta.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>
                   </View>
                   {busy ? (
@@ -462,24 +479,52 @@ export default function TrainerDevices() {
                     // pressing it changes nothing, and pressing it repeatedly
                     // is what four reports were made of.
                     <Cta label="Reconnect" a11yLabel={`Reconnect ${p.meta.name}`} onPress={() => onConnect(p)} />
+                  ) : on && !unreadable ? (
+                    // The board's green "Connected" chip — a STATE, not a
+                    // button, in the same shape the member's page draws it.
+                    // The green dot beside the name went with it: the chip is
+                    // the state now, said in a word as well as a colour. The
+                    // button that ends the connection is below, labelled with
+                    // what pressing it does.
+                    <View accessible accessibilityLabel={`${p.meta.name} is connected`}
+                      style={{ paddingVertical: 11, paddingHorizontal: sp.lg, borderRadius: radius.sm, backgroundColor: t.brand }}>
+                      <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Connected</Text>
+                    </View>
                   ) : on ? (
-                    // "Disconnect", not "Connected". A button says what
-                    // pressing it does; the state is already on this row
-                    // twice, in the dot beside the name and in the figures
-                    // underneath. Labelling a destructive action with the
-                    // state it undoes is how somebody taps it to find out what
-                    // it means.
-                    <Ghost label="Disconnect"
-                      a11yLabel={`Disconnect ${p.meta.name}, and remove the nights it measured`}
-                      onPress={() => confirmDisconnect(p)} />
+                    // Remembered, and unreadable in this build. Grey, so a
+                    // stored flag with nothing behind it never wears the live
+                    // colour — the restore loop in src/ui/wearables.tsx marks
+                    // every remembered id connected before it asks whether
+                    // this binary can read it. The flag under the row says
+                    // why, and Disconnect below is how the coach clears it.
+                    <View accessible accessibilityLabel={`${p.meta.name} cannot be read on this phone`}
+                      style={{ paddingVertical: 11, paddingHorizontal: sp.lg, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Not Readable</Text>
+                    </View>
                   ) : blocked ? (
                     <Ghost label="Unavailable" a11yLabel={`${p.meta.name} is unavailable — try connecting again`} onPress={() => onConnect(p)} />
                   ) : (
-                    <Cta label="Connect" a11yLabel={`Connect ${p.meta.name}`} onPress={() => onConnect(p)} />
+                    // The board's grey "Connect" chip. It was the green
+                    // primary; the one green thing on this list is now the
+                    // state that has been reached.
+                    <Ghost label="Connect" a11yLabel={`Connect ${p.meta.name}`} onPress={() => onConnect(p)} />
                   )}
                 </View>
 
                 {blocked && reason ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{reason}</Text> : null}
+
+                {/* Connected, and this build cannot read it — see `unreadable`.
+                    A warn flag rather than a caption, because the figures
+                    underneath are stale and nothing else on the row says so.
+                    `reason` carries the cause where the provider names one;
+                    where it does not, saying so is still better than silence
+                    and does not invent one. */}
+                {unreadable ? (
+                  <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                    {`${p.meta.name} was connected here, but this version of ${BRAND.label} cannot read it on this phone, so nothing is coming from it and any figures below have stopped updating. `}
+                    {reason ?? `${BRAND.label} has not named the reason, which is a fault on our side rather than anything to do with your device.`}
+                  </Flag>
+                ) : null}
 
                 {/* The state in words, wherever it is not simply working.
                     'live' says nothing here — the figures below it are the

@@ -28,7 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ScreenHeader, Cta, Ghost, Flag, Notice, PartialRead, Field } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value, fontScale } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { useMyGymKit } from '../../src/ui/coachKit';
@@ -105,7 +105,6 @@ import { classOffConfirmation } from '../../src/lib/notifyCopy';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { tellTheCancelledRoom } from '../../src/lib/classOff';
 import { supabase } from '../../src/lib/supabase';
-import { BACK_ICON } from '../../src/ui/direction';
 
 // The weekday name, the date order and the clock were all this file's own, and
 // all three were English and British. `DOW` was a hardcoded array; the fallback
@@ -719,9 +718,32 @@ export default function TrainerClasses() {
   const lbl = { ...ty.caption, color: t.ink3, marginBottom: 6 } as const;
   const chip = (label: string, active: boolean, onPress: () => void) => (
     <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
       style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: active ? t.brand : t.surface2 }}>
       <Text style={{ ...ty.label, fontWeight: '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
+  );
+  /**
+   * The board's segment bar, for a choice with a FIXED handful of positions:
+   * one `surface2` pill, equal segments, the chosen one filled in ink. The
+   * chips above stay for the sets whose size this screen does not decide —
+   * the branches a gym has, the eight weeks, the seven days — because a bar
+   * with nine equal segments is nine labels each a syllable wide.
+   */
+  const seg = <K extends string | number>(items: readonly (readonly [K, string])[], active: K, onPick: (k: K) => void) => (
+    <View accessibilityRole="tablist"
+      style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, gap: 2 }}>
+      {items.map(([k, label]) => {
+        const on = k === active;
+        return (
+          <Pressable key={String(k)} onPress={() => onPick(k)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+            style={{ flex: 1, minHeight: 40, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
+              style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
   const stepper = (label: string, val: string, dec: () => void, inc: () => void) => (
     <View style={{ flexGrow: 1, flexBasis: 120, minWidth: 110 }}>
@@ -748,14 +770,11 @@ export default function TrainerClasses() {
             this app does not put it — and without `a11yLabel` a screen reader
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
-        <ScreenHeader
-          eyebrow="Your branches"
+        <PageHead
           title="Classes"
           subtitle="Schedule group classes across your branches. Members book and waitlist automatically."
-          leading={<Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />}
+          trailing={<Ghost icon="plus" a11yLabel={createOpen ? 'Close the new class form' : 'Schedule a class'} onPress={() => setCreateOpen((open) => !open)} />}
         />
-
-        <Rule inset={0} />
 
         {/* ── new class ──────────────────────────────────────────────────── */}
         <Section>
@@ -867,9 +886,7 @@ export default function TrainerClasses() {
           ) : null}
 
           <Text style={[lbl, { marginTop: sp.md }]}>Repeat</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
-            {([[1, 'Just once'], [4, 'Weekly ×4'], [8, 'Weekly ×8'], [12, 'Weekly ×12']] as [number, string][]).map(([n, label]) => chip(label, weeks === n, () => setWeeks(n)))}
-          </ScrollView>
+          {seg([[1, 'Just once'], [4, 'Weekly ×4'], [8, 'Weekly ×8'], [12, 'Weekly ×12']] as const, weeks, setWeeks)}
 
           <View style={{ height: sp.lg }} />
           <Cta label={busy ? 'Adding…' : 'Add Class'} wide disabled={!canAdd || busy} onPress={submit} />
@@ -893,9 +910,7 @@ export default function TrainerClasses() {
           {upcoming.length > 0 ? (
             <View style={{ marginBottom: sp.md }}>
               <Text style={lbl}>Same Again runs for</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
-                {([[4, '4 more weeks'], [8, '8 more weeks'], [12, '12 more weeks']] as [number, string][]).map(([n, label]) => chip(label, againWeeks === n, () => setAgainWeeks(n)))}
-              </ScrollView>
+              {seg([[4, '4 more weeks'], [8, '8 more weeks'], [12, '12 more weeks']] as const, againWeeks, setAgainWeeks)}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 Counted from the last class in that series rather than from today, so a term that is nearly over carries straight on. Dates already on the timetable, and any that fall in the past, are skipped rather than doubled.
               </Text>

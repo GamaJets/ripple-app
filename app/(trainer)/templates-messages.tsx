@@ -26,7 +26,7 @@ import { View, Text, TextInput, ScrollView, Pressable, Alert, Modal, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useMyTemplates, saveTemplate, deleteTemplate } from '../../src/ui/messageTemplates';
 import {
@@ -34,7 +34,6 @@ import {
   nextPosition, TOKENS, MAX_TEMPLATE_BODY,
   type MessageTemplate,
 } from '../../src/lib/messageTemplates';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function SavedMessages() {
   const t = useTheme();
@@ -105,18 +104,10 @@ export default function SavedMessages() {
             this app does not put it — and without `a11yLabel` a screen reader
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your own words, kept</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Saved Messages</Text>
-          </View>
-        </View>
+        <PageHead title="Saved Messages" subtitle="Your own words, kept" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           The messages you type every week. Pick one in any thread and it lands in your box with the client’s name filled in. Nothing is ever sent for you.
         </Text>
-
-        <Rule inset={0} />
 
         <Section>
           <SectionHead title="Your Messages" note={lib.status === 'ready' && rows.length ? String(rows.length) : undefined} />

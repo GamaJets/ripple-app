@@ -66,7 +66,7 @@ import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, ActivityInd
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Card } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Card, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useNudges } from '../../src/ui/nudges';
@@ -81,7 +81,6 @@ import { paceNote } from '../../src/lib/interventions';
 import { cadenceLine, overdueNote } from '../../src/lib/cadence';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { OvernightChecks } from '../../src/ui/OvernightChecks';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
 /** The mark beside a verdict. A coloured dot beside ink text, never coloured
@@ -214,13 +213,7 @@ export default function Nudges() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Quiet Clients</Text>
-          </View>
-        </View>
+        <PageHead title="Quiet Clients" subtitle="Your book" />
 
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Clients whose training record has gone quiet, with a message drafted for you. Nothing here
@@ -651,13 +644,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={onClose} a11yLabel="Close without sending" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — nothing sent yet</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{nudge.name ?? 'Client'}</Text>
-          </View>
-        </View>
+        <PageHead title={nudge.name ?? 'Client'} subtitle="Draft — nothing sent yet" onBack={onClose} backLabel="Close without sending" />
 
         <Section>
           <Text style={{ ...ty.label, color: t.ink2 }}>{nudge.observed}</Text>
@@ -731,13 +718,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={onClose} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Why they are here</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{name ?? 'Client'}</Text>
-          </View>
-        </View>
+        <PageHead title={name ?? 'Client'} subtitle="Why they are here" onBack={onClose} />
 
         {drift ? (
           <Section>

@@ -41,7 +41,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useCoachSetup } from '../../src/ui/coachSetup';
 import { useCoachDelivery, useDeliveryFact } from '../../src/ui/coachDelivery';
@@ -51,7 +51,7 @@ import {
   coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, NOT_YOUR_SETUP,
   type CoachSetupRow,
 } from '../../src/lib/coachFirstRun';
-import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * The mark against one setup row — a filled tick, a hairline ring, a dash for a
@@ -132,13 +132,7 @@ export default function CoachGettingStarted() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Getting started</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{coachSetupHeading(rows)}</Text>
-          </View>
-        </View>
+        <PageHead title={coachSetupHeading(rows)} subtitle="Getting started" />
 
         <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
           {coachSetupNote(rows, status)}

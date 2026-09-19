@@ -73,7 +73,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { supabase } from '../../src/lib/supabase';
@@ -95,7 +95,6 @@ import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { signedInUid } from '../../src/lib/signedInUid';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { hitSlopFor } from '../../src/lib/a11y';
-import { BACK_ICON } from '../../src/ui/direction';
 
 interface Item {
   id: string; label: string; icon: string; active: boolean; sort: number;
@@ -654,13 +653,7 @@ export default function CoachChecklists() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their Checklists</Text>
-          </View>
-        </View>
+        <PageHead title="Their Checklists" subtitle="Your book" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Lines you add appear on that client&rsquo;s daily list, marked as set by you, beside the
           ones worked out from their own plan and targets. You can&rsquo;t tick them — that stays

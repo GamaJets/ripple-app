@@ -81,12 +81,12 @@
 // answer: an Instagram handle gets no dial button, because a coach finds out
 // that a tel: link over a handle dials nothing only after they have tapped it.
 import { useCallback, useState, useEffect } from 'react';
-import { View, Text, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Cta, Notice, Flag, PartialRead } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useLeads } from '../../src/ui/leads';
@@ -111,7 +111,6 @@ import { fetchMyCoachBrand } from '../../src/ui/coachBrand';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { appLocale } from '../../src/lib/locale';
 import { localDate } from '../../src/lib/localDate';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * A date as a coach reads one. Unknown stays unknown.
@@ -447,15 +446,9 @@ export default function TrainerLeads() {
             this app does not put it — and without `a11yLabel` a screen reader
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Who asked and did not join</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Enquiries</Text>
-          </View>
-        </View>
+        <PageHead title="Enquiries" subtitle="Who asked and did not join" />
 
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
           Your join link now carries a short form, so somebody who is not ready to install the app can still leave their
           name. They arrive here with the code they came in on, so an enquiry is attributed the same way a client is.
         </Text>
@@ -533,7 +526,7 @@ export default function TrainerLeads() {
         ) : null}
 
         <Section>
-          <SectionHead title="Your enquiries" />
+          <SectionHead title="Your Enquiries" />
           <Text style={{ ...ty.label, color: t.ink2 }}>{book.note}</Text>
 
           {/* ── what "error" is allowed to hide ────────────────────────────
@@ -596,7 +589,11 @@ export default function TrainerLeads() {
               {/* The filter. Only worth drawing once there is something to
                   filter — four buttons above an empty list is furniture. */}
               {book.rows.length > 0 ? (
-                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, flexWrap: 'wrap' }}>
+                /* The board's segment bar — one `surface2` pill, four equal
+                   segments, the chosen one in ink — where this was a wrap of
+                   one Cta and three Ghosts. Same four positions. */
+                <View accessibilityRole="tablist"
+                  style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, gap: 2, marginTop: sp.lg }}>
                   {FILTERS.map((f) => {
                     // Counted only when the read is the whole book. An
                     // enquiry queue is worked TO ZERO: "New (18)" is a promise
@@ -606,9 +603,18 @@ export default function TrainerLeads() {
                     // notice for this same read is drawn twelve lines above.
                     const n = !isWhole(book.status) ? null
                       : f.key === 'all' ? book.rows.length : book.rows.filter((r) => r.state === f.key).length;
-                    return f.key === filter
-                      ? <Cta key={f.key} label={`${f.label} (${num(n)})`} onPress={() => setFilter(f.key)} />
-                      : <Ghost key={f.key} label={`${f.label} (${num(n)})`} onPress={() => setFilter(f.key)} />;
+                    const on = f.key === filter;
+                    return (
+                      <Pressable key={f.key} onPress={() => setFilter(f.key)}
+                        accessibilityRole="tab" accessibilityState={{ selected: on }}
+                        accessibilityLabel={`${f.label}, ${n == null ? 'not counted' : num(n)}`}
+                        style={{ flex: 1, minHeight: 40, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+                        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
+                          style={{ ...ty.label, fontWeight: on ? '600' : '500', ...numeric, color: on ? t.bg : t.ink2 }}>
+                          {f.label} {num(n)}
+                        </Text>
+                      </Pressable>
+                    );
                   })}
                 </View>
               ) : null}
@@ -683,7 +689,7 @@ export default function TrainerLeads() {
         </Section>
 
         <Section>
-          <SectionHead title="What this cannot see" />
+          <SectionHead title="What This Cannot See" />
           <Text style={{ ...ty.body, color: t.ink2 }}>{MISTYPED_CODE_NOTE}</Text>
           <View style={{ marginTop: sp.md }}>
             <Rule />
