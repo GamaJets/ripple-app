@@ -64,7 +64,12 @@ import { useSessions } from '../../src/ui/sessions';
 import { fetchMyCurrency } from '../../src/lib/myCurrency';
 import { myCurrencyLine, type MyCurrency, type MyCurrencyGap } from '../../src/lib/currencySource';
 import { currencyForModel } from '../../src/lib/currencyForModel';
-import { deltaSign } from '../../src/lib/deltaLabel';
+import { deltaSign, deltaLabel } from '../../src/lib/deltaLabel';
+// The board's 7D / 30D / 90D / 1Y windows: what each covers, what is read for
+// it, and the bar chart. See the header of src/ui/coach/analyticsRange.ts.
+import { RANGES, bucketsOf, priorWindow, useRangeActivity, rangeFigures, type RangeKey, type RangeRead } from '../../src/ui/coach/analyticsRange';
+import { RangeBars } from '../../src/ui/coach/RangeBars';
+import { recentWindow, dayLabel } from '../../src/lib/adherence';
 import { wholeMoney, minorMoney, since, type TakenRow } from '../../src/lib/coachMoney';
 import { monthWindow } from '../../src/lib/monthlyHistory';
 import {
@@ -787,6 +792,100 @@ export default function TrainerAnalytics() {
   // the ones with the least left to say.
   const cohortRows = cohortBlock ? [] : cohorts(spans.spans, new Date()).slice().reverse();
 
+  /* ── the board's window: adherence and completions over 7D / 30D / 90D / 1Y
+   *
+   * The board opens Analytics on a chip row and two figures with charts under
+   * them, and neither figure existed on this screen: the KPI strip's
+   * adherence is each client's NEWEST check-in averaged across the book, which
+   * answers "how is the book now" and cannot be cut into weeks. These are the
+   * same rating read across every check-in in the window, and the sessions
+   * clients logged in it — src/ui/coach/analyticsRange.ts says where each comes
+   * from and why it is not src/lib/adherence.ts's tick-rate.
+   *
+   * Three gates, in order, and the sentence under the figure names whichever
+   * one closed:
+   *   · the roster read was WHOLE — the ids handed to the read are the book,
+   *     and a fragment of a book is not a smaller book;
+   *   · somebody on it has an account — a hand-added client has no check-in
+   *     screen and no workout log, so a roster that is all hand-added has
+   *     nobody to measure, which is not the same as a book that did nothing;
+   *   · the window's own read came back whole — capped reads produce no
+   *     figure, because a mean over the rows that happened to come back is a
+   *     wrong mean rather than a small one.
+   *
+   * The delta is gated on the SAME three for the window before, separately,
+   * so the figure a coach is looking at is not withheld because the comparison
+   * behind it came back short. */
+  const [range, setRange] = useState<RangeKey>('30D');
+  // Bumped by the pull below, like `driftNonce`: the window read re-runs on
+  // its own when the ids or the window change, and a refresh changes neither.
+  const [rangeNonce, setRangeNonce] = useState(0);
+  const rangeDef = RANGES.find((r) => r.key === range) ?? RANGES[1];
+  // `now` is the same instant the month figures use, so a coach who comes back
+  // to this tab after midnight reads a window that has moved with the day.
+  const win = useMemo(() => recentWindow(now, rangeDef.days), [now, rangeDef.days]);
+  const prevWin = useMemo(() => priorWindow(win), [win]);
+  const buckets = useMemo(() => bucketsOf(win, rangeDef.bucketDays), [win, rangeDef.bucketDays]);
+  const prevBuckets = useMemo(() => (prevWin ? bucketsOf(prevWin, rangeDef.bucketDays) : []), [prevWin, rangeDef.bucketDays]);
+  // The linked clients, and only off a whole roster: an empty list under a
+  // short read is "nobody was asked", and the reason line below says so
+  // before the read's own status gets a word.
+  const rangeIds = useMemo(() => (rosterWhole ? driftSubjects.map((c) => c.id) : []), [rosterWhole, driftSubjects]);
+  const curRead = useRangeActivity(rangeIds, win, rangeNonce);
+  const prevRead = useRangeActivity(rangeIds, prevWin ?? win, rangeNonce);
+  /** Why a window has no figure, or null when it may have one. */
+  const rangeGap = (read: RangeRead): string | null => {
+    if (rosterStatus === 'loading') return 'Reading your roster…';
+    if (!rosterWhole) {
+      return rosterStatus === 'partial'
+        ? 'Your roster came back short, so this is not drawn — a figure over part of your book is not a figure about it.'
+        : 'Your roster could not be read, so this is not drawn. It is unknown, not zero.';
+    }
+    if (read.status === 'loading') return 'Reading what your clients recorded…';
+    if (read.asked < 1) {
+      return clients === 0
+        ? 'No clients yet. This fills in as clients join, check in and log their sessions.'
+        : 'Everyone on your roster was added by hand, so there is no account behind them and nothing of theirs to read. They are not being counted as having done nothing.';
+    }
+    if (read.status === 'error') return 'Their records could not be read, so this is not drawn. It is unknown, not zero.';
+    if (read.status === 'partial') return 'More was recorded in this window than one read returns, so this is not drawn — a figure over part of it would be stated as the whole.';
+    return null;
+  };
+  const windowGap = rangeGap(curRead);
+  const prevWindowGap = prevWin ? rangeGap(prevRead) : 'The window before this one could not be worked out.';
+  const curFigures = useMemo(
+    () => (windowGap == null && isWhole(curRead.status) ? rangeFigures(curRead, buckets) : null),
+    [windowGap, curRead, buckets],
+  );
+  const prevFigures = useMemo(
+    () => (prevWindowGap == null && isWhole(prevRead.status) ? rangeFigures(prevRead, prevBuckets) : null),
+    [prevWindowGap, prevRead, prevBuckets],
+  );
+  const rangeLabels = buckets.map((b) => b.key);
+  const beforeNote = `the ${rangeDef.days} days before`;
+  /** The delta line under a figure: the movement against the window before,
+   *  or the reason there is none. `deltaLabel` signs it, so a change of
+   *  nothing reads "No change" rather than "−0". */
+  const rangeDeltaLine = (cur: number | null, prev: number | null, unit: string): string | null => {
+    if (cur == null) return null;
+    if (prevWindowGap != null) {
+      return prevRead.status === 'loading' && rosterWhole
+        ? `Reading ${beforeNote} to compare…`
+        : `Not compared with ${beforeNote}: ${prevWindowGap.charAt(0).toLowerCase()}${prevWindowGap.slice(1)}`;
+    }
+    if (prev == null) return `Nothing recorded in ${beforeNote} to compare with.`;
+    return `${deltaLabel(cur - prev, { since: null, unit, decimals: 0 })} vs ${beforeNote}`;
+  };
+  const adhDeltaLine = rangeDeltaLine(curFigures?.adherence ?? null, prevFigures?.adherence ?? null, '%');
+  const doneDeltaLine = rangeDeltaLine(curFigures?.completions ?? null, prevFigures?.completions ?? null, '');
+  /** Green only for movement upward; a fall, or no change, sits in ink. Read
+   *  off `deltaSign` rather than the raw difference so the two never disagree
+   *  about whether something moved. */
+  const upward = (cur: number | null, prev: number | null): boolean =>
+    cur != null && prev != null && deltaSign(cur - prev, 0) === '+';
+  /** The window's span, as the axis would write it: "14 Aug to 12 Sep". */
+  const winSpan = `${dayLabel(win.start)} to ${dayLabel(win.end)}`;
+
   /* ── pull to refresh ─────────────────────────────────────────────────────
    *
    * Six reads sit behind this screen and every figure on it is a combination of
@@ -800,6 +899,7 @@ export default function TrainerAnalytics() {
   const pull = usePullToRefresh(useCallback(
     () => {
       setDriftNonce((n) => n + 1);
+      setRangeNonce((n) => n + 1);
       return Promise.all([
         refreshRoster(), refreshSessions(), loadTakings(), loadCurrency(),
         Promise.resolve(reloadSpans()), Promise.resolve(reloadGoals()),
@@ -861,6 +961,100 @@ export default function TrainerAnalytics() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <ScreenHeader eyebrow="Your coaching business" title="Analytics" />
+
+        {/* ── the window ────────────────────────────────────────────────────
+            The board's chip row, in the segmented-bar idiom the kit already
+            uses: one pill, equal segments, the chosen one in ink. 30D leads,
+            as the board has it. The chips change which days the two blocks
+            below are read over — real windows, real reads — and nothing else
+            on the screen, which is still the calendar month. */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
+          {RANGES.map((r) => {
+            const on = r.key === range;
+            return (
+              <Pressable key={r.key} onPress={() => setRange(r.key)} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={r.spoken}
+                style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{r.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* ── client adherence over the window ─────────────────────────────
+            The board's first block: the figure, its movement against the
+            window before, and a bar per period. The figure is a dash and the
+            chart is not drawn under any read that was not whole — the sentence
+            in the chart's place says which read, and that a dash is unknown
+            rather than nought. */}
+        <Section>
+          <SectionHead title="Client Adherence" note={rangeDef.spoken} />
+          <View accessible accessibilityLabel={`Client adherence, ${rangeDef.spoken.toLowerCase()}: ${curFigures?.adherence == null ? 'not drawn' : `${curFigures.adherence} percent`}. ${adhDeltaLine ?? windowGap ?? ''}`}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: sp.md }}>
+              <Text style={{ ...value(36), color: t.ink }}>
+                {curFigures?.adherence == null ? fig(null) : `${curFigures.adherence}%`}
+              </Text>
+              {adhDeltaLine ? (
+                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', flexShrink: 1, color: upward(curFigures?.adherence ?? null, prevFigures?.adherence ?? null) ? t.brand : t.ink2 }}>
+                  {adhDeltaLine}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+          <View style={{ marginTop: sp.md }}>
+            {curFigures == null ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>{windowGap}</Text>
+            ) : curFigures.adherence == null ? (
+              // A whole read with nothing in it. Said rather than drawn as a
+              // row of empty slots, which reads as a chart that failed.
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                No check-ins from {winSpan}, so there is no adherence to average. Clients rate their own adherence each time they check in.
+              </Text>
+            ) : (
+              <RangeBars data={curFigures.adherenceByBucket} prior={prevFigures?.adherenceByBucket ?? null}
+                labels={rangeLabels} unit="%" max={100} what="Client adherence" priorNote={beforeNote} />
+            )}
+          </View>
+          {curFigures?.adherence != null ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Each client's own rating at check-in, as a percentage, averaged over the {curFigures.checkIns} check-in{curFigures.checkIns === 1 ? '' : 's'} from {winSpan}. Each bar is {rangeDef.bucketDays === 1 ? 'a day' : 'a week, starting on the date under it'}; a gap is a {rangeDef.bucketDays === 1 ? 'day' : 'week'} nobody checked in on, not a zero.
+              {prevFigures?.adherenceByBucket.some((v) => v != null) ? ` The fainter bar beside each is the same ${rangeDef.bucketDays === 1 ? 'day' : 'week'} of ${beforeNote}.` : ''}
+            </Text>
+          ) : null}
+        </Section>
+
+        {/* ── programme completions over the window ────────────────────────
+            The board's second block, as a line. One completion is one session
+            a client logged — a programme day done — and the caption says so,
+            because "completions" under a count of sessions would otherwise be
+            read as programmes finished, which nothing in the record marks. */}
+        <Section>
+          <SectionHead title="Program Completions" note={rangeDef.spoken} />
+          <View accessible accessibilityLabel={`Program completions, ${rangeDef.spoken.toLowerCase()}: ${curFigures == null ? 'not drawn' : `${curFigures.completions} session${curFigures.completions === 1 ? '' : 's'} logged`}. ${doneDeltaLine ?? windowGap ?? ''}`}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: sp.md }}>
+              <Text style={{ ...value(36), color: t.ink }}>{fig(curFigures?.completions)}</Text>
+              {doneDeltaLine ? (
+                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', flexShrink: 1, color: upward(curFigures?.completions ?? null, prevFigures?.completions ?? null) ? t.brand : t.ink2 }}>
+                  {doneDeltaLine}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+          <View style={{ marginTop: sp.md }}>
+            {curFigures == null ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>{windowGap}</Text>
+            ) : (
+              // Spark takes the counts as they are: a period with no session
+              // under a whole read is a counted zero and is drawn at the
+              // baseline, not left as a hole.
+              <Spark data={curFigures.completionsByBucket} labels={rangeLabels} />
+            )}
+          </View>
+          {curFigures != null ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Workout sessions your clients logged from {winSpan}, by the day they trained. Each point is {rangeDef.bucketDays === 1 ? 'a day' : 'a week, starting on the date under it'}. A session logged is a programme day done, not a whole programme finished — nothing in the record marks that.
+            </Text>
+          ) : null}
+        </Section>
 
         {/* ── outcomes before turnover ─────────────────────────────────────
             The board opens Analytics on the book's adherence, its size and
