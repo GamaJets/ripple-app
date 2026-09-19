@@ -17,11 +17,6 @@
 }
 
 .audience-page header.site .wrap { min-height: 82px; height: auto; }
-.audience-page .brand { font-weight: 700; letter-spacing: -.04em; }
-.audience-page .mark {
-  border-radius: 12px;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, .12) inset, 0 12px 30px var(--audience-glow);
-}
 .audience-page nav.site a { font-size: 15px; }
 .audience-page nav.site a[aria-current="page"] {
   color: var(--ink);

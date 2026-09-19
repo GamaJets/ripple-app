@@ -2,7 +2,7 @@
    hierarchy, measure and navigation rhythm. */
 .legal-page{--legal-glow:color-mix(in srgb,var(--accent) 16%,transparent)}
 .legal-page header.site{background:color-mix(in srgb,var(--sunk) 90%,transparent);border-bottom-color:rgba(255,255,255,.09);box-shadow:0 14px 44px rgba(0,0,0,.13)}
-.legal-page header.site .wrap{min-height:82px;height:auto}.legal-page .brand{font-weight:700;letter-spacing:-.04em}.legal-page .mark{border-radius:12px;box-shadow:0 0 0 1px rgba(255,255,255,.12) inset,0 10px 26px var(--legal-glow)}
+.legal-page header.site .wrap{min-height:82px;height:auto}
 .legal-page nav.site a{font-size:15px}.legal-page nav.site a.cta{border-radius:999px;padding-inline:19px}
 .legal-document .page,.legal-delete .page{padding-top:clamp(64px,8vw,108px);padding-bottom:clamp(88px,10vw,140px)}
 .legal-document .legal{grid-template-columns:minmax(220px,.38fr) minmax(0,1fr);column-gap:clamp(48px,7vw,104px)}

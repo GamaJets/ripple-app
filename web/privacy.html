@@ -29,8 +29,8 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=d7eb8a0cfa">
-<link rel="stylesheet" href="legal-redesign.css?v=6bc8154c1b">
+<link rel="stylesheet" href="styles.css?v=22d013ee13">
+<link rel="stylesheet" href="legal-redesign.css?v=eccbfde6a0">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -86,10 +86,19 @@ addEventListener('DOMContentLoaded', function () {
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
-        <svg width="26" height="18" viewBox="0 0 54 38" aria-hidden="true"><path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z" fill="#04211d"/><path d="m33 4 18 0-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z" fill="#22c55e"/></svg>
-      </span>
-      Repple<span class="vh"> home</span>
+      <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+        <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+          <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+          <path transform="translate(492 0)" d="M12 0V88H100"/>
+          <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+        </g>
+        <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+        <g class="signal" fill="#22c55e" transform="translate(124 0)">
+          <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+        </g>
+      </svg><span class="vh"> home</span>
     </a>
     <nav class="site" aria-label="Primary navigation">
       <div class="nav-links" id="site-menu">
@@ -114,7 +123,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="legal-head prose">
       <h1>Privacy</h1>
-      <p class="updated">Updated 4 September 2026</p>
+      <p class="updated">Updated 19 September 2026</p>
     </div>
 
     <!-- Named by the words already on the page, not by a copy of them. The
@@ -219,6 +228,7 @@ addEventListener('DOMContentLoaded', function () {
         <li><strong>Cheaper Inference</strong> — a second, alternative route to the same model reading, which Repple can be switched to instead of contacting Anthropic directly. It is not in use unless we switch it on, and it is set out beside Anthropic under <a href="#ai">What the AI features send, and where</a> below, because what it receives and what it retains are not the same as Anthropic&rsquo;s.</li>
         <li><strong>Stripe</strong> — payments, where a trainer or gym takes them. Stripe handles card details directly; we never receive them.</li>
         <li><strong>Open Food Facts</strong> — barcode and food-name lookups. Your phone asks them directly, so they see the barcode you scanned and your IP address, but nothing that identifies your account.</li>
+        <li><strong>Spoonacular</strong> — the recipe library behind the Meals list, and only when you search it. Our server asks on your behalf, and what it sends is the search and nothing about who is searching: the diet you have set, the allergens you have asked to avoid, the kind of meal, a calorie range, and any words you typed into the search box. Not your name, your email, your account or your IP address &mdash; to Spoonacular every Repple member is the same one caller. Two things do reach them from your phone rather than from us. A recipe&rsquo;s photograph is loaded from Spoonacular&rsquo;s image server, so that server sees your IP address and which photograph was asked for, as any website hosting an image would. And each recipe credits the website it came from with a link; if you tap it, you are on that website and under its policy, not ours. Spoonacular&rsquo;s terms do not let us keep its recipes, so we do not: a recipe you add to your plan is remembered as its title, its photograph&rsquo;s address and its number in their library, and is asked for again when you open it.</li>
         <li><strong>WHOOP, Oura, Spotify</strong> — only if you connect them, and only for what you connected them for. Spotify is the one that goes outwards rather than inwards: it creates a playlist in your own Spotify account.</li>
         <li><strong>Google, Meta and TikTok</strong> — <em>inside the apps</em>, for coaches only, and only for a coach&rsquo;s own accounts: putting a coach&rsquo;s own sessions on their own calendar, and reading back what a coach&rsquo;s own advertising cost them. A client&rsquo;s name is never sent to any of the three. A calendar event Repple writes says &ldquo;Coaching session&rdquo; and nothing else. Google separately receives a request from <em>this website</em>, from everybody, and that is set out immediately below rather than folded into this line.</li>
       </ul>
@@ -327,10 +337,19 @@ addEventListener('DOMContentLoaded', function () {
     <div class="cols">
       <div>
         <a class="brand" href="/">
-          <span class="mark">
-            <svg width="26" height="18" viewBox="0 0 54 38" aria-hidden="true"><path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z" fill="currentColor"/><path d="m33 4 18 0-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z" fill="#22c55e"/></svg>
-          </span>
-          Repple<span class="vh"> home</span>
+          <svg class="brand-word" viewBox="0 0 716 100" role="img" aria-label="Repple" focusable="false">
+            <g fill="none" stroke="currentColor" stroke-width="24" stroke-linejoin="round">
+              <path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(252 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(372 0)" d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/>
+              <path transform="translate(492 0)" d="M12 0V88H100"/>
+              <path transform="translate(604 0)" d="M100 12H12V88H100M12 50H84"/>
+            </g>
+            <path fill="currentColor" d="M38 62H70L112 100H78Z"/>
+            <g class="signal" fill="#22c55e" transform="translate(124 0)">
+              <path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/>
+            </g>
+          </svg><span class="vh"> home</span>
         </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           One connected fitness platform for members, coaches and gyms.

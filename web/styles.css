@@ -246,22 +246,18 @@ header.site .wrap {
   letter-spacing: -0.02em; text-decoration: none; flex: none;
 }
 .brand:hover { text-decoration: none; }
-/* The glyph inside the mark was painted #04211d — the teal palette's ink, set
-   as an attribute on the SVG in all sixteen pages. Amber's ink is different,
-   and in daylight it is white on #b45309, where a hardcoded dark green would
-   have disappeared into the tile. Taking it from the token instead means the
-   mark follows the palette rather than one theme's memory of it. CSS wins over
-   the presentation attributes still on the element. */
-.mark svg [stroke] { stroke: var(--brand-ink); }
-.mark svg [fill]:not([fill="none"]) { fill: var(--brand-ink); }
-.mark {
-  width: 48px; height: 48px; border-radius: 13px; flex: none;
-  display: grid; place-items: center;
-  /* Built from the fill rather than the text accent: this is a tile, not a
-     word on the page, so it should carry the colour the app icon actually is. */
-  background: linear-gradient(150deg, var(--brand-fill), color-mix(in srgb, var(--brand-fill) 62%, #000));
-  box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset;
-}
+/* The logo is the board's wordmark, R≡PPLE, one inline SVG per page (the
+   geometry is src/ui/BrandMark.tsx's). It replaced a glyph on a coloured plate
+   (`.mark`) plus the live word beside it, and with them the rule that forced
+   every fill inside the plate to --brand-ink — which would have painted the
+   three signal bars ink too, so the word must never sit inside a plate. Its
+   ink is currentColor, so it follows .brand's colour on light and dark
+   grounds; the bars keep their own green. Sized by height: the artwork is
+   716×100, so 18px tall is 129px wide. */
+.brand-word { height: 18px; width: auto; display: block; }
+/* /join and /coach keep an empty #b-wordmark beside the word for a white-label
+   tenant's name; empty, it must not take a flex gap. */
+.brand span:empty { display: none; }
 nav.site { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .nav-links { display: flex; align-items: center; gap: 4px; }
 nav.site a {
@@ -289,7 +285,6 @@ nav.site a.cta:hover { filter: brightness(1.08); background: var(--brand-fill); 
    the page is asking for. */
 @media (max-width: 760px) {
   header.site .wrap { height: 70px; gap: 10px; flex-wrap: nowrap; }
-  .mark { width: 38px; height: 38px; border-radius: 11px; }
   .brand { font-size: 19.5px; gap: 11px; }
   nav.site { gap: 6px; flex-wrap: nowrap; }
   nav.site a.cta { padding: 9px 14px; margin-left: 0; font-size: 14.5px; }
@@ -322,9 +317,12 @@ nav.site a.cta:hover { filter: brightness(1.08); background: var(--brand-fill); 
    no room for it. They are behind the button now, so it stays: measured at
    320px — the narrowest phone still in use — the bar needs 265 of 280px. */
 @media (max-width: 360px) {
-  .mark { width: 28px; height: 28px; }
   .brand { font-size: 16.5px; gap: 8px; }
   nav.site a.cta { padding: 9px 12px; font-size: 14px; }
+}
+
+@media (max-width: 620px) {
+  .brand-word { height: 16px; }
 }
 
 /* ── type ──────────────────────────────────────────────────────────────── */
