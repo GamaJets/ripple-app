@@ -325,7 +325,6 @@ export default function CoachJoinCode() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── what the person in front of them does next ──────────────────── */}
         <Section>
@@ -347,7 +346,6 @@ export default function CoachJoinCode() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── the named codes, live ones only ─────────────────────────────── */}
         <Section>

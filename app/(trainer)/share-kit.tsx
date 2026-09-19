@@ -949,7 +949,6 @@ export default function ShareKit() {
           </>
         )}
 
-        <Rule />
 
         {/* ── shape ──────────────────────────────────────────────────────── */}
         <Section>
@@ -961,7 +960,6 @@ export default function ShareKit() {
           />
         </Section>
 
-        <Rule />
 
         {/* ── the card ───────────────────────────────────────────────────── */}
         <Section>
@@ -1033,7 +1031,6 @@ export default function ShareKit() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── the one network posted to directly ──────────────────────────
             Everything above stays exactly as it was. This is one network

@@ -292,7 +292,6 @@ export default function Compare() {
           </View>
         </View>
 
-        <Rule />
 
         {photos === null ? (
           <Section>
@@ -529,7 +528,6 @@ export default function Compare() {
             member most likely to have a year of weigh-ins and nothing that
             shows them. Gating it on having two photos would hide a year of
             their own measurements behind a camera. */}
-        <Rule />
         <BodyYear
           scans={cd.scans}
           status={cd.scansStatus}

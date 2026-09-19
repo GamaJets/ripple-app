@@ -218,7 +218,6 @@ export default function CoachGettingStarted() {
           </Section>
         ) : null}
 
-        <Rule />
 
         <Section>
           <SectionHead title="If Something Does Not Make Sense" />

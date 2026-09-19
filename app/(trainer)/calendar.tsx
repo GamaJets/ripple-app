@@ -3101,7 +3101,6 @@ export default function TrainerSchedule() {
           </View>
         ) : null}
 
-        <Rule />
 
         {/* ── the things you do from here ─────────────────────────────────
             Below the calendar, not above it. Two of these read the SELECTED
@@ -3159,7 +3158,6 @@ export default function TrainerSchedule() {
           onExport={exportSchedule}
         />
 
-        <Rule />
 
         {/* ── standing appointments ────────────────────────────────────────
             Listed here rather than inside the weekly-availability sheet
@@ -3226,7 +3224,6 @@ export default function TrainerSchedule() {
           ))}
         </Section>
 
-        <Rule />
 
         {/* ── the selected day ───────────────────────────────────────────── */}
         <Section>
@@ -3600,7 +3597,6 @@ export default function TrainerSchedule() {
           {floorNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{floorNote}</Flag> : null}
         </Section>
 
-        <Rule />
 
         {/* ── the fortnight each client has booked out ───────────────────
             The diary, arranged by person. Every row of this comes off the

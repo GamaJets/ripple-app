@@ -2407,7 +2407,6 @@ export default function Builder() {
           readyToAssign={canAssign}
         />
 
-        <Rule />
 
         {/* ── templates ──────────────────────────────────────────────────── */}
         {/* Save as Template used to be the `note` on the SectionHead: small,
@@ -2452,7 +2451,6 @@ export default function Builder() {
           <Ghost label="Open Template Library" icon="grid" onPress={() => router.push('/(trainer)/templates')} />
         </Section>
 
-        <Rule />
 
         {/* ── the program itself ─────────────────────────────────────────── */}
         <Section>
@@ -2609,7 +2607,6 @@ export default function Builder() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── the block ──────────────────────────────────────────────────
             Drawn ONLY once there is more than one week, plus the one control
@@ -2779,7 +2776,6 @@ export default function Builder() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── days ───────────────────────────────────────────────────────── */}
         <Section>
@@ -3697,7 +3693,6 @@ export default function Builder() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── programme checks ───────────────────────────────────────────
             Named for what it is. Seven rules, no model, no score and no
@@ -3782,7 +3777,6 @@ export default function Builder() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── assign ─────────────────────────────────────────────────────── */}
         <Section>
@@ -3936,7 +3930,6 @@ export default function Builder() {
           })}
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The disclosures themselves, above the button that is being held.

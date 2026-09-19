@@ -1234,7 +1234,6 @@ export default function ClientBody() {
           </>
         )}
 
-        <Rule />
 
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           Body fat is a percentage and reads the same in every unit system. Weight and skeletal

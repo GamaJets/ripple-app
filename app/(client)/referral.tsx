@@ -275,7 +275,6 @@ export default function Referral() {
           </Card>
         </Section>
 
-        <Rule />
 
         {/* ── who actually came ───────────────────────────────────────────── */}
         <Section>
@@ -327,7 +326,6 @@ export default function Referral() {
           ) : null}
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="How It Works" />
@@ -344,7 +342,6 @@ export default function Referral() {
           ))}
         </Section>
 
-        <Rule />
 
         {/* ── what is and is not being promised ───────────────────────────── */}
         <Section>

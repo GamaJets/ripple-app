@@ -682,7 +682,6 @@ export default function InjuryDoc() {
             sentences — and the two that must never merge are "you kept this one
             private", which is a decision on file, and "no record either way",
             which is every document uploaded before the question existed. */}
-        <Rule />
         <Section>
           <SectionHead title="Your Documents"
             note={docsStatus === 'ready' ? String(docs.length) : undefined} />

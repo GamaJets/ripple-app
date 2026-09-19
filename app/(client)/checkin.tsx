@@ -201,7 +201,6 @@ export default function CheckIn() {
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>A quick pulse for your coach — takes 30 seconds.</Text>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Current Weight" note={wu} />
@@ -211,7 +210,6 @@ export default function CheckIn() {
           {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text> : null}
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="How the Week Went" note="1 – 5" />
@@ -221,7 +219,6 @@ export default function CheckIn() {
           <Rating t={t} label="Plan Adherence" value={adherence} onChange={setAdherence} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Anything for Your Coach?" />

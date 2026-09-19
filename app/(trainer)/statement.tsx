@@ -486,7 +486,6 @@ export default function StatementOfRecord() {
           />
         </View>
 
-        <Rule />
 
         {/* ── the period, which the coach chooses ───────────────────────── */}
         <Section>
@@ -639,7 +638,6 @@ export default function StatementOfRecord() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PERIOD_IS_YOURS}</Text>
         </Section>
 
-        <Rule />
 
         {!statement ? (
           <Section>

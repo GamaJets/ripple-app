@@ -295,7 +295,6 @@ export default function Promotions() {
               : `${(off ?? 0) > 0 ? `${off} more switched off. ` : ''}Push a live code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.`}
         />
 
-        <Rule />
 
         {/* ── new promotion ──────────────────────────────────────────────── */}
         <Section>
@@ -357,7 +356,6 @@ export default function Promotions() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── active promotions ──────────────────────────────────────────── */}
         <Section>

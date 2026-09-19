@@ -406,7 +406,6 @@ export default function Membership() {
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
-        <Rule />
 
         {/* ── your membership ─────────────────────────────────────────────
             The section this screen exists for, and the one it has been unable
@@ -611,7 +610,6 @@ export default function Membership() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── the hero: the only live number this screen has ────────────────
             Three sentences in the note, not two: "we couldn't read it" is wrong
@@ -636,7 +634,6 @@ export default function Membership() {
             : visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month'}
         />
 
-        <Rule />
 
         {/* ── the one card: the thing you open this screen to do ──────────── */}
         {heroAction ? (
@@ -650,7 +647,6 @@ export default function Membership() {
           </Section>
         ) : null}
 
-        <Rule />
 
         {/* ── everywhere else you can go ─────────────────────────────────── */}
         <Section>

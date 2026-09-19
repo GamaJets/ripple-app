@@ -1916,7 +1916,6 @@ export default function Scans() {
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{stalenessNote(bfNow, today)}</Text>
         ) : null}
 
-        <Rule />
 
         {/* ── the one card: the scan you can act on ───────────────────────── */}
         <Section>
@@ -1935,7 +1934,6 @@ export default function Scans() {
           />
         </Section>
 
-        <Rule />
 
         {/* ── body ───────────────────────────────────────────────────────── */}
         <Section>
@@ -1973,7 +1971,6 @@ export default function Scans() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── progress photos ────────────────────────────────────────────── */}
         <Section>
@@ -2348,9 +2345,7 @@ export default function Scans() {
           </Section>
         </>)}
 
-        <Rule />
 
-        <Rule />
 
         {/* ── handing your own record to somebody who treats bodies ──────────
             A client sitting in front of a physiotherapist had nothing to show
@@ -2383,7 +2378,6 @@ export default function Scans() {
         </Section>
 
         {/* ── what the training actually worked ───────────────────────────── */}
-        <Rule />
         <Section>
           <SectionHead title="Muscles Worked" note="last 7 days" />
           <Pressable
@@ -2441,7 +2435,6 @@ export default function Scans() {
           ] as const).map(([icon, label, route]) => ({ icon, label, key: route, onPress: () => router.push(route as any) }))} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Training Progress" note="What changed in your work" />

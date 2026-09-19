@@ -111,7 +111,6 @@ export default function Appearance() {
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>How this app looks, and how much of it your phone decides. Everything here applies instantly.</Text>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Reading" />
@@ -151,7 +150,6 @@ export default function Appearance() {
           </Flag>
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Palette" note={String(palettes.length)} />

@@ -413,7 +413,6 @@ export default function ClassCheckin() {
           arcLabel="of those booked checked in"
         />
 
-        <Rule />
 
         {/* ── the trainer's own estimate ──────────────────────────────────── */}
         <Section>
@@ -464,7 +463,6 @@ export default function ClassCheckin() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* What this phone is still carrying. Drawn even when the last tick
             went through, because the count is about the morning and not about
@@ -543,7 +541,6 @@ export default function ClassCheckin() {
           )}
         </Section>
 
-        <Rule />
 
         {/* Who can see the ticks that have just been made.
 

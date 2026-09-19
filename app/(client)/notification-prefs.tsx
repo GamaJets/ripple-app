@@ -495,7 +495,6 @@ export default function NotificationPrefs() {
           </Section>
         ) : null}
 
-        <Rule />
 
         <Section>
           <SectionHead title="What This App Sends" />
@@ -541,7 +540,6 @@ export default function NotificationPrefs() {
           ) : null}
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Quiet Hours" />
@@ -680,7 +678,6 @@ export default function NotificationPrefs() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── what is sent TO you ──────────────────────────────────────────
             This section was a paragraph explaining why it could not be
@@ -737,7 +734,6 @@ export default function NotificationPrefs() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_MASTER}</Text>
         </Section>
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>

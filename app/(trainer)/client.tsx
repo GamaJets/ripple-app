@@ -1698,7 +1698,6 @@ export default function ClientScreen() {
           </Flag>
         ) : null}
 
-        <Rule />
 
         {/* ── what is outstanding ─────────────────────────────────────────── */}
         <Section>
@@ -1867,7 +1866,6 @@ export default function ClientScreen() {
           </Section>
         ) : null}
 
-        <Rule />
 
         {/* ── what they cannot do ─────────────────────────────────────────────
             The coach's side of this screen never read injuries at all. A client
@@ -2272,7 +2270,6 @@ export default function ClientScreen() {
           </Section>
         ) : null}
 
-        <Rule />
 
         {/* ── three figures, and a dash wherever the record cannot answer ─── */}
         <Section>
@@ -2329,7 +2326,6 @@ export default function ClientScreen() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── whether they have actually been coming in ────────────────────
             The two numbers a coach opens an attendance record to find, and
@@ -2454,7 +2450,6 @@ export default function ClientScreen() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── what they have paid you ──────────────────────────────────────
             R1. The number the decision on this screen turns on, and it was on
@@ -2597,7 +2592,6 @@ export default function ClientScreen() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── what pays for their sessions ─────────────────────────────────
             The number a coach plans a renewal conversation around, and the one
@@ -2673,7 +2667,6 @@ export default function ClientScreen() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── who has already tried them ───────────────────────────────────
             `member_interventions` was built for the person about to make the
@@ -2754,7 +2747,6 @@ export default function ClientScreen() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── what they actually wrote to you ──────────────────────────────
             The half of the check-in this product collected every week and
@@ -2818,7 +2810,6 @@ export default function ClientScreen() {
           </>) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the ways in, each saying whether there is anything in there ─── */}
         <Section>
@@ -2950,7 +2941,6 @@ export default function ClientScreen() {
             onPress={() => router.push('/(trainer)/documents')} />
         </Section>
 
-        <Rule />
 
         {/* ── the one thing here that is yours to change ────────────────────
             Small on purpose. It is one word about somebody, sitting where a

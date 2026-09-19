@@ -1059,7 +1059,6 @@ export default function Nutrition() {
           </Flag>
         ) : null}
 
-        <Rule />
 
         {/* ── where that target came from ────────────────────────────────── */}
         <Section>
@@ -1080,9 +1079,7 @@ export default function Nutrition() {
           ) : null}
         </Section>
 
-        <Rule />
 
-        <Rule />
 
         {/* ── macro cycling: training vs rest day ────────────────────────── */}
         <Section>
@@ -1118,7 +1115,6 @@ export default function Nutrition() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── the one card: log what you actually ate ────────────────────── */}
         <Section>
@@ -1203,7 +1199,6 @@ export default function Nutrition() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── how you eat, and what to leave out (collapsible) ────────────
             Diet style used to be asked twice on a first run — once in the
@@ -1277,7 +1272,6 @@ export default function Nutrition() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── quick links ────────────────────────────────────────────────── */}
         <Section>
@@ -1309,7 +1303,6 @@ export default function Nutrition() {
           </Section>
         </>) : null}
 
-        <Rule />
 
         {/* ── the plan: today or the week ────────────────────────────────── */}
         <Section>
@@ -1455,7 +1448,6 @@ export default function Nutrition() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── snacks ─────────────────────────────────────────────────────── */}
         {snacks.length ? (

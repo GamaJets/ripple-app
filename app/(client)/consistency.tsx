@@ -372,7 +372,6 @@ export default function Consistency() {
           </Text>
         ) : null}
 
-        <Rule />
 
         {/* ── your own rhythm ──────────────────────────────────────────────
             The reading of the grid, above the grid. Two figures and one
@@ -421,7 +420,6 @@ export default function Consistency() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{OWN_CADENCE_SOURCE}</Text>
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Totals" note={logStatus === 'partial' ? 'Not all read' : undefined} />
@@ -453,7 +451,6 @@ export default function Consistency() {
           ) : null}
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The grid is drawn from `counts`, which is empty until the log

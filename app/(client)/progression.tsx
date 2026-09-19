@@ -70,7 +70,6 @@ export default function Progression() {
           </View>
         </View>
 
-        <Rule />
 
         {/* This screen prescribes a load, and every target is
             anchored to the most recent set it can see. With the read failed

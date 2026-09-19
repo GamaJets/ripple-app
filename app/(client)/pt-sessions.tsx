@@ -465,7 +465,6 @@ export default function PtSessions() {
           note="Ask your coach for an hour they haven’t opened. It asks — it doesn’t book"
           onPress={() => router.push('/(client)/request-session')} />
 
-        <Rule />
 
         {/* ── awaiting approval: the only actionable thing here ───────────── */}
         <Section>
@@ -638,7 +637,6 @@ export default function PtSessions() {
             this section a client could see that a session was booked and could
             not see whether their coach had recorded it as delivered, as a
             no-show, or as nothing yet. */}
-        <Rule />
         <Section>
           <SectionHead title="What Already Happened"
             note={sessionsWhole && history.length > 0 ? String(history.length) : undefined} />
@@ -781,7 +779,6 @@ export default function PtSessions() {
             removed several hours, and it is drawn as one entry with the hours
             inside it. Why a shared `cancelled_at` is the test for that, and why
             `was_series` is NOT, is argued in src/lib/sessionCancellations.ts. */}
-        <Rule />
         <Section>
           <SectionHead title="Sessions You Cancelled"
             note={cancelsWhole && cancels.actions.length > 0 ? String(cancels.actions.length) : undefined} />
@@ -850,7 +847,6 @@ export default function PtSessions() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{BEST_EFFORT_NOTE}</Text>
         </Section>
 
-        <Rule />
 
         <Section>
           <ListRow icon="trophy" title="My Packages & Sessions" note="What you have bought and what is left"

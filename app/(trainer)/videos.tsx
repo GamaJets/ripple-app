@@ -790,7 +790,6 @@ export default function TrainerVideos() {
           }
         />
 
-        <Rule />
 
         {/* ── what you programme but nobody has filmed ────────────────────
             The library answers "what have I recorded". This answers the more
@@ -914,7 +913,6 @@ export default function TrainerVideos() {
           </View>
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The way into the catalogue, from the one screen where a coach is
@@ -930,7 +928,6 @@ export default function TrainerVideos() {
             onPress={() => router.push('/(trainer)/broadcast-session')} />
         </Section>
 
-        <Rule />
 
         {/* ── the library ────────────────────────────────────────────────── */}
         <Section>

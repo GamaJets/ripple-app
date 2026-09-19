@@ -505,7 +505,6 @@ export default function OwnerRota() {
           note={heroNote()}
         />
 
-        <Rule />
 
         <Section>
           <SectionHead title="Supply Against Demand" />
@@ -525,7 +524,6 @@ export default function OwnerRota() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── what the published week costs ───────────────────────────────
             The screen's second question, and it had no answer at all. Every
@@ -588,7 +586,6 @@ export default function OwnerRota() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── the whole point: where the two disagree ────────────────────── */}
         <Section>
@@ -648,7 +645,6 @@ export default function OwnerRota() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── the rota itself ───────────────────────────────────────────── */}
         <Section>

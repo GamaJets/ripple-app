@@ -159,7 +159,6 @@ export default function SavedMessages() {
           </Section>
         </>) : null}
 
-        <Rule />
 
         <Section>
           <Notice tone={t.brand} kicker="Placeholders" title="Two words the app fills in"

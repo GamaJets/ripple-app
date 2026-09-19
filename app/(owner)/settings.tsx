@@ -554,7 +554,6 @@ export default function OwnerSettings() {
             mount with no gesture that would refresh them. */}
         <Fetched at={fetchedAt} onRefresh={refreshAll} busy={reloading} />
 
-        <Rule />
 
         <Section>
           <SectionHead title="Signed in as" />
@@ -581,7 +580,6 @@ export default function OwnerSettings() {
           </Pressable>
         </Section>
 
-        <Rule />
 
         {/* Notifications.
             An owner could be reached and could not say no — auth.tsx registered
@@ -620,7 +618,6 @@ export default function OwnerSettings() {
           </Text>
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Your Data" />
@@ -642,7 +639,6 @@ export default function OwnerSettings() {
             : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{requestLine}</Text>}
         </Section>
 
-        <Rule />
 
         {/* The owner-only consequence, on the screen and not only in the dialog:
             this queue is actionable by an owner and by nobody else. */}
@@ -656,7 +652,6 @@ export default function OwnerSettings() {
             onPress={() => router.push('/(owner)/deletions')} />
         </Section>
 
-        <Rule />
 
         {/* Credits — a licence term, not a courtesy.
             The owner app now renders the RepDB catalogue on /(owner)/library and
@@ -672,7 +667,6 @@ export default function OwnerSettings() {
           <RepdbAttribution />
         </Section>
 
-        <Rule />
 
         {/* Build — the diagnostic for whether an OTA actually landed on this phone. */}
         <Section>

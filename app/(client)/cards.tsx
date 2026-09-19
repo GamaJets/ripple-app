@@ -394,7 +394,6 @@ export default function Cards() {
           </Text>
         </Section>
 
-        <Rule />
 
         <Section>
           {/* This said "Connect Instagram / TikTok", in the spoken label as

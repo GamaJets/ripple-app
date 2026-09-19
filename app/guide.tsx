@@ -115,7 +115,6 @@ export default function Guide() {
             underline on the sentence rather than as the end of the header. */}
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>{GUIDE_INTRO[VARIANT]}</Text>
 
-        <Rule />
 
         {/* marginTop to match "Across the app" below. Without it this kicker
             sat hard against the rule above it and read as part of the header

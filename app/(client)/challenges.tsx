@@ -287,7 +287,6 @@ export default function Challenges() {
           ) : null}
         </Section>
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{SCORING_NOTE}</Text>

@@ -107,7 +107,6 @@ export default function CoachReferrals() {
           <Section><PartialRead what="clients" shown={rows?.length ?? 0} onPress={() => { void reload(); }} /></Section>
         ) : null}
 
-        <Rule />
 
         <Section>
           <SectionHead title="Your referrers" note={status === 'ready' && rows ? `${rows.length}` : undefined} />
@@ -154,7 +153,6 @@ export default function CoachReferrals() {
           )}
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Thanking them" />

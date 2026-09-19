@@ -394,7 +394,6 @@ export default function TrainerExercise() {
           </>
         ) : null}
 
-        <Rule />
         <Section>
           {/* "Record a clip for this movement" is the same negative in
               imperative form — it tells the coach there is nothing there. With

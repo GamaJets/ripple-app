@@ -766,7 +766,6 @@ export default function History() {
 
     {/* ── then and now ───────────────────────────────────────────────────── */}
     {arc ? (<>
-      <Rule />
       <Section>
         <SectionHead title="Then and Now" note={`${arc.months} months apart`} />
         {/* Each column is one FACT and is marked as one. Drawn, these are a
@@ -821,7 +820,6 @@ export default function History() {
         `dormant` is the same sentence said off `life.lastAt`, which is the real
         last session rather than the end of a window. */}
     {(breaks.length > 0 || (quiet != null && quiet > 0) || quiet == null) ? (<>
-      <Rule />
       <Section>
         <SectionHead title="Breaks" note={worstGap ? `Longest ${worstGap.months} month${worstGap.months === 1 ? '' : 's'}` : undefined} />
         {breaks.map((g) => (

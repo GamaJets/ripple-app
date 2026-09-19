@@ -258,7 +258,6 @@ export default function OwnerLibrary() {
           />
         </View>
 
-        <Rule />
 
         <Section>
           <SectionHead title="What it assumes you own" />
@@ -274,7 +273,6 @@ export default function OwnerLibrary() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── finding one ────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>

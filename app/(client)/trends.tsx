@@ -368,7 +368,6 @@ export default function Trends() {
             week while looking exactly like a measurement. */}
         {logKnown && weekNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{weekNote}</Text> : null}
 
-        <Rule />
 
         {/* ── weekly volume ──────────────────────────────────────────────── */}
         <Section>
@@ -418,7 +417,6 @@ export default function Trends() {
           ]} />
         </Section>
 
-        <Rule />
 
         {/* ── per-exercise est-1RM ───────────────────────────────────────── */}
         <Section>
@@ -635,7 +633,6 @@ export default function Trends() {
           </Section>
         </>) : null}
 
-        <Rule />
 
         {/* ── which lift is where ─────────────────────────────────────────
             The two charts above say the tonnage moved and never say which

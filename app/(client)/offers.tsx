@@ -191,7 +191,6 @@ export default function Offers() {
         <Notice tone={t.ink3} kicker="How this works" title={`${BRAND.label} records it, your gym applies it`}
           note={`Redeeming tells your gym you have used the code. The discount comes off through their billing, not through the app — ${BRAND.label} never touches the payment.`} />
 
-        <Rule />
 
         <Section>
           <SectionHead title="Codes You Have Used" note={status === 'ready' && mine.length ? String(mine.length) : undefined} />

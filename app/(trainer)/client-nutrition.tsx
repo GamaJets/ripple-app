@@ -763,7 +763,6 @@ export default function ClientNutrition() {
           </>
         )}
 
-        <Rule />
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           Calories and macros here are worked back from this client&rsquo;s own measurements and the
           goal they set, moved by the adjustment you chose. They are a coaching decision, not a

@@ -710,7 +710,6 @@ export default function Profile() {
 
         <ScreenHelp screen="me" />
 
-        <Rule />
 
         {/* ── goal ───────────────────────────────────────────────────────── */}
         <Section>
@@ -740,7 +739,6 @@ export default function Profile() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── coaching mode ──────────────────────────────────────────────── */}
         <Section>
@@ -759,7 +757,6 @@ export default function Profile() {
           })}
         </Section>
 
-        <Rule />
 
         {/* ── what this profile adds up to ───────────────────────────────── */}
         <Section>
@@ -793,7 +790,6 @@ export default function Profile() {
           )}
         </Section>
 
-        <Rule />
 
         <Section>
           {/* First of the three, and permanent. Reported as "Repple Coach has a

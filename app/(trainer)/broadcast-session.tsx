@@ -100,7 +100,6 @@ export default function ShareSessionClip() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── caption ────────────────────────────────────────────────────── */}
         <Section>
@@ -116,7 +115,6 @@ export default function ShareSessionClip() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── share ──────────────────────────────────────────────────────── */}
         <Section>
@@ -132,7 +130,6 @@ export default function ShareSessionClip() {
           </Pressable>
         </Section>
 
-        <Rule />
 
         {/* ── the other half of the marketing story ──────────────────────── */}
         <Section>

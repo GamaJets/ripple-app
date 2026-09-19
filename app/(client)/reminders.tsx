@@ -333,7 +333,6 @@ export default function Reminders() {
             note="What is set below is this screen's starting point rather than yours, so saving is switched off — it would replace the reminders you have set, and leave the ones already scheduled with no way to stop them. Anything you have already set is still saved and still arriving. Close this screen and open it again." />
         ) : null}
 
-        <Rule />
 
         {/* Hydration */}
         <Section>
@@ -398,7 +397,6 @@ export default function Reminders() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── Training, weigh-in, progress photo ────────────────────────────
             The three the product has an opinion about, and the three a member
@@ -464,7 +462,6 @@ export default function Reminders() {
           })}
         </Section>
 
-        <Rule />
 
         {/* Supplements */}
         <Section>
@@ -518,9 +515,7 @@ export default function Reminders() {
           </View>
         </Section>
 
-        <Rule />
 
-        <Rule />
 
         {/* The other half of the same subject. This screen decides WHAT gets
             sent and when; that one decides which kinds reach you at all, and

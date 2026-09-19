@@ -221,7 +221,6 @@ export default function OwnerTrainers() {
           </Notice>
         ) : null}
 
-        <Rule />
 
         <Section>
           <SectionHead title="Roster" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
@@ -281,7 +280,6 @@ export default function OwnerTrainers() {
           </Section>
         </>) : null}
 
-        <Rule />
 
         <Section>
           <SectionHead title="Trainers" note={!trainersUnknown && trainers.length ? `${num(roll.clients)} clients` : undefined} />

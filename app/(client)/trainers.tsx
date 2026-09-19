@@ -1293,7 +1293,6 @@ export default function FindTrainer() {
           </>
         ) : null}
 
-        <Rule />
 
         {/* ── the direct path ────────────────────────────────────────────── */}
         <Section>
@@ -1337,7 +1336,6 @@ export default function FindTrainer() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── the directory ──────────────────────────────────────────────── */}
         <Section>

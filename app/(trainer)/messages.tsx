@@ -548,7 +548,6 @@ export default function Messages() {
           <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: 2 }}>Messages</Text>
         </View>
       </View>
-      <Rule />
 
       {/* The name search sits at the top of this list and the keyboard has never been on
           top of it. `automaticallyAdjustKeyboardInsets` is here for what is UNDER it: with

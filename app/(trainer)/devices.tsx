@@ -418,7 +418,6 @@ export default function TrainerDevices() {
         </>) : null}
 
         {/* ── the devices themselves ─────────────────────────────────────── */}
-        <Rule />
         <Section>
           <SectionHead title="Your Devices" note={connected.length ? `${connected.length} connected` : undefined} />
           {/* Every row in the catalogue, including the ones that cannot be
@@ -545,7 +544,6 @@ export default function TrainerDevices() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── whose record this is ───────────────────────────────────────── */}
         <Section>

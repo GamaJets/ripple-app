@@ -282,7 +282,6 @@ export default function Receipts() {
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Everything recorded as paid by you, wherever it was taken</Text>
 
-        <Rule />
 
         {status === 'error' ? (
           <Section>
@@ -343,7 +342,6 @@ export default function Receipts() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAID_IS_EVERY_SOURCE}</Text>
         </Section>
 
-        <Rule />
 
         {/* ── where it came from ──────────────────────────────────────────── */}
         <Section>
@@ -355,7 +353,6 @@ export default function Receipts() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAID_EXCLUDES_CASH}</Text>
         </Section>
 
-        <Rule />
 
         {/* ── what the gym says you owe, which is a different question ─────── */}
         <Section>
@@ -368,7 +365,6 @@ export default function Receipts() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── the gym's own book ──────────────────────────────────────────── */}
         <Section>
@@ -404,7 +400,6 @@ export default function Receipts() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── passes ──────────────────────────────────────────────────────── */}
         <Section>
@@ -446,7 +441,6 @@ export default function Receipts() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── what a trainer sold you, through Repple ─────────────────────── */}
         <Section>
@@ -477,7 +471,6 @@ export default function Receipts() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── coaching renewals ───────────────────────────────────────────── */}
         <Section>
@@ -511,7 +504,6 @@ export default function Receipts() {
           )}
         </Section>
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>

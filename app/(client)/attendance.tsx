@@ -313,7 +313,6 @@ export default function Attendance() {
           Your classes and every time your gym recorded you coming through the door.
         </Text>
 
-        <Rule />
 
         {status === 'error' ? (
           <Section>
@@ -416,7 +415,6 @@ export default function Attendance() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── the record itself ───────────────────────────────────────────── */}
         <Section>
@@ -507,7 +505,6 @@ export default function Attendance() {
           </>
         ) : null}
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>

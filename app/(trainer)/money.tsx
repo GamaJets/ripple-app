@@ -539,7 +539,6 @@ export default function CoachMoney() {
           <Notice kicker="How to read this" title="Two ledgers, kept apart" note={NO_NET_NOTE} />
         </View>
 
-        <Rule />
 
         {/* ── COMING IN ──────────────────────────────────────────────────── */}
 
@@ -643,7 +642,6 @@ export default function CoachMoney() {
             onPress={() => router.push('/(trainer)/statement')} />
         </Section>
 
-        <Rule />
 
         {/* ── RECORDED, NOT COLLECTED ────────────────────────────────────── */}
 
@@ -713,7 +711,6 @@ export default function CoachMoney() {
             onPress={() => router.push('/(trainer)/calendar')} />
         </Section>
 
-        <Rule />
 
         {/* ── GOING OUT ──────────────────────────────────────────────────── */}
 
@@ -852,7 +849,6 @@ export default function CoachMoney() {
             onPress={() => router.push('/(trainer)/costs')} />
         </Section>
 
-        <Rule />
 
         {/* ── WHAT EACH CLIENT HAS PAID ──────────────────────────────────
             The one figure this app could not produce. Three lists existed —
@@ -968,7 +964,6 @@ export default function CoachMoney() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
         </Section>
 
-        <Rule />
 
         {/* ── WHICH CHANNELS WORKED ──────────────────────────────────────── */}
         {/* The figures above say what the coach's advertising COST. They say
@@ -1071,7 +1066,6 @@ export default function CoachMoney() {
             onPress={() => router.push('/(trainer)/dashboard')} />
         </Section>
 
-        <Rule />
 
         {/* ── WHERE IT LANDS ─────────────────────────────────────────────── */}
 

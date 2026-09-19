@@ -671,7 +671,6 @@ export default function StandingAppointments() {
           </View>
         </View>
 
-        <Rule />
 
         {/* ── your arrangements ──────────────────────────────────────────── */}
         <Section>
@@ -775,7 +774,6 @@ export default function StandingAppointments() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── asking for one ───────────────────────────────────────────────
             The other half of this screen. Everything above it acts on an
@@ -809,7 +807,6 @@ export default function StandingAppointments() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── what a standing appointment is, and is not ──────────────────── */}
         <Section>

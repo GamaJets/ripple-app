@@ -244,7 +244,6 @@ export default function OwnerExercise() {
           </>
         ) : null}
 
-        <Rule />
         <Section>
           <Ghost label="Exercise Library" icon="dumbbell" onPress={() => router.push('/(owner)/library')} />
         </Section>

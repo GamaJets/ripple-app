@@ -175,7 +175,6 @@ export default function Invoices() {
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>What your gym has billed you for</Text>
 
-        <Rule />
 
         {status === 'error' ? (
           <Section>
@@ -229,7 +228,6 @@ export default function Invoices() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── every invoice ───────────────────────────────────────────────── */}
         <Section>
@@ -303,7 +301,6 @@ export default function Invoices() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the two things this screen is not ───────────────────────────── */}
         <Section>

@@ -420,7 +420,6 @@ export default function CoachChat() {
           <Icon name="lock" size={16} color={t.ink2} />
         </Pressable>
       </View>
-      <Rule />
 
       {/* The compose bar is lifted by measurement rather than by
           KeyboardAvoidingView, which under-lifted it by the height of the
@@ -539,7 +538,6 @@ export default function CoachChat() {
         </ScrollView>
 
         {/* ── composer ───────────────────────────────────────────────────── */}
-        <Rule />
         {/* What is about to go with the message, and a way to change your mind
             before it does. Nothing is uploaded until Send. */}
         {pending ? (

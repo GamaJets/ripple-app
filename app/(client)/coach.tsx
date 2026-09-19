@@ -487,7 +487,6 @@ export default function Coach() {
         {assigned.cachedNote ? (
           <Flag tone={t.warn} style={{ marginHorizontal: G, marginBottom: sp.md }}>{assigned.cachedNote}</Flag>
         ) : null}
-        <Rule />
 
         {/* ── the conversation ───────────────────────────────────────────── */}
         <ScrollView ref={scroller} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled">

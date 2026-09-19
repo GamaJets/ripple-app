@@ -23,7 +23,10 @@ import { atScale, clampFontScale } from '../lib/typeScale';
 export const sp = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, huge: 48 } as const;
 
 /** Screen gutter and the gap a hairline-separated section carries. */
-export const layout = { gutter: 22, section: sp.xl } as const;
+// 16 and 16, down from 22 and 24. The approved board sets its screens tight:
+// a 16pt gutter, sections as cards with 16pt inside them, and the gap between
+// two cards carried by the cards rather than by air and a hairline.
+export const layout = { gutter: 16, section: sp.lg } as const;
 
 /** Radius — three steps, down from 25+. */
 export const radius = { sm: 10, md: 16, pill: 999 } as const;
@@ -114,7 +117,7 @@ export const grown = (pt: number): number => atScale(pt, fontScale);
  */
 export const type = {
   hero:    { fontSize: 44, fontWeight: '600', letterSpacing: -2,   lineHeight: grown(46) },
-  title:   { fontSize: 26, fontWeight: '600', letterSpacing: -0.6, lineHeight: grown(32) },
+  title:   { fontSize: 22, fontWeight: '700', letterSpacing: -0.5, lineHeight: grown(28) },
   head:    { fontSize: 17, fontWeight: '600', letterSpacing: -0.2, lineHeight: grown(22) },
   body:    { fontSize: 15, fontWeight: '400', letterSpacing: 0,    lineHeight: grown(21) },
   label:   { fontSize: 13, fontWeight: '400', letterSpacing: 0,    lineHeight: grown(18) },

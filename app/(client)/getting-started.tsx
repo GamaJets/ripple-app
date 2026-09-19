@@ -209,7 +209,6 @@ export default function GettingStarted() {
           ))}
         </Section>
 
-        <Rule />
 
         {/* ── the three the DESK cares about ──────────────────────────────
          *
@@ -261,7 +260,6 @@ export default function GettingStarted() {
           ))}
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="If Something Does Not Make Sense" />

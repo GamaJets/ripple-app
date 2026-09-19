@@ -727,7 +727,6 @@ export default function TrainerSettings() {
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Who you are signed in as, your data & this build</Text>
 
-        <Rule />
 
         {/* The permanent way back to the first-run list. The row on the Clients
             screen removes itself once every step is done, and a screen reachable
@@ -742,7 +741,6 @@ export default function TrainerSettings() {
             onPress={() => router.push('/(trainer)/getting-started')} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Signed in as" />
@@ -762,7 +760,6 @@ export default function TrainerSettings() {
             on={lock.enabled} onPress={() => { void toggleLock(); }} />
         </Section>
 
-        <Rule />
 
         {/* Notifications.
             The coach app had no notification preference at all — not a broken
@@ -924,7 +921,6 @@ export default function TrainerSettings() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* How often Quiet Clients may raise the same person. See the long note
             on `saveCooldown` above for why this is a floor rather than an
@@ -976,7 +972,6 @@ export default function TrainerSettings() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* Units.
             The coach portal had no unit control at all, so every coach read
@@ -1012,7 +1007,6 @@ export default function TrainerSettings() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* Currency.
             The setting six other screens point at and none of them could
@@ -1103,7 +1097,6 @@ export default function TrainerSettings() {
           ) : null}
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Account &amp; Sign-in" />
@@ -1117,7 +1110,6 @@ export default function TrainerSettings() {
             onPress={() => router.push('/(trainer)/account')} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Your Data" />
@@ -1153,7 +1145,6 @@ export default function TrainerSettings() {
             : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{requestLine}</Text>}
         </Section>
 
-        <Rule />
 
         {/* Build — the diagnostic for whether an OTA actually landed on this phone. */}
         <Section>

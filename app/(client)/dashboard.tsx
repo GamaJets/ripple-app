@@ -713,6 +713,25 @@ export default function Home() {
           </View>
         </View>
 
+        {/* ── the four things to do from here ──────────────────────────────
+            Under the goal card, where the board puts its tiles, rather than
+            at the foot of the screen where nobody scrolled to find them. */}
+        <View style={{ marginTop: sp.md }}>
+          <QuickRow items={[
+            { icon: 'meals', label: 'Meals', onPress: () => router.push('/(client)/nutrition') },
+            { icon: 'moon', label: 'Sleep', onPress: () => router.push('/(client)/recovery') },
+            { icon: 'progress', label: 'Progress', onPress: () => router.push('/(client)/scans') },
+            // One slot, so it goes to whichever of the three this client
+            // actually has: a session to book, a check-in to send, or — with
+            // nobody to send it to — their own report.
+            booksSessions
+              ? { icon: 'calendar' as const, label: 'Book', onPress: () => router.push('/(client)/calendar') }
+              : remoteCoached
+                ? { icon: 'message' as const, label: 'Check-in', onPress: () => router.push('/(client)/checkin') }
+                : { icon: 'chart' as const, label: 'Report', onPress: () => router.push('/(client)/report') },
+          ]} />
+        </View>
+
         {/* ── what you are looking at ─────────────────────────────────────
             One row, shut, and gone for good once it is read. See
             src/ui/ScreenHelp.tsx: the tour explained these tabs before the
@@ -808,7 +827,6 @@ export default function Home() {
           ) : null}
         </View>
 
-        <Rule />
 
         {/* ── whose copy today's focus was drawn from ──────────────────────
             Said before the card, for the same reason the notice below it is:
@@ -925,7 +943,6 @@ export default function Home() {
             brand-new account — and only on a SETTLED read, because a dash
             under a failed read is the honest answer and hiding it would tell
             somebody who has trained for a year that they never have. */}
-        <Rule />
         <Section>
           <SectionHead title="Daily Snapshot" note="Your progress" onPress={() => router.push('/(client)/scans')} />
           <ListRow
@@ -1008,7 +1025,6 @@ export default function Home() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
@@ -1177,24 +1193,6 @@ export default function Home() {
           </Section>
         </>) : null}
 
-        <Rule />
-
-        {/* ── quick actions ──────────────────────────────────────────────── */}
-        <Section>
-          <QuickRow items={[
-            { icon: 'plus', label: 'Log', onPress: () => router.push(trainIntent('/(client)/workouts') as any) },
-            { icon: 'meals', label: 'Food', onPress: () => router.push('/(client)/foodlog') },
-            // One slot, so it goes to whichever of the three this client
-            // actually has: a session to book, a check-in to send, or — with
-            // nobody to send it to — their own report.
-            booksSessions
-              ? { icon: 'calendar' as const, label: 'Book', onPress: () => router.push('/(client)/calendar') }
-              : remoteCoached
-                ? { icon: 'message' as const, label: 'Check-in', onPress: () => router.push('/(client)/checkin') }
-                : { icon: 'chart' as const, label: 'Report', onPress: () => router.push('/(client)/report') },
-            { icon: 'camera', label: 'Photo', onPress: () => router.push('/(client)/scans') },
-          ]} />
-        </Section>
 
       </ScrollView>
     </SafeAreaView>

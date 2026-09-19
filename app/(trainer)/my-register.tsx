@@ -228,7 +228,6 @@ export default function MyRegister() {
             somebody else waiting on them. */}
         <CoachCloseQueue queue={closeQueue} />
 
-        <Rule />
 
         <Section>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
@@ -251,7 +250,6 @@ export default function MyRegister() {
           </Section>
         ) : null}
 
-        <Rule />
 
         {/* ── the figures, over the classes that can support them ─────────── */}
         <Section>
@@ -303,7 +301,6 @@ export default function MyRegister() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── the registers that are still open, and the tap that closes one ──
           *
@@ -431,7 +428,6 @@ export default function MyRegister() {
           )}
         </Section>
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{TAUGHT_SCOPE_NOTE}</Text>

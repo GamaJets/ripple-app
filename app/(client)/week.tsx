@@ -343,7 +343,6 @@ export default function ThisWeek() {
           })}
         </Section>
 
-        <Rule />
 
         {/* ── the plan, against the record ────────────────────────────────
             The rows above answer "did I train"; this answers "did I train
@@ -386,7 +385,6 @@ export default function ThisWeek() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── what you were on before ─────────────────────────────────────
             Read-only, and the member's own record: `assigned_program_history`
@@ -433,7 +431,6 @@ export default function ThisWeek() {
           ) : null}
         </Section>
 
-        <Rule />
 
         <Section>
           {/* Says what the rows above it say. A plan with no day landing in this

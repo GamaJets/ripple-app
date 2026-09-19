@@ -704,7 +704,6 @@ export default function ExerciseScreen() {
         ) : null}
 
         {/* ── what you have done on it ──────────────────────────────────── */}
-        <Rule />
         <Section>
           {logStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your training log&hellip;</Text>
@@ -746,7 +745,6 @@ export default function ExerciseScreen() {
           )}
         </Section>
 
-        <Rule />
         <Section>
           <Ghost label="Exercise Library" icon="video" onPress={() => router.push('/(client)/library')} />
         </Section>

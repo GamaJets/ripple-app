@@ -349,7 +349,6 @@ export default function Programmes() {
         </ChipRow>
       ) : null}
 
-      <Rule />
 
       <Section>
         {/* A count over a list that came back short is not the size of the

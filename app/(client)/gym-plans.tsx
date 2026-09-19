@@ -263,7 +263,6 @@ export default function GymPlans() {
           </View>
         ) : null}
 
-        <Rule />
 
         {/* ── what you are on now ─────────────────────────────────────────
             Short, because app/(client)/membership.tsx is the screen for it.
@@ -292,7 +291,6 @@ export default function GymPlans() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── memberships ────────────────────────────────────────────────── */}
         <Section>
@@ -395,7 +393,6 @@ export default function GymPlans() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── drop-ins and packs ──────────────────────────────────────────
             The other half of the class screen. A pass is a CREDIT, not a seat:
@@ -512,7 +509,6 @@ export default function GymPlans() {
           </>
         ) : null}
 
-        <Rule />
 
         <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
           <Ghost label="Your Membership" onPress={() => router.push('/(client)/membership')} />

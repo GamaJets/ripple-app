@@ -145,7 +145,6 @@ export default function OwnerFeedback() {
             : `${rows.length} submission${rows.length === 1 ? '' : 's'}`}
         />
 
-        <Rule />
 
         <Section>
           <SectionHead title="Submissions" note={!truncated && rows.length ? String(rows.length) : undefined} />

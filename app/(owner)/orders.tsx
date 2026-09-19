@@ -316,7 +316,6 @@ export default function OwnerOrders() {
           </Flag>
         ) : null}
 
-        <Rule />
 
         {/* ── what was taken ─────────────────────────────────────────────── */}
         <Section>
@@ -374,7 +373,6 @@ export default function OwnerOrders() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── four tiles that add up to the book ──────────────────────────
             The Paid tile was `status === 'paid'` and the Not Granted tile is
@@ -417,7 +415,6 @@ export default function OwnerOrders() {
           ]} />
         </Section>
 
-        <Rule />
 
         {/* ── the book ───────────────────────────────────────────────────── */}
         <Section>

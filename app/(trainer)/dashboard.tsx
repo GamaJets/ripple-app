@@ -2284,7 +2284,6 @@ export default function TrainerClients() {
             same drift, unread-message and adherence facts the roster below
             uses, and a partial or failed read stays visibly partial or failed
             so this queue can never masquerade as the whole book. */}
-        <Rule />
         <Section>
           <SectionHead
             title="Needs Attention"
@@ -2361,7 +2360,6 @@ export default function TrainerClients() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the business, in three columns ──────────────────────────────── */}
         <Section>
@@ -2458,7 +2456,6 @@ export default function TrainerClients() {
             Coaching Tools. */}
         <UnexplainedDepartures reload={readNonce} />
 
-        <Rule />
 
         {/* ── coaching tools ─────────────────────────────────────────────── */}
         <Section>
@@ -2562,7 +2559,6 @@ export default function TrainerClients() {
           </Section>
         </>) : null}
 
-        <Rule />
 
         {/* ── the roster ─────────────────────────────────────────────────── */}
         <Section>

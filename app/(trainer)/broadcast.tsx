@@ -508,7 +508,6 @@ export default function Broadcast() {
           </ScrollView>
         </Section>
 
-        <Rule />
 
         {/* ── who that is ────────────────────────────────────────────────── */}
         <Section>
@@ -615,7 +614,6 @@ export default function Broadcast() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the message ────────────────────────────────────────────────── */}
         <Section>

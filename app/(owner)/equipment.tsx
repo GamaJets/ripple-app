@@ -405,7 +405,6 @@ export default function OwnerEquipment() {
           <Flag tone={t.warn} style={{ marginTop: sp.md }}>{clockNote}</Flag>
         ) : null}
 
-        <Rule />
 
         <Section>
           <SectionHead title="The Register" />
@@ -434,7 +433,6 @@ export default function OwnerEquipment() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* The catalogue hangs off the register rather than off the dashboard
             because the two answer one question from opposite sides: this screen
@@ -449,7 +447,6 @@ export default function OwnerEquipment() {
             onPress={() => router.push('/(owner)/library')} />
         </Section>
 
-        <Rule />
 
         {queue.length > 0 ? (
           <>

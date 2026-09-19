@@ -485,7 +485,6 @@ export default function Settings() {
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Preferences, legal & version</Text>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Signed in as" />
@@ -505,7 +504,6 @@ export default function Settings() {
           </View>
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Security" />
@@ -519,7 +517,6 @@ export default function Settings() {
             right={<Toggle t={t} on={lock.enabled} label={lockRowLabel} onPress={() => { void toggleLock(); }} />} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Notifications" />
@@ -541,7 +538,6 @@ export default function Settings() {
             right={<Toggle t={t} on={st.restSound} label="Rest Timer Sound" onPress={() => st.set({ restSound: !st.restSound })} />} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Units" />
@@ -553,7 +549,6 @@ export default function Settings() {
           } />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Appearance" />
@@ -561,7 +556,6 @@ export default function Settings() {
             onPress={() => router.push('/(client)/appearance')} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Your Data" />
@@ -628,7 +622,6 @@ export default function Settings() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── Legal ──────────────────────────────────────────────────────
             The four sentences below are a SUMMARY, and they used to be the only
@@ -669,7 +662,6 @@ export default function Settings() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── Credits ────────────────────────────────────────────────────────
             Its own section above Build, not a grey line beneath it. Every
@@ -683,7 +675,6 @@ export default function Settings() {
           <RepdbAttribution />
         </Section>
 
-        <Rule />
 
         {/* Build — the diagnostic for whether an OTA actually landed on this phone. */}
         <Section>
@@ -694,7 +685,6 @@ export default function Settings() {
           </Text>
         </Section>
 
-        <Rule />
 
         <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>{BRAND.label} · made for coaches &amp; their clients</Text>
       </ScrollView>

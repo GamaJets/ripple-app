@@ -223,7 +223,6 @@ export default function RestDay() {
           note={known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading — an empty ring here is not an empty week.' : 'Nothing this screen can count — an empty ring here is not an empty week.'}
         />
 
-        <Rule />
 
         <Section>
           <SectionHead title="Load" />
@@ -241,7 +240,6 @@ export default function RestDay() {
           ]} />
         </Section>
 
-        <Rule />
 
         {/* ── what the recovery figure is, and which silence it is ───────────
 
@@ -308,7 +306,6 @@ export default function RestDay() {
           </Section>
         </>) : null}
 
-        <Rule />
 
         <Section>
           <SectionHead title="On a Rest Day" />
@@ -326,7 +323,6 @@ export default function RestDay() {
           ))}
         </Section>
 
-        <Rule />
 
         {/* TF-20 gave this screen somewhere to send people. It has always been
             able to say "take a rest day" or "time for a deload week" and then
@@ -351,7 +347,6 @@ export default function RestDay() {
           </View>
         </Section>
 
-        <Rule />
 
         <Section>
           <Cta label="Open Recovery Tools" wide onPress={() => router.push('/(client)/recovery')} />

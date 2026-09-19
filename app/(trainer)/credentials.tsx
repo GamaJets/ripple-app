@@ -360,7 +360,6 @@ export default function TrainerCredentials() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── asking for one ─────────────────────────────────────────────────
             The shelf was built and nothing ever offered to fill it: a coach
@@ -384,7 +383,6 @@ export default function TrainerCredentials() {
             who is likely to rate well. See `ASK_IS_UNFILTERED`. */}
         <ReviewAsks />
 
-        <Rule />
 
         {/* ── reviews, and the answer back ───────────────────────────────── */}
         <Section>

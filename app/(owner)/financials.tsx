@@ -998,7 +998,6 @@ export default function Financials() {
             noticed. */}
         <MonthCloseCard close={monthClose} />
 
-        <Rule />
 
         {/* ── money out ───────────────────────────────────────────────────
             Beside the close rather than under the typed figures, and for the
@@ -1013,7 +1012,6 @@ export default function Financials() {
           closesUnread={!isWhole(monthClose.closes.status)}
         />
 
-        <Rule />
 
         {/* ── no account, so no figures ─────────────────────────────────────
             The figures below belong to an account, and until this screen knows
@@ -1364,7 +1362,6 @@ export default function Financials() {
           </>
         ) : null}
 
-        <Rule />
 
 
       </ScrollView>

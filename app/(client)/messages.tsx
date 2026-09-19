@@ -607,7 +607,6 @@ export default function Messages() {
           <Icon name="lock" size={16} color={t.ink2} />
         </Pressable>
       </View>
-      <Rule />
       {/* ── the search field ──────────────────────────────────────────────
           Drawn only while the control above is on. The sentence under it is the
           important half and is never withheld: this screen holds the recent end
@@ -836,7 +835,6 @@ export default function Messages() {
             </View>
           ) : null}
         </ScrollView>
-        <Rule />
         {/* What is about to go with the message, and a way to change your mind
             before it does. Nothing is uploaded until Send. */}
         {pending ? (

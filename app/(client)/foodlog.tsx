@@ -1418,7 +1418,6 @@ export default function FoodLog() {
     const pretty = new Date(y, m - 1, dd).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
     return (
      <View key={d.day}>
-      <Rule />
       <Pressable
        onPress={() => setOpenDay(open ? null : d.day)}
        accessibilityRole="button"

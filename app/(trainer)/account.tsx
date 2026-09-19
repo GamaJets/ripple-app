@@ -234,7 +234,6 @@ export default function CoachAccount() {
           The password you sign in with, and the address a reset would go to
         </Text>
 
-        <Rule />
 
         {/* ── email ──────────────────────────────────────────────────────── */}
         <Section>
@@ -287,7 +286,6 @@ export default function CoachAccount() {
           <Cta label={emBusy ? 'Sending…' : 'Change Email Address'} wide disabled={emBusy} onPress={() => { void submitEmail(); }} />
         </Section>
 
-        <Rule />
 
         {/* ── password ───────────────────────────────────────────────────── */}
         <Section>
@@ -319,7 +317,6 @@ export default function CoachAccount() {
           <Cta label={pwBusy ? 'Changing…' : 'Change Password'} wide disabled={pwBusy} onPress={() => { void submitPassword(); }} />
         </Section>
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>

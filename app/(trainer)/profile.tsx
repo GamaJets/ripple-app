@@ -413,7 +413,6 @@ export default function CoachProfile() {
           <ListRow icon="settings" title="Settings" note="Account, notifications, privacy and appearance" onPress={() => router.push('/(trainer)/settings')} />
         </View>
 
-        <Rule />
 
         {/* Everything below this line writes to the signed-in user's own
             `profiles` and `trainers` rows, and the provider refuses to answer —
@@ -469,7 +468,6 @@ export default function CoachProfile() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── who you are ────────────────────────────────────────────────── */}
         <Section>
@@ -479,21 +477,18 @@ export default function CoachProfile() {
           <Field t={t} label="Bio" value={p.bio} onChangeText={p.setBio} placeholder="Tell clients about your experience and approach" multiline />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Specialties" note="Tap a chip to remove" />
           <ChipEditor t={t} items={p.specialties} onAdd={addSpec} onRemove={(i) => p.setSpecialties(p.specialties.filter((_, x) => x !== i))} value={newSpec} setValue={setNewSpec} placeholder="e.g. Mobility" noun="A speciality" />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="What You Offer" note="Tap a chip to remove" />
           <ChipEditor t={t} items={p.offers} onAdd={addOffer} onRemove={(i) => p.setOffers(p.offers.filter((_, x) => x !== i))} value={newOffer} setValue={setNewOffer} placeholder="e.g. Nutrition coaching" noun="Something you offer" />
         </Section>
 
-        <Rule />
 
         {/* ── how you coach ──────────────────────────────────────────────
             The same three options, the same words and the same order as the
@@ -527,7 +522,6 @@ export default function CoachProfile() {
           ) : null}
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Session Rate" />
@@ -590,7 +584,6 @@ export default function CoachProfile() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── what the GYM pays this coach, which is the other number ─────
           *
@@ -709,7 +702,6 @@ export default function CoachProfile() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── late cancellations ─────────────────────────────────────────
             The policy a coach can actually state, in place of the bare number
@@ -844,7 +836,6 @@ export default function CoachProfile() {
           )}
         </Section>
 
-        <Rule />
 
         {/* Public directory opt-in. Off by default and never set on the
             trainer's behalf — clients only see coaches who switched this on. */}
@@ -873,7 +864,6 @@ export default function CoachProfile() {
           </Pressable>
         </Section>
 
-        <Rule />
 
         {/* ── the address a coach can put in a bio ────────────────────────── */}
         {/* Directly under the directory switch, because it is the same profile
@@ -984,7 +974,6 @@ export default function CoachProfile() {
         </>
         )}
 
-        <Rule />
 
         {/* ── who is waiting on a reply ──────────────────────────────────── */}
         {/* Its own section, above everything else here, because it is the thing
@@ -1007,7 +996,6 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/messages')} />
         </Section>
 
-        <Rule />
 
         {/* ── what a stranger judges you on ──────────────────────────────── */}
         {/* Directly under the directory opt-in, because this is what the
@@ -1028,7 +1016,6 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/credentials')} />
         </Section>
 
-        <Rule />
 
         {/* ── what your clients see around your coaching ─────────────────── */}
         {/* Its own section rather than a row under Account, because it is the
@@ -1045,7 +1032,6 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/brand')} />
         </Section>
 
-        <Rule />
 
         {/* ── your paperwork, not Repple's ───────────────────────────────── */}
         {/* Its own section rather than a row under Account, for the reason the
@@ -1060,7 +1046,6 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/documents')} />
         </Section>
 
-        <Rule />
 
         {/* ── the coach's own training ───────────────────────────────────── */}
         {/* Its own section rather than a row under Account, because the thing
@@ -1076,7 +1061,6 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/my-training')} />
         </Section>
 
-        <Rule />
 
         {/* ── the coach's own devices ────────────────────────────────────── */}
         {/* Its own section rather than a row under Your Training, for the
@@ -1100,7 +1084,6 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/devices')} />
         </Section>
 
-        <Rule />
 
         {/* ── money ──────────────────────────────────────────────────────── */}
         {/* Account — the in-app route to sign out, export, and account deletion.
@@ -1128,7 +1111,6 @@ export default function CoachProfile() {
           </View>
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The User Guide was filed under "Money", which it is not. A heading
@@ -1139,7 +1121,6 @@ export default function CoachProfile() {
             onPress={() => router.push('/guide')} />
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Money" />
@@ -1173,7 +1154,6 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/statement')} />
         </Section>
 
-        <Rule />
 
         {/* ── credits ────────────────────────────────────────────────────── */}
         {/* Its own section with its own heading, not a grey line at the foot of

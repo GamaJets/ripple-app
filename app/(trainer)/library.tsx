@@ -516,7 +516,6 @@ export default function TrainerLibrary() {
           }
         />
 
-        <Rule />
 
         <Section>
           <SectionHead title="What You Have Filmed" />
@@ -549,7 +548,6 @@ export default function TrainerLibrary() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── finding one ────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>

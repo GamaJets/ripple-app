@@ -960,7 +960,6 @@ export default function MyCoach() {
             are asserted on, because "on their public profile" said about a
             review that is not on one is a claim about who is reading somebody's
             words. */}
-        <Rule />
         <Section>
           <SectionHead title="Coaches You Have Reviewed" />
           <Text style={{ ...ty.label, color: t.ink3 }}>

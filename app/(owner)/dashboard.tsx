@@ -425,7 +425,6 @@ export default function OwnerOverview() {
           onPress={() => router.push('/(owner)/revenue')}
         />
 
-        <Rule />
 
         {/* ── the shape of the platform ──────────────────────────────────── */}
         <Section>
@@ -441,7 +440,6 @@ export default function OwnerOverview() {
           ]} />
         </Section>
 
-        <Rule />
 
         {/* ── MRR trend (real, accumulating) ─────────────────────────────── */}
         <Section>
@@ -473,7 +471,6 @@ export default function OwnerOverview() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── trainer health board ───────────────────────────────────────── */}
         {/* Before the pills, because a coach at the top of a list called "worst
@@ -508,7 +505,6 @@ export default function OwnerOverview() {
           ))}
         </Section>
 
-        <Rule />
 
         {/* ── client load per trainer ────────────────────────────────────── */}
         <Section>
@@ -539,7 +535,6 @@ export default function OwnerOverview() {
           ))}
         </Section>
 
-        <Rule />
 
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>

@@ -328,7 +328,6 @@ export default function BodyTrends() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{headNote}</Text>
         ) : null}
 
-        <Rule />
 
         {/* Said before the charts, because "Not Enough Readings Yet" below is a
             claim about the member's record and this is the reason it may not be

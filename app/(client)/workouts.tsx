@@ -2420,7 +2420,6 @@ export default function Train() {
           <DidYouKnow />
         </View>
 
-        <Rule />
 
         {/* ── what you're logging ────────────────────────────────────────── */}
         <Section>
@@ -3207,7 +3206,6 @@ export default function Train() {
           </Section>
         </>) : null}
 
-        <Rule />
 
         {/* ── log by text ────────────────────────────────────────────────── */}
         <Section>
@@ -3247,7 +3245,6 @@ export default function Train() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
@@ -6563,7 +6560,6 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
           <Text style={{ ...ty.head, color: t.ink }}>Edit entry</Text>
           <Pressable onPress={save} hitSlop={8} disabled={busy}><Text style={{ ...ty.body, fontWeight: '600', color: busy ? t.ink3 : t.brand }}>{busy ? 'Saving…' : 'Save'}</Text></Pressable>
         </View>
-        <Rule />
         <ScrollView contentContainerStyle={{ padding: sp.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           {dayLabel ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>

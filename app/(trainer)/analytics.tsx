@@ -1013,7 +1013,6 @@ export default function TrainerAnalytics() {
           </Card>
         ) : null}
 
-        <Rule />
 
         {/* ── the other figure, always present ───────────────────────────────
             Whichever led above, the other one is here. They are never added:
@@ -1048,7 +1047,6 @@ export default function TrainerAnalytics() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the shape of the business ──────────────────────────────────── */}
         <Section>
@@ -1071,7 +1069,6 @@ export default function TrainerAnalytics() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── goals ──────────────────────────────────────────────────────── */}
         <Section>
@@ -1143,7 +1140,6 @@ export default function TrainerAnalytics() {
           })}
         </Section>
 
-        <Rule />
 
         {/* ── roster health ──────────────────────────────────────────────── */}
         <Section>
@@ -1196,7 +1192,6 @@ export default function TrainerAnalytics() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── revenue trend ──────────────────────────────────────────────── */}
         <Section>
@@ -1283,7 +1278,6 @@ export default function TrainerAnalytics() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the same month last year ───────────────────────────────────
             The comparison directly above is month-on-month, and coaching is a
@@ -1324,7 +1318,6 @@ export default function TrainerAnalytics() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── how long people stay ───────────────────────────────────────
             Read from `coaching_relationships` and NOT from the roster. The
@@ -1379,7 +1372,6 @@ export default function TrainerAnalytics() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── client value ───────────────────────────────────────────────── */}
 
@@ -1483,7 +1475,6 @@ export default function TrainerAnalytics() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── AI digest ──────────────────────────────────────────────────── */}
         <Section>
@@ -1527,7 +1518,6 @@ export default function TrainerAnalytics() {
           </Pressable>
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The conversational half of the digest above. The digest answers

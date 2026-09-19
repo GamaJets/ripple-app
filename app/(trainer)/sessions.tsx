@@ -943,7 +943,6 @@ export default function TrainerSessions() {
                 : (hasGym ? 'Payroll cannot be worked out until every one of these is marked.' : 'Your delivered-sessions count is incomplete until every one of these is marked.')}
         />
 
-        <Rule />
 
         {/* ── asked, and not yet answered ─────────────────────────────────
             A client can now ask for an hour this coach never opened
@@ -1050,7 +1049,6 @@ export default function TrainerSessions() {
           </Section>
         ) : null}
 
-        <Rule />
 
         {loaded && rows.length > 0 ? (
           <Section>

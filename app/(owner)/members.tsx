@@ -751,7 +751,6 @@ export default function OwnerMembers() {
             : `${sum.activeMembers} active${frozen ? ` · ${frozen} frozen` : ''}`}
         />
 
-        <Rule />
 
         <Section>
           <SectionHead title="The Register" />
@@ -765,7 +764,6 @@ export default function OwnerMembers() {
           ]} />
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The heading counts the REGISTER and the note counts what is on

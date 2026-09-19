@@ -92,9 +92,32 @@ export function Rule({ inset = 0 }: { inset?: number }) {
   );
 }
 
-/** Vertical rhythm between sections. Pairs with <Rule/>. */
+/**
+ * A section, drawn the board's way: a card.
+ *
+ * This was air and a hairline — `paddingVertical` and nothing else, with a
+ * <Rule/> between neighbours — which is the "instrument panel" the header of
+ * this file describes. The approved board groups every screen into white
+ * cards on the ground with 16pt inside them, and that is the single largest
+ * visible difference between the board and the app. Changing it HERE, once,
+ * moves every screen at the same time; changing it screen by screen is how
+ * two screens come to disagree about what a section is.
+ *
+ * The <Rule/> a screen puts between two sections still draws; on the ground
+ * between two cards it is a faint line in a gap and nothing more. The
+ * paddings are inside the card, so a row's own vertical padding is unchanged
+ * and a Card inside a Section keeps its hairline (see Card) so white on
+ * white stays a box.
+ */
 export function Section({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
-  return <View style={[{ paddingVertical: layout.section }, style]}>{children}</View>;
+  const t = useTheme();
+  return (
+    <View style={[{
+      backgroundColor: t.surface, borderRadius: radius.md,
+      paddingVertical: layout.section, paddingHorizontal: sp.lg,
+      marginTop: sp.md,
+    }, style]}>{children}</View>
+  );
 }
 
 /**
@@ -192,7 +215,7 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
       justifyContent: 'space-between',
       alignItems: stacked ? 'flex-start' : 'baseline',
       gap: stacked ? sp.sm : sp.md,
-      marginBottom: sp.lg,
+      marginBottom: sp.md,
     }}>
       <Text style={{ ...ty.micro, color: t.ink3, flexShrink: 1 }}>{title}</Text>
       {note ? (
@@ -465,7 +488,10 @@ export function Card({ children, onPress, tone, style }: {
     <View style={[{
       backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg,
       ...elevation.e1,
-      ...(tone ? { borderWidth: hairline, borderColor: tone } : null),
+      // A hairline on every card, not only a toned one: sections are cards
+      // now, so a Card inside a Section is white on white and needs an edge
+      // to be a box at all. The tone, where there is one, is that edge.
+      borderWidth: hairline, borderColor: tone ?? t.ring,
     }, style]}>{children}</View>
   );
   // A tappable card is a button and has to say so; without a role it announces
@@ -753,7 +779,7 @@ export function QuickRow({ items }: { items: { icon: IconName; label: string; on
     <View style={{ flexDirection: 'row', gap: sp.sm }}>
       {items.map((q) => (
         <Pressable key={q.label} onPress={q.onPress} accessibilityRole="button"
-          style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+          style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.md, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring }}>
           <Icon name={q.icon} size={18} color={t.ink2} />
           <Text style={{ ...ty.micro, letterSpacing: 0.3, color: t.ink2, marginTop: 7 }}>{q.label}</Text>
         </Pressable>

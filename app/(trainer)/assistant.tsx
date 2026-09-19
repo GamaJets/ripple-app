@@ -497,7 +497,6 @@ export default function TrainerAssistant() {
             </Text>
           </View>
         </View>
-        <Rule />
 
         <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled" refreshControl={pull}>
 

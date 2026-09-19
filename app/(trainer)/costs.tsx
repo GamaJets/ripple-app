@@ -272,7 +272,6 @@ export default function Costs() {
           <Notice tone={t.crit} kicker="Nothing can be recorded yet" title="No currency" note={currencyBlocker} />
         ) : null}
 
-        <Rule />
 
         <Section>
           <SectionHead title="What You Have Recorded" note="Counted by the day you say you paid" />
@@ -424,7 +423,6 @@ export default function Costs() {
           </>
         ) : null}
 
-        <Rule />
 
         <Section>
           {/* A count is a claim about the coach's own records, so it is only

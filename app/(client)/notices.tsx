@@ -77,7 +77,6 @@ export default function Notices() {
           Everything posted to you, newest first. Notices stay here after the day they were sent.
         </Text>
 
-        <Rule />
 
         {status === 'error' ? (
           <Section>
@@ -137,7 +136,6 @@ export default function Notices() {
           ))}
         </Section>
 
-        <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>

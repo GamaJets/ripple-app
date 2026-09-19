@@ -876,7 +876,6 @@ export default function TrainerClasses() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── the schedule ───────────────────────────────────────────────── */}
         <Section>
@@ -1016,14 +1015,12 @@ export default function TrainerClasses() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* The hours the gym has this coach on, under the classes they teach:
             both are the same fortnight and a coach reading one wants the other.
             Read-only — the rota is the gym's to write. */}
         <MyShifts rota={rota} />
 
-        <Rule />
 
         {/* Below the timetable rather than above it: this screen is for
             scheduling, and the register is the constraint on it, not the

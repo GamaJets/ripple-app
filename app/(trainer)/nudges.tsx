@@ -481,7 +481,6 @@ export default function Nudges() {
             like a calm week. src/lib/nightlyPasses.ts carries the whole
             argument, including the part Repple cannot answer: whether a pass
             RAN is kept in a table the app is not allowed to read. */}
-        <Rule />
         <OvernightChecks />
       </ScrollView>
 
@@ -665,7 +664,6 @@ function DraftSheet({ nudge, onClose, onSent }: {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHAT_IT_CANNOT_SEE}</Text>
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Your message" note="edit before sending" />

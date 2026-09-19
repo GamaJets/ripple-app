@@ -489,7 +489,6 @@ export default function OwnerRevenue() {
           </Notice>
         ) : null}
 
-        <Rule />
 
         {/* ── unit economics ─────────────────────────────────────────────── */}
         <Section>
@@ -541,7 +540,6 @@ export default function OwnerRevenue() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── trend ──────────────────────────────────────────────────────── */}
         <Section>
@@ -572,7 +570,6 @@ export default function OwnerRevenue() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>One real snapshot per month — months before you started are left blank.</Text>
         </Section>
 
-        <Rule />
 
         {/* ── forecast ───────────────────────────────────────────────────── */}
         <Section>
@@ -603,7 +600,6 @@ export default function OwnerRevenue() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── revenue by plan ────────────────────────────────────────────── */}
         <Section>
@@ -633,7 +629,6 @@ export default function OwnerRevenue() {
           })}
         </Section>
 
-        <Rule />
 
         {/* Where the online money is. The till above is what somebody RECORDED
             receiving; card money taken through the gym's own Stripe account
@@ -647,7 +642,6 @@ export default function OwnerRevenue() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── revenue at risk ────────────────────────────────────────────── */}
         <Section>

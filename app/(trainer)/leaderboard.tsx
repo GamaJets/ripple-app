@@ -190,7 +190,6 @@ export default function Leaderboard() {
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Ordered by the last check-in rating each client gave themselves</Text>
 
-        <Rule />
 
         <Section>
           {/* `isWhole`, like the empty state below. A board read short is
@@ -512,7 +511,6 @@ export default function Leaderboard() {
           </View>
         ) : null}
 
-        <Rule />
 
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           Use the Broadcast button on Clients to celebrate the top of the board.

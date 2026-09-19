@@ -739,7 +739,6 @@ export default function Bookings() {
           </View>
         </View>
 
-        <Rule />
 
         {/* ── book something ─────────────────────────────────────────────── */}
         <Section>
@@ -754,7 +753,6 @@ export default function Bookings() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── what you have booked ───────────────────────────────────────── */}
         <Section>

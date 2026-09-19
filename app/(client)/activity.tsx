@@ -476,7 +476,6 @@ export default function Activity() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the other half of catching up ───────────────────────────────
             This screen is a record of what the MEMBER did. What was done TO

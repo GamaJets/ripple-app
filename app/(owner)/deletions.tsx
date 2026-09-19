@@ -378,7 +378,6 @@ export default function OwnerDeletions() {
                   : `Soonest runs out in ${soonest} ${soonest === 1 ? 'day' : 'days'}.`}
         />
 
-        <Rule />
 
         <Section>
           <SectionHead title="The 30-day Promise" />
@@ -393,7 +392,6 @@ export default function OwnerDeletions() {
           </Text>
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The count is withheld under truncation, exactly as the hero and
@@ -481,7 +479,6 @@ export default function OwnerDeletions() {
           })}
         </Section>
 
-        <Rule />
 
         <Section>
           {/* The note said `${log.length} recorded` over a read bounded at

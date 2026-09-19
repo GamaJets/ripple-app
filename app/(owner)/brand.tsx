@@ -243,7 +243,6 @@ export default function OwnerBrand() {
           </>)}
         </Section>
 
-        <Rule />
 
         {/* ── the colours are the content, not decoration ────────────────── */}
         <Section>
@@ -287,7 +286,6 @@ export default function OwnerBrand() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── live preview: chrome and the primary action, no invented data ─ */}
         <Section>
@@ -308,7 +306,6 @@ export default function OwnerBrand() {
           </View>
         </Section>
 
-        <Rule />
 
         <Section>
           <View style={{ alignSelf: 'flex-start' }}>

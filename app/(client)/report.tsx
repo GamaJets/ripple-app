@@ -629,7 +629,6 @@ export default function WeeklyReport() {
             : logStatus === 'partial' ? 'More logged than this screen can read in one go, so a week counted from it would be short.'
             : 'We couldn’t read your training log. This is not a week with nothing in it.'} />
 
-        <Rule />
 
         <Section>
           <SectionHead title="Training" />
@@ -679,7 +678,6 @@ export default function WeeklyReport() {
           ) : null}
         </Section>
 
-        <Rule />
 
         <Section>
           <SectionHead title="Body" />
@@ -819,7 +817,6 @@ export default function WeeklyReport() {
           </View>
         ) : null}
 
-        <Rule />
 
         <View style={{ marginTop: layout.section }}>
           <Cta label="Share My Progress" onPress={() => router.push('/(client)/social')} wide />

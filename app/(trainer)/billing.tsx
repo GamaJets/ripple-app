@@ -461,7 +461,6 @@ export default function TrainerBilling() {
           })()}
         </Section>
 
-        <Rule />
 
         <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>
           Plan prices are stated without a currency because Repple&apos;s plan config does not record

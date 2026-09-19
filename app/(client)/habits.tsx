@@ -156,7 +156,6 @@ export default function Habits() {
             : `${h.doneCount} of ${h.habits.length} done`}
         />
 
-        <Rule />
 
         {/* ── water ──────────────────────────────────────────────────────── */}
         <Section>
@@ -241,7 +240,6 @@ export default function Habits() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── checklist ──────────────────────────────────────────────────── */}
         <Section>
@@ -405,7 +403,6 @@ export default function Habits() {
           })}
         </Section>
 
-        <Rule />
 
         {/* ── your daily targets ──────────────────────────────────────────
             The three numbers the checklist used to invent. "10,000 steps",

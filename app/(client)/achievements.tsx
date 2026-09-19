@@ -164,7 +164,6 @@ export default function Achievements() {
             : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
         />
 
-        <Rule />
 
         <Section>
           <SectionHead title="Badges" />

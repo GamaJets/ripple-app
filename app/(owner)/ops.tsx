@@ -1446,7 +1446,6 @@ export default function OwnerOps() {
             in this file, which is all that check asks. A route named inside a
             branch that is false is reachable to a grep and unreachable to a
             person. */}
-        <Rule />
         <Section>
           <SectionHead title="Everywhere Else" />
           <ListRow icon="calendar" title="Trainer Rota" note="Who is on the floor when, against what is booked"

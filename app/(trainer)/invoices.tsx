@@ -801,7 +801,6 @@ export default function Invoices() {
             nothing to state, which is all three being empty. */}
         {book.totals && !book.totals.pots.length && !book.totals.unlabelled && !book.voided ? null : (
         <>
-        <Rule />
 
         <Section>
           <SectionHead
@@ -846,7 +845,6 @@ export default function Invoices() {
         </>
         )}
 
-        <Rule />
 
         {/* ── WHO OWES YOU ────────────────────────────────────────────────
             "Who owes me money" was the most common unanswered question in this
@@ -1067,7 +1065,6 @@ export default function Invoices() {
           </Section>
         ) : null}
 
-        <Rule />
 
         <Section>
           {/* A count, and "nothing", are both claims about the coach's own

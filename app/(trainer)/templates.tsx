@@ -382,7 +382,6 @@ export default function Templates() {
           </View>
         </Section>
 
-        <Rule />
 
         <Section>
           {/* A count over a library that came back short is not the size of the
@@ -470,7 +469,6 @@ export default function Templates() {
           ))}
         </Section>
 
-        <Rule />
         <PlatformProgrammes />
 
       </ScrollView>

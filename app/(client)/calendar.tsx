@@ -956,7 +956,6 @@ export default function Calendar() {
                   : 'Still to come. No open slots yet — your coach adds them here'}
         />
 
-        <Rule />
 
         {/* ── availability ───────────────────────────────────────────────── */}
         <Section>
@@ -1031,7 +1030,6 @@ export default function Calendar() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── the hour that repeats ───────────────────────────────────────
             A standing appointment is why some of the sessions on the grid
@@ -1182,7 +1180,6 @@ export default function Calendar() {
           {monthNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{monthNote}</Flag> : null}
         </Section>
 
-        <Rule />
 
         {/* ── the selected day ───────────────────────────────────────────── */}
         <Section>
@@ -1524,7 +1521,6 @@ export default function Calendar() {
           ) : null}
         </Section>
 
-        <Rule />
 
         {/* ── what is already marked ──────────────────────────────────────
             The grid can show a ring but not what it is, and one selected day
@@ -1577,7 +1573,6 @@ export default function Calendar() {
           )}
         </Section>
 
-        <Rule />
 
         {/* ── everything you have been charged ────────────────────────────
             Only drawn when there is something to say. Repple does not take

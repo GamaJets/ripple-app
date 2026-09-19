@@ -321,7 +321,6 @@ export default function OwnerGrowth() {
           members are counted separately, in Member Churn below.
         </Text>
 
-        <Rule />
 
         {/* ── member churn ───────────────────────────────────────────────── */}
         {/* The question a gym owner came to a tab called Growth to ask, which
@@ -416,7 +415,6 @@ export default function OwnerGrowth() {
           </Text>
         </Section>
 
-        <Rule />
 
         {/* ── retention ──────────────────────────────────────────────────── */}
         <Section>
@@ -443,7 +441,6 @@ export default function OwnerGrowth() {
           ]} />
         </Section>
 
-        <Rule />
 
         {/* ── platform client analytics ──────────────────────────────────── */}
         <Section>
@@ -497,7 +494,6 @@ export default function OwnerGrowth() {
           </View>
         </Section>
 
-        <Rule />
 
         {/* ── cohort retention ───────────────────────────────────────────── */}
         <Section>
@@ -513,7 +509,6 @@ export default function OwnerGrowth() {
           }))}
         </Section>
 
-        <Rule />
 
         {/* ── trainer acquisition funnel ─────────────────────────────────── */}
         <Section>
@@ -529,7 +524,6 @@ export default function OwnerGrowth() {
           }))}
         </Section>
 
-        <Rule />
 
         {/* ── promo / referral codes ─────────────────────────────────────── */}
         <Section>

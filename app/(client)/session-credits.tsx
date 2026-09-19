@@ -447,7 +447,6 @@ export default function SessionCredits() {
           </Text>
         ) : null}
 
-        <Rule />
         <Section>
           <Ghost label="Memberships & Packs" onPress={() => router.push('/(client)/packages')} />
           <View style={{ height: sp.sm }} />
