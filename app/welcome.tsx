@@ -24,7 +24,8 @@ import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
 import { Card, Cta, Ghost } from '../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
-import { BrandMark } from '../src/ui/BrandMark';
+import { BrandMark, BrandWordmark } from '../src/ui/BrandMark';
+import { BRAND_ID, DEFAULT_BRAND_ID } from '../src/lib/brands';
 
 
 /** What this build signs you up as, said plainly, plus where to go if the
@@ -210,8 +211,20 @@ export default function Welcome() {
               it is part of the lockup, not a label — and set in the brand
               green as the board sets it. */}
           <View style={{ alignItems: 'center', paddingHorizontal: sp.md }}>
-            <BrandMark size={72} />
-            <Text accessibilityRole="header" style={{ ...ty.hero, color: t.ink, letterSpacing: 2, textAlign: 'center', marginTop: sp.lg }}>{appName.toUpperCase()}</Text>
+            {/* The house brand's door carries the board's wordmark — the word
+                IS the logo, so it is drawn rather than typeset. A white-label
+                tenant has no such drawing: its door says its own name in type,
+                under the two-letter mark in its own accent. */}
+            {BRAND_ID === DEFAULT_BRAND_ID ? (
+              <View accessible accessibilityRole="header" accessibilityLabel={appName}>
+                <BrandWordmark width={236} />
+              </View>
+            ) : (
+              <>
+                <BrandMark size={96} />
+                <Text accessibilityRole="header" style={{ ...ty.hero, color: t.ink, letterSpacing: 2, textAlign: 'center', marginTop: sp.lg }}>{appName.toUpperCase()}</Text>
+              </>
+            )}
             {VARIANT !== 'client' ? (
               <Text style={{ ...ty.micro, color: t.brand, letterSpacing: 4, marginTop: sp.xs }}>{(VARIANT === 'trainer' ? 'Coach' : 'Studio').toUpperCase()}</Text>
             ) : null}
@@ -238,7 +251,7 @@ export default function Welcome() {
             {/* The tile the user just tapped on their home screen — teal for
                 Repple, indigo for Coach, amber for Studio. */}
             <View style={{ width: 46, height: 46, borderRadius: radius.md, backgroundColor: VARIANT_TILE[VARIANT], alignItems: 'center', justifyContent: 'center' }}>
-              <BrandMark size={30} ink="#ffffff" signal="#22c55e" />
+              <BrandMark size={34} ink="#ffffff" signal="#22c55e" />
             </View>
             <Text style={{ ...ty.title, color: t.ink }}>{appName}</Text>
           </View>

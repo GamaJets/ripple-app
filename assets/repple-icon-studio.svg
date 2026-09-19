@@ -1,11 +1,9 @@
-<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" fill="none">
-  <!-- The Repple mark from the approved redesign: the P with two signal bars,
-       on the near-black the board's splash screens use. Three plates, each a
-       step of the family green's own near-black, so the three icons stay
-       distinct and in the accent's hue family (coverage.test.ts holds both). -->
-  <rect x="0" y="0" width="1024" height="1024" rx="220" fill="#0a1311"/>
-  <g transform="translate(188 284) scale(12)">
-    <path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z" fill="#ffffff"/>
-    <path d="m33 4 18 0-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z" fill="#22c55e"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Repple Studio app icon. The drawing is "R≡" from the approved board's R≡PPLE wordmark — the same geometry as src/ui/BrandMark.tsx. -->
+  <rect width="1024" height="1024" fill="#0a1311"/>
+  <g transform="translate(182.0 374.5) scale(2.75)">
+    <g fill="none" stroke="#ffffff" stroke-width="24" stroke-linejoin="round"><path d="M12 100V12H76a20 20 0 0 1 20 20V42a20 20 0 0 1-20 20H12"/></g>
+    <path fill="#ffffff" d="M38 62H70L112 100H78Z"/>
+    <g fill="#22c55e" transform="translate(124 0)"><path d="M20 0H116L104 24H8Z"/><path d="M34 38H96L84 62H22Z"/><path d="M12 76H108L96 100H0Z"/></g>
   </g>
 </svg>

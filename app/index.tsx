@@ -11,7 +11,7 @@ import { useTheme } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { VARIANT, HOME_ROUTE } from '../src/lib/variant';
 import { hasSeenTour } from './tour';
-import { BrandMark } from '../src/ui/BrandMark';
+import { BrandWordmark } from '../src/ui/BrandMark';
 
 
 export default function Home() {
@@ -29,7 +29,7 @@ export default function Home() {
   if (loading || (authed && seenTour === null)) {
     return (
       <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <BrandMark size={60} />
+        <BrandWordmark width={200} />
       </View>
     );
   }
