@@ -198,6 +198,14 @@ Gates (caps, contrast, a11y, rtl, text, whole, dead-exports, reads, prose) and `
   list head's note; Meals per day sits under the list.
 - Everything else on the screen (Why This Target, day type, Log What You Ate, diet, quick tiles, snacks,
   grocery) follows below in its old order. `ScreenHelp` moved under the card.
+- Second pass (`"because i don't see how they match"`): the list head is the board's — "3 Meals" centred,
+  "This week" a word to the right — the segments are one full-width bar, the search row is a real
+  `TextInput` over `searchMeals(diet, slot, q)`, and the rows are the slot's **catalogue**, not the one
+  planned dish: the plan's meal leads (marked "In your plan"), then eight dishes sampled at a stride
+  through `catalogSize` (neighbouring indices differ only in garnish) and thinned to one row per base
+  name, each portioned with the planned meal's `servings`. Tapping one opens the recipe sheet, whose
+  "Swap This Meal" becomes **Use This Meal** (`choose(pos, idx)` → `override[pos]`) for a row that is not
+  the plan's. Still no photography: the thumbnail is `m.ico`.
 
 ## 5. What to do next
 
