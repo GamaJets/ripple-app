@@ -167,9 +167,10 @@ import {
 } from '../../src/lib/clientBrief';
 import { sessionsOf, trainingBoard, trainingLine } from '../../src/lib/clientTraining';
 import {
-  checkInAge, checkInGapLine, ratingsLine, readCoachCheckIns,
+  checkInAge, checkInGapLine, readCoachCheckIns,
   type CheckInRow, type CoachCheckIn,
 } from '../../src/lib/coachCheckins';
+import { CheckInReview } from '../../src/ui/coach/CheckInReview';
 import {
   CHANNELS, CONTACT_OUTCOMES, triedLine,
   type Channel, type Contact, type ContactOutcome,
@@ -2864,40 +2865,26 @@ export default function ClientScreen() {
             only thing on this screen that is somebody's own words rather than
             this app's summary of them. */}
         <Section>
-          <SectionHead title="What They Told You" />
+          {/* Board page 12, read the coach's way: the head says which
+              check-in this is and how old it is; the answers follow in the
+              shapes the client gave them — faces, tracks, the notes box —
+              and the coach's reply stands where the client's submit did.
+              src/ui/coach/CheckInReview.tsx draws them; nothing about what is
+              read, or when it is withheld, has moved. */}
+          <SectionHead title="Check-in"
+            // Null rather than a dash when the timestamp will not parse: a
+            // dash where a date goes, beside a note somebody wrote, reads as
+            // the screen having broken.
+            note={latestCheckIn && !checkInGap ? checkInAge(latestCheckIn.at, nowMs) ?? undefined : undefined} />
           {checkInGap ? (
             ciStatus === 'error' && !unasked
               ? <Flag tone={t.warn}>{checkInGap}</Flag>
               : <Text style={{ ...ty.body, color: t.ink3 }}>{checkInGap}</Text>
           ) : latestCheckIn ? (<>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-              <Text style={{ ...ty.label, color: t.ink3 }}>Their latest check-in</Text>
-              {/* Null rather than a dash when the timestamp will not parse:
-                  a dash where a date goes, beside a note somebody wrote, reads
-                  as the screen having broken. */}
-              {checkInAge(latestCheckIn.at, nowMs)
-                ? <Text style={{ ...ty.caption, color: t.ink3 }}>{checkInAge(latestCheckIn.at, nowMs)}</Text>
-                : null}
-            </View>
+            <CheckInReview checkIn={latestCheckIn} who={who} weightUnit={wu}
+              onReply={id ? go('/(trainer)/chat') : undefined} />
 
-            {latestCheckIn.note ? (
-              <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.brand }}>
-                <Text style={{ ...ty.body, color: t.ink }}>{latestCheckIn.note}</Text>
-              </View>
-            ) : (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                They sent the form without writing anything with it.
-              </Text>
-            )}
-
-            {/* Withheld entirely when none of the four was answered, rather
-                than drawn as a row of dashes that says nothing and takes up
-                the space where something might have. */}
-            {ratingsLine(latestCheckIn)
-              ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{ratingsLine(latestCheckIn)}</Text>
-              : null}
-
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
               {/* Adherence is the client's own 1-5 rating of how well they
                   stuck to the plan, and it is stated here as the scale it is
                   on. The roster shows the same column as a percentage, and the

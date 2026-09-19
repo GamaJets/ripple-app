@@ -79,7 +79,7 @@ import { hitSlopFor } from '../lib/a11y';
 import type { AppVariant } from '../lib/variant';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
-import { Rule, Ghost, Notice, PartialRead } from './kit';
+import { Section, Ghost, Notice, PartialRead } from './kit';
 import { SkeletonList } from './Skeleton';
 import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import type { LoadStatus } from './loadStatus';
@@ -93,7 +93,7 @@ import { signedInUid } from '../lib/signedInUid';
 import { authGateMessage } from '../lib/authedUid';
 import { useLive } from './realtime';
 import { useNow } from './today';
-import { BACK_ICON } from './direction';
+import { BACK_ICON, FORWARD_ICON } from './direction';
 
 export interface InboxItem {
   id: string;
@@ -750,7 +750,9 @@ export interface InboxFraming {
    *  falls back to 'client' under a bare `expo start` — which would make the
    *  coach's inbox refuse every coach route in development. */
   group: AppVariant;
-  /** The small line above the title. */
+  /** The small line that used to sit above the title. Kept on the framing so
+   *  the three route files need no change, but not drawn: the approved board
+   *  opens this screen with the one word, centred, and nothing over it. */
   kicker: string;
   /** What this screen is called here. */
   title: string;
@@ -1008,12 +1010,16 @@ export function NotificationInbox(f: InboxFraming) {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={t.ink3} />}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* ── the head, the board's way (coach page 18) ────────────────────
+            Back at the start, the title centred, and the unread pill at the
+            end. The kicker is no longer drawn — the board opens this screen
+            with the one word — and the blurb has moved to the foot of the
+            list, so nothing procedural sits in the first viewport. When there
+            is no pill a spacer the width of the back button holds the title
+            in the middle. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{f.kicker}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{f.title}</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>{f.title}</Text>
           {badge.kind === 'count' ? (
             <View style={{ paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: t.brand }}>
               {/* caption, not micro: micro uppercases, and "3 NEW" is the same
@@ -1021,9 +1027,8 @@ export function NotificationInbox(f: InboxFraming) {
                   shouted. */}
               <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{badge.label} new</Text>
             </View>
-          ) : null}
+          ) : <View style={{ width: 38 }} />}
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>{f.blurb}</Text>
 
         {status === 'error' ? (
           // Deliberately NOT "you have no notifications". Under 'error' an
@@ -1058,14 +1063,19 @@ export function NotificationInbox(f: InboxFraming) {
             clips a paragraph at the largest text size. */}
         {chips.length ? (
           <View style={{ marginBottom: sp.lg }}>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+            {/* One full-width segmented bar — All | Unread on the board — in
+                the idiom app/(client)/nutrition.tsx draws its meal slots with:
+                equal segments in a surface2 pill, the lit one filled with ink.
+                The chips themselves are unchanged: same set, same order, same
+                labels and spoken lines from `inboxChips`. */}
+            <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3 }}>
               {chips.map((c) => {
                 const on = c.mode === mode;
                 return (
                   <Pressable
                     key={c.mode}
                     onPress={() => setMode(c.mode)}
-                    accessibilityRole="button"
+                    accessibilityRole="tab"
                     // Both halves. `selected` is what a screen reader uses to
                     // say which of four is on; the label is what the control
                     // DOES, and it carries the figure, or the reason there is
@@ -1073,14 +1083,11 @@ export function NotificationInbox(f: InboxFraming) {
                     // hear is the same defect as a number that is wrong.
                     accessibilityState={{ selected: on }}
                     accessibilityLabel={c.a11y}
-                    hitSlop={hitSlopFor(32)}
-                    style={{
-                      paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill,
-                      backgroundColor: on ? t.brand : t.surface2,
-                      borderWidth: on ? 0 : hairline, borderColor: t.ring,
-                    }}
+                    style={{ flex: 1, minHeight: 40, paddingHorizontal: sp.sm, paddingVertical: sp.xs, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}
                   >
-                    <Text style={{ ...ty.micro, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>{c.label}</Text>
+                    {/* Wraps rather than truncates: "Sessions · 12" at the
+                        largest text size is a figure, and a figure is never cut. */}
+                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2, textAlign: 'center' }}>{c.label}</Text>
                   </Pressable>
                 );
               })}
@@ -1096,8 +1103,6 @@ export function NotificationInbox(f: InboxFraming) {
             ) : null}
           </View>
         ) : null}
-
-        <Rule />
 
         {status === 'loading' && !items.length ? (
           <View style={{ paddingTop: sp.lg }}><SkeletonList n={4} /></View>
@@ -1116,10 +1121,13 @@ export function NotificationInbox(f: InboxFraming) {
             somebody's inbox, and a chip matching nothing is not that. What a
             narrowed empty list says instead is the filter line under the chips,
             which is the one place that can tell the two apart. */}
-        {shown.map((item, i) => (
+        {/* The rows sit in one card, as the board draws them (coach page 18):
+            a round mark at the start, the heading over the body, the age and a
+            chevron at the end. */}
+        {shown.length ? <Section style={{ marginTop: 0, paddingVertical: 0 }}>{shown.map((item, i) => (
           <View
             key={item.id}
-            style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}
           >
             {/* The row's own tap target stops at the controls. Nesting the
                 delete inside the Pressable that opens the notification would
@@ -1130,48 +1138,46 @@ export function NotificationInbox(f: InboxFraming) {
               accessibilityRole="button"
               accessibilityLabel={`${item.heading ?? 'Notification'}. ${item.body}`}
               accessibilityState={{ selected: !item.read }}
-              style={{ flex: 1, flexDirection: 'row', gap: sp.md }}
+              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}
             >
-              <View style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: item.read ? t.surface2 : t.surface3 }}>
-                <Icon name={item.icon} size={17} color={item.read ? t.ink3 : t.brand} />
+              {/* The board's mark: a filled circle, green for something that
+                  happened and near-black for a message, grey once the row has
+                  been read. The fill IS the unread state — the 7pt dot that
+                  used to sit beside the age said the same thing twice. It is
+                  per row and needs no whole-list read to be true: this row came
+                  back with read=false, whatever the status of the set it
+                  arrived in. */}
+              <View style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: item.read ? t.surface2 : item.kind === 'message' ? t.ink : t.brand }}>
+                <Icon name={item.icon} size={17} color={item.read ? t.ink3 : item.kind === 'message' ? t.bg : t.brandInk} />
               </View>
               <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-                  {/* NOT `item.title ?? f.title`. That drew the SCREEN's name —
-                      "Notifications" — over every untitled row, which reads as
-                      a heading somebody wrote and says nothing. `inboxHeading`
-                      returns a true one or none at all; when it is none the
-                      body moves up into this line's place and the age still
-                      has a row to sit on. */}
-                  {item.heading ? (
-                    <Text style={{ ...ty.label, fontWeight: item.read ? '500' : '700', color: t.ink, flex: 1 }} numberOfLines={1}>
-                      {item.heading}
-                    </Text>
-                  ) : (
-                    <View style={{ flex: 1 }} />
-                  )}
-                  {/* ty.caption, not ty.micro: micro carries
-                      `textTransform: 'uppercase'` and rendered a two-hour-old
-                      notification as "2H". A unit beside a figure is lowercase
-                      everywhere else in this app (kg, kcal, min), and an
-                      uppercased aside shouts as loudly as the heading it sits
-                      next to. Same change, same reason, as the `Field` hint in
-                      src/ui/kit.tsx. */}
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{inboxAge(item.at, nowMs)}</Text>
-                  {/* The unread mark is per row and needs no whole-list read to
-                      be true: this row came back with read=false, whatever the
-                      status of the set it arrived in. */}
-                  {!item.read ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: t.brand }} /> : null}
-                </View>
-                <Text style={{ ...ty.label, color: item.read ? t.ink3 : t.ink2, marginTop: item.heading ? 3 : 0 }}>{item.body}</Text>
+                {/* NOT `item.title ?? f.title`. That drew the SCREEN's name —
+                    "Notifications" — over every untitled row, which reads as
+                    a heading somebody wrote and says nothing. `inboxHeading`
+                    returns a true one or none at all; when it is none the
+                    body moves up into this line's place. */}
+                {item.heading ? (
+                  <Text style={{ ...ty.body, fontWeight: item.read ? '500' : '700', color: t.ink }}>
+                    {item.heading}
+                  </Text>
+                ) : null}
+                <Text style={{ ...ty.caption, color: item.read ? t.ink3 : t.ink2, marginTop: item.heading ? 2 : 0 }}>{item.body}</Text>
                 {item.route ? null : (
                   // A row whose stored route this build will not follow. Saying
                   // so is better than a tap that appears to do nothing. Caption
-                  // rather than micro for the same reason as the age above:
+                  // rather than micro for the same reason as the age below:
                   // this is a sentence, and micro would shout it.
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Nothing to open</Text>
                 )}
               </View>
+              {/* ty.caption, not ty.micro: micro carries
+                  `textTransform: 'uppercase'` and rendered a two-hour-old
+                  notification as "2H". A unit beside a figure is lowercase
+                  everywhere else in this app (kg, kcal, min), and an
+                  uppercased aside shouts as loudly as the heading it sits
+                  next to. Same change, same reason, as the `Field` hint in
+                  src/ui/kit.tsx. */}
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{inboxAge(item.at, nowMs)}</Text>
             </Pressable>
 
             {/* Back to unread, on read rows only — on an unread row it is a
@@ -1216,8 +1222,18 @@ export function NotificationInbox(f: InboxFraming) {
                 <Icon name="minus" size={16} color={t.crit} />
               </Pressable>
             ) : null}
+
+            {/* The board's chevron, only where a tap goes somewhere. Drawn
+                outside the Pressable so the two row controls keep their place
+                between the text and the edge, and hidden from the reader — the
+                row's own label and role already say it opens. */}
+            {item.route ? (
+              <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+              </View>
+            ) : null}
           </View>
-        ))}
+        ))}</Section> : null}
 
         {/* Withheld under a live filter, and said rather than simply gone. Both
             of these are scoped by PREDICATE and not by what is drawn — the RPC
@@ -1251,6 +1267,11 @@ export function NotificationInbox(f: InboxFraming) {
         {bulkNote ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{bulkNote}</Text>
         ) : null}
+
+        {/* What this inbox carries and what it does not — the framing's blurb,
+            under the list rather than over it. It is the one line that
+            differs between the three apps, and it is still said. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: layout.section }}>{f.blurb}</Text>
 
         {/* WHY THERE IS NO "CLEAR ALL".
             An unread notification is one the person has not seen, and the only

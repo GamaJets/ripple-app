@@ -65,7 +65,7 @@ import {
 } from '../../src/lib/threadSafety';
 import { useRoster } from '../../src/ui/roster';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
-import { BACK_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 /** The clip itself, in its own component so the player hook receives a settled
  *  URL — a signature arrives asynchronously and a hook cannot wait for one. */
@@ -403,12 +403,23 @@ export default function CoachChat() {
             ? <Image source={{ uri: peer.avatar }} style={{ width: 38, height: 38 }} accessibilityIgnoresInvertColors />
             : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? t.brand : t.ink3 }}>{peerMonogram(head)}</Text>}
         </View>
-        <View style={{ flex: 1 }}>
-          {/* Casing and full ink are for a real name only; a dash gets neither,
-              so the header never dresses a placeholder up as a person. */}
-          <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>{head.note ?? 'Coaching chat'}</Text>
-        </View>
+        {/* The name is the way to the record, as the board's chevron beside it
+            says (page 9). Only when there is a client to open: a thread reached
+            without a key has nobody to go to, and a chevron that goes nowhere
+            is the tap that "appears to do nothing". `client.tsx` reads the same
+            two params the roster hands this screen. */}
+        <Pressable onPress={() => { if (clientId) router.push({ pathname: '/(trainer)/client', params: { clientId, name: head.isName ? head.text : '' } } as any); }}
+          disabled={!clientId} accessibilityRole={clientId ? 'button' : undefined}
+          accessibilityLabel={clientId ? `Open ${head.isName ? head.text + '’s' : 'their'} record` : undefined}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+          <View style={{ flex: 1 }}>
+            {/* Casing and full ink are for a real name only; a dash gets neither,
+                so the header never dresses a placeholder up as a person. */}
+            <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{head.note ?? 'Coaching chat'}</Text>
+          </View>
+          {clientId ? <Icon name={FORWARD_ICON} size={16} color={t.ink3} /> : null}
+        </Pressable>
         {/* In the header rather than buried in a menu, for the same reason it is
             in the client's: a moderation path somebody has to go looking for is
             one they reach for after it has already gone wrong. The icon carries
@@ -541,13 +552,16 @@ export default function CoachChat() {
         {/* What is about to go with the message, and a way to change your mind
             before it does. Nothing is uploaded until Send. */}
         {pending ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingTop: sp.md }}>
+          // Drawn as the board's attachment card (page 9's "Week 4 Plan.pdf"):
+          // a bordered card with the file at its start and its name beside it.
+          // The same row it always was — nothing is uploaded until Send.
+          <View style={{ marginHorizontal: G, marginTop: sp.md, flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.md, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring }}>
             {pending.kind === 'image'
               ? <Image source={{ uri: pending.uri }} style={{ width: 44, height: 44, borderRadius: radius.sm, backgroundColor: t.surface2 }} resizeMode="cover" accessibilityIgnoresInvertColors />
               : <View style={{ width: 44, height: 44, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="video" size={18} color={t.ink3} />
                 </View>}
-            <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>
               {pending.kind === 'image' ? 'Photo ready to send' : 'Video ready to send'}
             </Text>
             <Pressable onPress={() => setPending(null)} accessibilityRole="button"
@@ -564,33 +578,50 @@ export default function CoachChat() {
             <Text style={{ ...ty.caption, color: t.ink2 }}>{UNFILLED_TOKEN_NOTE}</Text>
           </View>
         ) : null}
+        {/* The board's composer (page 9): one pill holding the box with the
+            attach glyph at its trailing end, and a round green send button
+            beside it. The two quiet controls that used to sit BEFORE the box
+            — the camera and the saved-messages picker — now sit inside the
+            pill at its end, which is where the board draws its attach glyph;
+            they do the same two things they always did. */}
         <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'center' }}>
-          <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={8}
-            style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="camera" size={18} color={t.ink2} />
-          </Pressable>
-          <Pressable onPress={() => setTplOpen(true)} accessibilityRole="button" accessibilityLabel="Use a saved message" hitSlop={8}
-            style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="pencil" size={18} color={t.ink2} />
-          </Pressable>
-          <TextInput value={text} onChangeText={setText} editable={canSend}
-            // The placeholder is the only thing naming this box, and a placeholder
-            // is drawn only while it is EMPTY — so from the first keystroke it was
-            // an unnamed field, and a closed conversation said nothing at all.
-            // Two ways to be un-sendable, and they are different sentences. A
-            // hand-added client's thread was never opened and never closed —
-            // "This conversation is closed" would be a fourth wrong thing to
-            // tell a coach about somebody who has never had the app.
-            accessibilityLabel={canSend ? (firstName ? 'Message ' + firstName : 'Message your client') : !hasAccount ? 'There is no account to message yet' : 'This conversation is closed'}
-            placeholder={canSend ? (firstName ? 'Message ' + firstName + '…' : 'Message your client…') : !hasAccount ? 'No account to message yet' : 'This conversation is closed'}
-            placeholderTextColor={t.ink3}
-            style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, opacity: canSend ? 1 : 0.6 }} />
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 46, paddingStart: sp.lg, paddingEnd: sp.xs, backgroundColor: t.surface2, borderRadius: radius.pill, opacity: canSend ? 1 : 0.6 }}>
+            <TextInput value={text} onChangeText={setText} editable={canSend}
+              // The placeholder is the only thing naming this box, and a placeholder
+              // is drawn only while it is EMPTY — so from the first keystroke it was
+              // an unnamed field, and a closed conversation said nothing at all.
+              // Two ways to be un-sendable, and they are different sentences. A
+              // hand-added client's thread was never opened and never closed —
+              // "This conversation is closed" would be a fourth wrong thing to
+              // tell a coach about somebody who has never had the app.
+              accessibilityLabel={canSend ? (firstName ? 'Message ' + firstName : 'Message your client') : !hasAccount ? 'There is no account to message yet' : 'This conversation is closed'}
+              placeholder={canSend ? 'Type a message…' : !hasAccount ? 'No account to message yet' : 'This conversation is closed'}
+              placeholderTextColor={t.ink3}
+              style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.sm }} />
+            <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={6}
+              style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="camera" size={18} color={t.ink2} />
+            </Pressable>
+            <Pressable onPress={() => setTplOpen(true)} accessibilityRole="button" accessibilityLabel="Use a saved message" hitSlop={6}
+              style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="pencil" size={18} color={t.ink2} />
+            </Pressable>
+          </View>
           {/* Disabled while a send is in flight: tapping twice would put the
               same clip in the bucket twice and the thread twice with it. And
               disabled while blocked — the database refuses the write either
               way, so leaving it live would only turn a closed conversation into
-              an error message. */}
-          <Cta label={busy ? 'Sending…' : 'Send'} onPress={onSend} disabled={busy || !canSend} />
+              an error message. Round and green as the board draws it; the word
+              is spoken rather than printed, and the spinner is the in-flight
+              state the label used to carry as "Sending…". */}
+          <Pressable onPress={onSend} disabled={busy || !canSend}
+            accessibilityRole="button" accessibilityLabel={busy ? 'Sending' : 'Send'}
+            accessibilityState={{ disabled: busy || !canSend, busy }}
+            style={{ width: 46, height: 46, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: canSend ? t.brand : t.surface2, borderWidth: canSend ? 0 : hairline, borderColor: t.ring }}>
+            {busy
+              ? <ActivityIndicator size="small" color={t.brandInk} />
+              : <Icon name={FORWARD_ICON} size={20} color={canSend ? t.brandInk : t.ink3} />}
+          </Pressable>
         </View>
         {/* The state, in words, under the box. `blockedComposerNote` returns
             null for an unread state rather than guessing: a coach who has not
