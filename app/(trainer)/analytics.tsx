@@ -33,8 +33,11 @@ import { useTheme } from '../../src/ui/components';
 // The month window's instant, recomputed at midnight, on foreground and on
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow } from '../../src/ui/today';
+// Counts go through the reader's own digit grouping, as every other figure in
+// the app does — 1,248 sessions, not 1248.
+import { num } from '../../src/lib/format';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ScreenHeader, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, FigureCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -876,13 +879,23 @@ export default function TrainerAnalytics() {
     if (prev == null) return `Nothing recorded in ${beforeNote} to compare with.`;
     return `${deltaLabel(cur - prev, { since: null, unit, decimals: 0 })} vs ${beforeNote}`;
   };
-  const adhDeltaLine = rangeDeltaLine(curFigures?.adherence ?? null, prevFigures?.adherence ?? null, '%');
+  // The gap between two percentages is in POINTS, and "+12%" beside "92%" says
+  // something else: that adherence grew by an eighth, which from 80 would be
+  // 89.6 and not 92. The review's own example reads "down 9 points".
+  const adhMoved = curFigures?.adherence != null && prevFigures?.adherence != null
+    ? Math.abs(Math.round(curFigures.adherence - prevFigures.adherence)) : null;
+  const adhDeltaLine = rangeDeltaLine(curFigures?.adherence ?? null, prevFigures?.adherence ?? null, adhMoved === 1 ? 'point' : 'points');
   const doneDeltaLine = rangeDeltaLine(curFigures?.completions ?? null, prevFigures?.completions ?? null, '');
   /** Green only for movement upward; a fall, or no change, sits in ink. Read
    *  off `deltaSign` rather than the raw difference so the two never disagree
    *  about whether something moved. */
   const upward = (cur: number | null, prev: number | null): boolean =>
     cur != null && prev != null && deltaSign(cur - prev, 0) === '+';
+  /** "1 client", "12 clients" — for the source line of a figure card, where the
+   *  population a figure is over is half of what the figure means. `asked` is
+   *  who the read was PUT to — every linked client — and not who answered, so
+   *  the line says "across" and never "from" or "logged by". */
+  const countOf = (n: number, noun: string) => `${num(n)} ${noun}${n === 1 ? '' : 's'}`;
   /** The window's span, as the axis would write it: "14 Aug to 12 Sep". */
   const winSpan = `${dayLabel(win.start)} to ${dayLabel(win.end)}`;
 
@@ -968,38 +981,42 @@ export default function TrainerAnalytics() {
             as the board has it. The chips change which days the two blocks
             below are read over — real windows, real reads — and nothing else
             on the screen, which is still the calendar month. */}
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
-          {RANGES.map((r) => {
-            const on = r.key === range;
-            return (
-              <Pressable key={r.key} onPress={() => setRange(r.key)} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={r.spoken}
-                style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
-                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{r.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {/* The kit's `Segmented` since round four, in place of the hand-built
+            tablist: the same pill, the same ink fill and the same spoken
+            "Last 30 days", plus the two things the copy here never had — the
+            label gives up points before it truncates, and from 1.35 the four
+            segments wrap two to a row instead of squeezing. */}
+        <Segmented
+          options={RANGES.map((r) => ({ key: r.key, label: r.label, a11yLabel: r.spoken }))}
+          value={range}
+          onChange={setRange}
+          style={{ marginTop: sp.lg }}
+        />
 
         {/* ── client adherence over the window ─────────────────────────────
             The board's first block: the figure, its movement against the
-            window before, and a bar per period. The figure is a dash and the
-            chart is not drawn under any read that was not whole — the sentence
-            in the chart's place says which read, and that a dash is unknown
-            rather than nought. */}
-        <Section>
-          <SectionHead title="Client Adherence" note={rangeDef.spoken} />
-          <View accessible accessibilityLabel={`Client adherence, ${rangeDef.spoken.toLowerCase()}: ${curFigures?.adherence == null ? 'not drawn' : `${curFigures.adherence} percent`}. ${adhDeltaLine ?? windowGap ?? ''}`}>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: sp.md }}>
-              <Text style={{ ...value(36), color: t.ink }}>
-                {curFigures?.adherence == null ? fig(null) : `${curFigures.adherence}%`}
-              </Text>
-              {adhDeltaLine ? (
-                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', flexShrink: 1, color: upward(curFigures?.adherence ?? null, prevFigures?.adherence ?? null) ? t.brand : t.ink2 }}>
-                  {adhDeltaLine}
-                </Text>
-              ) : null}
-            </View>
-          </View>
+            window before, and a bar per period. Drawn by the kit's FigureCard
+            since round four, which is the data-layout review's rule 2 as a
+            component — label, value and unit, comparison, period, source — so
+            the dates the window covers and WHOSE check-ins it averages are on
+            the card rather than three lines down in a caption. The movement
+            sits under the figure with a mark, not beside it in green type:
+            the kit's reasoning (a status colour is not an ink) over the
+            board's, for every figure card in the app at once. The figure is a
+            dash and the chart is not drawn under any read that was not whole —
+            the sentence in the chart's place says which read, and that a dash
+            is unknown rather than nought. */}
+        <FigureCard
+          title="Client Adherence"
+          note={rangeDef.spoken}
+          figure={curFigures?.adherence == null ? null : String(curFigures.adherence)}
+          unit={curFigures?.adherence == null ? undefined : '%'}
+          comparison={adhDeltaLine ?? undefined}
+          tone={upward(curFigures?.adherence ?? null, prevFigures?.adherence ?? null) ? t.brand : undefined}
+          period={winSpan}
+          source={curFigures?.adherence == null ? undefined : `${countOf(curFigures.checkIns, 'check-in')}, across ${countOf(curRead.asked, 'client')} with an account`}
+          spoken={`Client adherence, ${rangeDef.spoken.toLowerCase()}, ${winSpan}: ${curFigures?.adherence == null ? 'not drawn' : `${curFigures.adherence} percent`}. ${adhDeltaLine ?? windowGap ?? ''}`}
+        >
           <View style={{ marginTop: sp.md }}>
             {curFigures == null ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>{windowGap}</Text>
@@ -1020,25 +1037,24 @@ export default function TrainerAnalytics() {
               {prevFigures?.adherenceByBucket.some((v) => v != null) ? ` The fainter bar beside each is the same ${rangeDef.bucketDays === 1 ? 'day' : 'week'} of ${beforeNote}.` : ''}
             </Text>
           ) : null}
-        </Section>
+        </FigureCard>
 
         {/* ── programme completions over the window ────────────────────────
             The board's second block, as a line. One completion is one session
             a client logged — a programme day done — and the caption says so,
             because "completions" under a count of sessions would otherwise be
             read as programmes finished, which nothing in the record marks. */}
-        <Section>
-          <SectionHead title="Program Completions" note={rangeDef.spoken} />
-          <View accessible accessibilityLabel={`Program completions, ${rangeDef.spoken.toLowerCase()}: ${curFigures == null ? 'not drawn' : `${curFigures.completions} session${curFigures.completions === 1 ? '' : 's'} logged`}. ${doneDeltaLine ?? windowGap ?? ''}`}>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: sp.md }}>
-              <Text style={{ ...value(36), color: t.ink }}>{fig(curFigures?.completions)}</Text>
-              {doneDeltaLine ? (
-                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', flexShrink: 1, color: upward(curFigures?.completions ?? null, prevFigures?.completions ?? null) ? t.brand : t.ink2 }}>
-                  {doneDeltaLine}
-                </Text>
-              ) : null}
-            </View>
-          </View>
+        <FigureCard
+          title="Program Completions"
+          note={rangeDef.spoken}
+          figure={curFigures == null ? null : num(curFigures.completions)}
+          unit={curFigures == null ? undefined : (curFigures.completions === 1 ? 'session' : 'sessions')}
+          comparison={doneDeltaLine ?? undefined}
+          tone={upward(curFigures?.completions ?? null, prevFigures?.completions ?? null) ? t.brand : undefined}
+          period={winSpan}
+          source={curFigures == null ? undefined : `Across ${countOf(curRead.asked, 'client')} with an account`}
+          spoken={`Program completions, ${rangeDef.spoken.toLowerCase()}, ${winSpan}: ${curFigures == null ? 'not drawn' : `${curFigures.completions} session${curFigures.completions === 1 ? '' : 's'} logged`}. ${doneDeltaLine ?? windowGap ?? ''}`}
+        >
           <View style={{ marginTop: sp.md }}>
             {curFigures == null ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>{windowGap}</Text>
@@ -1054,7 +1070,7 @@ export default function TrainerAnalytics() {
               Workout sessions your clients logged from {winSpan}, by the day they trained. Each point is {rangeDef.bucketDays === 1 ? 'a day' : 'a week, starting on the date under it'}. A session logged is a programme day done, not a whole programme finished — nothing in the record marks that.
             </Text>
           ) : null}
-        </Section>
+        </FigureCard>
 
         {/* ── outcomes before turnover ─────────────────────────────────────
             The board opens Analytics on the book's adherence, its size and
@@ -1067,6 +1083,17 @@ export default function TrainerAnalytics() {
             { label: 'Clients', value: fig(clients) },
             { label: 'At Risk', value: fig(riskCount), unit: riskCount == null ? undefined : (riskCount === 1 ? 'client' : 'clients') },
           ]} />
+          {/* Rule 2: three figures with no period and no population are three
+              numbers. These are NOT over the window chosen above — they are
+              the roster as it stands — and a strip sitting directly under a
+              "Last 30 days" card would otherwise borrow its dates. Said only
+              under a whole roster; without one all three are dashes and the
+              notice below says why. */}
+          {rosterWhole ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Your roster as it stands today, not the window above. Adherence is the average of each client’s own check-in rating{avgAdh == null ? '' : `, over the ${_adhKnown.length} who have one`}; At Risk is anyone under 70% on it.
+            </Text>
+          ) : null}
         </View>
 
         {/* The densest figures screen in either app. Two of the things this
@@ -1151,6 +1178,230 @@ export default function TrainerAnalytics() {
           </Card>
         ) : null}
 
+        {/* ── RETENTION, BEFORE DELIVERY AND MONEY ─────────────────────────
+            The data-layout review's order for this screen: client outcomes,
+            then retention and who is at risk, then the coach's own delivery
+            and takings, then where clients come from, and comparisons last.
+            Roster Health, At-risk Clients and How Long People Stay were the
+            thirteenth, seventeenth and sixteenth things on the page — under
+            the goals, the revenue chart and last year — so the question "who
+            am I about to lose" was answered after "how did August compare".
+            They are moved, whole and unre-worded, to directly under the
+            at-risk card they explain. */}
+
+        {/* ── roster health ──────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Roster Health"
+            note={!rosterWhole ? undefined : avgAdh == null ? 'No check-ins yet' : `${avgAdh}% avg adherence`} />
+          {/* The bar is withheld rather than drawn from what loaded. A DistBar
+              always fills its width, so a split computed over a short roster is
+              rendered as the whole book at whatever proportions the fragment
+              happened to have — the one chart on this screen that cannot show
+              its own incompleteness. Three zeroes would be worse still: an
+              empty bar under "Roster health" reads as a roster in trouble. */}
+          {onTrack == null || watch == null || riskCount == null ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {rosterStatus === 'loading'
+                ? 'Reading your roster…'
+                : rosterStatus === 'partial'
+                  ? 'Your roster came back short, so the split between on-track, watch and at-risk is not drawn — a share of part of your book is not a share of it.'
+                  : 'Your roster could not be read, so the split between on-track, watch and at-risk is not drawn. It is unknown, not empty.'}
+            </Text>
+          ) : (<>
+            {/* Four bands, and the fourth is the one that was missing. See
+                `noRecord` above: without it this bar was drawn over the
+                clients who have check-ins and read as though it were drawn
+                over the book. */}
+            <DistBar segments={[
+              { label: STATUS_LABEL.on_track, value: onTrack, color: t.brand },
+              { label: STATUS_LABEL.watch, value: watch, color: t.warn },
+              { label: STATUS_LABEL.at_risk, value: riskCount, color: t.crit },
+              ...(noRecord ? [{ label: STATUS_LABEL.idle, value: noRecord, color: t.ink3 }] : []),
+            ]} />
+            <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md, flexWrap: 'wrap' }}>
+              {([[STATUS_LABEL.on_track, onTrack, t.brand], [STATUS_LABEL.watch, watch, t.warn], [STATUS_LABEL.at_risk, riskCount, t.crit],
+                 ...(noRecord ? [[STATUS_LABEL.idle, noRecord, t.ink3] as const] : [])] as const).map(([l, v, col]) => (
+                <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {v}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Which measure these four bands are, said out loud, because the
+                At-risk list further down this same screen is a different one.
+                Two measures on one screen is fine; two measures on one screen
+                with nothing saying so is how a coach comes to distrust both. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {noRecord
+                ? `Measured on check-in adherence. ${noRecord === 1 ? 'One client has' : `${noRecord} clients have`} no check-ins at all, so ${noRecord === 1 ? 'they are' : 'they are'} counted as ${STATUS_LABEL.idle.toLowerCase()} rather than as on track — an absence is not a pass. At-risk Clients below is a different measure — each client against their own pattern — and does have something to say about them.`
+                : 'Measured on check-in adherence. At-risk Clients below is a different measure: each client against their own pattern.'}
+            </Text>
+          </>)}
+        </Section>
+
+
+        {/* ── client value ───────────────────────────────────────────────── */}
+
+        {/* ── at-risk clients ────────────────────────────────────────────── */}
+        <Section>
+          {/* The note said "Low adherence or inactive 2+ days", which was an
+              accurate description of `atRiskClient` and of nothing else in the
+              app. What is measured now is each client against their OWN
+              baseline over 56 days, plus the band for a client there is nothing
+              on record about — see src/lib/clientDrift.ts, and the Clients
+              screen, which has always said it this way. */}
+          {/* ── and the explanation goes UNDER the head, not inside it ──────
+              This sentence was passed as `note`. `SectionHead` lays title and
+              note out as a two-child `space-between` row with no gap and no
+              shrink on either — the slot is for "Leaderboard ›" or "Last 90
+              days", three words at most. Two sentences in it rendered on a
+              device as "AT-RISK CLIENTSWell below their own rate over the last
+              14 days. …" — the title and the note touching with no space
+              between them, the first line running off the right edge of the
+              phone, and the remainder wrapping to a centred second line under
+              the whole row. Seen on an iPhone 17 Pro at the default text size,
+              so it is not an accessibility-size edge case.
+
+              Every other explanatory sentence on this screen is a caption
+              beneath its head; this one now is too. */}
+          <SectionHead title="At-risk Clients" />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>
+            {bandNote('at_risk')} Plus anyone there is nothing on record for.
+          </Text>
+          {/* Four renders, and the first three are the ones that were missing.
+              "Everyone is on track" is a claim about every client the coach
+              has: it may be made only over a whole roster AND a training record
+              that came back. Before, an unread record produced an empty filter
+              and that sentence. */}
+          {dr.error ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Their training records could not be read, so who is drifting is unknown. This is not a clean bill of health for your book.
+            </Text>
+          ) : atRisk === null ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {rosterStatus === 'loading' || dr.drift === null
+                ? 'Reading who has stopped training…'
+                : !rosterWhole
+                  ? 'Your roster did not come back whole, so who is drifting cannot be worked out — this is not a clean bill of health for your book.'
+                  /* The truncated read gets its own sentence, and it is the
+                     provider's — `dr.note`. A read that came back at the row
+                     ceiling is not a roster that came back short, and sending a
+                     coach off to their Clients tab would send them after a
+                     problem that is not there. Said second because a short
+                     roster is the more fundamental of the two and is the one
+                     they can do something about. */
+                  : (dr.note ?? 'More activity is on record than one request returns, so who is drifting cannot be worked out from it — this is not a clean bill of health for your book.')}
+            </Text>
+          ) : atRisk.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Everyone is holding their own pattern.</Text>
+          ) : atRisk.map((c, i) => (
+            <View key={c.id} style={{
+              flexDirection: 'row', alignItems: 'center', paddingVertical: sp.md,
+              borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+            }}>
+              {/* The dot, the label and the line under the name all used to be
+                  re-derived here from `adherence` and from `lastActive`, which
+                  is a display string. They are the verdict's own now, so this
+                  row cannot say something different from the band it was put
+                  in. `idle` is drawn in the quieter tone on purpose: it is not
+                  a judgement about the client, it is the absence of one. */}
+              <View style={{ width: 6, height: 6, borderRadius: 3, marginEnd: sp.md, backgroundColor: dr.driftFor(c.id)?.status === 'at_risk' ? t.crit : t.warn }} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  {DRIFT_LABEL[dr.driftFor(c.id)!.status]} · {dr.driftFor(c.id)!.reason}
+                </Text>
+              </View>
+            </View>
+          ))}
+
+          {/* Who this section did not consider, said out loud. Drawn whatever
+              the drift read did — the people it names are outside the list for
+              a reason that has nothing to do with how the read went, and a
+              coach comparing this section against their Clients tab is
+              otherwise looking at two different books with no explanation of
+              which. */}
+          {handAddedNote ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{handAddedNote}</Text>
+          ) : null}
+
+          {/* The list above names them and stops. This is the row that does
+              something about it, and it sits directly under the names because
+              that is the second the coach wants it — not three taps away in a
+              hub they had no reason to open.
+
+              Shown whatever the roster read did. On 'error' the list above says
+              nothing was suggested, and nudges.tsx keeps the same three states
+              apart on its own read; withholding the row when the read failed
+              would hide the screen precisely when the coach cannot see who has
+              gone quiet from here either. */}
+          <View style={{ marginTop: sp.md }}>
+            <ListRow icon="bell" title="Quiet Clients"
+              note="Who is breaking their own pattern, and a draft you read and send yourself"
+              onPress={() => router.push('/(trainer)/nudges')} />
+          </View>
+        </Section>
+
+
+        {/* ── how long people stay ───────────────────────────────────────
+            Read from `coaching_relationships` and NOT from the roster. The
+            roster is the people who have not left, so a curve built from it is
+            flat at 100% forever and there is nothing on it that would give
+            that away — see src/ui/coachCohorts.ts.
+
+            Counts first, percentages only where the cohort is big enough. The
+            floor is the console's own `MIN_COHORT_FOR_RATE` rather than a
+            second number, and it is ten — more people than most self-employed
+            coaches sign in a month — so a screen that had only percentages
+            would say "too small" against every row it ever drew. */}
+        <Section>
+          <SectionHead title="How Long People Stay" />
+          {cohortBlock ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{cohortBlock}</Text>
+          ) : cohortRows.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Nobody has started with you yet, so there is no cohort to follow. This fills in on its own as people join and as time passes.
+            </Text>
+          ) : (<>
+            <View style={{ flexDirection: 'row', paddingBottom: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3, flex: 1.4 }}>Started</Text>
+              {MILESTONES.map((m) => (
+                <Text key={m} style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>{m}m</Text>
+              ))}
+            </View>
+            {cohortRows.map((row, i) => (
+              <View key={row.month} style={{
+                flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm,
+                borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+              }}>
+                <View style={{ flex: 1.4 }}>
+                  <Text style={{ ...ty.label, color: t.ink }}>{monthLabelOf(row.month)}</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>{row.size} joined</Text>
+                </View>
+                {row.held.map((h, k) => (
+                  <View key={MILESTONES[k]} style={{ flex: 1, alignItems: 'flex-end' }}>
+                    {/* A dash where the cohort has not reached this milestone.
+                        A zero there would draw as a collapse on the right-hand
+                        side of the table, which is where the eye lands. */}
+                    <Text style={{ ...value(15), color: t.ink }}>{h == null ? '—' : `${h}/${row.size}`}</Text>
+                    {row.retained[k] != null ? (
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>{row.retained[k]}%</Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COHORT_CAVEAT}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{COHORT_FLOOR_NOTE}</Text>
+          </>)}
+        </Section>
+
+
+        {/* ── DELIVERY AND TAKINGS ─────────────────────────────────────────
+            The coach's own month: what they delivered, what was taken, the
+            targets they set against both, and the trend. Third in the review's
+            order, under the clients' outcomes and under who is at risk. */}
+
         {/* ── the hero ─────────────────────────────────────────────────────
             WHICH figure leads is the one thing `delivery` decides here. A coach
             who trains people in the room leads on the sessions they delivered;
@@ -1161,29 +1412,39 @@ export default function TrainerAnalytics() {
 
             Every unknown resolves to the in-person layout, so a coach whose
             roster failed to load, or who has not answered how they coach, gets
-            the screen they have always had. */}
+            the screen they have always had.
+
+            A kit FigureCard now, not the retired `Hero`: the same figure and
+            the same sentence under it, with the period and whose word it is
+            on the card's last line. The ring Hero drew for the revenue goal is
+            not carried over — Your Goals, below, draws that same progress as a
+            bar beside its target, and one goal drawn twice in two shapes is
+            two things to reconcile. */}
         {sessionsLead ? (
-          <Hero
-            label="Sessions Delivered"
-            figure={fig(sessionsMo)}
-            unit={sessionsMo == null ? undefined : 'this month'}
-            note={sessionsMo == null
+          <FigureCard
+            title="Sessions Delivered"
+            note="Payments"
+            onPress={() => router.push('/(trainer)/payments')}
+            figure={sessionsMo == null ? null : num(sessionsMo)}
+            period="This month"
+            source={sessionsMo == null ? undefined : 'From the outcomes you marked'}
+            detail={sessionsMo == null
               ? sessionsUnknownLine(sessionsStatus)
               : revenue != null && sessionFee != null
                 ? (myCur
                     ? `${fig(priced(revenue))} at your ${fig(priced(sessionFee))} session rate. ${DELIVERED_IS_MARKED} Repple does not process this, so it is your own arithmetic and not a payout.`
                     : noCur('there is no unit to price these sessions in'))
                 : `Set a session rate in your profile to see what that is worth. ${DELIVERED_IS_MARKED}`}
-            arc={revenue != null && goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
-            arcLabel="of the revenue goal"
-            onPress={() => router.push('/(trainer)/payments')}
           />
         ) : (
-          <Hero
-            label="Taken This Month"
-            figure={fig(takenOne)}
-            note={takenNote}
+          <FigureCard
+            title="Taken This Month"
+            note="Money"
             onPress={() => router.push('/(trainer)/money')}
+            figure={takenOne}
+            period="This month"
+            source={takenOne == null ? undefined : 'Recorded payments, gross'}
+            detail={takenNote}
           />
         )}
 
@@ -1244,7 +1505,11 @@ export default function TrainerAnalytics() {
 
         {/* ── the shape of the business ──────────────────────────────────── */}
         <Section>
-          <SectionHead title="Roster" note="Leaderboard" onPress={() => router.push('/(trainer)/leaderboard')} />
+          {/* No way onward from this head any more. It opened the Leaderboard,
+              which the review puts LAST on this screen — a ranking of clients
+              against each other is a comparison, not an outcome — and it has
+              its own row at the foot of the page. */}
+          <SectionHead title="Roster" />
           <KpiRow items={[
             { label: 'Clients', value: fig(clients) },
             { label: 'Avg Adherence', value: fig(avgAdh), unit: avgAdh == null ? undefined : '%' },
@@ -1332,58 +1597,6 @@ export default function TrainerAnalytics() {
               </View>
             );
           })}
-        </Section>
-
-
-        {/* ── roster health ──────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Roster Health"
-            note={!rosterWhole ? undefined : avgAdh == null ? 'no check-ins yet' : `${avgAdh}% avg adherence`}
-            onPress={() => router.push('/(trainer)/leaderboard')} />
-          {/* The bar is withheld rather than drawn from what loaded. A DistBar
-              always fills its width, so a split computed over a short roster is
-              rendered as the whole book at whatever proportions the fragment
-              happened to have — the one chart on this screen that cannot show
-              its own incompleteness. Three zeroes would be worse still: an
-              empty bar under "Roster health" reads as a roster in trouble. */}
-          {onTrack == null || watch == null || riskCount == null ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {rosterStatus === 'loading'
-                ? 'Reading your roster…'
-                : rosterStatus === 'partial'
-                  ? 'Your roster came back short, so the split between on-track, watch and at-risk is not drawn — a share of part of your book is not a share of it.'
-                  : 'Your roster could not be read, so the split between on-track, watch and at-risk is not drawn. It is unknown, not empty.'}
-            </Text>
-          ) : (<>
-            {/* Four bands, and the fourth is the one that was missing. See
-                `noRecord` above: without it this bar was drawn over the
-                clients who have check-ins and read as though it were drawn
-                over the book. */}
-            <DistBar segments={[
-              { label: STATUS_LABEL.on_track, value: onTrack, color: t.brand },
-              { label: STATUS_LABEL.watch, value: watch, color: t.warn },
-              { label: STATUS_LABEL.at_risk, value: riskCount, color: t.crit },
-              ...(noRecord ? [{ label: STATUS_LABEL.idle, value: noRecord, color: t.ink3 }] : []),
-            ]} />
-            <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md, flexWrap: 'wrap' }}>
-              {([[STATUS_LABEL.on_track, onTrack, t.brand], [STATUS_LABEL.watch, watch, t.warn], [STATUS_LABEL.at_risk, riskCount, t.crit],
-                 ...(noRecord ? [[STATUS_LABEL.idle, noRecord, t.ink3] as const] : [])] as const).map(([l, v, col]) => (
-                <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {v}</Text>
-                </View>
-              ))}
-            </View>
-            {/* Which measure these four bands are, said out loud, because the
-                At-risk list further down this same screen is a different one.
-                Two measures on one screen is fine; two measures on one screen
-                with nothing saying so is how a coach comes to distrust both. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {noRecord
-                ? `Measured on check-in adherence. ${noRecord === 1 ? 'One client has' : `${noRecord} clients have`} no check-ins at all, so ${noRecord === 1 ? 'they are' : 'they are'} counted as ${STATUS_LABEL.idle.toLowerCase()} rather than as on track — an absence is not a pass. At-risk Clients below is a different measure — each client against their own pattern — and does have something to say about them.`
-                : 'Measured on check-in adherence. At-risk Clients below is a different measure: each client against their own pattern.'}
-            </Text>
-          </>)}
         </Section>
 
 
@@ -1513,162 +1726,40 @@ export default function TrainerAnalytics() {
         </Section>
 
 
-        {/* ── how long people stay ───────────────────────────────────────
-            Read from `coaching_relationships` and NOT from the roster. The
-            roster is the people who have not left, so a curve built from it is
-            flat at 100% forever and there is nothing on it that would give
-            that away — see src/ui/coachCohorts.ts.
+        {/* ── where clients come from ──────────────────────────────────────
+            Fourth and fifth in the review's order: referrals and enquiries,
+            then what the advertising cost. Referrals and Enquiries had no row
+            on this screen at all — one was a tile on the Clients tab and the
+            other was reachable from Ad Spend and from search — so the screen
+            a coach opens to ask "is the business growing" could not take them
+            to either half of the answer. Rows and no figures: each of those
+            screens owns a read this one does not make, and a count copied here
+            would be a second number to keep honest.
 
-            Counts first, percentages only where the cohort is big enough. The
-            floor is the console's own `MIN_COHORT_FOR_RATE` rather than a
-            second number, and it is ten — more people than most self-employed
-            coaches sign in a month — so a screen that had only percentages
-            would say "too small" against every row it ever drew. */}
+            Ad Spend sits under them because it is the same question one step
+            on — what it cost to bring them in. It was reachable ONLY from an
+            Explore search result before it had a row here, which finds it for
+            a coach who already knows the phrase "ad spend" and for nobody
+            else. */}
         <Section>
-          <SectionHead title="How Long People Stay" />
-          {cohortBlock ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{cohortBlock}</Text>
-          ) : cohortRows.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nobody has started with you yet, so there is no cohort to follow. This fills in on its own as people join and as time passes.
-            </Text>
-          ) : (<>
-            <View style={{ flexDirection: 'row', paddingBottom: sp.sm }}>
-              <Text style={{ ...ty.micro, color: t.ink3, flex: 1.4 }}>Started</Text>
-              {MILESTONES.map((m) => (
-                <Text key={m} style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>{m}m</Text>
-              ))}
-            </View>
-            {cohortRows.map((row, i) => (
-              <View key={row.month} style={{
-                flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm,
-                borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-              }}>
-                <View style={{ flex: 1.4 }}>
-                  <Text style={{ ...ty.label, color: t.ink }}>{monthLabelOf(row.month)}</Text>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>{row.size} joined</Text>
-                </View>
-                {row.held.map((h, k) => (
-                  <View key={MILESTONES[k]} style={{ flex: 1, alignItems: 'flex-end' }}>
-                    {/* A dash where the cohort has not reached this milestone.
-                        A zero there would draw as a collapse on the right-hand
-                        side of the table, which is where the eye lands. */}
-                    <Text style={{ ...value(15), color: t.ink }}>{h == null ? '—' : `${h}/${row.size}`}</Text>
-                    {row.retained[k] != null ? (
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>{row.retained[k]}%</Text>
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-            ))}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COHORT_CAVEAT}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{COHORT_FLOOR_NOTE}</Text>
-          </>)}
-        </Section>
-
-
-        {/* ── client value ───────────────────────────────────────────────── */}
-
-        {/* ── at-risk clients ────────────────────────────────────────────── */}
-        <Section>
-          {/* The note said "Low adherence or inactive 2+ days", which was an
-              accurate description of `atRiskClient` and of nothing else in the
-              app. What is measured now is each client against their OWN
-              baseline over 56 days, plus the band for a client there is nothing
-              on record about — see src/lib/clientDrift.ts, and the Clients
-              screen, which has always said it this way. */}
-          {/* ── and the explanation goes UNDER the head, not inside it ──────
-              This sentence was passed as `note`. `SectionHead` lays title and
-              note out as a two-child `space-between` row with no gap and no
-              shrink on either — the slot is for "Leaderboard ›" or "Last 90
-              days", three words at most. Two sentences in it rendered on a
-              device as "AT-RISK CLIENTSWell below their own rate over the last
-              14 days. …" — the title and the note touching with no space
-              between them, the first line running off the right edge of the
-              phone, and the remainder wrapping to a centred second line under
-              the whole row. Seen on an iPhone 17 Pro at the default text size,
-              so it is not an accessibility-size edge case.
-
-              Every other explanatory sentence on this screen is a caption
-              beneath its head; this one now is too. */}
-          <SectionHead title="At-risk Clients" />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>
-            {bandNote('at_risk')} Plus anyone there is nothing on record for.
+          <SectionHead title="Where Clients Come From" />
+          <ListRow icon="people" title="Who Brings You Clients"
+            note="Clients whose code brought somebody in, and how many started training"
+            onPress={() => router.push('/(trainer)/referrals')} />
+          <ListRow icon="message" title="Enquiries"
+            note="People who asked about coaching without joining, and who has waited longest"
+            onPress={() => router.push('/(trainer)/leads')} />
+          <ListRow icon="trending" title="Ad Spend"
+            note="What your ads cost, and what they brought in"
+            onPress={() => router.push('/(trainer)/ad-spend')} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {sessionFee == null
+              ? 'Set a session rate in your profile to see what a new client is worth.'
+              : myCur
+                ? `Every new client at ${fig(priced(sessionFee))}/session adds about ${fig(priced(sessionFee * 4))}/mo.`
+                : noCur('what a new client is worth cannot be priced here')}
           </Text>
-          {/* Four renders, and the first three are the ones that were missing.
-              "Everyone is on track" is a claim about every client the coach
-              has: it may be made only over a whole roster AND a training record
-              that came back. Before, an unread record produced an empty filter
-              and that sentence. */}
-          {dr.error ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              Their training records could not be read, so who is drifting is unknown. This is not a clean bill of health for your book.
-            </Text>
-          ) : atRisk === null ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {rosterStatus === 'loading' || dr.drift === null
-                ? 'Reading who has stopped training…'
-                : !rosterWhole
-                  ? 'Your roster did not come back whole, so who is drifting cannot be worked out — this is not a clean bill of health for your book.'
-                  /* The truncated read gets its own sentence, and it is the
-                     provider's — `dr.note`. A read that came back at the row
-                     ceiling is not a roster that came back short, and sending a
-                     coach off to their Clients tab would send them after a
-                     problem that is not there. Said second because a short
-                     roster is the more fundamental of the two and is the one
-                     they can do something about. */
-                  : (dr.note ?? 'More activity is on record than one request returns, so who is drifting cannot be worked out from it — this is not a clean bill of health for your book.')}
-            </Text>
-          ) : atRisk.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Everyone is holding their own pattern.</Text>
-          ) : atRisk.map((c, i) => (
-            <View key={c.id} style={{
-              flexDirection: 'row', alignItems: 'center', paddingVertical: sp.md,
-              borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-            }}>
-              {/* The dot, the label and the line under the name all used to be
-                  re-derived here from `adherence` and from `lastActive`, which
-                  is a display string. They are the verdict's own now, so this
-                  row cannot say something different from the band it was put
-                  in. `idle` is drawn in the quieter tone on purpose: it is not
-                  a judgement about the client, it is the absence of one. */}
-              <View style={{ width: 6, height: 6, borderRadius: 3, marginEnd: sp.md, backgroundColor: dr.driftFor(c.id)?.status === 'at_risk' ? t.crit : t.warn }} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                  {DRIFT_LABEL[dr.driftFor(c.id)!.status]} · {dr.driftFor(c.id)!.reason}
-                </Text>
-              </View>
-            </View>
-          ))}
-
-          {/* Who this section did not consider, said out loud. Drawn whatever
-              the drift read did — the people it names are outside the list for
-              a reason that has nothing to do with how the read went, and a
-              coach comparing this section against their Clients tab is
-              otherwise looking at two different books with no explanation of
-              which. */}
-          {handAddedNote ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{handAddedNote}</Text>
-          ) : null}
-
-          {/* The list above names them and stops. This is the row that does
-              something about it, and it sits directly under the names because
-              that is the second the coach wants it — not three taps away in a
-              hub they had no reason to open.
-
-              Shown whatever the roster read did. On 'error' the list above says
-              nothing was suggested, and nudges.tsx keeps the same three states
-              apart on its own read; withholding the row when the read failed
-              would hide the screen precisely when the coach cannot see who has
-              gone quiet from here either. */}
-          <View style={{ marginTop: sp.md }}>
-            <ListRow icon="bell" title="Quiet Clients"
-              note="Who is breaking their own pattern, and a draft you read and send yourself"
-              onPress={() => router.push('/(trainer)/nudges')} />
-          </View>
         </Section>
-
 
         {/* ── AI digest ──────────────────────────────────────────────────── */}
         <Section>
@@ -1732,23 +1823,20 @@ export default function TrainerAnalytics() {
             note="A CSV of the figures above and every month you have recorded"
             onPress={() => { void exportAnalytics(); }} />
           <ListRow icon="chart" title="Payments"
+            note="Who bought what, and the price list they buy from"
             onPress={() => router.push('/(trainer)/payments')} />
-          {/* Beside Payments because it is the other half of the same sum —
-              what came in, and what was spent to bring it in. Not a screen this
-              change added: ad-spend.tsx was reachable ONLY from an Explore
-              search result, which finds it for a coach who already knows the
-              phrase "ad spend" and for nobody else. The screen a coach is
-              standing on when they wonder what marketing cost them is this one. */}
-          <ListRow icon="trending" title="Ad Spend"
-            note="What your ads cost, and what they brought in"
-            onPress={() => router.push('/(trainer)/ad-spend')} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            {sessionFee == null
-              ? 'Set a session rate in your profile to see what a new client is worth.'
-              : myCur
-                ? `Every new client at ${fig(priced(sessionFee))}/session adds about ${fig(priced(sessionFee * 4))}/mo.`
-                : noCur('what a new client is worth cannot be priced here')}
-          </Text>
+        </Section>
+
+        {/* ── and the comparison, last ─────────────────────────────────────
+            The review's sixth item. A leaderboard ranks clients against each
+            other, which is motivating for them and says nothing about whether
+            any of them is getting what they came for — so it closes the page
+            rather than heading the Roster section, where it used to be the
+            first way onward a coach met. */}
+        <Section>
+          <ListRow icon="trophy" title="Leaderboard"
+            note="Your clients ranked by consistency — a comparison, not an outcome"
+            onPress={() => router.push('/(trainer)/leaderboard')} />
         </Section>
 
       </ScrollView>

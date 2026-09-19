@@ -118,7 +118,7 @@ import { useTheme } from '../../src/ui/components';
 // The month window's instant, recomputed at midnight, on foreground and on
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow } from '../../src/ui/today';
-import { Rule, Section, SectionHead, PageHead, Notice, Flag, ListRow, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, ListRow, PartialRead, fig, FigureCard } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/theme/scale';
 import { minorMoney, wholeMoney, type Taken, type TakenRow } from '../../src/lib/coachMoney';
 import { takingsStrands, TAKINGS_IS_GROSS } from '../../src/lib/coachRevenue';
@@ -709,9 +709,9 @@ export default function CoachMoney() {
         <PageHead title="Payments" />
 
         {/* ── THE FIGURE ─────────────────────────────────────────────────
-            The board's hero: an eyebrow, one big figure, the movement against
-            last month in green to its right, and "This Month" under it. The
-            eyebrow is "Total Taken" and not the board's "Total Earnings",
+            The board's hero: a head, one big figure, the movement against
+            last month under it, and "This Month" under that. The
+            head is "Total Taken" and not the board's "Total Earnings",
             because this app has never been told a coach's earnings — the
             figure is what clients were CHARGED, gross, before Stripe's fee
             and the platform's, plus what the coach recorded by hand — and
@@ -721,47 +721,46 @@ export default function CoachMoney() {
             One figure per currency, never one figure over all of them; a dash
             and the reason where `ledger()` withholds the total; and the
             delta only where both months are whole — see `deltaFor`. */}
-        <Section>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Total Taken</Text>
-          {sales.status === 'partial' || renewals.status === 'partial' || receipts.status === 'partial' ? (
+        {/* The kit's FigureCard, which is the review's "metric summary": the
+            head, the figure, its movement, the period. Three things moved
+            with it. The truncation notice sits OVER the card instead of inside
+            it — it is a card itself, and it is about every figure below. The
+            movement is UNDER its figure rather than to its right, so neither
+            "AED 12,480.00" nor "+12% against August" gives up width to the
+            other at any text size. And the green is the 6pt mark beside the
+            movement, not the ink of it: scale.ts keeps colour off text, and
+            the sign already says which way the month went. */}
+        {sales.status === 'partial' || renewals.status === 'partial' || receipts.status === 'partial' ? (
+          <View style={{ marginTop: sp.md }}>
             <PartialRead what="payments" onPress={load} />
-          ) : null}
-          {!range ? (<>
-            <Text style={{ ...ty.hero, ...numeric, color: t.ink, marginTop: sp.sm }}>{fig(null)}</Text>
-            <Flag style={{ marginTop: sp.sm }}>This month could not be read as two dates, so no figure is stated. That is not a statement that nothing was taken.</Flag>
-          </>) : !monthIn.total ? (<>
-            <Text style={{ ...ty.hero, ...numeric, color: t.ink, marginTop: sp.sm }}>{fig(null)}</Text>
-            <Flag style={{ marginTop: sp.sm }}>{monthIn.reason}</Flag>
-          </>) : !monthIn.total.pots.length ? (<>
-            <Text style={{ ...ty.hero, ...numeric, color: t.ink, marginTop: sp.sm }}>{fig(null)}</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{ledgerEmptyLine('in', monthIn.status)}</Text>
-          </>) : monthIn.total.pots.map((p) => {
+          </View>
+        ) : null}
+        <FigureCard title="Total Taken" period="This Month"
+          /* One figure per currency, each its own spoken sentence. With no
+             pots there is no `figures`, and the card draws the one dash. */
+          figures={range && monthIn.total && monthIn.total.pots.length ? monthIn.total.pots.map((p) => {
             const pct = deltaFor(p.currency);
-            const sign = deltaSign(pct, 0);
-            // `since: null` is a decision, not an omission: the caption under
-            // the movement names the month it is measured from.
+            // `since: null` is a decision, not an omission: the sentence
+            // names the month it is measured from itself.
             const moved = pct == null ? null : deltaLabel(pct, { since: null, unit: '%', decimals: 0 });
-            return (
-              /* Wraps rather than shrinks: a long figure — "AED 12,480.00" at
-                 hero size, or any figure at a large text size — pushes the
-                 movement onto the next line instead of squeezing the money. */
-              <View key={p.currency} accessible
-                accessibilityLabel={`${minorMoney(p.minorUnits, p.currency) ?? 'not denominated'}, ${p.count} ${plural(p.count, 'payment', 'payments')} in ${p.currency} in ${period.label}${moved ? `. ${moved} against ${prior.label}` : ''}`}
-                style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', columnGap: sp.md, marginTop: sp.sm }}>
-                <Text style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 0 }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
-                {moved ? (
-                  <View style={{ alignItems: 'flex-end', paddingBottom: 6 }}>
-                    {/* Green for up, as the board draws it. Down is plain ink
-                        and not the alarm colour: a quieter month is a fact
-                        about the month, not a fault on the screen. */}
-                    <Text style={{ ...ty.head, ...numeric, color: sign === '+' ? t.brand : sign === '' ? t.ink3 : t.ink2 }}>{moved}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Against {prior.label}</Text>
-                  </View>
-                ) : null}
-              </View>
-            );
-          })}
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>This Month</Text>
+            return {
+              key: p.currency,
+              figure: minorMoney(p.minorUnits, p.currency),
+              comparison: moved ? `${moved} against ${prior.label}` : undefined,
+              // Marked for up, as the board draws it. Down takes the quiet
+              // mark and not the alarm colour: a quieter month is a fact
+              // about the month, not a fault on the screen.
+              tone: deltaSign(pct, 0) === '+' ? t.brand : undefined,
+              spoken: `${minorMoney(p.minorUnits, p.currency) ?? 'not denominated'}, ${p.count} ${plural(p.count, 'payment', 'payments')} in ${p.currency} in ${period.label}${moved ? `. ${moved} against ${prior.label}` : ''}`,
+            };
+          }) : undefined}
+          figure={null}
+          detail={range && monthIn.total && !monthIn.total.pots.length ? ledgerEmptyLine('in', monthIn.status) : undefined}>
+          {!range ? (
+            <Flag style={{ marginTop: sp.sm }}>This month could not be read as two dates, so no figure is stated. That is not a statement that nothing was taken.</Flag>
+          ) : !monthIn.total ? (
+            <Flag style={{ marginTop: sp.sm }}>{monthIn.reason}</Flag>
+          ) : null}
           {monthIn.total && monthIn.total.pots.length > 1 ? (
             <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
               These are separate amounts of money and are deliberately not added together.
@@ -770,7 +769,7 @@ export default function CoachMoney() {
           {monthIn.total ? missingNote(monthIn.total) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{TAKINGS_IS_GROSS}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PERIOD_NOTE}</Text>
-        </Section>
+        </FigureCard>
 
         {/* ── RECENT PAYMENTS ────────────────────────────────────────────
             The board's list: a round avatar, the client, the amount at the
@@ -841,91 +840,16 @@ export default function CoachMoney() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{STRIPE_AUTHORITY_NOTE}</Text>
         </Section>
 
-        {/* ── THE HALF STRIPE NEVER SAW ──────────────────────────────────
-            For most self-employed coaches this is the bigger half. It is drawn
-            as its own section as well as being inside the two ledgers above,
-            because a coach reading a total needs to see how much of it is their
-            own word rather than Stripe's — the two are different KINDS of fact
-            and this screen's whole design is about not blurring those. */}
-        <Section>
-          <SectionHead title="Recorded by You" note="Cash, transfers and anything taken at a gym" />
-          {receipts.status === 'partial' ? (
-            <PartialRead what="recorded payments" shown={receipts.rows.length} onPress={load} />
-          ) : null}
-          {receipts.status !== 'ready' ? (
-            <Flag>{receiptsEmptyLine(receipts.status)}</Flag>
-          ) : recordedByHand.pots.length ? (
-            <View>
-              {recordedByHand.pots.map((p) => potRow(
-                p.currency,
-                `${p.count} ${plural(p.count, 'payment', 'payments')} in ${p.currency}`,
-                minorMoney(p.minorUnits, p.currency),
-              ))}
-              {recordedByHand.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{receiptsEmptyLine(receipts.status)}</Text>
-          )}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
-          <ListRow icon="grid" title="Cash and Transfers"
-            note="Record a payment that did not go through this app"
-            onPress={() => router.push('/(trainer)/receipts')} />
-        </Section>
-
-        {/* ── WHAT A GYM HAS PAID THEM ───────────────────────────────────
-            The third kind of money that reaches a coach, and the only one this
-            app had never shown them. It sits here, beside the half Stripe never
-            saw, because both answer "money that came in that Repple did not
-            take" — and it is a SECTION rather than a strand for the reason in
-            src/ui/PaidRuns.tsx: a settlement is a gym's word that it handed
-            money over, and the ledger above is Stripe's record of a card being
-            charged. Nothing adds the two.
-
-            For a coach with no gym this draws one sentence saying so. That is
-            the common case today — every payroll table in this database is
-            empty and all seven live coaches are alone in their own tenant — and
-            an empty list under this heading would read as a gym that has paid
-            them nothing. */}
-        <PaidRuns paid={paid} />
-
-        <Section>
-          <ListRow icon="grid" title="Payments & Packages"
-            note="Who bought what, who is subscribed, and the price list they buy from"
-            onPress={() => router.push('/(trainer)/payments')} />
-          <ListRow icon="grid" title="Invoices"
-            /* `isWhole`, not `!== 'error'`. This is a count of the coach's
-               own gapless document sequence and an assertion that they have
-               issued none, and neither survives the other two statuses.
-               `issued` starts at `{ count: 0, status: 'loading' }` and the
-               read runs from `useFocusEffect`, so the third arm — "Issue a
-               document…" — was what a coach with forty invoices read every
-               single time they opened this screen. And `fetchMyInvoices` ends
-               `.limit(capLimit())`, so a truncated read arrives as 'partial'
-               and printed "1000 issued" as a fact. app/(trainer)/invoices.tsx
-               gates the same figure on `isWhole(status)` and says why. */
-            note={issued.status === 'error'
-              ? 'Your issued documents could not be counted just now'
-              : !isWhole(issued.status)
-                ? 'Your own statement of a charge, never a payment receipt'
-                : issued.count > 0
-                  ? `${issued.count} issued — your own statement of a charge, never a payment receipt`
-                  : 'Issue a document for what somebody paid you, including cash and transfers'}
-            onPress={() => router.push('/(trainer)/invoices')} />
-          {/* The document this whole screen is the working copy of.
-              app/(trainer)/statement.tsx existed and was reachable from the
-              profile hub and from search, and from nowhere on the Money screen
-              — so a coach standing on the page that holds every figure it is
-              built from had no way to get to it, and the one moment they want
-              it is the moment they are looking at their takings. */}
-          <ListRow icon="chart" title="Statement of Record"
-            note="What this app recorded in a year or a quarter, to hand to an accountant — never a tax return"
-            onPress={() => router.push('/(trainer)/statement')} />
-        </Section>
-
+        {/* ── THE ORDER FROM HERE DOWN ───────────────────────────────────
+            The data-layout review's, and it is the order the money moves in:
+            what was charged and what is still owed (coming in), what reached
+            the coach (Stripe's payouts, then their own cash and transfers,
+            then a gym's settlements — three sections, never one figure), what
+            goes out, what each client has paid, and the documents last. The
+            statement and the invoice list are where a coach goes AFTER the
+            figures, so they close the page instead of interrupting the two
+            ledgers half way down. Nothing was added, removed or re-worded by
+            the move, and no section reads another's figure. */}
 
         {/* ── RECORDED, NOT COLLECTED ────────────────────────────────────── */}
 
@@ -995,6 +919,170 @@ export default function CoachMoney() {
             onPress={() => router.push('/(trainer)/calendar')} />
         </Section>
 
+
+        {/* ── WHERE IT LANDS ─────────────────────────────────────────────── */}
+
+        {/* ── WHAT ACTUALLY LANDED ───────────────────────────────────────
+            The figure a coach argues with. Every number above this is GROSS —
+            what a client was charged — and the gap between "AED 4,800 taken"
+            and "AED 4,281 in my account" is the gap a coach fills with a
+            suspicion about the platform. Part 194 mirrors Stripe's payout
+            events so the question has an answer.
+
+            It is its own section and it is NEVER subtracted from anything
+            above. A payout is a BALANCE reaching a bank — many charges at once,
+            less what Stripe and Repple took and anything refunded, on Stripe's
+            own schedule — so "taken minus landed equals fees" is wrong on all
+            three numbers. `PAYOUT_IS_NOT_A_SALE` is that sentence on the page,
+            and this is the same discipline `NO_NET_NOTE` keeps at the top. */}
+        <Section>
+          <SectionHead title="What Landed in Your Bank" note="Mirrored from Stripe as each payout happens" />
+          {payouts.status === 'partial' ? (
+            <PartialRead what="payouts" shown={payouts.rows.length} onPress={load} />
+          ) : null}
+          {landed.withheld ? (
+            <Flag>{landed.withheld}</Flag>
+          ) : landed.arrived && landed.arrived.pots.length ? (
+            <View>
+              {landed.arrived.pots.map((p) => potRow(
+                p.currency,
+                `${p.count} ${plural(p.count, 'payout', 'payouts')} in ${p.currency}`,
+                minorMoney(p.minorUnits, p.currency),
+              ))}
+              {landed.arrived.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{payoutsEmptyLine(payouts.status)}</Text>
+          )}
+
+          {/* A payout that bounced is a coach who is not being paid and does
+              not know it. It is the one row on this screen that has to be acted
+              on, so it is drawn above the ones that are merely on their way. */}
+          {landed.failed ? (
+            <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
+              {landed.failed} {plural(landed.failed, 'payout did not reach your bank', 'payouts did not reach your bank')}. Until that is sorted out at Stripe, money stays in your Stripe balance instead of arriving.
+            </Flag>
+          ) : null}
+          {payouts.rows.filter((p) => payoutFailureLine(p)).slice(0, 3).map((p) => (
+            <Text key={p.id} style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{payoutFailureLine(p)}</Text>
+          ))}
+          {landed.onTheWay ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+              {landed.onTheWay} {plural(landed.onTheWay, 'payout is', 'payouts are')} on the way and {plural(landed.onTheWay, 'is', 'are')} in no figure above. Money in transit is not money in a bank account.
+            </Flag>
+          ) : null}
+          {landed.unknown ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+              {landed.unknown} {plural(landed.unknown, 'payout carries a state', 'payouts carry a state')} this app does not recognise, so {plural(landed.unknown, 'it is', 'they are')} counted and not added to anything. Your Stripe dashboard says what happened to {plural(landed.unknown, 'it', 'them')}.
+            </Flag>
+          ) : null}
+
+          {/* The three most recent, so the section is a record rather than a
+              single figure. Stripe's own status word is resolved through
+              `payoutStateLabel`, which answers "Not Stated" for anything it
+              does not know rather than assuming the money arrived. */}
+          {payouts.status === 'ready' && payouts.rows.length ? (
+            <View style={{ marginTop: sp.md }}>
+              {payouts.rows.slice(0, 3).map((p) => (
+                <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>
+                    {payoutStateLabel(p.status)}{p.arrivalOn ? ` · ${p.arrivalOn}` : ''}
+                  </Text>
+                  <Text style={{ ...ty.label, ...numeric, color: t.ink2 }}>
+                    {minorMoney(p.amountCents, p.currency) ?? 'not denominated'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{PAYOUT_IS_NOT_A_SALE}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAYOUT_STRIPE_IS_THE_RECORD}</Text>
+        </Section>
+
+        <Section>
+          <SectionHead title="Where It Lands" />
+          {/* Four sentences, and there used to be three. 'error' was branched
+              and 'loading' was not, so for the length of the read `acct` was
+              null and this fell to the last arm — a coach opening the screen
+              was told, in the app's own confident type, that they have no
+              payout account. Loading, failed and empty are three different
+              sentences; src/lib/payoutAccount.ts resolves which. */}
+          {payoutStage(connect.acct, connect.read) === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your payout account…</Text>
+          ) : payoutStage(connect.acct, connect.read) === 'unreadable' ? (
+            <Flag>
+              Your payout account could not be read. This is not a statement that you have none — if you had set one up it is still set up.
+            </Flag>
+          ) : payoutStage(connect.acct, connect.read) === 'active' ? (
+            <Text style={{ ...ty.label, color: t.ink2 }}>
+              Your Stripe payout account is active, so a client can be charged. When each payment reaches your bank, and what Stripe took for it, are things only Stripe knows.
+            </Text>
+          ) : payoutStage(connect.acct, connect.read) === 'started' ? (
+            <Text style={{ ...ty.label, color: t.ink2 }}>
+              Your Stripe payout account is started but not finished, so nobody can be charged yet. Finish it on the Payments screen.
+            </Text>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              You have no Stripe payout account, so nothing can be taken through Repple. Anything a client pays you in cash or by transfer never appears on this screen.
+            </Text>
+          )}
+        </Section>
+
+        {/* ── THE HALF STRIPE NEVER SAW ──────────────────────────────────
+            For most self-employed coaches this is the bigger half. It is drawn
+            as its own section as well as being inside the two ledgers above,
+            because a coach reading a total needs to see how much of it is their
+            own word rather than Stripe's — the two are different KINDS of fact
+            and this screen's whole design is about not blurring those. */}
+        <Section>
+          <SectionHead title="Recorded by You" note="Cash, transfers and anything taken at a gym" />
+          {receipts.status === 'partial' ? (
+            <PartialRead what="recorded payments" shown={receipts.rows.length} onPress={load} />
+          ) : null}
+          {receipts.status !== 'ready' ? (
+            <Flag>{receiptsEmptyLine(receipts.status)}</Flag>
+          ) : recordedByHand.pots.length ? (
+            <View>
+              {recordedByHand.pots.map((p) => potRow(
+                p.currency,
+                `${p.count} ${plural(p.count, 'payment', 'payments')} in ${p.currency}`,
+                minorMoney(p.minorUnits, p.currency),
+              ))}
+              {recordedByHand.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{receiptsEmptyLine(receipts.status)}</Text>
+          )}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
+          <ListRow icon="grid" title="Cash and Transfers"
+            note="Record a payment that did not go through this app"
+            onPress={() => router.push('/(trainer)/receipts')} />
+        </Section>
+
+        {/* ── WHAT A GYM HAS PAID THEM ───────────────────────────────────
+            The third kind of money that reaches a coach, and the only one this
+            app had never shown them. It sits here, beside the half Stripe never
+            saw, because both answer "money that came in that Repple did not
+            take" — and it is a SECTION rather than a strand for the reason in
+            src/ui/PaidRuns.tsx: a settlement is a gym's word that it handed
+            money over, and the ledger above is Stripe's record of a card being
+            charged. Nothing adds the two.
+
+            For a coach with no gym this draws one sentence saying so. That is
+            the common case today — every payroll table in this database is
+            empty and all seven live coaches are alone in their own tenant — and
+            an empty list under this heading would read as a gym that has paid
+            them nothing. */}
+        <PaidRuns paid={paid} />
 
         {/* ── GOING OUT ──────────────────────────────────────────────────── */}
 
@@ -1134,6 +1222,108 @@ export default function CoachMoney() {
         </Section>
 
 
+        {/* ── WHICH CHANNELS WORKED ──────────────────────────────────────── */}
+        {/* The figures above say what the coach's advertising COST. They say
+            nothing about whether any of it worked, and that is the question a
+            coach opens a money screen holding.
+
+            Every function drawn here already existed and is untouched:
+            src/lib/codeReturn.ts has answered it per code since part 98 —
+            what each cost, who came in on it, what they paid, and
+            enoughToTell(), which declines to rank two channels until the split
+            could be told from a coin toss. All of it was reachable only by
+            opening the Add a Client sheet on the Clients screen, three taps
+            from here and behind a button whose label is about adding somebody.
+            Nothing about this section is new arithmetic except the roll-up in
+            src/lib/coachChannels.ts, which is the one sentence that set could
+            not produce: what the whole of it cost against what the whole of it
+            returned, withheld the moment either side has a hole in it.
+
+            It is read-only on purpose. The spend field per code stays on the
+            Clients screen, beside the figures it feeds — app/(trainer)/ad-spend.tsx
+            gives the reason and it applies twice over here: two places to type
+            the same number is how they come to disagree. */}
+        <Section>
+          <SectionHead title="Which Codes Worked" note="Named codes only" />
+
+          {/* First, before any figure. Every number below is last touch, and a
+              coach about to move a budget on them is owed that sentence before
+              they read them rather than under them. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{LAST_TOUCH_NOTE}</Text>
+
+          {codes.status === 'error' ? (
+            <Flag>{codes.reason ?? channelEmptyLine('error')}</Flag>
+          ) : codes.status === 'partial' ? (
+            <PartialRead what="join codes" shown={codes.rows.length} onPress={load} />
+          ) : !namedCodes.length ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{channelEmptyLine(codes.status)}</Text>
+          ) : (
+            <View>
+              {/* The verdict, and it is a refusal far more often than it is a
+                  ranking. A coach with twelve clients told "Instagram is your
+                  best channel" off a four-versus-one split has been handed a
+                  coin toss dressed as a finding, and they spend real money on
+                  it. enoughToTell() is what declines to say it. */}
+              {codeTell.rankable ? (
+                <Notice tone={t.good} kicker="Enough to tell"
+                  title={`${codeTell.best.label} is ahead of ${codeTell.runnerUp.label}`}
+                  note={codeTell.note} />
+              ) : (
+                <Notice tone={t.s3} kicker="Not enough yet"
+                  title="Too early to say which is working" note={codeTell.note} />
+              )}
+
+              {/* The whole of it against the whole of it, or the reason there
+                  is no such figure. `against` refuses on an unrecorded cost
+                  before anything else, because that is the hole that makes a
+                  coach's advertising look cheaper than it was — the direction
+                  that loses them money. */}
+              <Text style={{ ...ty.label, color: against.statable ? t.ink2 : t.ink3, marginBottom: sp.sm }}>
+                {againstLine(against)}
+              </Text>
+              {channelReachLine(codes.status, channels) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                  {channelReachLine(codes.status, channels)}
+                </Text>
+              ) : null}
+              {channels.unnamed > 0 ? (
+                <Flag tone={t.ink3} style={{ marginBottom: sp.md }}>
+                  Your main code is left out of everything in this section. It is not a channel — it collects everybody no named code claims, including codes you have since replaced — so setting what it earned against what it cost would compare real money with nothing.
+                </Flag>
+              ) : null}
+
+              {namedCodes.map((c) => {
+                const fgs = codeFigures(codes.status, c);
+                const line = returnLine(codes.status, c);
+                return (
+                  <View key={c.id ?? c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(codes.status, c)}</Text>
+                    <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+                      {codeFig('Spent', fgs.spent)}
+                      {codeFig('Clients', fgs.clients)}
+                      {codeFig('They paid', fgs.revenue)}
+                      {codeFig('Each cost', fgs.perClient)}
+                    </View>
+                    {line ? (
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{line}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Both ways out, because the two halves of a missing figure are
+              fixed in two different places. A cost nobody has typed is typed on
+              the Clients screen; a cost that should have arrived on its own is
+              an ad account that is not connected. */}
+          <ListRow icon="people" title="Clients"
+            note="Where you make a code, and where you record what it cost you"
+            onPress={() => router.push('/(trainer)/dashboard')} />
+        </Section>
+
+
         {/* ── WHAT EACH CLIENT HAS PAID ──────────────────────────────────
             The one figure this app could not produce. Three lists existed —
             sales, renewals, cash — on three screens, and no per-person total
@@ -1249,220 +1439,40 @@ export default function CoachMoney() {
         </Section>
 
 
-        {/* ── WHICH CHANNELS WORKED ──────────────────────────────────────── */}
-        {/* The figures above say what the coach's advertising COST. They say
-            nothing about whether any of it worked, and that is the question a
-            coach opens a money screen holding.
-
-            Every function drawn here already existed and is untouched:
-            src/lib/codeReturn.ts has answered it per code since part 98 —
-            what each cost, who came in on it, what they paid, and
-            enoughToTell(), which declines to rank two channels until the split
-            could be told from a coin toss. All of it was reachable only by
-            opening the Add a Client sheet on the Clients screen, three taps
-            from here and behind a button whose label is about adding somebody.
-            Nothing about this section is new arithmetic except the roll-up in
-            src/lib/coachChannels.ts, which is the one sentence that set could
-            not produce: what the whole of it cost against what the whole of it
-            returned, withheld the moment either side has a hole in it.
-
-            It is read-only on purpose. The spend field per code stays on the
-            Clients screen, beside the figures it feeds — app/(trainer)/ad-spend.tsx
-            gives the reason and it applies twice over here: two places to type
-            the same number is how they come to disagree. */}
         <Section>
-          <SectionHead title="Which Codes Worked" note="Named codes only" />
-
-          {/* First, before any figure. Every number below is last touch, and a
-              coach about to move a budget on them is owed that sentence before
-              they read them rather than under them. */}
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{LAST_TOUCH_NOTE}</Text>
-
-          {codes.status === 'error' ? (
-            <Flag>{codes.reason ?? channelEmptyLine('error')}</Flag>
-          ) : codes.status === 'partial' ? (
-            <PartialRead what="join codes" shown={codes.rows.length} onPress={load} />
-          ) : !namedCodes.length ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{channelEmptyLine(codes.status)}</Text>
-          ) : (
-            <View>
-              {/* The verdict, and it is a refusal far more often than it is a
-                  ranking. A coach with twelve clients told "Instagram is your
-                  best channel" off a four-versus-one split has been handed a
-                  coin toss dressed as a finding, and they spend real money on
-                  it. enoughToTell() is what declines to say it. */}
-              {codeTell.rankable ? (
-                <Notice tone={t.good} kicker="Enough to tell"
-                  title={`${codeTell.best.label} is ahead of ${codeTell.runnerUp.label}`}
-                  note={codeTell.note} />
-              ) : (
-                <Notice tone={t.s3} kicker="Not enough yet"
-                  title="Too early to say which is working" note={codeTell.note} />
-              )}
-
-              {/* The whole of it against the whole of it, or the reason there
-                  is no such figure. `against` refuses on an unrecorded cost
-                  before anything else, because that is the hole that makes a
-                  coach's advertising look cheaper than it was — the direction
-                  that loses them money. */}
-              <Text style={{ ...ty.label, color: against.statable ? t.ink2 : t.ink3, marginBottom: sp.sm }}>
-                {againstLine(against)}
-              </Text>
-              {channelReachLine(codes.status, channels) ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                  {channelReachLine(codes.status, channels)}
-                </Text>
-              ) : null}
-              {channels.unnamed > 0 ? (
-                <Flag tone={t.ink3} style={{ marginBottom: sp.md }}>
-                  Your main code is left out of everything in this section. It is not a channel — it collects everybody no named code claims, including codes you have since replaced — so setting what it earned against what it cost would compare real money with nothing.
-                </Flag>
-              ) : null}
-
-              {namedCodes.map((c) => {
-                const fgs = codeFigures(codes.status, c);
-                const line = returnLine(codes.status, c);
-                return (
-                  <View key={c.id ?? c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(codes.status, c)}</Text>
-                    <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
-                      {codeFig('Spent', fgs.spent)}
-                      {codeFig('Clients', fgs.clients)}
-                      {codeFig('They paid', fgs.revenue)}
-                      {codeFig('Each cost', fgs.perClient)}
-                    </View>
-                    {line ? (
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{line}</Text>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-
-          {/* Both ways out, because the two halves of a missing figure are
-              fixed in two different places. A cost nobody has typed is typed on
-              the Clients screen; a cost that should have arrived on its own is
-              an ad account that is not connected. */}
-          <ListRow icon="people" title="Clients"
-            note="Where you make a code, and where you record what it cost you"
-            onPress={() => router.push('/(trainer)/dashboard')} />
+          <ListRow icon="grid" title="Payments & Packages"
+            note="Who bought what, who is subscribed, and the price list they buy from"
+            onPress={() => router.push('/(trainer)/payments')} />
+          <ListRow icon="grid" title="Invoices"
+            /* `isWhole`, not `!== 'error'`. This is a count of the coach's
+               own gapless document sequence and an assertion that they have
+               issued none, and neither survives the other two statuses.
+               `issued` starts at `{ count: 0, status: 'loading' }` and the
+               read runs from `useFocusEffect`, so the third arm — "Issue a
+               document…" — was what a coach with forty invoices read every
+               single time they opened this screen. And `fetchMyInvoices` ends
+               `.limit(capLimit())`, so a truncated read arrives as 'partial'
+               and printed "1000 issued" as a fact. app/(trainer)/invoices.tsx
+               gates the same figure on `isWhole(status)` and says why. */
+            note={issued.status === 'error'
+              ? 'Your issued documents could not be counted just now'
+              : !isWhole(issued.status)
+                ? 'Your own statement of a charge, never a payment receipt'
+                : issued.count > 0
+                  ? `${issued.count} issued — your own statement of a charge, never a payment receipt`
+                  : 'Issue a document for what somebody paid you, including cash and transfers'}
+            onPress={() => router.push('/(trainer)/invoices')} />
+          {/* The document this whole screen is the working copy of.
+              app/(trainer)/statement.tsx existed and was reachable from the
+              profile hub and from search, and from nowhere on the Money screen
+              — so a coach standing on the page that holds every figure it is
+              built from had no way to get to it, and the one moment they want
+              it is the moment they are looking at their takings. */}
+          <ListRow icon="chart" title="Statement of Record"
+            note="What this app recorded in a year or a quarter, to hand to an accountant — never a tax return"
+            onPress={() => router.push('/(trainer)/statement')} />
         </Section>
 
-
-        {/* ── WHERE IT LANDS ─────────────────────────────────────────────── */}
-
-        {/* ── WHAT ACTUALLY LANDED ───────────────────────────────────────
-            The figure a coach argues with. Every number above this is GROSS —
-            what a client was charged — and the gap between "AED 4,800 taken"
-            and "AED 4,281 in my account" is the gap a coach fills with a
-            suspicion about the platform. Part 194 mirrors Stripe's payout
-            events so the question has an answer.
-
-            It is its own section and it is NEVER subtracted from anything
-            above. A payout is a BALANCE reaching a bank — many charges at once,
-            less what Stripe and Repple took and anything refunded, on Stripe's
-            own schedule — so "taken minus landed equals fees" is wrong on all
-            three numbers. `PAYOUT_IS_NOT_A_SALE` is that sentence on the page,
-            and this is the same discipline `NO_NET_NOTE` keeps at the top. */}
-        <Section>
-          <SectionHead title="What Landed in Your Bank" note="Mirrored from Stripe as each payout happens" />
-          {payouts.status === 'partial' ? (
-            <PartialRead what="payouts" shown={payouts.rows.length} onPress={load} />
-          ) : null}
-          {landed.withheld ? (
-            <Flag>{landed.withheld}</Flag>
-          ) : landed.arrived && landed.arrived.pots.length ? (
-            <View>
-              {landed.arrived.pots.map((p) => potRow(
-                p.currency,
-                `${p.count} ${plural(p.count, 'payout', 'payouts')} in ${p.currency}`,
-                minorMoney(p.minorUnits, p.currency),
-              ))}
-              {landed.arrived.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{payoutsEmptyLine(payouts.status)}</Text>
-          )}
-
-          {/* A payout that bounced is a coach who is not being paid and does
-              not know it. It is the one row on this screen that has to be acted
-              on, so it is drawn above the ones that are merely on their way. */}
-          {landed.failed ? (
-            <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-              {landed.failed} {plural(landed.failed, 'payout did not reach your bank', 'payouts did not reach your bank')}. Until that is sorted out at Stripe, money stays in your Stripe balance instead of arriving.
-            </Flag>
-          ) : null}
-          {payouts.rows.filter((p) => payoutFailureLine(p)).slice(0, 3).map((p) => (
-            <Text key={p.id} style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{payoutFailureLine(p)}</Text>
-          ))}
-          {landed.onTheWay ? (
-            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-              {landed.onTheWay} {plural(landed.onTheWay, 'payout is', 'payouts are')} on the way and {plural(landed.onTheWay, 'is', 'are')} in no figure above. Money in transit is not money in a bank account.
-            </Flag>
-          ) : null}
-          {landed.unknown ? (
-            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-              {landed.unknown} {plural(landed.unknown, 'payout carries a state', 'payouts carry a state')} this app does not recognise, so {plural(landed.unknown, 'it is', 'they are')} counted and not added to anything. Your Stripe dashboard says what happened to {plural(landed.unknown, 'it', 'them')}.
-            </Flag>
-          ) : null}
-
-          {/* The three most recent, so the section is a record rather than a
-              single figure. Stripe's own status word is resolved through
-              `payoutStateLabel`, which answers "Not Stated" for anything it
-              does not know rather than assuming the money arrived. */}
-          {payouts.status === 'ready' && payouts.rows.length ? (
-            <View style={{ marginTop: sp.md }}>
-              {payouts.rows.slice(0, 3).map((p) => (
-                <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
-                  <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>
-                    {payoutStateLabel(p.status)}{p.arrivalOn ? ` · ${p.arrivalOn}` : ''}
-                  </Text>
-                  <Text style={{ ...ty.label, ...numeric, color: t.ink2 }}>
-                    {minorMoney(p.amountCents, p.currency) ?? 'not denominated'}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{PAYOUT_IS_NOT_A_SALE}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAYOUT_STRIPE_IS_THE_RECORD}</Text>
-        </Section>
-
-        <Section>
-          <SectionHead title="Where It Lands" />
-          {/* Four sentences, and there used to be three. 'error' was branched
-              and 'loading' was not, so for the length of the read `acct` was
-              null and this fell to the last arm — a coach opening the screen
-              was told, in the app's own confident type, that they have no
-              payout account. Loading, failed and empty are three different
-              sentences; src/lib/payoutAccount.ts resolves which. */}
-          {payoutStage(connect.acct, connect.read) === 'loading' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your payout account…</Text>
-          ) : payoutStage(connect.acct, connect.read) === 'unreadable' ? (
-            <Flag>
-              Your payout account could not be read. This is not a statement that you have none — if you had set one up it is still set up.
-            </Flag>
-          ) : payoutStage(connect.acct, connect.read) === 'active' ? (
-            <Text style={{ ...ty.label, color: t.ink2 }}>
-              Your Stripe payout account is active, so a client can be charged. When each payment reaches your bank, and what Stripe took for it, are things only Stripe knows.
-            </Text>
-          ) : payoutStage(connect.acct, connect.read) === 'started' ? (
-            <Text style={{ ...ty.label, color: t.ink2 }}>
-              Your Stripe payout account is started but not finished, so nobody can be charged yet. Finish it on the Payments screen.
-            </Text>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              You have no Stripe payout account, so nothing can be taken through Repple. Anything a client pays you in cash or by transfer never appears on this screen.
-            </Text>
-          )}
-        </Section>
 
         <Section>
           <SectionHead title="What Is Not Here" />
