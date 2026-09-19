@@ -2279,6 +2279,9 @@ export default function Builder() {
           ]} />
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
+          {days.length === 0 ? (
+            <View style={{ flex: 1 }}><Ghost icon="plus" label="Add a Training Day" onPress={addDay} /></View>
+          ) : (<>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.sm }}>
             {days.map((day, index) => (
               <Pressable key={`${day.day}-${index}`} onPress={() => toggleDay(index)} accessibilityRole="button"
@@ -2290,6 +2293,7 @@ export default function Builder() {
             ))}
           </ScrollView>
           <Ghost icon="plus" a11yLabel="Add a training day" onPress={addDay} />
+          </>)}
         </View>
 
         {/* ── client ─────────────────────────────────────────────────────── */}
@@ -4088,7 +4092,8 @@ export default function Builder() {
           gate and the same handler as the button at the foot of the page,
           which keeps its captions saying WHY it is off. The scroll pads for
           it, so nothing on the page hides underneath. */}
-      <View pointerEvents="box-none" style={{ position: 'absolute', start: G, end: G, bottom: sp.md }}>
+      <View pointerEvents="box-none"
+        style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: G, paddingTop: sp.sm, paddingBottom: sp.md, backgroundColor: t.bg, borderTopWidth: hairline, borderTopColor: t.ring }}>
         <View style={{ opacity: canAssign ? 1 : 0.55, ...elevation.e1 }} pointerEvents={canAssign && !assignBusy ? 'auto' : 'none'}>
           <Cta wide label={assignCtaLabel({
             busy: assignBusy,

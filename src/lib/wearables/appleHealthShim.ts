@@ -51,6 +51,8 @@
 // failure mode this codebase spends most of its comments trying to prevent.
 import {
   requestAuthorization,
+  getRequestStatusForAuthorization,
+  AuthorizationRequestStatus,
   authorizationStatusFor,
   AuthorizationStatus,
   isHealthDataAvailable,
@@ -297,8 +299,37 @@ export const AppleHealthCompat = {
       // A refusal is not an error here: HealthKit answers an unrequested read
       // with an empty array rather than a failure, and appleHealth.ts is built
       // on that. Resolving lets the existing "asked, got nothing" paths run.
-      .then(() => done(null))
+      //
+      // `false` IS an error. The pod resolves HKHealthStore's own success flag,
+      // which is false when the request could not be processed at all — an
+      // app without the HealthKit entitlement, or without the two usage
+      // strings — and never merely because the member said no. Resolving on it
+      // was how a build that could not ask reported itself as connected.
+      .then((ok) => done(ok === false ? 'iOS refused to process the Apple Health request.' : null))
       .catch((e) => done(e?.message ?? String(e)));
+  },
+
+  /**
+   * Whether iOS still needs to show the sheet for this set — which is the one
+   * question that CAN tell "never asked" from "asked and refused".
+   *
+   * HealthKit hides read refusals on purpose, so after a request every read
+   * type looks the same whether it was granted or declined. But whether the
+   * sheet has been PRESENTED is not hidden: HKAuthorizationRequestStatus is
+   * `shouldRequest` until the member has been shown these types, and
+   * `unnecessary` once they have decided — either way. So a connect that ends
+   * with `shouldRequest` is a connect where nothing was asked, and the screen
+   * should not call that connected. Reported "Apple Watch says connected but
+   * heart rate never shows"; this is the half of it the app can see.
+   */
+  getRequestStatus(permSet: any, done: (err: any, res: 'unknown' | 'shouldRequest' | 'unnecessary' | null) => void) {
+    cb(
+      getRequestStatusForAuthorization(toAuth(permSet)).then((s) =>
+        s === AuthorizationRequestStatus.unnecessary ? 'unnecessary'
+          : s === AuthorizationRequestStatus.shouldRequest ? 'shouldRequest'
+            : 'unknown'),
+      done,
+    );
   },
 
   /**

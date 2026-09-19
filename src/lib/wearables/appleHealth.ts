@@ -131,7 +131,44 @@ function requestAuth(): Promise<void> {
     () => new Promise<void>((resolve, reject) => {
       k.initHealthKit(permissionSet(k), (err: string) => (err ? reject(new Error(String(err))) : resolve()));
     }),
-  );
+  ).then(() => sheetWasShown(k));
+}
+
+/**
+ * Refuse to call this "connected" when iOS never showed the sheet.
+ *
+ * `initHealthKit` resolves when the request was processed, and a request can
+ * be processed with nothing put in front of the member — a build without the
+ * HealthKit entitlement on its profile, or one whose usage strings did not
+ * make it into the binary, comes back at once with no sheet and every read
+ * answering empty for ever. Until now that resolved, the id was remembered,
+ * the row said Connected, and heart rate never appeared. This asks the one
+ * question HealthKit does answer about permission — has this set been
+ * presented — and turns "still needs asking" into a failure with the fix in
+ * it. A member who saw the sheet and declined is `unnecessary` and is not
+ * touched by this; their refusal is a decision the screens already respect.
+ *
+ * Unknown is let through. It is the answer on an old module or an OS that
+ * will not say, and refusing on it would disconnect a working watch to be
+ * safe against a fault we cannot see.
+ */
+function sheetWasShown(k: any): Promise<void> {
+  if (typeof k.getRequestStatus !== 'function') return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    k.getRequestStatus(permissionSet(k), (err: any, res: string | null) => {
+      if (err) { resolve(); return; } // could not find out; not a reason to refuse
+      if (res === 'shouldRequest') {
+        reject(new Error(
+          'iOS did not show the Apple Health permission sheet, so nothing has been allowed and no '
+          + 'reading can arrive. This is a problem with the build, not with your watch: the app is '
+          + 'missing its HealthKit entitlement or its Health usage descriptions. Please report it — '
+          + 'a rebuild is needed, and reconnecting will not help until then.',
+        ));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 /**

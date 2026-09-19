@@ -305,9 +305,25 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
         // Failure leaves the state alone rather than marking it an error. A
         // refusal is a decision, not a fault, and the screens already say what
         // they can and cannot see — src/lib/watchReach.ts holds those sentences.
+        //
+        // ── and a rejection here is a FAULT, not a decision ──────────────
+        //
+        // HealthKit does not reject when the member says no; it resolves and
+        // answers every read with nothing. So the only way `connect()` rejects
+        // on a local provider is that the request could not be made at all —
+        // no entitlement, no usage strings, no module, or (now) a sheet iOS
+        // never presented. This used to swallow that and leave the row saying
+        // Connected, which is exactly how "Apple Watch is connected but heart
+        // rate never shows" reached us: a remembered id, marked connected
+        // before anybody asked, over a request that was failing every launch.
+        // The state goes to 'error' — the Devices row draws that with the
+        // reason — and the read is not attempted over it.
         const local = p.meta.kind === 'healthkit' || p.meta.kind === 'health-connect';
         if (local && typeof p.connect === 'function') {
-          void p.connect().then(() => sync(id as ProviderId)).catch(() => { /* a decision, not a fault */ });
+          void p.connect().then(() => sync(id as ProviderId)).catch((e) => {
+            reportError('wearables.restore.connect', e, { provider: id });
+            setState(id, 'error');
+          });
         } else {
           sync(id as ProviderId);
         }
