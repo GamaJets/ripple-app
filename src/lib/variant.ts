@@ -77,9 +77,20 @@ export const VARIANT_TILE: Record<AppVariant, string> = {
  * say the screens should match the logo.
  */
 export const VARIANT_ACCENT: Record<AppVariant, string> = {
-  client: '#16b8a6',
-  trainer: '#7a70f0',
-  owner: '#e0912f',
+  // The approved board draws all three apps in one green. It used to be a
+  // hue per app — teal, indigo, amber, the same three the site's --client,
+  // --coach and --studio carry — and the board's reviewers chose one mark
+  // for the family instead. The tile colours above are untouched: they are
+  // the plates behind three different home-screen icons and still tell the
+  // apps apart where that matters. A stored white-label accent still wins
+  // over this, in src/ui/components.tsx, exactly as before.
+  //
+  // As a fill this green is fine; as TEXT on white it is 2.3:1 and
+  // unreadable, which is why `brandInkFor` picks the ink that sits on it and
+  // why check:contrast refuses `t.brand` as a text colour.
+  client: '#22C55E',
+  trainer: '#22C55E',
+  owner: '#22C55E',
 };
 
 /** Human name for the current build, used in copy and the user guide. */
