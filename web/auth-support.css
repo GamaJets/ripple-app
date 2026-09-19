@@ -1,0 +1,184 @@
+/* Auth, support and download flows — additive presentation layer.
+   The shared site tokens and components remain authoritative in styles.css;
+   this file only composes them into the quieter, product-led layouts used by
+   the redesigned homepage. No form or script selector depends on these rules. */
+
+body.flow-page {
+  background:
+    radial-gradient(circle at 82% 5%, color-mix(in srgb, var(--accent) 10%, transparent) 0, transparent 30rem),
+    radial-gradient(circle at 8% 34%, color-mix(in srgb, var(--client) 7%, transparent) 0, transparent 27rem),
+    var(--bg);
+}
+
+.flow-page main { min-width: 0; }
+.flow-page .page { padding-top: clamp(42px, 7vw, 84px); }
+
+/* A repeated visual cue from the homepage's product surfaces: the page is
+   functional, but it still belongs to the same connected product. */
+.flow-page .flow-panel {
+  position: relative;
+  overflow: hidden;
+  border: var(--rule);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: var(--shadow);
+}
+.flow-page .flow-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, var(--client), var(--coach), var(--studio));
+}
+
+/* ── account forms ─────────────────────────────────────────────────────── */
+.auth-page .auth-card {
+  width: min(100%, 680px);
+  margin-inline: auto;
+  padding: clamp(26px, 5vw, 54px);
+}
+.auth-page .auth-card > h1 { margin-top: 10px; }
+.auth-page .auth-card > p:first-of-type { max-width: 55ch; }
+.auth-page form {
+  border-top: var(--hair);
+  padding-top: 24px;
+}
+.auth-page .fl,
+.signup-page .fl {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.auth-page .fld,
+.auth-page .pw input,
+.signup-page input[type="email"],
+.signup-page input[type="text"],
+.signup-page .pw input {
+  min-height: 50px;
+  border-radius: 10px;
+  background: var(--sunk);
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.auth-page .fld:focus,
+.auth-page .pw input:focus,
+.signup-page input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--panel2);
+}
+.auth-page .contact,
+.signup-page #go {
+  min-height: 50px;
+  border-radius: 10px;
+}
+.auth-page #msg:not(:empty),
+.signup-page #msg:not(:empty),
+.signup-page #resendMsg:not(:empty) {
+  border: var(--rule);
+  border-left: 3px solid currentColor;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--panel);
+}
+.auth-page .callout { background: color-mix(in srgb, var(--panel2) 72%, transparent); }
+.auth-page #done:not([hidden]),
+.signup-page #done:not([hidden]),
+.signup-page #resendWrap:not([hidden]) {
+  border: var(--rule);
+  border-radius: 12px;
+  padding: 18px;
+  background: var(--panel2);
+}
+
+/* Signup keeps the existing two-column information architecture, but the form
+   is now the obvious working surface and assurance content recedes beside it. */
+.signup-page .signup-grid {
+  grid-template-columns: minmax(0, 500px) minmax(0, 1fr);
+  gap: clamp(24px, 5vw, 72px);
+}
+.signup-page .signup-grid > :first-child {
+  position: relative;
+  border: var(--rule);
+  border-radius: 18px;
+  padding: clamp(24px, 4vw, 40px);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  box-shadow: var(--shadow);
+}
+.signup-page .signup-grid > :first-child::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  border-radius: 18px 18px 0 0;
+  background: linear-gradient(90deg, var(--client), var(--coach), var(--studio));
+}
+.signup-page .assure { padding-top: 10px; }
+.signup-page .assure .surface,
+.signup-page .assure .card { box-shadow: none; }
+
+/* ── support ───────────────────────────────────────────────────────────── */
+.support-page .hero { padding-bottom: clamp(50px, 7vw, 84px); }
+.support-page .hero .surface { box-shadow: var(--shadow); }
+.support-page .jump {
+  padding: 12px;
+  border: var(--rule);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+.support-page .jump a { min-height: 38px; display: inline-flex; align-items: center; }
+.support-page .qa h3 { text-wrap: balance; }
+
+/* ── downloads ─────────────────────────────────────────────────────────── */
+.download-page .download-hero {
+  position: relative;
+  padding: clamp(28px, 5vw, 52px);
+  margin-bottom: clamp(42px, 6vw, 68px);
+}
+.download-page .download-hero .display { max-width: 18ch; }
+.download-page .download-hero .lede { max-width: 64ch; }
+.download-page .download-hero .callout { margin-bottom: 0; }
+.download-page .tiles { align-items: stretch; }
+.download-page .tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease;
+}
+.download-page .tile:hover { transform: translateY(-3px); background: var(--panel2); }
+.download-page .tile .btn-row { margin-top: auto; padding-top: 12px; }
+.download-page .store:focus-visible,
+.flow-page .btn:focus-visible,
+.flow-page .contact:focus-visible,
+.flow-page input:focus-visible,
+.flow-page button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 860px) {
+  .signup-page .signup-grid { grid-template-columns: minmax(0, 1fr); }
+  .signup-page .assure { padding-top: 0; }
+  .download-page .download-hero { padding: 24px; }
+}
+
+@media (max-width: 520px) {
+  .auth-page .auth-card,
+  .signup-page .signup-grid > :first-child,
+  .download-page .download-hero {
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+    margin-inline: calc(var(--gut) * -1);
+  }
+  .signup-page .signup-grid > :first-child::before { border-radius: 0; }
+  .auth-page .auth-card { padding-inline: var(--gut); }
+  .download-page .tile:hover { transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download-page .tile,
+  .auth-page input,
+  .signup-page input { transition: none; }
+}
