@@ -22,7 +22,7 @@ import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
-import { Card, Cta } from '../src/ui/kit';
+import { Card, Cta, Ghost } from '../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
 
 function Ripple({ size, color }: { size: number; color: string }) {
@@ -48,6 +48,8 @@ export default function Welcome() {
   const router = useRouter();
   const auth = useAuth();
   const { appName } = useBrand();
+  // The door, then the form. See the note above the door below.
+  const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<'in' | 'up'>('up');
   const [name, setName] = useState('');
   // Not state, and not a choice: the build decides. A trainer who signs up
@@ -161,6 +163,72 @@ export default function Welcome() {
   // onto its wrapper so the eye toggle stays centred on the input itself).
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md } as const;
   const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
+
+  /* ── the door ───────────────────────────────────────────────────────────
+     The approved board opens every app on a product door — the mark, the
+     app's name, its strapline, and two buttons — not on a registration form.
+     The door lives in this component so every authentication branch below
+     is untouched: it only decides which mode the form opens in. The client
+     app leads with Get Started (most people arriving at it are new); the
+     coach and studio apps lead with Sign In (most people arriving at them
+     were invited and already have an account).
+
+     Drawn in the theme's own tokens rather than the board's fixed near-black,
+     so a white-label brand's palette, a member's chosen palette and the
+     phone's light mode all still hold — the default palette IS the board's
+     dark, so the default install looks like the board. The mark is the same
+     Ripple the form uses; the wordmark is the brand's name set plainly,
+     because the board's stylised mark is a raster and cannot be resolved
+     from one — see the handoff. */
+  if (!showForm) {
+    const clientBuild = VARIANT === 'client';
+    const primaryMode: 'in' | 'up' = clientBuild ? 'up' : 'in';
+    const secondaryMode: 'in' | 'up' = clientBuild ? 'in' : 'up';
+    const primaryLabel = clientBuild ? 'Get Started' : 'Sign In';
+    const secondaryLabel = clientBuild ? 'Sign In' : 'Create Account';
+    const strap = VARIANT === 'client'
+      ? 'A healthier, happier, stronger you.'
+      : VARIANT === 'trainer'
+        ? 'Empower people. Change lives.'
+        : 'Run your gym from one connected system.';
+    const openForm = (nextMode: 'in' | 'up') => {
+      setMode(nextMode);
+      setNotice(null);
+      setShowForm(true);
+    };
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingVertical: sp.xl, justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+            <View style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: VARIANT_TILE[VARIANT], alignItems: 'center', justifyContent: 'center' }}>
+              <Ripple size={24} color="#ffffff" />
+            </View>
+            <View>
+              <Text style={{ ...ty.head, color: t.ink, letterSpacing: 1.2 }}>{appName.toUpperCase()}</Text>
+              {VARIANT !== 'client' ? (
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{VARIANT === 'trainer' ? 'Coach' : 'Studio'}</Text>
+              ) : null}
+            </View>
+          </View>
+
+          <View style={{ alignItems: 'center', paddingHorizontal: sp.md }}>
+            <View style={{ width: 82, height: 82, borderRadius: 24, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', marginBottom: sp.xl }}
+              accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <Ripple size={54} color={t.brand} />
+            </View>
+            <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', maxWidth: 300 }}>{strap}</Text>
+            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{VARIANT_LABEL[VARIANT]}</Text>
+          </View>
+
+          <View style={{ gap: sp.md }}>
+            <Cta wide label={primaryLabel} onPress={() => openForm(primaryMode)} />
+            <Ghost label={secondaryLabel} onPress={() => openForm(secondaryMode)} />
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>

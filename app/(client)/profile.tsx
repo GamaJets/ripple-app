@@ -23,7 +23,7 @@ import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost, Field, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Card, Field, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { CLIENT_FEATURES } from '../../src/lib/features';
 import { ageFromDob } from '../../src/lib/age';
@@ -644,40 +644,59 @@ export default function Profile() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* ── header: who you are. No hero — a profile has no live metric ─── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <Pressable onPress={openEdit} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Me</Text>
-            {/* An empty name used to render as an empty line under "ME". Say
-                what to do about it instead of showing nothing. */}
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize' }} numberOfLines={1}>
-              {cd.name || 'Add your name'}
-            </Text>
-            <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>{statsLine}</Text>
-          </Pressable>
-          <Ghost icon="pencil" onPress={openEdit} />
-          <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityState={{ disabled: photoBusy }} accessibilityRole="button"
-            accessibilityLabel={photoBusy ? 'Uploading your profile photo' : 'Change your profile photo'}>
-            {/* `avatarSource`, not `cd.photo`. A row still holding a device path
-                from before the upload existed would otherwise draw here — and
-                only here, on the one device that can open it, which is exactly
-                how nobody noticed the coach could not. */}
-            {avatarSource(cd.photo) ? (
-              <Image source={{ uri: avatarSource(cd.photo)! }} style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
-            ) : (
-              <View style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                {cd.init ? (
-                  <Text style={{ ...value(20), color: t.brandInk }}>{cd.init}</Text>
-                ) : (
-                  <Icon name="me" size={24} color={t.brandInk} />
-                )}
+        {/* ── header: who you are. No hero — a profile has no live metric ───
+            The board's Me opens on a card: the photo, the name, the stats
+            line, and three figures under a rule. The pencil that sat beside
+            the name is a row now, so the way to edit is a sentence rather
+            than a glyph. */}
+        <Card style={{ marginTop: sp.md, marginBottom: sp.lg }}>
+          <View style={{ alignItems: 'center', gap: sp.md }}>
+            <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityState={{ disabled: photoBusy }} accessibilityRole="button"
+              accessibilityLabel={photoBusy ? 'Uploading your profile photo' : 'Change your profile photo'}>
+              {/* `avatarSource`, not `cd.photo`. A row still holding a device path
+                  from before the upload existed would otherwise draw here — and
+                  only here, on the one device that can open it, which is exactly
+                  how nobody noticed the coach could not. */}
+              {avatarSource(cd.photo) ? (
+                <Image source={{ uri: avatarSource(cd.photo)! }} style={{ width: 72, height: 72, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
+              ) : (
+                <View style={{ width: 72, height: 72, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                  {cd.init ? (
+                    <Text style={{ ...value(20), color: t.brandInk }}>{cd.init}</Text>
+                  ) : (
+                    <Icon name="me" size={24} color={t.brandInk} />
+                  )}
+                </View>
+              )}
+              <View style={{ position: 'absolute', bottom: -2, end: -2, width: 22, height: 22, borderRadius: radius.pill, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="camera" size={12} color={t.ink2} />
               </View>
-            )}
-            <View style={{ position: 'absolute', bottom: -2, end: -2, width: 22, height: 22, borderRadius: radius.pill, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="camera" size={12} color={t.ink2} />
-            </View>
-          </Pressable>
-        </View>
+            </Pressable>
+            <Pressable onPress={openEdit} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ alignItems: 'center' }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Me</Text>
+              {/* An empty name used to render as an empty line under "ME". Say
+                  what to do about it instead of showing nothing. */}
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize', textAlign: 'center' }} numberOfLines={1}>
+                {cd.name || 'Add your name'}
+              </Text>
+              <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3, textAlign: 'center' }}>{statsLine}</Text>
+            </Pressable>
+          </View>
+          {/* Three figures the rest of this screen is built from. A dash
+              where nothing has been measured — never a placeholder body. */}
+          <View style={{ marginTop: sp.lg, paddingTop: sp.lg, borderTopWidth: hairline, borderTopColor: t.ring }}>
+            <KpiRow items={[
+              { label: 'Weight', value: fig(shownWeight), unit: shownWeight != null ? wu : undefined },
+              { label: 'Body Fat', value: fig(cd.bodyFatPct), unit: cd.bodyFatPct != null ? '%' : undefined },
+              { label: 'Daily Target', value: macros ? macros.kcal.toLocaleString() : fig(null), unit: macros ? 'kcal' : undefined },
+            ]} />
+          </View>
+        </Card>
+
+        <Section style={{ paddingTop: 0 }}>
+          <ListRow icon="pencil" title="Edit Profile" note="Photo, name and body details" onPress={openEdit} />
+          <ListRow icon="bell" title="Notifications" note="Choose what you are sent, and when" onPress={() => router.push('/(client)/notification-prefs')} />
+        </Section>
 
         {/* A photo saved before there was anywhere to put it. The member is the
             only person who can fix it and the one person for whom nothing looks
@@ -696,7 +715,9 @@ export default function Profile() {
         {/* ── goal ───────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Your Goal" />
-          <View style={{ flexDirection: 'row', gap: sp.sm }}>
+          {/* Pills that wrap, so every label keeps the reader's text size
+              rather than four fixed columns squeezing the longest. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
             {/* The chosen goal was carried by background colour alone, which a
                 screen reader gets nothing of — the same defect `Seg` above
                 names, and the coaching-mode radios below already avoid. This
@@ -710,7 +731,8 @@ export default function Profile() {
                   accessibilityRole="radio" accessibilityState={{ selected: on }}
                   accessibilityLabel={on ? `${g.label}. Your goal.` : `Set your goal to ${g.label}`}
                   accessibilityHint="Your goal sets your daily calorie and macro targets"
-                  style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+                  style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.lg,
+                    paddingVertical: sp.md, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{g.label}</Text>
                 </Pressable>
               );
@@ -870,7 +892,10 @@ export default function Profile() {
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>From your latest scan, or type it in. Changes recalculate your plan.</Text>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, marginBottom: sp.lg }}>
+            {/* All diet choices stay visible. Hiding the scroll indicator made
+                later choices indistinguishable from choices that did not
+                exist, especially once larger text widened every label. */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
               {/* Same as the goal above, and for the same reason: the diet
                   decides the macro split, and background colour is not an
                   answer a screen reader can read. */}
@@ -879,11 +904,12 @@ export default function Profile() {
                   accessibilityRole="radio" accessibilityState={{ selected: cd.diet === d.id }}
                   accessibilityLabel={cd.diet === d.id ? `${d.label}. Your diet.` : `Set your diet to ${d.label}`}
                   accessibilityHint="Your diet sets how your daily target is split between protein, carbs and fat"
-                  style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: cd.diet === d.id ? t.brand : t.surface2 }}>
+                  style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+                    borderRadius: radius.pill, backgroundColor: cd.diet === d.id ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.label, fontWeight: cd.diet === d.id ? '600' : '500', color: cd.diet === d.id ? t.brandInk : t.ink2 }}>{d.label}</Text>
                 </Pressable>
               ))}
-            </ScrollView>
+            </View>
 
             <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, marginBottom: sp.lg }}>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{previewMacros ? <>New target · <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink }}>{previewMacros.kcal.toLocaleString()} kcal</Text> · P{previewMacros.protein} / C{previewMacros.carbs} / F{previewMacros.fat}</> : 'Enter a weight and body fat to see your target.'}</Text>

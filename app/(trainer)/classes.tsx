@@ -28,8 +28,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead, Field } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, Cta, Ghost, Flag, Notice, PartialRead, Field } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, value, fontScale } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { useMyGymKit } from '../../src/ui/coachKit';
 import { GymKitRegister } from '../../src/ui/GymKitRegister';
@@ -194,6 +194,10 @@ export default function TrainerClasses() {
   const [cap, setCap] = useState(16);
   const [weeks, setWeeks] = useState(1);
   const [busy, setBusy] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  // Two fields or three steppers on one row stop fitting at the larger
+  // text sizes; they stack from there rather than shrink.
+  const stackControls = fontScale >= 1.25;
   /** How many more weeks "Same Again" runs a series for. Its own state, and not
    *  `weeks`: that one belongs to the form above and a coach who set it to 12
    *  three minutes ago did not thereby ask for twelve more Reformer classes. */
@@ -720,7 +724,7 @@ export default function TrainerClasses() {
     </Pressable>
   );
   const stepper = (label: string, val: string, dec: () => void, inc: () => void) => (
-    <View style={{ flex: 1 }}>
+    <View style={{ flexGrow: 1, flexBasis: 120, minWidth: 110 }}>
       <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>{label}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.sm }}>
         <Pressable onPress={dec} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Lower ' + label} style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
@@ -744,22 +748,30 @@ export default function TrainerClasses() {
             this app does not put it — and without `a11yLabel` a screen reader
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your branches</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Schedule group classes across your branches. Members book and waitlist automatically.
-        </Text>
+        <ScreenHeader
+          eyebrow="Your branches"
+          title="Classes"
+          subtitle="Schedule group classes across your branches. Members book and waitlist automatically."
+          leading={<Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />}
+        />
 
         <Rule inset={0} />
 
         {/* ── new class ──────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="New Class" />
+          {/* Folded until asked for. The form is eleven controls tall, and
+              a coach who opens Classes to see today's timetable scrolled past
+              all of them every time; the board keeps the timetable in view
+              and offers the form as one row. Nothing about the form changed. */}
+          <SectionHead title="Create a Class" note={createOpen ? 'Close' : 'New'} onPress={() => setCreateOpen((open) => !open)} />
+          {!createOpen ? (
+            <View>
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Your timetable stays in view until you are ready to add a one-off class or a repeating series.
+              </Text>
+              <Ghost label="Schedule a Class" icon="plus" onPress={() => setCreateOpen(true)} />
+            </View>
+          ) : (<>
 
           <TextInput value={title} onChangeText={setTitle} placeholder="Class title — e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={inp}
             accessibilityLabel="Class title" />
@@ -780,7 +792,7 @@ export default function TrainerClasses() {
           {/* Two names side by side, and which is which — and which of the two
               may be left empty — lived in placeholders that the first keystroke
               erased. */}
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+          <View style={{ flexDirection: stackControls ? 'column' : 'row', gap: sp.sm, marginTop: sp.md }}>
             <Field label="Instructor">
               <TextInput value={instructor} onChangeText={setInstructor} style={inp} />
             </Field>
@@ -810,7 +822,7 @@ export default function TrainerClasses() {
               `HOURS`: any hand-picked window is somebody's assumption about
               when training happens, and 5am to 10pm excluded the 4am opener
               and the late shift. */}
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
             {stepper('Start hour', fmtClock(hour, 0), () => setHour((h) => (h + 23) % 24), () => setHour((h) => (h + 1) % 24))}
             {/* "Minutes" — directly under "Start hour", and setting the class
                 LENGTH. A coach reads "Start hour: 6:00 PM · Minutes: 45" as a
@@ -861,6 +873,7 @@ export default function TrainerClasses() {
 
           <View style={{ height: sp.lg }} />
           <Cta label={busy ? 'Adding…' : 'Add Class'} wide disabled={!canAdd || busy} onPress={submit} />
+          </>)}
         </Section>
 
         <Rule />
@@ -914,7 +927,7 @@ export default function TrainerClasses() {
             const off = c.status === 'cancelled';
             return (
               <View key={c.id} style={{
-                flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
+                flexDirection: stackControls ? 'column' : 'row', alignItems: stackControls ? 'stretch' : 'center', gap: sp.md, paddingVertical: sp.md,
                 borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
               }}>
                 <View style={{ flex: 1 }}>
@@ -969,7 +982,7 @@ export default function TrainerClasses() {
                   ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{!countsKnown ? 'capacity' : full ? 'full' : 'booked'}</Text>
                 </View>
-                <View style={{ gap: 6 }}>
+                <View style={{ gap: 6, flexDirection: stackControls ? 'row' : 'column', flexWrap: stackControls ? 'wrap' : 'nowrap' }}>
                   {/* Neither verb is offered on a class that was called off.
                       There is no register to take for a room that never opened,
                       and repeating a cancelled Tuesday for twelve weeks is the

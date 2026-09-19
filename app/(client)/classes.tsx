@@ -221,7 +221,8 @@ export default function Classes() {
   const chip = (label: string, active: boolean, onPress: () => void) => (
     <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}
       accessibilityState={{ selected: active }}
-      style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: active ? t.brand : t.surface2 }}>
+      style={{ minHeight: 44, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill,
+        justifyContent: 'center', backgroundColor: active ? t.brand : t.surface2 }}>
       <Text style={{ ...ty.label, fontWeight: active ? '600' : '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
@@ -264,10 +265,13 @@ export default function Classes() {
         </View>
 
         {branches.length > 1 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.lg }} contentContainerStyle={{ gap: sp.sm }}>
+          /* Every branch stays visible. A horizontal row with its scroll
+             indicator hidden made the later branches look as though they did
+             not exist, particularly at the larger text sizes. */
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.lg }}>
             {chip('All branches', branch === null, () => setBranch(null))}
             {branches.map((b) => chip(b, branch === b, () => setBranch(b === branch ? null : b)))}
-          </ScrollView>
+          </View>
         ) : null}
 
         {/* When the server last answered, and a way to ask again. A member

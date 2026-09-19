@@ -94,8 +94,18 @@ import { assertRootFloors } from './gate-floor.mjs';
 
 const CHECK = process.argv.includes('--check');
 const WEB = new URL('../web/', import.meta.url).pathname;
-const css = readFileSync(join(WEB, 'styles.css'));
-const hash = createHash('sha256').update(css).digest('hex').slice(0, 10);
+
+// Every stylesheet at the root of web/, each hashed on its own bytes. There
+// used to be one, `styles.css`; the redesign added four more (home-redesign,
+// audience-redesign, auth-support, legal-redesign) and pages link whichever
+// they use — the homepage links home-redesign.css and NOT styles.css. A stamp
+// on one file and none on the others would reintroduce, for the new files,
+// exactly the four-hour mismatch this script exists to prevent.
+const SHEETS = readdirSync(WEB).filter((n) => n.endsWith('.css')).sort();
+const hashOf = Object.fromEntries(SHEETS.map((n) => [
+  n, createHash('sha256').update(readFileSync(join(WEB, n))).digest('hex').slice(0, 10),
+]));
+const hash = hashOf['styles.css'];
 
 // Matches a bare link and an already-stamped one, so the stamp is replaced
 // rather than accumulated.
@@ -109,9 +119,9 @@ const hash = createHash('sha256').update(css).digest('hex').slice(0, 10);
 // twenty-one pages were at v=38b4504e80 and this gate printed "ok". The two
 // bugs hid each other: fixing only the walk turns a stale page into a "no
 // stylesheet link" report, and fixing only the pattern still opens nothing.
-const RE = /href="((?:\.\.\/)*)styles\.css(?:\?v=[a-f0-9]+)?"/g;
+const RE = new RegExp(`href="((?:\\.\\./)*)(${SHEETS.map((n) => n.replace('.', '\\.')).join('|')})(?:\\?v=[a-z0-9]+)?"`, 'g');
 /** The replacement, preserving whatever `../` prefix the page used to get there. */
-const want = (_, up) => `href="${up}styles.css?v=${hash}"`;
+const want = (_, up, name) => `href="${up}${name}?v=${hashOf[name]}"`;
 
 // Recursive, for the reason above: `web/` is not flat. `ads/callback.html` is a
 // real page a real visitor lands on — it is where an ad platform returns a

@@ -36,7 +36,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, Hero, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 // The instant `awaitingOutcome`, `pastSessions` and `windowStart` are ALL judged
@@ -924,10 +924,12 @@ export default function TrainerSessions() {
             44pt target and `BACK_ICON`, so it mirrors correctly in RTL
             without this screen knowing about direction at all — which is the
             whole point of src/ui/direction. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Mark Sessions</Text>
-        </View>
+        <ScreenHeader
+          eyebrow="Session record"
+          title="Mark Sessions"
+          subtitle="Clear outstanding outcomes first, then use the same screen to review what already happened."
+          leading={<Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />}
+        />
 
         <Hero
           label="Waiting on an Outcome"

@@ -22,7 +22,7 @@ import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, value, fontScale } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { trainerAccessNote } from '../../src/lib/trainerProfileAccess';
 import { useDeliveryFact } from '../../src/ui/coachDelivery';
@@ -290,12 +290,16 @@ export default function CoachProfile() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* ── header. No hero — a profile has no single live number ───────── */}
+        {/* ── header. No hero — a profile has no single live number ─────────
+            Settings at the trailing edge, as the board draws it: the one
+            control a coach reaches for from here that is not about how
+            clients see them. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your profile</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>How Clients See You</Text>
+            <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginTop: 5 }}>How Clients See You</Text>
           </View>
+          <Ghost icon="settings" a11yLabel="Open settings" onPress={() => router.push('/(trainer)/settings')} />
         </View>
 
         {/* ── live preview: the one surface on this screen that groups ──────
@@ -330,10 +334,29 @@ export default function CoachProfile() {
                 <Text style={{ ...value(20), color: t.brand }}>{initials}</Text>
               </View>
             )}
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.head, color: t.ink }} numberOfLines={1}>{p.name || 'Your name'}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              {/* Whole at the larger sizes rather than cut to one line: a name
+                  is the one thing on a profile that must not be truncated. */}
+              <Text style={{ ...ty.head, color: t.ink }} numberOfLines={fontScale >= 1.35 ? undefined : 1}>{p.name || 'Your name'}</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{p.tagline || 'No tagline yet'}</Text>
             </View>
+          </View>
+
+          {/* Three figures a client would count. The rate is the coach's own
+              figure and is printed as it is; a dash where none is set, never
+              a zero that would read as free. */}
+          <View style={{ flexDirection: 'row', marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+            {[
+              { label: 'Offers', value: String(p.offers.length) },
+              { label: 'Specialties', value: String(p.specialties.length) },
+              { label: 'Rate', value: p.sessionFee == null ? fig(null) : fig(p.sessionFee) },
+            ].map((item, index) => (
+              <View key={item.label} accessible accessibilityLabel={`${item.label}, ${item.value === fig(null) ? 'not set' : item.value}`}
+                style={{ flex: 1, alignItems: 'center', borderStartWidth: index ? hairline : 0, borderStartColor: t.ring }}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{item.value}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{item.label}</Text>
+              </View>
+            ))}
           </View>
 
           {p.specialties.length > 0 && (
@@ -383,6 +406,12 @@ export default function CoachProfile() {
           </View>
         </Card>
         )}
+
+        {/* The two places a coach goes from their profile most, as rows. */}
+        <View style={{ marginBottom: sp.lg }}>
+          <ListRow icon="message" title="Messages" note="Client conversations and replies" onPress={() => router.push('/(trainer)/messages')} />
+          <ListRow icon="settings" title="Settings" note="Account, notifications, privacy and appearance" onPress={() => router.push('/(trainer)/settings')} />
+        </View>
 
         <Rule />
 

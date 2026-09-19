@@ -17,6 +17,7 @@ import { num, numUpTo } from '../../src/lib/format';
 import { fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
@@ -78,7 +79,7 @@ import type { FoodFacts } from '../../src/lib/foodPortion';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Flag, Meter, QuickRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -887,8 +888,8 @@ export default function Nutrition() {
         <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Meals</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Today</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Nutrition</Text>
               {/* The measurements arms are asked first and only of the case
                   they are about, so the food-rules arms below cannot answer
                   over the top of "you have never been scanned". */}
@@ -939,13 +940,31 @@ export default function Nutrition() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Meals</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Today</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Nutrition</Text>
           </View>
           <Pressable onPress={sharePlan} accessibilityRole="button" accessibilityLabel="Share plan"
             hitSlop={hitSlopFor(38)}
             style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
             <Icon name="share" size={17} color={t.ink2} />
+          </Pressable>
+        </View>
+
+        {/* Plan, Targets and Recipes as the board draws them. Targets is the
+            Goal screen, which owns the figures; Recipes opens the first meal
+            of the plan in the sheet every meal row below already opens, and
+            is off until there is a plan to open. */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
+          <View accessibilityRole="tab" accessibilityState={{ selected: true }} style={{ flex: 1, minHeight: 38, borderRadius: radius.sm, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Plan</Text>
+          </View>
+          <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Targets" onPress={() => router.push('/(client)/goal')}
+            style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Targets</Text>
+          </Pressable>
+          <Pressable accessibilityRole="tab" accessibilityState={{ selected: false, disabled: plan.length === 0 }} accessibilityLabel="Recipes" disabled={plan.length === 0}
+            onPress={() => { if (plan[0]) setRecipe(plan[0]); }} style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ ...ty.label, color: plan.length ? t.ink3 : t.ring }}>Recipes</Text>
           </Pressable>
         </View>
 
@@ -972,20 +991,62 @@ export default function Nutrition() {
             is true and load-bearing. This row decodes it, once. */}
         <ScreenHelp screen="meals" />
 
-        <Hero
-          label={!dayWhole ? 'Calories' : cal.net >= 0 ? 'Calories Left' : 'Calories Over'}
-          figure={dayWhole ? Math.abs(cal.net).toLocaleString() : fig(null)}
-          unit={dayWhole ? 'kcal' : undefined}
-          note={dayWhole ? caloriesNote(cal)
-            : fl.status === 'loading' ? 'Reading today’s food log…'
-            : fl.status === 'partial' ? 'You have logged more today than this screen can read in one go, so what is left cannot be worked out from it.'
-            : 'We couldn’t read today’s food log. What is left depends on what you have eaten, so this is unknown rather than your whole allowance.'}
-          // undefined, not 0: an empty ring drawn for a target we do not have
-          // is a figure invented to fill a slot.
-          arc={dayWhole && target.kcal ? eaten.kcal / target.kcal : undefined}
-          arcLabel="of today's calories eaten"
-          onPress={() => router.push('/(client)/foodlog')}
-        />
+        {/* One card: the ring of today's calories, what is left, the three
+            macros against target, and the way to log. The withholding is the
+            hero's: `Calories Left` is `target − eaten`, so an unread log does
+            not make it blank, it makes it BIGGER — the safest-looking
+            direction and the wrong one — so figure, ring and macros wait
+            for a whole read, and the line under the figure says which read
+            is short. undefined arc, not 0: an empty ring drawn for a target
+            we do not have is a figure invented to fill a slot. */}
+        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+            <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
+              accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories could not be counted. Open the food log'}
+              hitSlop={8}
+              style={{ width: 86, height: 86, alignItems: 'center', justifyContent: 'center' }}>
+              <Svg width={86} height={86} viewBox="0 0 86 86" style={{ position: 'absolute' }}
+                accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <Circle cx="43" cy="43" r="36" fill="none" stroke={t.surface3} strokeWidth={7} />
+                {dayWhole && target.kcal ? (
+                  <Circle cx="43" cy="43" r="36" fill="none" stroke={t.brand} strokeWidth={7} strokeLinecap="round"
+                    strokeDasharray={2 * Math.PI * 36} strokeDashoffset={2 * Math.PI * 36 * (1 - Math.min(1, eaten.kcal / target.kcal))}
+                    transform="rotate(-90 43 43)" />
+                ) : null}
+              </Svg>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(19), color: t.ink }}>{dayWhole ? num(eaten.kcal) : fig(null)}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
+            </Pressable>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition Today</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>
+                {dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'left' : 'over'}` : 'Calories not counted'}
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                {dayWhole ? caloriesNote(cal)
+                  : fl.status === 'loading' ? 'Reading today’s food log…'
+                  : fl.status === 'partial' ? 'You have logged more today than this screen can read in one go, so what is left cannot be worked out from it.'
+                  : 'We couldn’t read today’s food log. What is left depends on what you have eaten, so this is unknown rather than your whole allowance.'}
+              </Text>
+            </View>
+          </View>
+          {/* Intake against target, not the plan's totals: three figures under
+              a sentence about what you have eaten mean what you have eaten. */}
+          <View style={{ flexDirection: 'row', marginTop: sp.lg, paddingVertical: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
+            {[
+              { label: 'Protein', value: dayWhole ? `${Math.round(eaten.protein)} / ${target.protein} g` : fig(null) },
+              { label: 'Carbs', value: dayWhole ? `${Math.round(eaten.carbs)} / ${target.carbs} g` : fig(null) },
+              { label: 'Fat', value: dayWhole ? `${Math.round(eaten.fat)} / ${target.fat} g` : fig(null) },
+            ].map((macro, index) => (
+              <View key={macro.label} accessible accessibilityLabel={`${macro.label}, ${dayWhole ? macro.value.replace(' / ', ' of ') : 'not counted'}`}
+                style={{ flex: 1, alignItems: 'center', paddingHorizontal: sp.xs, borderStartWidth: index ? hairline : 0, borderStartColor: t.ring }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>{macro.label}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginTop: 3 }}>{macro.value}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={{ marginTop: sp.md }}><Cta label="Log a Meal" wide onPress={() => router.push('/(client)/foodlog')} /></View>
+        </View>
 
         {/* The burn named in the sentence above is the last thing the device
             told us rather than a current reading. Said here rather than woven
@@ -1021,33 +1082,6 @@ export default function Nutrition() {
 
         <Rule />
 
-        {/* ── the plan's macro split against target ──────────────────────── */}
-        <Section>
-          {/* These meters showed the PLAN — tot.P/C/F, the totals of the meals
-              suggested below — while sitting directly under a hero that reads
-              "0 of 2,040 kcal eaten". Three filled bars beneath that sentence
-              say, in the only visual language this screen has for progress,
-              that you have eaten 89g of protein. You have not. A tester read it
-              exactly that way and said so: "I didn't log any meals today."
-
-              A meter toward a target means intake here, because that is what
-              the figure above it means. The plan's own total keeps its place in
-              the note, where it is named. */}
-          <SectionHead title="Macros Eaten" note={`${tot.K.toLocaleString()} kcal planned below`} />
-          {/* The same withholding as the hero, and for the sharper version of
-              the same reason: three empty bars ARE a statement in this screen's
-              visual language, and the statement is "you have eaten nothing". */}
-          {dayWhole ? (<>
-            <Meter label="Protein" val={eaten.protein} target={target.protein} />
-            <Meter label="Carbs" val={eaten.carbs} target={target.carbs} dim />
-            <Meter label="Fat" val={eaten.fat} target={target.fat} dim />
-          </>) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {fl.status === 'loading' ? 'Reading today’s food log…' : 'Today’s food log could not be read, so these bars would be empty for the wrong reason. Your targets are above.'}
-            </Text>
-          )}
-        </Section>
-
         <Rule />
 
         {/* ── macro cycling: training vs rest day ────────────────────────── */}
@@ -1066,12 +1100,17 @@ export default function Nutrition() {
             </View>
             {cycleNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{cycleNote}</Text> : null}
           </View>
-          <View style={{ flexDirection: 'row', gap: sp.sm }}>
+          {/* Three genuinely different plans, so each label keeps the
+              reader's chosen text size and the group wraps instead of
+              squeezing into three fixed columns. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
             {DAY_TYPES.map(({ key, label }) => {
               const on = dayType === key;
               return (
                 <Pressable key={key} onPress={() => setDayType(key)} accessibilityRole="button" accessibilityState={{ selected: on }}
-                  style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                  accessibilityLabel={`${label} meal plan`}
+                  style={{ minHeight: 44, paddingHorizontal: sp.lg, paddingVertical: 11, borderRadius: radius.pill,
+                    alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
                 </Pressable>
               );

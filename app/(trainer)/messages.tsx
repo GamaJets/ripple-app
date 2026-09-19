@@ -525,6 +525,16 @@ export default function Messages() {
    *  refusal for somebody the coach has narrowed out of the list is counted and
    *  said to be off-screen rather than marked nowhere. */
   const refusedNote = refusedScreenNote(refusedRecord.refused, refusedRecord.status, shownIds);
+  /* ── who is waiting on the coach, first ──────────────────────────────
+   *
+   * A client's unread messages are work waiting on the coach, so they lead
+   * the screen instead of being buried in recency order. Split from `shown`
+   * — the filtered list — so a search or a filter narrows both halves the
+   * same way. A null unread count stays in the ordinary list: an unread count
+   * that failed to load is not silently treated as zero, and ThreadRow says
+   * the unknown state on the row itself. */
+  const waitingThreads = shown.filter((c) => c.unread != null && c.unread > 0);
+  const otherThreads = shown.filter((c) => c.unread == null || c.unread === 0);
   const G = layout.gutter;
 
   return (
@@ -535,7 +545,7 @@ export default function Messages() {
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients</Text>
-          <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>Messages</Text>
+          <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: 2 }}>Messages</Text>
         </View>
       </View>
       <Rule />
@@ -710,15 +720,13 @@ export default function Messages() {
           </Section>
         ) : null}
 
-        {shown.length ? (
+        {waitingThreads.length ? (
           <Section>
             <SectionHead
-              title="Conversations"
-              note={narrowed
-                ? `${shown.length} of ${conversations.length}`
-                : 'Most recent first'}
+              title="Waiting for You"
+              note={`${waitingThreads.length} ${waitingThreads.length === 1 ? 'client' : 'clients'}`}
             />
-            {shown.map((c, i) => (
+            {waitingThreads.map((c, i) => (
               <View key={c.clientId}>
                 {i > 0 ? <Rule inset={56} /> : null}
                 <ThreadRow t={c} now={now} queued={queuedThreads.get(c.clientId)}
@@ -726,6 +734,27 @@ export default function Messages() {
               </View>
             ))}
           </Section>
+        ) : null}
+
+        {otherThreads.length ? (
+          <>
+            {waitingThreads.length ? <Rule /> : null}
+            <Section>
+              <SectionHead
+                title={waitingThreads.length ? 'Other Conversations' : 'Conversations'}
+                note={narrowed
+                  ? `${shown.length} of ${conversations.length}`
+                  : 'Most recent first'}
+              />
+              {otherThreads.map((c, i) => (
+                <View key={c.clientId}>
+                  {i > 0 ? <Rule inset={56} /> : null}
+                  <ThreadRow t={c} now={now} queued={queuedThreads.get(c.clientId)}
+                    refused={refusedThreads.get(c.clientId)} onPress={() => open(c)} />
+                </View>
+              ))}
+            </Section>
+          </>
         ) : null}
 
         {/* The four empty lists, kept apart. Never "no messages" over a failure. */}

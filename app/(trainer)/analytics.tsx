@@ -34,7 +34,7 @@ import { useTheme } from '../../src/ui/components';
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -860,9 +860,19 @@ export default function TrainerAnalytics() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching business</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Analytics</Text>
+        <ScreenHeader eyebrow="Your coaching business" title="Analytics" />
+
+        {/* ── outcomes before turnover ─────────────────────────────────────
+            The board opens Analytics on the book's adherence, its size and
+            who is at risk — client outcomes, and only then the money. All
+            three are already computed below under a whole roster read and
+            are dashes otherwise; the notice under this strip says why. */}
+        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+          <KpiRow items={[
+            { label: 'Adherence', value: avgAdh == null ? fig(null) : String(avgAdh), unit: avgAdh == null ? undefined : '%' },
+            { label: 'Clients', value: fig(clients) },
+            { label: 'At Risk', value: fig(riskCount), unit: riskCount == null ? undefined : (riskCount === 1 ? 'client' : 'clients') },
+          ]} />
         </View>
 
         {/* The densest figures screen in either app. Two of the things this
@@ -884,6 +894,54 @@ export default function TrainerAnalytics() {
         ) : figureStatus === 'partial' ? (
           <PartialRead what={rosterStatus === 'partial' ? 'clients on your book' : 'sessions in your calendar'} />
         ) : null}
+
+        {/* ── at-risk revenue: the one thing to act on ──────────────────────
+            Above the month's figures rather than under them: the
+            relationships at risk come before the turnover they may affect.
+            Everything about the card is as it was — a dash and never "~$0"
+            without a rate, and no card at all unless the roster came back
+            whole and the training record behind the verdict landed. */}
+        {atRisk && atRisk.length > 0 ? (<>
+          <Rule />
+          <Section>
+            <Card tone={t.warn}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Revenue at risk</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  {/* A dash, not ~$0. The figure is these clients' delivered
+                      sessions priced at the coach's own rate, so with no rate
+                      set there is no figure — and "~$0/mo at risk" is the one
+                      reading that would make this card safe to ignore. */}
+                  <Text style={{ ...value(26), color: t.ink }}>
+                    {priced(atRiskRevenue) == null ? '—' : <>~{priced(atRiskRevenue)}<Text style={{ ...ty.caption, color: t.ink3 }}>/mo</Text></>}
+                  </Text>
+                  {/* "N clients slipping" is a count of the whole book, and off
+                      a short roster it is a count of whoever happened to load —
+                      which reads as reassuringly small. The card no longer
+                      renders at all unless the roster came back whole AND the
+                      training record behind the verdict landed (`atRisk` is
+                      null otherwise), which is a stricter bargain than the "at
+                      least" hedge it replaces: this card is an instruction to
+                      go and ring people, and a hedged instruction is still an
+                      instruction. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                    {atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.
+                    {atRiskRevenue == null
+                      ? (sessionFee == null
+                          ? ' Set a session rate in your profile to see what that is worth.'
+                          : ' What that is worth cannot be worked out from a read this short.')
+                      : ' Counted from the sessions they were marked as having taken, so a booking they did not turn up to is not in it.'}
+                  </Text>
+                </View>
+                <Cta label="Review" onPress={() => router.push('/(trainer)/dashboard')} />
+              </View>
+            </Card>
+          </Section>
+        </>) : null}
+
 
         {/* A coach with an empty book that we KNOW is empty. Deliberately said
             in the words of the business they told us they run: a remote coach
@@ -1084,48 +1142,6 @@ export default function TrainerAnalytics() {
             );
           })}
         </Section>
-
-        {/* ── at-risk revenue: the one thing to act on ────────────────────── */}
-        {atRisk && atRisk.length > 0 ? (<>
-          <Rule />
-          <Section>
-            <Card tone={t.warn}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
-                <Text style={{ ...ty.micro, color: t.ink3 }}>Revenue at risk</Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={{ flex: 1 }}>
-                  {/* A dash, not ~$0. The figure is these clients' delivered
-                      sessions priced at the coach's own rate, so with no rate
-                      set there is no figure — and "~$0/mo at risk" is the one
-                      reading that would make this card safe to ignore. */}
-                  <Text style={{ ...value(26), color: t.ink }}>
-                    {priced(atRiskRevenue) == null ? '—' : <>~{priced(atRiskRevenue)}<Text style={{ ...ty.caption, color: t.ink3 }}>/mo</Text></>}
-                  </Text>
-                  {/* "N clients slipping" is a count of the whole book, and off
-                      a short roster it is a count of whoever happened to load —
-                      which reads as reassuringly small. The card no longer
-                      renders at all unless the roster came back whole AND the
-                      training record behind the verdict landed (`atRisk` is
-                      null otherwise), which is a stricter bargain than the "at
-                      least" hedge it replaces: this card is an instruction to
-                      go and ring people, and a hedged instruction is still an
-                      instruction. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                    {atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.
-                    {atRiskRevenue == null
-                      ? (sessionFee == null
-                          ? ' Set a session rate in your profile to see what that is worth.'
-                          : ' What that is worth cannot be worked out from a read this short.')
-                      : ' Counted from the sessions they were marked as having taken, so a booking they did not turn up to is not in it.'}
-                  </Text>
-                </View>
-                <Cta label="Review" onPress={() => router.push('/(trainer)/dashboard')} />
-              </View>
-            </Card>
-          </Section>
-        </>) : null}
 
         <Rule />
 
