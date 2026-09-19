@@ -236,6 +236,40 @@ Suite 564 ok, all gates ok. Deep links work for screenshots: `xcrun simctl openu
 Kit note from three lanes: a `ScreenHeader centered` variant (back + centred title + 38pt spacer) would
 remove the copies now hand-built on ~12 screens.
 
+## 4h. Rounds two and three — every screen on the kit (19 Sep, late night)
+
+"Keep building", then "don't stop until everything is done and ready to commit and push a new build to
+android and ios." Commits `327d393` … `bcce4aa`.
+
+**Kit:** `PageHead({ title?, subtitle?, leading?, trailing?, onBack?, backLabel? })` — the board's
+pushed-page head (round back, centred title, subtitle, trailing slot or spacer), adopted on every pushed
+page in all three apps; `KpiRow` figures at `value(26)` with the label under. `check:caps` lists
+`PageHead title`. `Hero` is retired from every screen (kit export kept; nothing imports it now — safe to
+delete in a later pass). The inline "figure card" (`Section` + `SectionHead` + `ty.hero` figure + note)
+is now copied on ~15 screens; a kit `FigureCard` would fold them.
+
+**Second pass on board pages:** Analytics has 7D/30D/90D/1Y windows, adherence and completions as figure
++ movement + chart (`src/ui/coach/analyticsRange.ts`, `RangeBars.tsx`); Builder has a centred head and
+seven weekday circles that add/open a day; Clients has agenda rows, a search pill, a segment bar, roster
+rows that say their state in words with a dot, and a round green Add Client.
+
+**Exercise heatmap (user request):** `src/ui/ExerciseMuscles.tsx` draws the body front and back with
+primary movers at 1.0 and secondaries at 0.5 through `muscleMap`; on both exercise screens under
+"Muscles Worked", and as a 40pt lit silhouette on every library row. Steps and Tips now sit in the
+client's ready view too, not only behind the Demo control.
+
+**Family passes (no board pages):** Studio (owner) on `ScreenHeader`/`PageHead`/figure cards; coach
+record pages (client-*, my-*, log-session, class-checkin, my-register); coach utility pages (videos,
+sessions, classes, devices with `ProviderMark`, leads, referrals, …); client account/coach/schedule
+pages (Appearance as Light/Dark/System rows; Your Coach centred with one Message action); client body
+and nutrition pages (Food Log with a Photo/Barcode/Search/Describe bar and thumbnail rows; Muscles with
+the body first). Website: the redesign shipped no new markup for the audience pages — its restyle is the
+stylesheets already linked — so only the mark and download's hero panel moved.
+
+**Verified before the build:** tsc clean, all 41 source gates, 564 suites, the build gates (lockfile,
+patches, inlined-env, native, native-tracked, testflight, release-version, version-bump, runtime-reach,
+bundle, schema:offline, functions, stripe-fields, studio), dark mode on eight client screens.
+
 ## 5. What to do next
 
 **Port the implemented screens from `repple-redesign`, file by file, re-applying audit fixes on
