@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -42,7 +42,6 @@ import {
   summariseRegister, needsAttention, serviceState, nextServiceDue,
   type Equipment, type ServiceState,
 } from '../../src/lib/gymEquipment';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * Today, on the GYM's calendar — not UTC's, and no longer the reader's either.
@@ -351,14 +350,7 @@ export default function OwnerEquipment() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width so the
-            title is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Equipment</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Equipment" />
 
         {/* A card rather than the kit's bare `Hero`: the one block on this
             screen the board does not draw. */}

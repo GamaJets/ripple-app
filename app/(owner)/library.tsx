@@ -32,14 +32,13 @@ import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Notice, Ghost, PartialRead, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { catalogueValue as cap } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { BACK_ICON } from '../../src/ui/direction';
 
 
 /** The equipment chip standing for rows where the catalogue records none.
@@ -233,14 +232,7 @@ export default function OwnerLibrary() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width so the
-            title is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Exercise Library</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Exercise Library" onBack={goBack} />
 
         {/* A card rather than the kit's bare `Hero`: the one block on this
             screen the board does not draw. */}

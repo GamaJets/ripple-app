@@ -18,10 +18,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -40,7 +39,6 @@ import {
   setMembershipStatus, setMembershipFreeze, setMembershipDates, recordPayment, summarise, money,
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
-import { BACK_ICON } from '../../src/ui/direction';
 // What money a SUM is in. `summarise` reports it and this screen used to throw
 // it away — see the header of src/lib/sumCurrency.ts for what that printed.
 import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '../../src/lib/sumCurrency';
@@ -118,7 +116,6 @@ interface Candidate { id: string; name: string }
 
 export default function OwnerMembers() {
   const t = useTheme();
-  const router = useRouter();
   const { tenant } = useTenant();
   // The gym's own currency, and NOTHING when it has not set one.
   //
@@ -698,15 +695,7 @@ export default function OwnerMembers() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        {/* The pushed-page header the board draws: a round back control at the
-            leading edge, the title centred, and a trailing spacer the width of
-            the control so the title sits on the screen's centre line rather
-            than the centre of what is left beside the button. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Members</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Members" />
 
         {/* One caveat for the whole screen, because staleness is a fact about
             the read and every figure below comes off the same read. Said here

@@ -37,7 +37,7 @@ import { plainExact } from '../../src/lib/units';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Spark, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Spark, Notice, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
@@ -73,7 +73,6 @@ import { Fetched } from '../../src/ui/fetched';
 import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useToday } from '../../src/ui/today';
-import { BACK_ICON } from '../../src/ui/direction';
 // Which of this owner's gyms these figures are, and whether there are others.
 // Renders nothing for a single-site owner — see src/lib/ownerSiteScope.ts.
 import { fetchOwnerSites, SITES_LOADING } from '../../src/lib/ownerSiteScope';
@@ -386,17 +385,11 @@ export default function OwnerRevenue() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width. Not
-            "Platform revenue". Every figure below is this gym's own — sessions
-            its coaches delivered, at its own session fee — and "the platform"
-            is what a trainer pays Repple, which the header of
+        {/* Not "Platform revenue". Every figure below is this gym's own —
+            sessions its coaches delivered, at its own session fee — and "the
+            platform" is what a trainer pays Repple, which the header of
             src/ui/trainers.tsx rules is not a gym owner's business at all. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Revenue</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Revenue" />
         {/* What these figures cover. Null — and so absent entirely — for the
             one-gym owner, which is the overwhelming case and is asserted in
             ownedSites.test.ts. */}

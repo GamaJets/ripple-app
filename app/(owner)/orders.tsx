@@ -46,9 +46,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, KpiRow, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Flag, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -62,7 +61,6 @@ import {
   fetchGymOrders, orderLine, orderTrouble, paidPots, unspellablePaid,
   ORDER_STATUS_LABEL, type GymOrderRow, type UnspellablePaid,
 } from '../../src/lib/gymOrders';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** How far back the order book is read. Ninety days is a quarter — long enough
  *  to cover a Stripe payout cycle and every dispute window an owner is likely
@@ -123,7 +121,6 @@ function unspellableReasons(u: UnspellablePaid): string {
 
 export default function OwnerOrders() {
   const t = useTheme();
-  const router = useRouter();
   const { tenant } = useTenant();
   const tenantId = tenant?.id ?? null;
 
@@ -216,14 +213,7 @@ export default function OwnerOrders() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width so the
-            title is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Online Orders</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Online Orders" />
 
         {/* Said once, for the whole screen: the hero, the per-currency pots,
             the four KPIs and the book are all derived from this one read, so

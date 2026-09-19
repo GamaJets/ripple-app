@@ -15,24 +15,21 @@
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, PartialRead, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PartialRead, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { BACK_ICON } from '../../src/ui/direction';
 import { num1 } from '../../src/lib/format';
 
 const CAT_COLOR = (t: any, c: string | null) => c === 'Bug' ? t.crit : c === 'Praise' ? t.brand : c === 'Confusing' ? t.warn : t.ink3;
 
 export default function OwnerFeedback() {
   const t = useTheme();
-  const router = useRouter();
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
   /**
@@ -116,14 +113,7 @@ export default function OwnerFeedback() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width so the
-            title is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Feedback</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Feedback" />
 
         {/* ── the figure: the one number that summarises the inbox ───────── */}
         {/* A card rather than the kit's bare `Hero`. The ring the Hero drew

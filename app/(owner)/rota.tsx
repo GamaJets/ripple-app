@@ -18,9 +18,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -125,7 +124,6 @@ function Chip({ label, on, onPress, tone }: { label: string; on: boolean; onPres
 
 export default function OwnerRota() {
   const t = useTheme();
-  const router = useRouter();
   const { tenant } = useTenant();
 
   /**
@@ -453,17 +451,11 @@ export default function OwnerRota() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width so the
-            title is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Rota</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Rota" />
 
         {/* ── the week being read ────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+        {/* `marginTop` because the kit's head carries no margin of its own. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
           <Ghost icon={BACK_ICON} a11yLabel="Previous week" onPress={() => setWeek((w) => shiftWeek(w, -1))} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>

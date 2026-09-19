@@ -27,7 +27,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -38,7 +38,6 @@ import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 import { catalogueValue as cap } from '../../src/lib/format';
 import { supabase } from '../../src/lib/supabase';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
-import { BACK_ICON } from '../../src/ui/direction';
 
 
 export default function OwnerExercise() {
@@ -85,20 +84,14 @@ export default function OwnerExercise() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width so the
-            title is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
-          {/* The owner sees the catalogue in their own language too, and on
-              this screen the marker below is doing a second job: it is how an
-              owner reviewing the German library can see, movement by movement,
-              what is still English. */}
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        {/* The owner sees the catalogue in their own language too, and on
+            this screen the marker below is doing a second job: it is how an
+            owner reviewing the German library can see, movement by movement,
+            what is still English. */}
+        <PageHead title={display?.name.text || detail?.name || name || 'Exercise'} onBack={goBack} />
+        {/* `marginTop` because the kit's head carries no margin of its own. */}
         <Fetched at={fetchedAt} onRefresh={() => { void reload(); }} busy={status === 'loading'}
-                 style={{ marginBottom: sp.md }} />
+                 style={{ marginTop: sp.lg, marginBottom: sp.md }} />
 
         {display?.note ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>

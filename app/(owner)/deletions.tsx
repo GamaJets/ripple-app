@@ -45,9 +45,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, KpiRow, fig, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, fig, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { supabase } from '../../src/lib/supabase';
@@ -55,7 +54,6 @@ import { isoDate } from '../../src/lib/format';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { BACK_ICON } from '../../src/ui/direction';
 import { capLimit, capped } from '../../src/lib/rowCap';
 
 /** How far back the audit trail is read. A BOUND, not a cap — the screen only
@@ -169,7 +167,6 @@ function clockLabel(days: number | null): string {
 
 export default function OwnerDeletions() {
   const t = useTheme();
-  const router = useRouter();
 
   const [pending, setPending] = useState<Pending[] | null>(null);   // null = not loaded yet
   const [log, setLog] = useState<Actioned[] | null>(null);          // null = not loaded yet
@@ -336,14 +333,7 @@ export default function OwnerDeletions() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width so the
-            title is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Deletion Requests</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Deletion Requests" />
 
         {/* A card rather than the kit's bare `Hero`, which is the one block
             on this screen the board does not draw. The Hero's tone was a dot

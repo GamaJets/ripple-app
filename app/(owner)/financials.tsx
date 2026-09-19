@@ -60,7 +60,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Notice, Spark, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Notice, Spark, fig, PageHead } from '../../src/ui/kit';
 import { useMrrHistory } from '../../src/ui/useMrrHistory';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
@@ -122,7 +122,6 @@ import { fetchOwnerSites, SITES_LOADING } from '../../src/lib/ownerSiteScope';
 import { siteNotice, type SiteScope } from '../../src/lib/ownedSites';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { BACK_ICON } from '../../src/ui/direction';
 /* ── whether this month can be closed ──────────────────────────────────────
  *
  * The whole verdict — 'closeable' or 'blocked', and the blockers in the words
@@ -962,14 +961,7 @@ export default function Financials() {
             also put it under the thumb that scrolls, and past the title in
             reading order, so a screen reader announced the screen and then
             offered the way out of it. */}
-        {/* The title centred over the page with a trailing spacer the width
-            of the back control, the way every pushed page in the other two
-            apps opens now. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Financial Checks</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Financial Checks" />
         {/* The typed figures are on this phone; the register they are
             checked against is not. This line is about the register. */}
         <Fetched at={fetchedAt} onRefresh={reread} busy={busy} />

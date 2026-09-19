@@ -84,7 +84,21 @@ export default function OwnerLayout() {
 
   return (
     <>
-    <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: grown(56) + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { ...ty.caption, fontSize: 11, fontWeight: '500' }, sceneStyle: { backgroundColor: t.bg } }}>
+    {/* The same bar as app/(client)/_layout.tsx and app/(trainer)/_layout.tsx,
+        option for option: one label style, one icon size, the accent from the
+        theme so a white-label gym's tint reaches its own portal. Laid out the
+        same way as theirs so the three can be read against each other. */}
+    <Tabs
+      backBehavior="history"
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: grown(56) + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
+        tabBarActiveTintColor: t.brand,
+        tabBarInactiveTintColor: t.ink3,
+        tabBarLabelStyle: { ...ty.caption, fontSize: 11, fontWeight: '500' },
+        sceneStyle: { backgroundColor: t.bg },
+      }}
+    >
       <Tabs.Screen name="dashboard" options={{ title: 'Overview', tabBarIcon: ({ color }) => <Icon name="grid" size={23} color={color} /> }} />
       <Tabs.Screen name="trainers" options={{ title: 'Trainers', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
       <Tabs.Screen name="brand" options={{ title: 'Brand', tabBarIcon: ({ color }) => <Icon name="palette" size={23} color={color} /> }} />

@@ -34,10 +34,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, fig, PageHead } from '../../src/ui/kit';
 import { plainExact } from '../../src/lib/units';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
@@ -54,11 +53,9 @@ import { capLimit, capped } from '../../src/lib/rowCap';
 // defect — see the header of `deliverySummary` — so the report is handed over
 // in its shape rather than reworded here.
 import { deliverySummary, type DeliveryReport } from '../../src/lib/notifyCopy';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Promotions() {
   const t = useTheme();
-  const router = useRouter();
   const { promos, status, addPromo, toggleActive, removePromo, refresh } = usePromos();
   /* ── When the codes were last read ───────────────────────────────────
      The provider carries no stamp, so the screen keeps one: the moment
@@ -262,14 +259,7 @@ export default function Promotions() {
         {/* Back on the LEADING edge — see the same note in
             app/(owner)/financials.tsx. These two were the only screens in the
             owner portal with it on the trailing side. */}
-        {/* The pushed-page header the board draws: round back control, the
-            title centred, and a trailing spacer the control's own width so the
-            title is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Promotions</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+        <PageHead title="Promotions" />
 
         {/* ── the figure ─────────────────────────────────────────────────── */}
         {/* `promos.length` was every code the gym had ever made, under the word
