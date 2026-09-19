@@ -159,6 +159,30 @@ truthful client screenshots; that needs the user's password.
 Review page (17-item set less Workout View / Active Tracking, which need a signed-in client):
 https://claude.ai/artifact/RCjxmm2weVTsAtQsz8Epvk
 
+## 4e. Home and Me against the board again; the HealthKit import (19 Sep, late)
+
+The user said "screens still don't match the mockups" and "look at the issues on the simulators client app".
+Applied and committed (`5230bcb`):
+
+- **Home** now opens the way board page 2 does: "Good Evening," in body ink over the first name in title
+  weight, search / bell / avatar circles top right (avatar opens Me), the Weekly Goal card with its ring and
+  Start Workout directly under. The "Read N minutes ago · Refresh" stamp and "What This Screen Shows" moved
+  below the Today card, so nothing procedural sits in the first viewport. `ScreenHeader` has a `greeting`
+  prop for this (eyebrow in `ty.body`, ink2).
+- **Me** (board page 19): the stat strip is Workouts / Badges (of 12) / Best Streak from `useWorkoutLog()`,
+  gated on `isWhole(logStatus)` — dashes on a partial or failed read, never a 0. The old
+  Weight / Body Fat / Daily Target strip is gone (those live on Progress and Meals).
+- **Apple Health, root cause:** Metro logged `Failed to get NitroModules` from `appleHealthShim.ts` on every
+  Train render. The simulator binary (built 9 Sep) has **zero** Nitro / HealthKit symbols — the
+  `@kingstinct/react-native-healthkit` native side is not in it, so "connected" was a stored preference
+  with nothing behind it. JS side: `nativePresent()` and `healthKitHere()` now ask the cached
+  `healthModule('health')` first, so a missing module fails once, not per render. The native side needs a
+  fresh build (`npx expo prebuild` + rebuild, or EAS) — **held until the user approves the screenshots.**
+- Metro also logs `ERR_NOTIFICATIONS_KEYCHAIN_ACCESS` from expo-notifications (no keychain entitlement in
+  the dev build). Not changed; likely simulator-only, verify on a device build.
+
+Gates (caps, contrast, a11y, rtl, text, whole, dead-exports, reads, prose) and `npm test` clean.
+
 ## 5. What to do next
 
 **Port the implemented screens from `repple-redesign`, file by file, re-applying audit fixes on
