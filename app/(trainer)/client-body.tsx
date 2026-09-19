@@ -111,7 +111,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Notice, Flag, Spark, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, Spark, fig, Segmented } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
@@ -125,6 +125,7 @@ import { ScanCadencePanel } from '../../src/ui/ScanCadencePanel';
 import { SourceChip } from '../../src/ui/ScanSource';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { isoToday } from '../../src/lib/dayPlan';
 import { plain, lengthLabel } from '../../src/lib/units';
 import { numUpTo, fmtDay } from '../../src/lib/format';
@@ -331,9 +332,18 @@ export default function ClientBody() {
       // DATE and nothing stops two scans sharing one, so the id settles the
       // ties — an order with ties in it is not an order, and at the cap the
       // server may break them differently on each read.
+      //
+      // `created_at` sits between the two since a coach reported "can't see
+      // the updated body scan". `scans.id` is a uuid_generate_v4(), so on its
+      // own it settled a tie STABLY and ARBITRARILY: of two scans dated the
+      // same day — a typed entry and then the InBody sheet, or a scan entered
+      // again to correct it — a coin decided which one this screen called the
+      // newest, and it could be the one the client had just replaced. When the
+      // row was written is the only thing on it that knows which came second.
+      // The id stays last, for two rows written in the same microsecond.
       supabase.from('scans').select(SCAN_COLS)
         .eq('client_id', id)
-        .order('taken_at', { ascending: false }).order('id', { ascending: false })
+        .order('taken_at', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit()),
       // The client's own row, for the figures they typed. RLS on `clients` is
       // what limits this to a coach's own book; the filter is about which client
@@ -365,11 +375,22 @@ export default function ClientBody() {
       setScanStatus('error');
     } else {
       const page = capped((scanRes.data ?? []) as unknown as CompositionScanRow[]);
-      setHistory(readBodyHistory(page.rows));
+      // Handed over OLDEST first, which is not how they were read. Both
+      // `readBodyHistory` and `metricTrends` order by DAY with a stable sort
+      // and then take the last entry as the latest — and a stable sort keeps
+      // two scans dated the same day in the order they arrived. Arriving
+      // newest-first, the scan a client had just added sat BEFORE the one it
+      // replaced, so "latest" was the older of the pair: the figure, its delta
+      // and the composition table all described the scan the coach had already
+      // seen. The member's own app never had this, because src/ui/clientData.tsx
+      // turns its page round before anything reads it; this does the same.
+      // The read stays newest-first — that decides which end the cap cuts.
+      const oldestFirst = page.rows.slice().reverse();
+      setHistory(readBodyHistory(oldestFirst));
       // Carried through untouched. A row with no `metrics` contributes no
       // point to any composition metric — the same rule as the missing muscle
       // figure above it, and for the same reason: absence is not zero.
-      setComp(page.rows.map((r) => ({ takenAt: r.taken_at, metrics: r.metrics ?? undefined })));
+      setComp(oldestFirst.map((r) => ({ takenAt: r.taken_at, metrics: r.metrics ?? undefined })));
       setScanRows(page.rows.map((r) => ({ day: r.taken_at ?? null, source: r.source ?? null })));
       setScanStatus(page.truncated ? 'partial' : 'ready');
     }
@@ -448,6 +469,21 @@ export default function ClientBody() {
     ...(picked ? [load(picked, askable), wellnessRefresh()] : []),
   ]), [r, picked, askable, load, wellnessRefresh]));
 
+  // The other half of "can't see the updated body scan". Every coach screen is
+  // a tab mounted ONCE (src/ui/refreshOnFocus.ts), and the effect above reads
+  // when `picked` changes and at no other time — so a coach who had opened
+  // this client's body once went on being shown that read for the life of the
+  // app, however many scans the client added afterwards, unless they happened
+  // to pull. Coming back to the screen is the moment a coach is asking "has
+  // anything changed", so it goes and looks. The scans and the typed figures
+  // only: the roster is the dashboard's to refresh, and it does so on its own
+  // focus.
+  useRefreshOnFocus(useCallback(() => {
+    if (!USE_SUPABASE || !picked) return;
+    void load(picked, askable);
+    void wellnessRefresh();
+  }, [picked, askable, load, wellnessRefresh]));
+
   const fullName = client?.name ?? '';
   const who = fullName ? fullName.split(' ')[0] : 'They';
   /**
@@ -519,15 +555,6 @@ export default function ClientBody() {
   const chip = (on: boolean) => ({
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
     backgroundColor: on ? t.brand : t.surface2,
-  });
-
-  /** One segment of the board's bar: an ink fill under the chosen word, the
-   *  ground colour for the word itself — the same pill the client's Meals tab
-   *  draws its slot bar with, so coach and client read one control. */
-  const seg = (on: boolean) => ({
-    flex: 1, minHeight: 40, borderRadius: radius.pill,
-    alignItems: 'center' as const, justifyContent: 'center' as const,
-    backgroundColor: on ? t.ink : 'transparent',
   });
 
   /** The mark in the circle at the start of each row: the instrument the
@@ -631,18 +658,16 @@ export default function ClientBody() {
             </Text>
           ) : null}
 
-          <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
-            {(['1M', '3M', '6M', '1Y'] as const).map((r) => {
-              const on = range === r;
-              return (
-                <Pressable key={r} accessibilityRole="tab" accessibilityState={{ selected: on }}
-                  accessibilityLabel={r === '1M' ? 'Last month' : r === '3M' ? 'Last 3 months' : r === '6M' ? 'Last 6 months' : 'Last year'}
-                  onPress={() => setRange(r)} style={seg(on)}>
-                  <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{r}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {/* The kit's Segmented. The range stays ON the card whose line it
+              changes — the review's rule 8 — and each abbreviation is said in
+              full, because "3M" is read out as "three em". */}
+          <Segmented style={{ marginTop: sp.lg }} value={range} onChange={setRange}
+            options={[
+              { key: '1M', label: '1M', a11yLabel: 'Last month' },
+              { key: '3M', label: '3M', a11yLabel: 'Last 3 months' },
+              { key: '6M', label: '6M', a11yLabel: 'Last 6 months' },
+              { key: '1Y', label: '1Y', a11yLabel: 'Last year' },
+            ] as const} />
         </Section>
 
         {/* ── every reading in the window, newest first ──────────────────
@@ -865,26 +890,17 @@ export default function ClientBody() {
                 under their own grant (see client-photos.tsx) and are opened
                 there rather than drawn here. */}
             {picked ? (
-              <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
-                {BODY_METRICS.map((m) => {
-                  const on = metric === m.key;
-                  return (
-                    <Pressable key={m.key} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={m.label}
-                      onPress={() => setMetric(m.key)} style={seg(on)}>
-                      {/* "Skeletal Muscle" is the series' name and does not fit
-                          a quarter of the bar; the hero under it says it in full. */}
-                      <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2, textAlign: 'center' }}>
-                        {m.key === 'muscle' ? 'Muscle' : m.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-                <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Photos"
-                  onPress={() => router.push({ pathname: '/(trainer)/client-photos', params: { clientId: picked, name: fullName } } as any)}
-                  style={seg(false)}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2, textAlign: 'center' }}>Photos</Text>
-                </Pressable>
-              </View>
+              <Segmented style={{ marginTop: sp.lg }} value={metric} onChange={(k) => { if (k !== 'photos') setMetric(k); }}
+                options={[
+                  /* "Skeletal Muscle" is the series' name and does not fit
+                     a quarter of the bar; the hero under it says it in full,
+                     and so does the spoken label. */
+                  ...BODY_METRICS.map((m) => ({ key: m.key, label: m.key === 'muscle' ? 'Muscle' : m.label, a11yLabel: m.label })),
+                  /* A segment that goes somewhere instead of selecting: the
+                     kit never draws it as chosen. */
+                  { key: 'photos' as const, label: 'Photos',
+                    onPress: () => router.push({ pathname: '/(trainer)/client-photos', params: { clientId: picked, name: fullName } } as any) },
+                ]} />
             ) : null}
 
             {picked && !askable ? (

@@ -42,9 +42,10 @@
 // bold title-case label now (the approved board has no tracked uppercase), and
 // its strings are left to their authors here for the same practical reason: the
 // slots it fills are kickers and section titles written as short phrases.
-// That covers a LOT of ground: <SectionHead title>, <Hero label>, <Field label>,
-// <Notice kicker>, <ActionCard ringLabel/ringNote>, <QuickRow> — six of the
-// kit's slots. The naive version of this check flagged 122 of these and 17 real
+// That covers a LOT of ground: <Hero label>, <Field label>, <Notice kicker>,
+// <ActionCard ringLabel/ringNote>, <QuickRow> — five of the kit's slots, and
+// until round 4 a sixth, <SectionHead title>, which is ty.head now (see the note
+// under MICRO for where that leaves it). The naive version of this check flagged 122 of these and 17 real
 // ones; the 122 are why nobody would have run it twice.
 //
 // The console has the same trap pointing the other way. The rail in
@@ -135,6 +136,22 @@ const VISIBLE = new Map([
   ['ListRow', ['title']],        // ty.body  — kit.tsx:401
   ['PageHead', ['title']],       // ty.title — kit.tsx, the board's centred page head
   ['ActionCard', ['title', 'cta']], // ty.body kit.tsx:380, and cta is a <Cta>
+  // The data-layout shapes (round 4). Each of these is a HEADING over a card —
+  // ty.head, the face SectionHead's title now uses — and every call site that
+  // exists was written Title Case, so they start held to it rather than being
+  // swept later. What this cannot see: `cta={{ label: '…' }}` on ActionBlock,
+  // `action={{ label }}` on AttentionRow and the `options` of Segmented are
+  // object literals, not attributes, and ATTR below reads attributes. Those
+  // labels reach the screen through <Cta>, <Ghost> and a tab, all Title Case
+  // by the same house rule, and nothing here checks that they are.
+  // <SyncBadge label> is deliberately NOT here. The badge's own four words are
+  // Title Case ("Waiting to Send", "Not Sent"), but `label` is the slot for a
+  // row that can say more, and the first two callers both wrote a sentence in
+  // it — "Marked on this phone · waiting to send" — which is the right thing to
+  // write there. Same standing as <Notice title>: case-visible, and prose.
+  ['FigureCard', ['title']],     // ty.head, through SectionHead
+  ['ActionBlock', ['title']],    // ty.head
+  ['Expandable', ['title']],     // ty.head
 ]);
 
 /**
@@ -143,13 +160,28 @@ const VISIBLE = new Map([
  * their absence above.
  */
 const MICRO = new Map([
-  ['SectionHead', ['title']],    // kit.tsx:87
   ['Hero', ['label']],           // kit.tsx:143
   ['Field', ['label']],          // kit.tsx:491
   ['Notice', ['kicker']],        // kit.tsx:850
   ['ActionCard', ['ringLabel', 'ringNote']], // kit.tsx:369, 373
 ]);
 
+// <SectionHead title> WAS in MICRO and is in neither list now. Round 4 raised it
+// from ty.micro to ty.head in t.ink — a tester could not find the subheadings —
+// so it is case-visible at 17pt bold and MICRO would be a false statement about
+// it. It is not in VISIBLE either, and the reason is a count: tried there, rule 1
+// flags 30 of the 718 call sites, and they are not 30 typos. About half are
+// sentences standing where a heading goes, the way <Notice title> does below —
+// "Could not read your history", "Have a code from your coach?", "Sign in to
+// see this" — and Title Casing those is the over-correction this file exists
+// not to make. The other half are real headings in sentence case ("Your ad
+// accounts", "6-month forecast", "Spent, by code") and DO want the edit; they
+// sit in screens that were mid-change when this was written. The honest state
+// is therefore "unread", said here, rather than a rule that cannot tell the two
+// halves apart. The way back in is the sweep: capitalise the real headings,
+// move the sentences to a <Notice> or a body line, then add
+// ['SectionHead', ['title']] to VISIBLE. <FigureCard title> is already held.
+//
 // <Notice title> is ty.head and IS case-visible, but it is deliberately a
 // sentence everywhere it is used — "Your clients could not be read" x12, "We
 // couldn't read your training log" x7 — so it is prose and rule 1 leaves it

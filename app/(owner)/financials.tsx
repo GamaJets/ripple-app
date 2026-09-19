@@ -60,10 +60,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Notice, Spark, fig, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Notice, Spark, fig, PageHead, FigureCard, ActionBlock } from '../../src/ui/kit';
 import { useMrrHistory } from '../../src/ui/useMrrHistory';
 import { isWhole } from '../../src/ui/loadStatus';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, anyEntered, reviewFinances, reviewBasis, storageNote, type FinInputs, type FinFlag } from '../../src/lib/finReview';
 import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise, sharedCurrency } from '../../src/lib/gymRecord';
@@ -1146,7 +1146,12 @@ export default function Financials() {
           </Section>
         ) : !ready ? (
           /* ── honest empty state: no hero of zeros ─────────────────────── */
-          <Section>
+          /* A fragment now, not one Section round all three arms: the two
+             arms that end in a button are the kit's ActionBlock — a title, the
+             reason, where the figures are kept, one full-width button — and
+             that is a card of its own. The failed-read arm has no action to
+             offer, deliberately, and stays a plain Section. */
+          <>
             {/* Two different people arrive here and they must not read the same
                 sentence. One has typed nothing. The other typed their member
                 counts, left revenue blank, and would otherwise be told "nothing
@@ -1158,7 +1163,7 @@ export default function Financials() {
                 Save button below would then write the blank over the top of
                 what is still on disk, making the sentence true. */}
             {hydrateFailed && !anyEntered(fin) ? (
-              <>
+              <Section>
                 <SectionHead title="Your Figures Could Not Be Read" />
                 <Text style={{ ...ty.body, color: t.ink2 }}>
                   This phone&rsquo;s stored copy of your monthly figures did not come back. That is
@@ -1166,7 +1171,7 @@ export default function Financials() {
                   before is still on this phone. Close the app and open it again before typing
                   anything here: saving now writes over whatever is still stored.
                 </Text>
-              </>
+              </Section>
             ) : hasFigures(fin) && blocker ? (
               /* ── revenue is in and something the review needs is not ─────
                   A fourth person, and the branch below would have told them
@@ -1179,32 +1184,21 @@ export default function Financials() {
                   blank, what it would have been used for, and what the old
                   answer would have been, so an owner can see that the dash is
                   the honest one. src/lib/ownerFinancialsCache.ts writes it. */
-              <>
-                <SectionHead title="No Score Yet" />
-                <Text style={{ ...ty.body, color: t.ink2 }}>{blocker}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  {storageNote()}
-                </Text>
-                <View style={{ height: sp.lg }} />
-                <Cta label="Fill It In" wide onPress={openEditor} />
-              </>
-            ) : (<>
-            <SectionHead title={anyEntered(fin) ? 'Revenue Is Missing' : 'No Figures Yet'} />
-            <Text style={{ ...ty.body, color: t.ink2 }}>
-              {anyEntered(fin)
+              <ActionBlock title="No Score Yet" reason={blocker} meta={storageNote()}
+                cta={{ label: 'Fill It In', onPress: openEditor }} />
+            ) : (
+            <ActionBlock
+              title={anyEntered(fin) ? 'Revenue Is Missing' : 'No Figures Yet'}
+              reason={anyEntered(fin)
                 ? 'Your figures are saved. The review still needs your total revenue for the month — margin, the health score and every recommendation below are a share of it, and without it there is nothing honest to work them out from.'
                 : "Enter this month's revenue, expenses and membership numbers. Nothing is shown until it comes from you."}
-            </Text>
-            {/* Before they type, not after. Somebody deciding whether to keep
-                their P&L here needs to know it is kept nowhere else while the
-                decision is still theirs to make. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {storageNote()}
-            </Text>
-            <View style={{ height: sp.lg }} />
-            <Cta label={anyEntered(fin) ? 'Add My Revenue' : 'Enter My Figures'} wide onPress={openEditor} />
-            </>)}
-          </Section>
+              /* Before they type, not after. Somebody deciding whether to keep
+                 their P&L here needs to know it is kept nowhere else while the
+                 decision is still theirs to make. */
+              meta={storageNote()}
+              cta={{ label: anyEntered(fin) ? 'Add My Revenue' : 'Enter My Figures', onPress: openEditor }} />
+            )}
+          </>
         ) : r ? (
           <>
             {/* ── the figure ───────────────────────────────────────────── */}
@@ -1219,26 +1213,23 @@ export default function Financials() {
                 : `Grade ${r.grade} · a ${num(r.marginPct)}% net margin. The amounts are not written here because this gym has not set its currency.`;
               const pctOf100 = Math.round(Math.max(0, Math.min(100, r.score)));
               return (
-                <Section>
-                  <SectionHead title="Health Score" note={`Grade ${r.grade}`} />
-                  {/* `r.score` is a number by type — the review has run —
-                      so the spoken sentence carries it directly rather than
-                      through fig(), which could only ever draw the dash a
-                      sentence must not contain. */}
-                  <View accessible accessibilityLabel={`Health score, ${num(r.score)} out of 100, ${note}`}>
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                        style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(r.score)}</Text>
-                      <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>/100</Text>
-                    </View>
-                    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
-                  </View>
+                /* The kit's FigureCard, which is this card: the head, one
+                   figure shrunk to fit with its unit, the sentence under it,
+                   and one spoken line for all of it. The meter is a child, so
+                   it stays its own element outside that line. */
+                <FigureCard title="Health Score" note={`Grade ${r.grade}`}
+                  figure={fig(r.score)} unit="/100" detail={note}
+                  /* `r.score` is a number by type — the review has run —
+                     so the spoken sentence carries it directly rather than
+                     through fig(), which could only ever draw the dash a
+                     sentence must not contain. */
+                  spoken={`Health score, ${num(r.score)} out of 100, ${note}`}>
                   <View accessible accessibilityRole="progressbar" accessibilityLabel={`${pctOf100}% health score`}
                     accessibilityValue={{ min: 0, max: 100, now: pctOf100 }}
                     style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.lg, overflow: 'hidden' }}>
                     <View style={{ height: 3, borderRadius: 2, width: `${pctOf100}%`, backgroundColor: t.brand }} />
                   </View>
-                </Section>
+                </FigureCard>
               );
             })()}
 

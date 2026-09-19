@@ -7,7 +7,7 @@
 // boxed, and a real card is spent only on something you can act on. Accent
 // colour marks the live metric and the primary action, and nothing else.
 import { useState, type ReactNode } from 'react';
-import { View, Text, Pressable, type ViewStyle, type StyleProp } from 'react-native';
+import { View, Text, Pressable, ScrollView, type ViewStyle, type StyleProp } from 'react-native';
 import { router } from 'expo-router';
 import Svg, { Circle, Polyline, Line } from 'react-native-svg';
 import { useTheme } from './components';
@@ -22,7 +22,8 @@ import {
   axisLabel, pointLabel, tickIndices, maxTicksForWidth,
   segments, readablePoints, hasInteriorGap, nearestPoint,
 } from '../lib/chartAxis';
-import { BACK_ICON, END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from './direction';
+import { BACK_ICON, END_ALIGN, FORWARD_CHAR, FORWARD_ICON, turn } from './direction';
+import { isWhole, type LoadStatus } from './loadStatus';
 
 /* ── how this kit talks ───────────────────────────────────────────────────
  *
@@ -252,8 +253,26 @@ export function PageHead({ title, subtitle, leading, trailing, onBack, backLabel
 }
 
 /**
- * A section's header: a quiet uppercase title at the leading edge, and an
- * optional tappable trailing note (a summary figure, "All activity ›").
+ * A section's header: the title at the leading edge, and an optional tappable
+ * trailing note (a summary figure, "All activity ›").
+ *
+ * ── The title is a HEADING, and is drawn as one ───────────────────────────
+ *
+ * It was `ty.micro` on `t.ink3` — the same face and the same grey as the
+ * label over a field and the caption under a row. A coach testing the app
+ * wrote, of exactly this component: "With the subheadings like coaching
+ * tools, this month. It blends in too much with the other text it's easy to
+ * miss." They were right, and the arithmetic says why: on a dense screen a
+ * card holds a 13pt grey title over 15pt INK rows, so the thing that names
+ * the card was the quietest text in it. A heading that is outranked by what
+ * it heads is not doing the one job it has.
+ *
+ * So the title is `ty.head` in `t.ink` — 17pt bold, the same step a Notice's
+ * title and an ActionBlock's use, one below the page title — and it is said
+ * as a header, so a VoiceOver reader can move card to card with the rotor
+ * instead of swiping through every row between them. The NOTE stays caption
+ * on `t.ink3`: it is the aside, and the contrast between the two is what
+ * makes the title read as the title.
  *
  * "Leading" and "trailing" rather than left and right because the row is a
  * plain `flexDirection: 'row'` and Yoga swaps the two ends in a right-to-left
@@ -265,7 +284,20 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
   // At the largest accessibility sizes even proportional shrinking leaves a
   // sentence-length note as a column of three-letter lines beside the title.
   // Past that point the two stack, title over note, and each gets the width.
-  const stacked = fontScale >= 1.5;
+  //
+  // And at ANY size where the two cannot share a line. At 13pt the title gave
+  // up little; at 17pt bold "What Your Business Costs" beside "What you have
+  // recorded going out" is two columns of two-word lines, which is the defect
+  // described below arriving by a different road. A 17pt bold character
+  // averages about 9pt and a 12pt caption character about 6, and the inside of
+  // a card on the narrowest phone the app supports is a little under 300pt —
+  // so where the sum does not fit, the note goes UNDER the title and reads as
+  // its subtitle, which is how the board sets a sentence-length note anyway.
+  // Short pairs ("This Month" / "Analytics ›") are nowhere near the line and
+  // stay a row. An estimate, deliberately: measuring would cost a layout pass
+  // and a flash of the wrong arrangement on every card of every screen.
+  const crowded = !!note && (title.length * 9 + note.length * 6) * fontScale > 290;
+  const stacked = fontScale >= 1.5 || crowded;
   return (
     // `gap` and the two `flexShrink`s are not tidying. Without them this row
     // had no way to be too wide: `space-between` puts nothing between the two
@@ -291,10 +323,10 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
       flexDirection: stacked ? 'column' : 'row',
       justifyContent: 'space-between',
       alignItems: stacked ? 'flex-start' : 'baseline',
-      gap: stacked ? sp.sm : sp.md,
+      gap: stacked ? sp.xs : sp.md,
       marginBottom: sp.md,
     }}>
-      <Text style={{ ...ty.micro, color: t.ink3, flexShrink: 1 }}>{title}</Text>
+      <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, flexShrink: 1 }}>{title}</Text>
       {note ? (
         // The chevron is drawn as a character, so it is also SPOKEN as one —
         // "All activity right-pointing angle quotation mark". The label says the
@@ -317,7 +349,9 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
           {/* END_ALIGN rather than a raw 'right': a note that has wrapped to a
               second line must stay against the trailing edge it started at, and
               in a right-to-left locale that edge is the left one. */}
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: END_ALIGN }}>{note}{onPress ? ' ' + FORWARD_CHAR : ''}</Text>
+          {/* …and stacked under the title it is a subtitle, which starts where
+              the title starts. 'auto' is the leading edge in every locale. */}
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: stacked ? 'auto' : END_ALIGN }}>{note}{onPress ? ' ' + FORWARD_CHAR : ''}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -1290,5 +1324,610 @@ export function PartialRead({ what, shown, onPress }: {
     >
       {onPress ? <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={onPress} /></View> : null}
     </Notice>
+  );
+}
+
+/* ── the data-layout shapes ───────────────────────────────────────────────── */
+
+/* The review of how real data is ordered on every screen — docs/claude-handoff/
+ * CLAUDE-CODE-DATA-LAYOUT-AND-FLOW-REVIEW.md — asks for a small set of shared
+ * shapes before any screen is touched, "through the existing theme and UI
+ * files", and gives ten rules they have to hold. The ones below are the shapes
+ * this kit did not have. Each is built out of the parts above it — Section,
+ * SectionHead, Cta, Ghost, Flag's mark — so there is still one card, one
+ * button and one dot in the app, and the rule each shape exists for is named
+ * beside it so a later reader can check the component against the rule rather
+ * than against a memory of it.
+ */
+
+/** The 6pt status mark: the same dot Hero, Flag and Notice draw. A mark and
+ *  never the message — every caller below puts words beside it, and hides it
+ *  from the screen reader, which gets the words. */
+function Dot({ tone, top = 0 }: { tone: string; top?: number }) {
+  return (
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+      style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: tone, marginTop: top, flexShrink: 0 }} />
+  );
+}
+
+/**
+ * One figure of a FigureCard, where a card holds more than one.
+ *
+ * That is money, and only money: the audit rule is that two currencies are
+ * never summed, so "Total Taken" for a coach paid in AED and GBP is two
+ * figures under one heading and there is no honest single one. Everything
+ * else passes `figure` and never sees this type.
+ */
+export interface FigureItem {
+  /** Stable key — the currency code. */
+  key: string;
+  /** Already spelled by the caller; null or undefined draws the dash. */
+  figure: string | null | undefined;
+  unit?: string;
+  /** Already a sentence — see FigureCard's `comparison`. */
+  comparison?: string;
+  /** The comparison's mark. Absent, the quiet one. */
+  tone?: string;
+  /** The whole figure as one spoken sentence, where the caller can say it
+   *  better than "title, figure, comparison" — "AED 4,800, 12 payments in AED
+   *  in September". */
+  spoken?: string;
+}
+
+/**
+ * The metric summary: a card that leads with ONE figure and says what it is,
+ * what it is measured in, how it moved, over what period and on whose word.
+ *
+ * ── Why this is a component ───────────────────────────────────────────────
+ *
+ * Round 3 retired `Hero` screen by screen in favour of "a Section figure
+ * card": SectionHead, a `ty.hero` Text with `adjustsFontSizeToFit`, a unit in
+ * `ty.head`, a note, and an `accessible` wrapper with a hand-joined sentence.
+ * About fifteen screens now carry those fifteen lines, and they have already
+ * drifted — one forgot the shrink-to-fit and wraps AED figures mid-number, two
+ * colour the movement as TEXT in a status colour, which scale.ts forbids and
+ * check:contrast only catches for warn and crit. This is that card, once.
+ *
+ * ── Rule 2: a metric with context, source and time ────────────────────────
+ *
+ * "78%" alone is not information; "Adherence · 78% · last 7 days · down 9
+ * points" is. So the slots are the review's, in its order: the label is
+ * `title`, then `figure` and `unit`, then `comparison`, then `period` and
+ * `source` on one quiet line. None is invented when absent — a card with no
+ * comparison draws no comparison, and never "no change", which is a claim.
+ *
+ * ── What it will not do ───────────────────────────────────────────────────
+ *
+ * It will not compute. `comparison` arrives as the sentence `deltaLabel`
+ * wrote — sign, unit, baseline and the three no-baseline arms all decided in
+ * src/lib/deltaLabel.ts, where the test is — because a second place that
+ * subtracts is a second place that subtracts two rounded ends. `figure`
+ * arrives spelled (`minorMoney`, `weightLabel`, `num`) or null, and null is
+ * the dash, by `fig()`: rule 5, unknown is not zero. When it IS the dash,
+ * `detail` is where the caller says why — a dash with no reason beside it
+ * reads as the screen having broken.
+ *
+ * ── Colour ────────────────────────────────────────────────────────────────
+ *
+ * `tone` colours the 6pt mark beside the comparison and nothing else. The
+ * words stay ink: `t.brand` as 13pt text does not clear 4.5:1 on every
+ * white-label palette, and "+2 cm" already says which way it went. Pass a
+ * tone only for a VERDICT — movement the reader's own goal wanted — and leave
+ * it off for a movement that is merely a fact.
+ *
+ * One spoken sentence for the whole figure, as Hero had: label, figure, unit,
+ * comparison, detail, period, source. `children` sit outside that group,
+ * because a label replaces its subtree and a button or a meter swept inside
+ * it stops being reachable (rule 3 of scripts/check-a11y.mjs).
+ */
+export function FigureCard({
+  title, note, onPress, figure, unit, comparison, period, source, tone, detail, figures, spoken, children,
+}: {
+  title: string;
+  /** SectionHead's trailing note, and `onPress` makes it the way onward. */
+  note?: string;
+  onPress?: () => void;
+  /** Spelled by the caller, or null. Null, undefined and NaN draw the dash. */
+  figure?: string | null;
+  unit?: string;
+  /** A finished `deltaLabel` sentence — "−1.2 cm since 3 Aug". Never a number. */
+  comparison?: string;
+  /** "This month", "Last 30 days", "Measured 14 Aug". */
+  period?: string;
+  /** Whose word the figure is — "From your figures", "Mirrored from Stripe". */
+  source?: string;
+  /** The comparison's mark. */
+  tone?: string;
+  /** One sentence under the figure: what it counts, or why it is a dash. */
+  detail?: string;
+  /** Several figures under one heading — one per currency, never summed.
+   *  Replaces `figure`/`unit`/`comparison`/`tone`. */
+  figures?: FigureItem[];
+  /** The spoken sentence, where the default joins the wrong things. */
+  spoken?: string;
+  /** Under the figure: a meter, a staleness note, a PartialRead, a button. */
+  children?: ReactNode;
+}) {
+  const t = useTheme();
+  const tail = [period, source].filter(Boolean).join(' · ');
+  // The dash is an answer in a slot and a hole in a sentence (check:prose), and
+  // VoiceOver reads "—" as nothing at all — so the ear gets the words.
+  const say = (f: string | null | undefined, u?: string) => {
+    const shown = fig(f);
+    return shown === '—' ? 'no figure' : [shown, u].filter(Boolean).join(' ');
+  };
+  const one = (f: string | null | undefined, u?: string, cmp?: string, mark?: string) => (
+    <>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+        {/* Shrunk to fit and never wrapped — Hero's reasoning, above, in full:
+            a money figure broken across two lines is a figure read wrong, and
+            the floor is low because below it iOS ellipsises, and "AED 1,284,9…"
+            is a different number. */}
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+          style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(f)}</Text>
+        {u ? <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{u}</Text> : null}
+      </View>
+      {/* UNDER the figure, not beside it. Beside it the two compete for one
+          line, and either the money shrinks to make room for "+12% against
+          August" or the comparison wraps into a column; under it both get the
+          card's width at every text size. */}
+      {cmp ? (
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 3 }}>
+          <Dot tone={mark || t.ink3} top={grown(6)} />
+          <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink2, flex: 1 }}>{cmp}</Text>
+        </View>
+      ) : null}
+    </>
+  );
+  return (
+    <Section>
+      <SectionHead title={title} note={note} onPress={onPress} />
+      {figures && figures.length ? (
+        <>
+          {figures.map((f, i) => (
+            <View key={f.key} accessible style={{ marginTop: i === 0 ? 0 : sp.md }}
+              accessibilityLabel={f.spoken ?? [title, say(f.figure, f.unit), f.comparison].filter(Boolean).join(', ')}>
+              {one(f.figure, f.unit, f.comparison, f.tone)}
+            </View>
+          ))}
+          {detail ? <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{detail}</Text> : null}
+          {tail ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{tail}</Text> : null}
+        </>
+      ) : (
+        <View accessible
+          accessibilityLabel={spoken ?? [title, say(figure, unit), comparison, detail, tail].filter(Boolean).join(', ')}>
+          {one(figure, unit, comparison, tone)}
+          {detail ? <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{detail}</Text> : null}
+          {tail ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{tail}</Text> : null}
+        </View>
+      )}
+      {children}
+    </Section>
+  );
+}
+
+/** What a write's state is called. Title Case, because it is a label beside a
+ *  row and not a sentence in it. "Waiting to Send" rather than "Queued": the
+ *  second is our word for it, and the first is what is happening to their set. */
+const SYNC_WORDS = {
+  queued: 'Waiting to Send',
+  retrying: 'Retrying',
+  failed: 'Not Sent',
+  delivered: 'Sent',
+} as const;
+
+export type SyncState = keyof typeof SYNC_WORDS;
+
+/**
+ * The state of ONE write, beside the thing that was written.
+ *
+ * ── Rule 6: sync state beside affected data ───────────────────────────────
+ *
+ * The offline outbox tells a member that "3 things are waiting to send" in a
+ * banner, and not WHICH three — so a coach looking at a client's Tuesday
+ * cannot tell whether the workout that is missing was never done or has not
+ * arrived. This is the small inline mark that goes on the workout, the
+ * attendance tick, the message or the payment itself.
+ *
+ * ── Rule 9: never colour alone ────────────────────────────────────────────
+ *
+ * Words and a dot, always both. Four states are four colours only to somebody
+ * who can tell warn from crit at 6pt in sunlight; the word is the state, and
+ * the dot lets an eye find the one row in forty that has it. There is no
+ * icon-only or dot-only form and no prop to get one.
+ *
+ * `label` replaces the words where the row can say more — "Sent 09:14",
+ * "Not Sent · Tap to Retry" — and must still name the state, because it is
+ * also what is spoken. Polite live region: a badge that turns from Retrying
+ * to Not Sent while somebody is on the row is news, and not an interruption.
+ *
+ * It draws what it is TOLD. A badge left saying "Waiting to Send" after the
+ * outbox has drained is a false statement about somebody's data, so pass
+ * `state` from the queue's own answer and never from a flag set at tap time.
+ */
+export function SyncBadge({ state, label }: { state: SyncState; label?: string }) {
+  const t = useTheme();
+  const tone = state === 'failed' ? t.crit : state === 'retrying' ? t.warn : state === 'delivered' ? t.brand : t.ink3;
+  const words = label ?? SYNC_WORDS[state];
+  return (
+    <View accessible accessibilityRole="text" accessibilityLabel={words} accessibilityLiveRegion="polite"
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start' }}>
+      <Dot tone={tone} />
+      <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, flexShrink: 1 }}>{words}</Text>
+    </View>
+  );
+}
+
+/**
+ * One line of a "who needs me" list: who, WHY, how long, what state, one action.
+ *
+ * ── Rule 4: the reason beside the alert ───────────────────────────────────
+ *
+ * "Needs attention" with the reason one tap away is a list of names, and a
+ * coach with forty clients opens forty records to find the two that matter.
+ * The owner's Trainer Health board did exactly this: a score, a name, "At
+ * risk" — and the sentence saying WHY ("6 sessions finished but unmarked")
+ * was computed, and shown only in the sheet behind the row. So `reason` is
+ * not optional here. A row with no reason to give is a ListRow.
+ *
+ * The order is the review's: name → reason → age and status → action.
+ * `status` is words with the 6pt mark beside them (rule 9); `age` is how old
+ * this is or when it falls due — "3 days", "Due Friday" — or the one count
+ * that sizes it, in the quiet ink because it qualifies the status.
+ * `sync` puts a SyncBadge on the row where the row IS the queued write.
+ *
+ * ── One action, and where it lives ────────────────────────────────────────
+ *
+ * The row opens the record; `action` is the one thing worth doing WITHOUT
+ * opening it ("Message", "Mark Delivered"). It is a Ghost and not a Cta: ten
+ * of these in a list would be ten primary buttons, and rule 1 allows a screen
+ * one. It is a SIBLING of the pressable row rather than a child — a button
+ * inside an `accessible` element is unreachable by VoiceOver — and it names
+ * its subject when spoken ("Message, Dana Whitfield"), since a screen reader
+ * meets ten identical "Message" buttons with nothing to tell them apart. At
+ * large text it drops under the words so the name keeps the row's width.
+ *
+ * The name wraps to two lines and the reason to three: a long name is rule
+ * 10's first test, and an ellipsis in the reason is rule 4 broken again.
+ */
+export function AttentionRow({
+  monogram, avatar, icon, name, reason, age, status, tone, sync, action, onPress, divider,
+}: {
+  /** Initials, as the caller's own rule cuts them. Two characters are drawn. */
+  monogram?: string;
+  /** Anything round and about 40pt — a photo, a HealthPill. Wins over the others. */
+  avatar?: ReactNode;
+  icon?: IconName;
+  name: string;
+  reason: string;
+  age?: string;
+  status?: string;
+  /** The status mark's colour. The words carry the meaning. */
+  tone?: string;
+  sync?: SyncState;
+  action?: { label: string; onPress: () => void };
+  onPress?: () => void;
+  /** A hairline above — every row but the first. */
+  divider?: boolean;
+}) {
+  const t = useTheme();
+  const below = !!action && fontScale >= 1.35;
+  const D = grown(40);
+  const spoken = [name, reason, status, age, sync ? SYNC_WORDS[sync] : ''].filter(Boolean).join('. ');
+  const identity = avatar ?? (monogram || icon ? (
+    <View style={{ width: D, height: D, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+      {monogram
+        // Array.from, not slice: a name that opens with an emoji or an
+        // astral-plane letter is two UTF-16 units, and half of one is "�".
+        ? <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{Array.from(monogram).slice(0, 2).join('')}</Text>
+        : <Icon name={icon!} size={18} color={tone || t.brand} />}
+    </View>
+  ) : null);
+  const body = (
+    <>
+      {identity}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={2} style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
+        <Text numberOfLines={linesAtScale(fontScale, 3)} style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{reason}</Text>
+        {status || age ? (
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 3 }}>
+            {status ? <Dot tone={tone || t.ink3} top={grown(5)} /> : null}
+            <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+              {status ? <Text style={{ color: t.ink2, fontWeight: '500' }}>{status}</Text> : null}
+              {status && age ? ' · ' : ''}{age}
+            </Text>
+          </View>
+        ) : null}
+        {sync ? <View style={{ marginTop: sp.xs }}><SyncBadge state={sync} /></View> : null}
+      </View>
+      {onPress && !(action && !below) ? <Icon name={FORWARD_ICON} size={15} color={t.ink3} /> : null}
+    </>
+  );
+  const rowStyle = { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: sp.md } as const;
+  const act = action ? (
+    <Ghost label={action.label} a11yLabel={`${action.label}, ${name}`} onPress={action.onPress} />
+  ) : null;
+  return (
+    <View style={{ paddingVertical: sp.md, borderTopWidth: divider ? hairline : 0, borderTopColor: t.ring }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+        {onPress ? (
+          <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={spoken} style={rowStyle}>{body}</Pressable>
+        ) : (
+          <View accessible accessibilityLabel={spoken} style={rowStyle}>{body}</View>
+        )}
+        {below ? null : act}
+      </View>
+      {below && act ? (
+        <View style={{ flexDirection: 'row', marginTop: sp.sm, marginStart: identity ? D + sp.md : 0 }}>{act}</View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * The primary action block: what to do next, WHY, and one button to do it.
+ *
+ * ── Rule 1: one primary question, one dominant action ─────────────────────
+ *
+ * The review's stack for every primary screen is context → current state →
+ * NEXT ACTION → evidence → tools, and the next action was the part with no
+ * shape. ActionCard above is a ring, two lines and a small button at the
+ * trailing edge — right for Home's adaptive nudge, and wrong here twice over:
+ * the button is the smallest thing in it, and there is nowhere to put the
+ * reason. An empty state's "Log a Workout" was a paragraph and a Cta in a bare
+ * Section, hand-built each time, some with a title and some without.
+ *
+ * So: a title that names the action's SUBJECT, the reason in a sentence
+ * ("the review needs your revenue for the month — every figure below is a
+ * share of it"), one quiet line of `meta` (when, how long, where it is kept),
+ * and a full-width Cta that cannot be mistaken for anything else. `secondary`
+ * is the quiet way out and is a Ghost under it, never a second Cta beside it:
+ * two equal buttons is a question, and this block exists to be an answer.
+ *
+ * A disabled `cta` keeps its shape (see Cta) — put WHY it is disabled in
+ * `reason`, where the reader looks, rather than leaving a dead button to
+ * explain itself. One of these per screen; a second means neither is primary.
+ */
+export function ActionBlock({ title, reason, meta, cta, secondary, children }: {
+  title: string;
+  reason?: string;
+  meta?: string;
+  cta: { label: string; onPress: () => void; disabled?: boolean; a11yLabel?: string };
+  secondary?: { label: string; onPress: () => void };
+  /** Between the words and the button — a field, a picker. Rarely. */
+  children?: ReactNode;
+}) {
+  const t = useTheme();
+  return (
+    <Section>
+      <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink }}>{title}</Text>
+      {reason ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{reason}</Text> : null}
+      {meta ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{meta}</Text> : null}
+      {children}
+      <View style={{ marginTop: sp.lg }}>
+        <Cta wide label={cta.label} onPress={cta.onPress} disabled={cta.disabled} a11yLabel={cta.a11yLabel} />
+      </View>
+      {secondary ? (
+        <View style={{ marginTop: sp.sm }}>
+          <Ghost label={secondary.label} onPress={secondary.onPress} />
+        </View>
+      ) : null}
+    </Section>
+  );
+}
+
+/**
+ * Low-frequency tools, folded behind their own heading.
+ *
+ * ── Rule 7: progressive disclosure ────────────────────────────────────────
+ *
+ * "The first viewport should contain the decision, not the database." A coach
+ * testing the app asked for this in as many words — "A way to minimise the
+ * coaching tools so like a drop down" — about a grid of seven destinations
+ * that sat between them and their client list every time they opened Home.
+ * Nothing is removed by folding it: the review is explicit that a working
+ * feature absent from the first viewport moves "into progressive disclosure or
+ * its existing secondary route", and this is the first of those.
+ *
+ * The header is the whole control — a 44pt row, not a chevron to aim at — and
+ * it is a button that says `expanded` or collapsed, which is the state a
+ * screen reader otherwise has no way to learn (rule 9). `note` is one quiet
+ * line saying what is inside, so nobody has to open it to find out it was not
+ * what they wanted. The chevron turns through `turn()`, so it points the
+ * reader's own forward when shut, and down when open, in either direction.
+ *
+ * ── What is inside is kept ────────────────────────────────────────────────
+ *
+ * The children are not mounted until the first opening — a folded tool should
+ * cost nothing, and several of these run a read — and after that they are
+ * HIDDEN on collapse rather than unmounted. A half-typed import or a picked
+ * filter survives being folded away; `display: 'none'` takes the subtree out
+ * of layout and out of the accessibility tree on both platforms, so nothing
+ * folded can be swiped into.
+ */
+export function Expandable({ title, note, defaultOpen = false, children }: {
+  title: string;
+  note?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const t = useTheme();
+  const [open, setOpen] = useState(defaultOpen);
+  const [mounted, setMounted] = useState(defaultOpen);
+  return (
+    <Section>
+      <Pressable
+        onPress={() => { setMounted(true); setOpen((o) => !o); }}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={note ? `${title}. ${note}` : title}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 44, marginVertical: -sp.sm }}
+      >
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>{title}</Text>
+          {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text> : null}
+        </View>
+        <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}>
+          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+        </View>
+      </Pressable>
+      {mounted ? (
+        <View style={{ display: open ? 'flex' : 'none', marginTop: sp.lg }}>{children}</View>
+      ) : null}
+    </Section>
+  );
+}
+
+/**
+ * The frame round a chart that decides whether there is a chart.
+ *
+ * ── Rules 5 and 10: unknown is not zero, and one point is not a trend ─────
+ *
+ * Every screen with a <Spark> carries the same ladder by hand — failed read,
+ * too little history, otherwise draw — and they disagree. One screen folds
+ * 'loading' into "could not be read"; one draws on a 'partial' read, which is
+ * a line through the rows that happened to fit in one query, sloping
+ * wherever the truncation put it; two say "not enough history" under a FAILED
+ * read, which is a claim about the member's record that nobody checked.
+ *
+ * Five states, five different things on the page:
+ *
+ *   loading     a quiet line. Not the empty sentence — nothing is known yet.
+ *   error       the read failed. Marked, and never "no data".
+ *   partial     some of it came back. Marked, and NOT drawn: a trend over part
+ *               of a series is a wrong trend, not a shorter one.
+ *   no points   `emptyLine` — a whole read with nothing in it, which is the
+ *               only state in which "nothing recorded yet" is a fact.
+ *   one point   said as the reading it is. A line needs two ends.
+ *
+ * and `children` — the chart — on a whole read with two points or more, and
+ * at no other time. `points` is the count of READINGS, not of slots: a
+ * six-month series with two recorded months has two. `isWhole` is the gate,
+ * the same function check:whole holds every figure in the app to.
+ *
+ * The three failure sentences have defaults that are true of any chart;
+ * `emptyLine` has none, because what an empty one means is the caller's to
+ * say. Error and partial take Flag's mark so the two that are FAULTS look
+ * different from the two that are merely early — in shape, not only in words.
+ */
+export function ChartShell({ status, points, emptyLine, partialLine, errorLine, onePointLine, loadingLine, children }: {
+  status: LoadStatus;
+  /** How many real readings the series holds. Nulls are not readings. */
+  points: number;
+  emptyLine: string;
+  partialLine?: string;
+  errorLine?: string;
+  onePointLine?: string;
+  loadingLine?: string;
+  children: ReactNode;
+}) {
+  const t = useTheme();
+  const quiet = (line: string) => <Text style={{ ...ty.label, color: t.ink3 }}>{line}</Text>;
+  if (status === 'loading') return quiet(loadingLine ?? 'Reading…');
+  if (status === 'error') {
+    return <Flag>{errorLine ?? 'This could not be read, so no trend is drawn. That is a read that failed, not a record with nothing in it.'}</Flag>;
+  }
+  if (!isWhole(status)) {
+    return <Flag tone={t.warn}>{partialLine ?? 'Only part of this came back, so the trend is held back rather than drawn through the part that did.'}</Flag>;
+  }
+  if (points <= 0) return quiet(emptyLine);
+  if (points === 1) return quiet(onePointLine ?? 'One reading so far. The trend appears from the second one.');
+  return <>{children}</>;
+}
+
+/** One segment of a Segmented bar. */
+export interface Segment<K extends string = string> {
+  key: K;
+  label: string;
+  /** What to say when the label is an abbreviation — "Last 3 months" for "3M". */
+  a11yLabel?: string;
+  /** A segment that GOES somewhere instead of selecting — Photos, on a bar of
+   *  three series and one other screen. It never draws as selected. */
+  onPress?: () => void;
+  disabled?: boolean;
+}
+
+/**
+ * The board's segmented bar: a `surface2` pill of equal segments, the chosen
+ * one filled in ink.
+ *
+ * About twenty screens build this by hand — the same `tablist` View, the same
+ * `seg(on)` style, the same ternary on `t.bg` — and the copies disagree in the
+ * ways that matter: some have the tab roles and some have none, a few cap the
+ * label at one line with no shrink so "Body Fat" becomes "Body F…", and none
+ * of them does anything at all about large text.
+ *
+ * ── Rule 8: the filter stays attached to its data ─────────────────────────
+ *
+ * This is a LOCAL control: it sits on the card or over the list it changes,
+ * and its state is the caller's — `value` in, `onChange` out — so the screen
+ * decides whether a range survives leaving the page. It is a tablist of tabs
+ * with `selected` said on each, which is the state a colour fill cannot give
+ * a screen reader (rule 9): selected is ink on the ground colour, 600 weight,
+ * AND announced.
+ *
+ * ── Large text ────────────────────────────────────────────────────────────
+ *
+ * Four equal segments on a 390pt phone are 85pt each, and "Body Fat" at 1.35
+ * is not. The label first gives up 15% — below that floor iOS ellipsises, so
+ * the floor is high and the bar does the rest: from 1.35 the segments WRAP,
+ * two to a row, in a rounded box rather than a pill. `scroll` is the other
+ * answer, for a set whose length is the data's (a day's meal slots, a
+ * programme's weeks) and could be seven: the bar scrolls sideways, segments
+ * sized to their words. It is opt-in and not the default for the reason
+ * ChipGrid gives — a row you must drag to discover hides its tail — and it
+ * earns the exception only because the selected segment is always on screen
+ * to show the row is a row.
+ */
+export function Segmented<K extends string>({ options, value, onChange, scroll, style }: {
+  options: readonly Segment<K>[];
+  value: K | null | undefined;
+  onChange: (key: K) => void;
+  scroll?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const t = useTheme();
+  const wrap = !scroll && fontScale >= 1.35 && options.length > 2;
+  const segs = options.map((o, i) => {
+    const on = !o.onPress && o.key === value;
+    return (
+      <Pressable key={`${o.key}-${i}`}
+        onPress={o.onPress ?? (() => onChange(o.key))}
+        disabled={o.disabled}
+        accessibilityRole="tab"
+        accessibilityLabel={o.a11yLabel ?? o.label}
+        accessibilityState={{ selected: on, disabled: !!o.disabled }}
+        // 40pt tall; the slop makes it 44 without moving anything round it.
+        hitSlop={{ top: 2, bottom: 2, left: 0, right: 0 }}
+        style={{
+          // Scrolling, a segment is as wide as its words and GROWS, so three
+          // short ones still fill the bar; wrapping, two share a row; otherwise
+          // they are equal, which is what makes it read as one control.
+          ...(scroll ? { flexGrow: 1 } : wrap ? { flexGrow: 1, flexBasis: '45%' } : { flex: 1 }),
+          minHeight: grown(40), paddingHorizontal: scroll ? sp.lg : sp.xs,
+          alignItems: 'center', justifyContent: 'center',
+          borderRadius: wrap ? radius.sm : radius.pill,
+          backgroundColor: on ? t.ink : 'transparent',
+          opacity: o.disabled ? 0.5 : 1,
+        }}>
+        <Text numberOfLines={1} adjustsFontSizeToFit={!scroll} minimumFontScale={0.85}
+          style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2, textAlign: 'center' }}>
+          {o.label}
+        </Text>
+      </Pressable>
+    );
+  });
+  const bar: ViewStyle = { backgroundColor: t.surface2, borderRadius: wrap ? radius.md : radius.pill, padding: 3 };
+  return scroll ? (
+    <View style={[bar, style]}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist"
+        keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+        {segs}
+      </ScrollView>
+    </View>
+  ) : (
+    <View accessibilityRole="tablist" style={[bar, { flexDirection: 'row', flexWrap: wrap ? 'wrap' : 'nowrap' }, style]}>
+      {segs}
+    </View>
   );
 }

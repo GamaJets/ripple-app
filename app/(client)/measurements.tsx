@@ -32,7 +32,7 @@ import { useToast } from '../../src/ui/toast';
 import { useMeasurements, METRICS, type MeasureEntry, type MetricKey } from '../../src/ui/measurements';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, fig, FigureCard } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote, weightLabel } from '../../src/lib/units';
@@ -312,28 +312,25 @@ export default function Measurements() {
       it was taped as the head's note, one big figure with its unit, and the
       movement since the previous waist on its own line under it. */}
   {waistNow != null ? (
-   <Section>
-    {/* The date this figure was actually measured on, and how long ago that
-        was — not just the date it is being compared against. A waist with no
-        date is a rumour, and a five-week-old one presented as current is a
-        rumour with a number on it. */}
-    <SectionHead title="Waist" note={`Measured ${dayLabel(latest.at)}${latestAgo ? ` · ${latestAgo}` : ''}`} />
-    <View accessible accessibilityLabel={['Waist', [fig(waistNow), lu].join(' '), waistLine].join(', ')}>
-     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-       style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(waistNow)}</Text>
-      <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{lu}</Text>
-     </View>
-     {/* Green only where the waist moved the way the member's goal reads it
-         — the colour is a verdict, and where the goal has no opinion the
-         line is plain ink. */}
-     <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: waistMove != null && waistMove !== 0 && goalRead('waist', waistMove) ? t.brand : t.ink2, marginTop: 3 }}>{waistLine}</Text>
-    </View>
+   /* The kit's FigureCard. Its slots are this card's lines, and the head's
+      note is the day it was taped — the date this figure was actually measured on, and
+      how long ago that was, not just the date it is being compared against. A
+      waist with no date is a rumour, and a five-week-old one presented as
+      current is a rumour with a number on it. */
+   <FigureCard title="Waist" note={`Measured ${dayLabel(latest.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
+    figure={fig(waistNow)} unit={lu}
+    comparison={waistLine}
+    /* Green only where the waist moved the way the member's goal reads it
+       — the colour is a verdict, and where the goal has no opinion the mark
+       is the quiet one. It is the MARK that takes the colour now and the
+       words stay ink: brand as 13pt text does not clear 4.5:1 on every
+       tenant's palette, and "−2 cm" already says which way it went. */
+    tone={waistMove != null && waistMove !== 0 && goalRead('waist', waistMove) ? t.brand : undefined}>
     {/* Where a figure is stale, how stale. The client is the only person who
         can judge whether a six-week-old waist still describes them, and they
         can only judge it if they are given the six weeks. */}
     {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{stale}</Text> : null}
-   </Section>
+   </FigureCard>
   ) : stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{stale}</Text> : null}
 
   {/* ── latest snapshot with change vs previous ─────────────────────── */}

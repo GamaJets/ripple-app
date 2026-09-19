@@ -73,7 +73,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Rect, Line, Text as SvgText } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Cta, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Cta, Notice, fig, FigureCard, ActionBlock, Expandable } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -458,22 +458,22 @@ export default function History() {
   // here means the read landed whole and there is genuinely nothing in it.
   if (stage === 'empty' || !span) {
     return frame(
-      <><Rule /><Section>
-        <SectionHead title="Nothing Logged Yet" />
-        <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
-          {historyNote(log)} Log one session and this page starts keeping the score for you —
-          month by month, for as long as you train.
-        </Text>
-        <Cta label="Log a Workout" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
-      </Section>
+      <><Rule />
+      {/* The kit's ActionBlock: on a page with nothing on it the next action
+          IS the page, so it gets the title, the reason and the one button. */}
+      <ActionBlock title="Nothing Logged Yet"
+        reason={`${historyNote(log)} Log one session and this page starts keeping the score for you — month by month, for as long as you train.`}
+        cta={{ label: 'Log a Workout', onPress: () => router.push(trainIntent('/(client)/workouts') as any) }} />
       {/* The import belonged here first and I put it only at the bottom of the
           loaded screen, where somebody who has never logged in Repple never
           reaches it. This empty state IS the arrival screen for a lifter with
           three years in Hevy: "log one session and this page starts keeping
           score" is the wrong and only answer to give them. Below the Cta, not
           above it — logging tonight's session is still the shorter path for
-          everybody who has nothing to bring. */}
-      <ImportFromAnotherApp onImported={() => { void read(); }} /></>
+          everybody who has nothing to bring. OPEN here, for the same reason:
+          folded, it is a heading a lifter with three years to bring has to
+          guess at. */}
+      <ImportFromAnotherApp open onImported={() => { void read(); }} /></>
     );
   }
 
@@ -554,28 +554,11 @@ export default function History() {
         chose. `historyNote` goes with it: it counts days and sessions. */}
     {/* The board's figure card where the Hero was: the label as the head,
         one big figure with its unit, the sentence under it. */}
-    <Section>
-      <SectionHead title={whole ? `Lifted Since ${monthLabel(sinceKey)}` : `Lifted Since ${monthLabel(sinceKey)}, at Least`} />
-      <View accessible accessibilityLabel={[
-        whole ? `Lifted since ${monthLabel(sinceKey)}` : `Lifted since ${monthLabel(sinceKey)}, at least`,
-        [whole ? fig(headline?.figure.toLocaleString()) : fig(null), whole && headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : ''].filter(Boolean).join(' '),
-        whole ? historyNote(log) : 'More than this page can add up in one read — see above.',
-      ].join(', ')}>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-            style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>
-            {whole ? fig(headline?.figure.toLocaleString()) : fig(null)}
-          </Text>
-          {whole && headline ? (
-            <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>
-              {headline.unit === 't' ? 'tonnes' : headline.unit}
-            </Text>
-          ) : null}
-        </View>
-        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
-          {whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}
-        </Text>
-      </View>
+    <FigureCard
+      title={whole ? `Lifted Since ${monthLabel(sinceKey)}` : `Lifted Since ${monthLabel(sinceKey)}, at Least`}
+      figure={whole ? headline?.figure.toLocaleString() : null}
+      unit={whole && headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : undefined}
+      detail={whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}>
     {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unitNote}</Text> : null}
     {/* The note blames the member's record when the fault is this read: it
         says "your own weight is not recorded for the day you did them". Only
@@ -589,7 +572,7 @@ export default function History() {
           : 'Some bodyweight sets are not in this total because your weight history could not be read just now. That is this screen rather than a gap in your record, and nothing has been lost.'}
       </Text>
     ) : null}
-    </Section>
+    </FigureCard>
 
     <Rule />
 
@@ -984,7 +967,11 @@ export default function History() {
  * written. An importer that writes first and reports afterwards is one a member
  * cannot refuse.
  */
-function ImportFromAnotherApp({ onImported }: { onImported: () => void }) {
+function ImportFromAnotherApp({ onImported, open }: {
+  onImported: () => void;
+  /** Start unfolded — the empty state, where this may be the reason they came. */
+  open?: boolean;
+}) {
   const t = useTheme();
   const { logWorkouts } = useWorkoutLog();
   const [preview, setPreview] = useState<LiftingImportPreview | null>(null);
@@ -1036,8 +1023,12 @@ function ImportFromAnotherApp({ onImported }: { onImported: () => void }) {
   };
 
   return (
-    <Section>
-      <SectionHead title="Bring In Another App's History" />
+    /* Folded, at the foot of a loaded history: it is used once, by somebody
+       arriving from another app, and never again — the review's rule 7, and
+       the kit's Expandable. The picked file, the preview and the result are
+       this component's own state, above the fold, so none of them is lost by
+       folding it. */
+    <Expandable title="Bring In Another App's History" note="A Strong or Hevy export" defaultOpen={open}>
       <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
         Export your log from Strong or Hevy and open it here. Sets come in as sets, one session per day per
         lift. Anything the file does not say clearly is left out rather than guessed at, and you see the count
@@ -1063,7 +1054,7 @@ function ImportFromAnotherApp({ onImported }: { onImported: () => void }) {
       {done ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{done}</Text>
       ) : null}
-    </Section>
+    </Expandable>
   );
 }
 
