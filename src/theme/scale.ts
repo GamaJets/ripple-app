@@ -118,11 +118,16 @@ export const grown = (pt: number): number => atScale(pt, fontScale);
 export const type = {
   hero:    { fontSize: 44, fontWeight: '600', letterSpacing: -2,   lineHeight: grown(46) },
   title:   { fontSize: 22, fontWeight: '700', letterSpacing: -0.5, lineHeight: grown(28) },
-  head:    { fontSize: 17, fontWeight: '600', letterSpacing: -0.2, lineHeight: grown(22) },
+  head:    { fontSize: 17, fontWeight: '700', letterSpacing: -0.2, lineHeight: grown(22) },
   body:    { fontSize: 15, fontWeight: '400', letterSpacing: 0,    lineHeight: grown(21) },
   label:   { fontSize: 13, fontWeight: '400', letterSpacing: 0,    lineHeight: grown(18) },
   caption: { fontSize: 12, fontWeight: '400', letterSpacing: 0,    lineHeight: grown(16) },
-  micro:   { fontSize: 11, fontWeight: '500', letterSpacing: 0.9,  lineHeight: grown(14), textTransform: 'uppercase' },
+  // The board's small label: bold, title case, the author's own casing. It
+  // was an 11pt tracked UPPERCASE — the one typographic habit the board has
+  // none of, and the reason the app read as a different face when it is the
+  // same system font. scripts/check-caps.mjs still leaves micro strings to
+  // their authors, so a kicker typed in sentence case stays that way.
+  micro:   { fontSize: 13, fontWeight: '600', letterSpacing: -0.1, lineHeight: grown(18) },
 } satisfies Record<string, TextStyle>;
 
 /** Values read as data, not prose: semibold + tabular figures. */

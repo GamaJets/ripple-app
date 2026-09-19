@@ -695,9 +695,9 @@ export default function Home() {
               style={{ width: 62, height: 62, alignItems: 'center', justifyContent: 'center' }}>
               <Svg width={62} height={62} viewBox="0 0 62 62" style={{ position: 'absolute' }}
                 accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                <Circle cx="31" cy="31" r="26" fill="none" stroke={t.surface3} strokeWidth={5} />
+                <Circle cx="31" cy="31" r="26" fill="none" stroke={t.surface2} strokeWidth={6} />
                 {logKnown ? (
-                  <Circle cx="31" cy="31" r="26" fill="none" stroke={t.brand} strokeWidth={5} strokeLinecap="round"
+                  <Circle cx="31" cy="31" r="26" fill="none" stroke={t.brand} strokeWidth={6} strokeLinecap="round"
                     strokeDasharray={2 * Math.PI * 26}
                     strokeDashoffset={2 * Math.PI * 26 * (1 - Math.min(1, wk.days / Math.max(1, goalDays)))}
                     transform="rotate(-90 31 31)" />

@@ -36,9 +36,12 @@
 //
 // ── the trap: half of this codebase's labels have no visible case ──────────
 //
-// `ty.micro` in src/theme/scale.ts carries `textTransform: 'uppercase'`. Every
-// string under it renders in capitals whichever way it is typed, so its source
-// casing is invisible and correcting it is churn with no user-visible effect.
+// `ty.micro` in src/theme/scale.ts carried `textTransform: 'uppercase'` until
+// 19 Sep 2026 — every string under it rendered in capitals whichever way it was
+// typed, so its source casing was invisible and correcting it was churn. It is a
+// bold title-case label now (the approved board has no tracked uppercase), and
+// its strings are left to their authors here for the same practical reason: the
+// slots it fills are kickers and section titles written as short phrases.
 // That covers a LOT of ground: <SectionHead title>, <Hero label>, <Field label>,
 // <Notice kicker>, <ActionCard ringLabel/ringNote>, <QuickRow> — six of the
 // kit's slots. The naive version of this check flagged 122 of these and 17 real

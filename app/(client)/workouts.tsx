@@ -69,7 +69,7 @@ import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, Hero, KpiRow, Card, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -2129,37 +2129,11 @@ export default function Train() {
       <ScrollView ref={pageScroll} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <ScreenHeader eyebrow={coachProgram ? 'Coach plan' : 'Your training'} title="My Program" subtitle={program.title} />
+        <ScreenHeader eyebrow={coachProgram ? 'Coach plan' : 'Your training'} title="My Program" />
 
-        {/* ── the programme, as the board opens it ─────────────────────────
-            A demo of the first movement, the session's name, how much of it
-            there is, and a way into the whole block. The demo is the same
-            <SessionDemo> the runner shows, off the same library read, so a
-            movement with no clip draws the same placeholder here as there.
-            "View Program" is the quiet control on purpose: the day strip
-            below picks the session and Start Workout under it is the one
-            primary action on this screen. */}
-        <Card style={{ marginTop: sp.lg }}>
-          {exercises[0] ? (
-            <View style={{ marginBottom: sp.md, borderRadius: radius.md, overflow: 'hidden', backgroundColor: t.surface2 }}>
-              <SessionDemo t={t} name={nameOf(exercises[0])} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} />
-            </View>
-          ) : (
-            <View style={{ height: 112, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.md }}
-              accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <Icon name="train" size={34} color={t.brand} />
-            </View>
-          )}
-          <Text style={{ ...ty.micro, color: t.ink3 }}>{coachProgram ? 'Assigned by your coach' : program.title}</Text>
-          <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>{workout.focus}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-            {exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`} · {heroNote}
-          </Text>
-          <View style={{ marginTop: sp.lg }}><Ghost label="View Program" icon="grid" onPress={() => router.push('/(client)/week')} /></View>
-        </Card>
-
-        {/* Current and past, as the board draws them. Past is the training
-            history screen, which already exists and already answers it. */}
+        {/* Current and past, as the board draws them: above the card. Past is
+            the training history screen, which already exists and already
+            answers it. */}
         <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
           <View accessibilityRole="tab" accessibilityState={{ selected: true }} style={{ flex: 1, minHeight: 38, borderRadius: radius.sm, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Current</Text>
@@ -2169,6 +2143,79 @@ export default function Train() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Past</Text>
           </Pressable>
         </View>
+
+        {/* ── the programme, as the board opens it ─────────────────────────
+            The session's first movement as the picture, with the programme's
+            name and the week over it; Start Workout directly under, then the
+            quiet way into the whole block. The demo is the same <SessionDemo>
+            the runner shows, off the same catalogue read, so a movement with
+            no clip draws the same placeholder here as there.
+
+            The Start block moved up here from under the day strip. It starts
+            the SELECTED day — the strip below still picks — and every gate on
+            it came with it: the unsent-work note, the injury read, and the
+            three reasons it may be withheld. */}
+        <View style={{ marginTop: sp.lg, borderRadius: radius.md, overflow: 'hidden', backgroundColor: t.surface2 }}>
+          {exercises[0] ? (
+            <SessionDemo t={t} name={nameOf(exercises[0])} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} />
+          ) : (
+            <View style={{ height: 160, alignItems: 'center', justifyContent: 'center' }}
+              accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <Icon name="train" size={34} color={t.brand} />
+            </View>
+          )}
+          {/* The name over the picture, on a scrim, as the board draws it. The
+              scrim is what makes white ink readable over any frame; the same
+              sentence is spoken once, from the group. */}
+          <View accessible accessibilityLabel={`${program.title}, ${workout.focus}. ${exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`}, ${heroNote}`}
+            style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: sp.lg, paddingTop: sp.xxl, paddingBottom: sp.lg, backgroundColor: 'rgba(0,0,0,0.55)' }}>
+            <Text style={{ ...ty.head, color: '#ffffff' }} numberOfLines={1}>{program.title}</Text>
+            <Text style={{ ...ty.caption, color: 'rgba(255,255,255,0.82)', marginTop: 2 }} numberOfLines={1}>
+              {workout.focus} · {exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`} · {heroNote}
+            </Text>
+          </View>
+        </View>
+
+        <View style={{ marginTop: sp.md }}>
+        {/* What is on this phone and nowhere else.
+            Standing here, above the Start button, for the reason the food log
+            and the check-in put theirs at the top of their screens: it is the
+            answer to "did that actually send?", and somebody who cannot find
+            the answer logs the session a second time. `unsentNote` is the one
+            wording for it across all four stores — see the note on it in
+            src/lib/offlineQueue.ts, which is careful that the work reads as
+            SAFE without reading as delivered.
+            Counted in exercises, which is what an entry is: one row per
+            movement, holding all of its sets. */}
+        {unsentNote(unsentWorkouts, 'exercise') ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+            {unsentNote(unsentWorkouts, 'exercise')} Until then your streak, your records and your coach's dashboard are short of them.
+          </Flag>
+        ) : null}
+        {/* Above the Start button, because it is a fact about the plan behind
+            that button. Two arms, and neither of them is silence: a read still
+            in flight is not the same answer as one that failed, and neither is
+            the same as "we checked and there is nothing to avoid" — which is
+            what this screen used to draw for all three. See `injRead`. */}
+        {injLoading ? (
+          <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
+            Reading what you have disclosed — nothing below has been checked against your injuries yet.
+          </Flag>
+        ) : !injRead ? (
+          <Notice tone={t.crit} kicker="Injury" title="Your injuries could not be read"
+            note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or skip it, and pull down to try again." />
+        ) : null}
+        {start.canStart ? (
+          <Cta label="Start Workout" wide onPress={() => { const at = Date.now(); setResumeAt(null); rememberSession({ kind: 'guided', startedAt: at }); void startLiveActivity(workout.focus || 'Workout', at); setSession(true); }} />
+        ) : start.note && start.safety ? (
+          // A heading rather than a footnote, because this one is the app
+          // having taken today's session away from them for their own safety.
+          <Notice tone={t.crit} kicker="Injury" title="Today's session is on hold" note={start.note} />
+        ) : start.note ? (
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{start.note}</Text>
+        ) : null}
+        </View>
+        <View style={{ marginTop: sp.sm }}><Ghost label="View Program" icon="grid" onPress={() => router.push('/(client)/week')} /></View>
 
         {/* ── whose copy of the coach's plan is being trained ──────────────
             The kicker directly above says "Coach plan" the moment `getProgram`
@@ -2350,55 +2397,6 @@ export default function Train() {
         {/* ── the hero: today's session, one number ───────────────────────── */}
         <ScreenHelp screen="train" />
 
-        <Hero
-          /* The DAY the strip is on, not the word "Today". It said "Today" for
-             whichever day was selected, which was already wrong for a Thursday
-             looked at on Tuesday and is now wrong for a whole week at a time. */
-          label={`${weekOffset === 0 && dayIdx === todayIdx ? 'Today' : dateFor(dayIdx).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })} · ${workout.focus}`}
-          figure={fig(exercises.length)}
-          unit={exercises.length === 1 ? 'exercise' : 'exercises'}
-          note={heroNote}
-          arc={exercises.length > 0 ? doneCount / exercises.length : undefined}
-          arcLabel="of today's exercises done"
-          onPress={() => router.push('/(client)/week')}
-        />
-        {/* What is on this phone and nowhere else.
-            Standing here, above the Start button, for the reason the food log
-            and the check-in put theirs at the top of their screens: it is the
-            answer to "did that actually send?", and somebody who cannot find
-            the answer logs the session a second time. `unsentNote` is the one
-            wording for it across all four stores — see the note on it in
-            src/lib/offlineQueue.ts, which is careful that the work reads as
-            SAFE without reading as delivered.
-            Counted in exercises, which is what an entry is: one row per
-            movement, holding all of its sets. */}
-        {unsentNote(unsentWorkouts, 'exercise') ? (
-          <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-            {unsentNote(unsentWorkouts, 'exercise')} Until then your streak, your records and your coach's dashboard are short of them.
-          </Flag>
-        ) : null}
-        {/* Above the Start button, because it is a fact about the plan behind
-            that button. Two arms, and neither of them is silence: a read still
-            in flight is not the same answer as one that failed, and neither is
-            the same as "we checked and there is nothing to avoid" — which is
-            what this screen used to draw for all three. See `injRead`. */}
-        {injLoading ? (
-          <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
-            Reading what you have disclosed — nothing below has been checked against your injuries yet.
-          </Flag>
-        ) : !injRead ? (
-          <Notice tone={t.crit} kicker="Injury" title="Your injuries could not be read"
-            note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or skip it, and pull down to try again." />
-        ) : null}
-        {start.canStart ? (
-          <Cta label="Start Workout" wide onPress={() => { const at = Date.now(); setResumeAt(null); rememberSession({ kind: 'guided', startedAt: at }); void startLiveActivity(workout.focus || 'Workout', at); setSession(true); }} />
-        ) : start.note && start.safety ? (
-          // A heading rather than a footnote, because this one is the app
-          // having taken today's session away from them for their own safety.
-          <Notice tone={t.crit} kicker="Injury" title="Today's session is on hold" note={start.note} />
-        ) : start.note ? (
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{start.note}</Text>
-        ) : null}
 
         {/* Calendar, booking and the tip are useful context and secondary to
             choosing and starting today's session. They used to sit above the

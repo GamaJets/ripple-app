@@ -580,7 +580,8 @@ export function ListRow({ icon, title, note, onPress, tone }: {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={note ? `${title}. ${note}` : title}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-      <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+      {/* A circle, as the board draws every row's icon. */}
+      <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
         <Icon name={icon} size={17} color={tone || t.brand} />
       </View>
       <View style={{ flex: 1 }}>
@@ -781,7 +782,9 @@ export function QuickRow({ items }: { items: { icon: IconName; label: string; on
       {items.map((q) => (
         <Pressable key={q.label} onPress={q.onPress} accessibilityRole="button"
           style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.md, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring }}>
-          <Icon name={q.icon} size={18} color={t.brand} />
+          <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name={q.icon} size={17} color={t.brand} />
+          </View>
           <Text style={{ ...ty.micro, letterSpacing: 0.3, color: t.ink2, marginTop: 7 }}>{q.label}</Text>
         </Pressable>
       ))}
