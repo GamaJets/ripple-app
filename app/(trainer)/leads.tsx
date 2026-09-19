@@ -448,11 +448,6 @@ export default function TrainerLeads() {
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <PageHead title="Enquiries" subtitle="Who asked and did not join" />
 
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
-          Your join link now carries a short form, so somebody who is not ready to install the app can still leave their
-          name. They arrive here with the code they came in on, so an enquiry is attributed the same way a client is.
-        </Text>
-
         {/* Said first, and not softened. */}
         <View style={{ marginTop: sp.xl }}>
           <Notice tone={t.warn} kicker="Nothing is sent" title="Following these up is you, by hand" note={FOLLOW_UP_IS_MANUAL} />
@@ -686,6 +681,23 @@ export default function TrainerLeads() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{w.why}</Text>
             </View>
           ))}
+        </Section>
+
+        {/* ── where these come from ────────────────────────────────────────
+            This paragraph opened the screen, above the notice and above the
+            queue, so the first thing under the title was how the form works —
+            and who has been waiting longest started below the fold. The
+            data-layout review's rule is that the first viewport holds the
+            decision; how an enquiry gets here is background, and it sits with
+            the other background at the foot. The two sentences that change what
+            a coach DOES — nothing is sent, and you will be told — stay at the
+            top, unsoftened. */}
+        <Section>
+          <SectionHead title="Where These Come From" />
+          <Text style={{ ...ty.body, color: t.ink2 }}>
+            Your join link carries a short form, so somebody who is not ready to install the app can still leave their
+            name. They arrive here with the code they came in on, so an enquiry is attributed the same way a client is.
+          </Text>
         </Section>
 
         <Section>

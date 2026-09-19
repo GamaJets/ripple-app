@@ -92,11 +92,11 @@
 // .ts) keeps addressed and delivered as two columns for the same reason; this
 // is that rule where the second figure can never be filled in.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PageHead, Scrim } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useTenant } from '../../src/ui/tenant';
@@ -120,6 +120,13 @@ import { recipientFact, factsCaption, type Addressed } from '../../src/lib/segme
 import {
   sendOutcome, outcomeLines, outcomeTitle, WHERE_THE_RECORD_IS, type SendOutcome,
 } from '../../src/lib/broadcastOutcome';
+// The coach's saved messages, offered INSIDE this composer — the same library
+// and the same rules as the picker in app/(trainer)/chat.tsx. See `useSaved`.
+import { useMyTemplates } from '../../src/ui/messageTemplates';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import {
+  applyTemplate, orderTemplates, templatesEmptyLine, hasUnfilledToken, UNFILLED_TOKEN_NOTE,
+} from '../../src/lib/messageTemplates';
 
 export default function Broadcast() {
   const t = useTheme();
@@ -458,7 +465,65 @@ export default function Broadcast() {
       Alert.alert('Not Sent', 'Something went wrong on the way to your clients’ threads, and this screen cannot say how far it got. Open a thread to check before sending it again — a second send would put the same words there twice.');
     } finally { setBusy(false); }
   };
-  const send = () => deliver(recipients.map((c) => c.id));
+  /**
+   * ── REVIEW, BEFORE N THINGS THAT CANNOT BE TAKEN BACK ───────────────────
+   *
+   * The data-layout review's flow for this screen is "audience → context →
+   * compose → review → delivery state", and the fourth step was missing: the
+   * button sent. The count was on it and the names were above it, so the coach
+   * COULD have checked — but a thumb that lands on a full-width button at the
+   * bottom of a form is not a decision, and what it starts is one message per
+   * person that no screen in this app can recall.
+   *
+   * So the press asks once, and says the two things that are being agreed to:
+   * how many, and which audience. The ids are taken at the press and not at
+   * the confirm, so what goes is the list the coach was looking at when they
+   * asked — a roster refresh landing under the alert cannot widen it.
+   *
+   * The retry below does not ask again. It goes to named people the coach has
+   * just been told about, and a second question there is friction on a repair.
+   */
+  const send = () => {
+    const ids = recipients.map((c) => c.id);
+    // Anything the button should not have allowed goes straight to `deliver`,
+    // which already refuses with the guard's own sentence.
+    if (!body.trim() || !ids.length || busy || !claim.allowed) { void deliver(ids); return; }
+    const audience = sel.kind === 'tag' ? `“${sel.tag}”` : def ? def.title : 'All clients';
+    Alert.alert(
+      ids.length === 1 ? 'Send to 1 Client?' : `Send to ${ids.length} Clients?`,
+      `Audience: ${audience}. Your words go into ${ids.length === 1 ? 'their own thread' : `${ids.length} separate threads, one each`}, exactly as typed, and cannot be taken back once they have gone.`,
+      [
+        { text: 'Not Yet', style: 'cancel' },
+        { text: 'Send', onPress: () => { void deliver(ids); } },
+      ],
+    );
+  };
+
+  /**
+   * ── the saved messages, inside the composer ─────────────────────────────
+   *
+   * The review asks for saved messages to live in the compose flow rather than
+   * as a destination of their own, and the one-to-one composer has had them
+   * since the library was built. This one had not, so the message a coach
+   * writes most often to everybody — the holiday closure, the timetable change
+   * — was the one they had to retype or go and copy.
+   *
+   * Same rules as chat.tsx: it lands IN THE BOX and sends nothing, and it is
+   * appended to what is typed rather than replacing it. One difference, and it
+   * is the honest one: `{name}` cannot be filled here. A broadcast is the same
+   * words in every thread — nothing is composed per client under the coach's
+   * name (see the head of this file) — so the token is left visible and
+   * `UNFILLED_TOKEN_NOTE` says, under the box, that it goes exactly as it
+   * reads. `{coach}` is the coach's own name and is filled.
+   */
+  const saved = useMyTemplates();
+  const { name: coachName } = useMyTrainerProfile();
+  const [savedOpen, setSavedOpen] = useState(false);
+  const useSaved = (tpl: string) => {
+    const filled = applyTemplate(tpl, null, coachName ?? null);
+    setBody((prev) => (prev.trim() ? `${prev.replace(/\s+$/, '')}\n\n${filled}` : filled));
+    setSavedOpen(false);
+  };
 
   const chip = (label: string, active: boolean, onPress: () => void) => (
     <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }}
@@ -613,6 +678,16 @@ export default function Broadcast() {
           <SectionHead title="Message" />
           <TextInput value={body} onChangeText={setBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.md }} />
+          {/* Directly under the box it fills, and quiet: the one green button
+              in this section is the send. */}
+          <View style={{ alignSelf: 'flex-start', marginBottom: sp.md }}>
+            <Ghost label="Use a Saved Message" icon="pencil" onPress={() => setSavedOpen(true)} />
+          </View>
+          {hasUnfilledToken(body) ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
+              {UNFILLED_TOKEN_NOTE} A broadcast is the same words to everyone, so a name cannot be filled in for you here.
+            </Text>
+          ) : null}
 
           {/* What the client will actually see, said to the coach and not added
               to the message. The full argument is on `bulkThreadNote`: appending
@@ -668,6 +743,38 @@ export default function Broadcast() {
         </Section>
 
       </ScrollView>
+
+      {/* ── the saved messages ───────────────────────────────────────────
+          A picker and nothing more, as in the chat composer: editing them is
+          on its own screen, because an editor inside a composer is where
+          somebody edits the template while meaning to edit the message. */}
+      <Modal visible={savedOpen} transparent animationType="slide" onRequestClose={() => setSavedOpen(false)}>
+        <Scrim onPress={() => setSavedOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '70%' }}>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+            Tapping one puts it in your box. Nothing is sent until you press Send, and a client’s name is not filled in — everybody gets the same words.
+          </Text>
+          <ScrollView>
+            {saved.rows.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>{templatesEmptyLine(saved.status)}</Text>
+            ) : orderTemplates(saved.rows).map((tpl, i) => (
+              <Pressable key={tpl.id ?? tpl.title} onPress={() => useSaved(tpl.body)}
+                accessibilityRole="button" accessibilityLabel={`Use the ${tpl.title} message`}
+                style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
+                  {applyTemplate(tpl.body, null, coachName ?? null)}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          <Ghost label="Manage Your Messages" onPress={() => { setSavedOpen(false); router.push('/(trainer)/templates-messages'); }} />
+          <View style={{ height: sp.sm }} />
+          <Cta label="Close" wide onPress={() => setSavedOpen(false)} />
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

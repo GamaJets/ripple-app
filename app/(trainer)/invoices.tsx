@@ -801,7 +801,7 @@ export default function Invoices() {
 
         <Section>
           <SectionHead
-            title="What you have issued"
+            title="What You Have Issued"
             note={ccy.currency ? `Priced in ${ccy.currency}${ccy.source === 'packages' ? ', from your own packages' : ccy.source === 'gym' ? ', from your gym’s setting' : ''}` : undefined}
           />
           {book.totals ? (
@@ -842,6 +842,21 @@ export default function Invoices() {
         </>
         )}
 
+
+        {/* ── THE ONE ACTION, BEFORE THE HISTORY ──────────────────────────
+            This button closed the page, under the whole issued list — so the
+            thing a coach opens this screen to DO moved one row further away
+            with every invoice they issued, and at forty it was several screens
+            down. The data-layout review's stack is state, then the next action,
+            then the evidence and the history; so it sits under the totals and
+            above who owes what, and the list below is what it adds to. Same
+            control, same gate, same sentence when no currency is set. */}
+        <View style={{ marginTop: layout.section }}>
+          <Cta label="Issue an Invoice" wide disabled={!!currencyBlocker} onPress={() => setOpen(true)} />
+          {currencyBlocker ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{currencyBlocker}</Text>
+          ) : null}
+        </View>
 
         {/* ── WHO OWES YOU ────────────────────────────────────────────────
             "Who owes me money" was the most common unanswered question in this
@@ -1185,13 +1200,6 @@ export default function Invoices() {
             </Text>
           ) : null}
         </Section>
-
-        <View style={{ marginTop: layout.section }}>
-          <Cta label="Issue an Invoice" wide disabled={!!currencyBlocker} onPress={() => setOpen(true)} />
-          {currencyBlocker ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{currencyBlocker}</Text>
-          ) : null}
-        </View>
       </ScrollView>
 
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>

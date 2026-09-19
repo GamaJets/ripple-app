@@ -296,7 +296,7 @@ export default function Nudges() {
 
             {n.dueBack && n.dueBack.length ? (
               <Section>
-                <SectionHead title="Due back" note={`${n.dueBack.length}`} />
+                <SectionHead title="Due Back" note={`${n.dueBack.length}`} />
                 <Text style={{ ...ty.label, color: t.ink2 }}>{overdueNote(n.dueBack)}</Text>
                 <View style={{ marginTop: sp.md }}>
                   {n.dueBack.map((d, i) => (
@@ -327,8 +327,8 @@ export default function Nudges() {
             {n.dueBack && n.dueBack.length ? <Rule /> : null}
 
             <Section>
-              <SectionHead title="Worth a message"
-                note={board.nudges.length ? `${board.nudges.length}` : 'none'} />
+              <SectionHead title="Worth a Message"
+                note={board.nudges.length ? `${board.nudges.length}` : 'None'} />
               {board.nudges.length === 0 ? (
                 <Text style={{ ...ty.body, color: t.ink2 }}>
                   {board.assessed
@@ -369,7 +369,7 @@ export default function Nudges() {
                       stored week is still being read, and null is not "due". */}
                   <SectionHead
                     title="Slipping"
-                    note={(showWatch ?? !!n.watchDigestDue) ? 'hide' : `${board.watching.length}`}
+                    note={(showWatch ?? !!n.watchDigestDue) ? 'Hide' : `${board.watching.length}`}
                     onPress={() => setShowWatch((v) => !(v ?? !!n.watchDigestDue))}
                   />
                   <Text style={{ ...ty.body, color: t.ink2 }}>{watchDigestNote(board.watching)}</Text>
@@ -415,8 +415,8 @@ export default function Nudges() {
                 <Rule />
                 <Section>
                   <SectionHead
-                    title="Set aside"
-                    note={showMuted ? 'hide' : `${board.muted.length}`}
+                    title="Set Aside"
+                    note={showMuted ? 'Hide' : `${board.muted.length}`}
                     onPress={() => setShowMuted((v) => !v)}
                   />
                   <Text style={{ ...ty.label, color: t.ink3 }}>
@@ -653,7 +653,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
 
 
         <Section>
-          <SectionHead title="Your message" note="edit before sending" />
+          <SectionHead title="Your Message" note="Edit before sending" />
           <TextInput
             value={body}
             onChangeText={setBody}
@@ -731,7 +731,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
         ) : null}
 
         <Section>
-          <SectionHead title="The record" note="what was actually read" />
+          <SectionHead title="The Record" note="What was actually read" />
           {evidence ? (
             <View>
               {evidence.lines.map((l, i) => (
@@ -753,7 +753,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
           <>
             <Rule />
             <Section>
-              <SectionHead title="Every day on record" note="in the window read" />
+              <SectionHead title="Every Day on Record" note="In the window read" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
                 {[...evidence.baselineDays, ...evidence.recentDays].map((d) => (
                   <View key={d.day}

@@ -85,7 +85,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Ghost, PartialRead, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Ghost, PartialRead, Flag, PageHead, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useCoachThreads } from '../../src/ui/coachThreads';
 import { peerMonogram } from '../../src/lib/peerAvatar';
@@ -127,7 +127,7 @@ import {
 import { useNow } from '../../src/ui/today';
 import { isWhole } from '../../src/ui/loadStatus';
 import { hitSlopFor } from '../../src/lib/a11y';
-import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * One row: a face, a name, the last thing said and when, and whether anything
@@ -533,20 +533,31 @@ export default function Messages() {
    * same way. A null unread count stays in the ordinary list: an unread count
    * that failed to load is not silently treated as zero, and ThreadRow says
    * the unknown state on the row itself. */
-  const waitingThreads = shown.filter((c) => c.unread != null && c.unread > 0);
-  const otherThreads = shown.filter((c) => c.unread == null || c.unread === 0);
+  /* ── and nobody in two queues ─────────────────────────────────────────
+   *
+   * "Waiting on a Reply" above is drawn from the same threads, and somebody
+   * who wrote on Monday and has not been opened since is in BOTH by
+   * definition: last word theirs, a day old, unread. They were drawn twice,
+   * four inches apart, under two headings that both began with "Waiting" —
+   * and a coach counting the screen got a number one higher than the people
+   * on it. The reply queue keeps them, because its row already says whether
+   * the message has been opened (`waitingLine`), and this one takes whoever is
+   * left. Only while that queue is actually drawn: under a filter it is not,
+   * and then nobody is removed from anything. */
+  const inReplyQueue = new Set(!narrowed && hasWaiting(waiting) ? waiting.rows.map((w) => w.thread.clientId) : []);
+  const listed = shown.filter((c) => !inReplyQueue.has(c.clientId));
+  const waitingThreads = listed.filter((c) => c.unread != null && c.unread > 0);
+  const otherThreads = listed.filter((c) => c.unread == null || c.unread === 0);
   const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
-          <Icon name={BACK_ICON} size={20} color={t.ink2} />
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients</Text>
-          <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: 2 }}>Messages</Text>
-        </View>
+      {/* The kit's pushed-page head — round back, centred title, the context
+          under it — in place of the hand-built row every other pushed page
+          gave up in round three. Outside the ScrollView, as it always was, so
+          the way back does not scroll away under a long inbox. */}
+      <View style={{ paddingHorizontal: G, paddingBottom: sp.sm }}>
+        <PageHead title="Messages" subtitle="Your clients" />
       </View>
 
       {/* The name search sits at the top of this list and the keyboard has never been on
@@ -555,7 +566,13 @@ export default function Messages() {
           scrolled into view. The padding is deliberately left alone — this field is nowhere
           near the end of the screen, and a keyboard's height of dead space under a list of
           conversations would be scrolling into nothing. */}
-      <ScrollView contentContainerStyle={{ paddingBottom: sp.xxl }}
+      {/* The gutter is the ScrollView's, once. It used to be each notice's own
+          `paddingHorizontal`, from when a Section was a full-width band between
+          hairlines; Sections became bordered cards (src/ui/kit.tsx) and this
+          list kept no gutter of its own, so every card here ran to both edges
+          of the glass with its rounded corners cut off by the bezel — the one
+          inbox in the app that did not look like the board's. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: sp.xxl }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" refreshControl={pull}>
         {status === 'loading' ? (
@@ -570,7 +587,7 @@ export default function Messages() {
         {/* A read that did not come back. Drawn ABOVE the lists, because
             whatever is below it is the last thing we had and not the answer. */}
         {status === 'error' ? (
-          <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
+          <View style={{ paddingTop: sp.lg }}>
             <Notice
               tone={t.crit}
               kicker="Not loaded"
@@ -586,7 +603,7 @@ export default function Messages() {
             list is not all of them, so "nobody else is waiting" is not something
             this screen may imply. */}
         {status === 'partial' ? (
-          <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
+          <View style={{ paddingTop: sp.lg }}>
             {/* "clients on your book" was wrong about its own set, and wrong in
                 the direction that reassures. `coach_threads()` reads
                 `from clients c where c.trainer_id = auth.uid()`
@@ -605,7 +622,7 @@ export default function Messages() {
             Drawn under a failed read of the conversations too: the queue is the
             device's and is known whether or not the server answered. */}
         {outboxNote ? (
-          <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
+          <View style={{ paddingTop: sp.lg }}>
             <Flag tone={t.warn}>{outboxNote}</Flag>
           </View>
         ) : null}
@@ -617,7 +634,7 @@ export default function Messages() {
             the queue is — this is the DEVICE's record and is known whether or
             not the server answered this morning. */}
         {refusedNote ? (
-          <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
+          <View style={{ paddingTop: sp.lg }}>
             <Flag tone={t.crit}>{refusedNote}</Flag>
           </View>
         ) : null}
@@ -631,7 +648,7 @@ export default function Messages() {
             The chip is drawn from the WHOLE list, so pressing it never changes
             the number written on it. */}
         {status !== 'loading' ? (
-          <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
+          <View style={{ paddingTop: sp.lg }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
               <Icon name="search" size={16} color={t.ink3} />
               <TextInput
@@ -721,9 +738,15 @@ export default function Messages() {
 
         {waitingThreads.length ? (
           <Section>
+            {/* "Unread", the chip's own word, and not a second heading that
+                begins "Waiting". The count is a count of the coach's book, so
+                it is said over a whole read alone — under 'partial' these are
+                the unread threads that LOADED, and the notice above says so. */}
             <SectionHead
-              title="Waiting for You"
-              note={`${waitingThreads.length} ${waitingThreads.length === 1 ? 'client' : 'clients'}`}
+              title="Unread"
+              note={isWhole(status)
+                ? `${waitingThreads.length} ${waitingThreads.length === 1 ? 'client' : 'clients'}`
+                : undefined}
             />
             {waitingThreads.map((c, i) => (
               <View key={c.clientId}>
@@ -740,7 +763,7 @@ export default function Messages() {
             {waitingThreads.length ? <Rule /> : null}
             <Section>
               <SectionHead
-                title={waitingThreads.length ? 'Other Conversations' : 'Conversations'}
+                title={waitingThreads.length || inReplyQueue.size ? 'Other Conversations' : 'Conversations'}
                 note={narrowed
                   ? `${shown.length} of ${conversations.length}`
                   : 'Most recent first'}
@@ -758,7 +781,7 @@ export default function Messages() {
 
         {/* The four empty lists, kept apart. Never "no messages" over a failure. */}
         {emptyNote ? (
-          <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xxl, paddingHorizontal: G }}>
+          <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xxl }}>
             {emptyNote}
           </Text>
         ) : null}
@@ -803,6 +826,34 @@ export default function Messages() {
                 <Ghost label="Show Clients" icon="people" onPress={() => setShowAll(true)}
                   a11yLabel="Show the clients you have not written to yet" />
               )}
+            </Section>
+          </>
+        ) : null}
+
+        {/* ── one person, or an audience ───────────────────────────────────
+            The data-layout review's flow for coach messaging opens "Inbox →
+            person / audience", and this inbox had only the first half:
+            Broadcast was a tile on the Clients tab and was reachable from
+            nowhere on the one screen about writing to clients. It is a row
+            here and deliberately NOT a thread in the lists above — a broadcast
+            is N ordinary messages in N threads (see broadcast.tsx), so there
+            is no broadcast conversation to list, and a row dressed as one
+            would be a thread nobody can reply in. The note says how many it
+            goes to is settled on that screen, before anything is sent, because
+            no count belongs here: the audience has not been chosen yet.
+
+            Saved messages and the Quiet Clients drafts are not rows beside
+            it. Both are ways of filling the composer, and both already live
+            inside the compose flow — the picker in the chat box, the draft
+            sheet that sends through the ordinary thread. */}
+        {status !== 'loading' ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Write to Many" />
+              <ListRow icon="people" title="Broadcast"
+                note="One message into each client’s own thread. You pick who, and see how many, before it goes."
+                onPress={() => router.push('/(trainer)/broadcast')} />
             </Section>
           </>
         ) : null}
