@@ -270,6 +270,49 @@ stylesheets already linked — so only the mark and download's hero panel moved.
 patches, inlined-env, native, native-tracked, testflight, release-version, version-bump, runtime-reach,
 bundle, schema:offline, functions, stripe-fields, studio), dark mode on eight client screens.
 
+## 4i. Round four, the wordmark, recipes, and the builds (19–20 Sep)
+
+**Builds shipped (1.3.0).** First set, from `c824130`: client iOS 53 / Android 19, coach iOS 24 / Android 9,
+studio Android 9 — all submitted by build id through `npm run submit`. Studio iOS 16 was refused by Apple
+(ITMS-90683 ×3): `app.config.ts` stripped the camera and health purpose strings from the owner variant, but
+the modules are autolinked into every binary, so the strings are required. The owner variant now carries
+the three keys with sentences that are true of it (`OWNER_REQUIRED_PLIST`); studio iOS 17 went through.
+Coach iOS needed ONE interactive `eas build` for the widget target's provisioning profile (the owner's
+Apple login); non-interactive builds work for it since. Second set queued 20 Sep from `a5b2a31`: client iOS
+54 / Android 21, coach iOS 25 / Android 11, studio iOS 18 / Android 10.
+Preflight had two pre-existing blockers, both fixed: a zone-dependent assertion in
+`coachLogReview.test.ts`, and repo part 2940 (`ai_coach_health_consents`) never applied to the live DB.
+
+**Logo.** The owner chose the BOARD's wordmark over the logo pack's angular mark: `src/ui/BrandMark.tsx`
+constructs R≡PPLE as vectors (`BrandWordmark`, and `BrandMark` = "R≡"); door and launch screen (house
+brand only — a tenant keeps its own name), the three icon masters, Android adaptive foreground, favicon,
+store icons, and every website header/footer (`svg.brand-word`, the `.mark` plate rules deleted). The pack
+itself is in `docs/claude-handoff/logo/` for print and marketing.
+
+**Data-layout review** (`docs/claude-handoff/CLAUDE-CODE-DATA-LAYOUT-AND-FLOW-REVIEW.md`) applied to every
+section, each lane reporting done-already / changed / not-applicable per item. Kit gained `FigureCard`,
+`AttentionRow`, `ActionBlock`, `SyncBadge`, `Expandable`, `ChartShell`, `Segmented`; `SectionHead` titles
+are ink at head weight. Open kit asks: `Expandable` cannot persist its state or draw without its card
+(coach home uses an inline `Fold` with AsyncStorage instead); ~12 screens still hand-build a figure card.
+
+**Coach tester's TestFlight notes (build 20), all answered:** clock + rest timer when logging a client's
+session; a tick can be taken back before save (AFTER save needs a coach UPDATE policy on `workouts` and a
+floor-queue act — not built); roster is names + one status line; Invite/Import at the top of Clients;
+Coaching Tools and Roster Actions fold away (remembered per device); stronger section heads; a client's
+programme opens as collapsed days; "Your Programmes" shortcuts in the builder and templates; RepDB stills
+on builder, picker and log-session rows; "can't see the updated body scan" had four causes (the sheet
+picked the newest scan WITH a metrics breakdown, no re-read on focus, same-day order by random id, and
+newest-first rows handed to a last-wins picker) — all fixed.
+
+**Recipes (Spoonacular).** `supabase/functions/recipes` (deployed) holds `SPOONACULAR_API_KEY` (set by the
+owner); `src/lib/recipeWire.ts`, `recipes.ts`, `recipePlan.ts`, `src/ui/useRecipeSearch.ts`; Meals has a
+"Search Real Recipes" entry (no quota spent on mount), photographed rows, allergens re-checked locally,
+a recipe can be planned for TODAY only (week/grocery stay on the generated plan), only `RecipeRef`
+(id, title, image URL) is ever stored. Free plan = 50 points/day ≈ 25 searches across all members — dev
+only. Coach-side recipe planning needs a `recipe_refs jsonb` column (described in
+`docs/RECIPES-SPOONACULAR.md`, not written). Not yet seen running: the simulator's account has no body on
+record, so Meals shows the measurements prompt there.
+
 ## 5. What to do next
 
 **Port the implemented screens from `repple-redesign`, file by file, re-applying audit fixes on
