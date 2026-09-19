@@ -38,9 +38,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Ghost, PageHead, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
+import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
@@ -61,7 +62,6 @@ import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/ui/auth';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
-import { BACK_ICON } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // ── the question that gets BETTER as a coach gets busier ───────────────────
 //
@@ -214,14 +214,7 @@ export default function TrainerExercise() {
             of: it is opened from the library, not from a day, so the line is
             what the catalogue records about the movement instead, and nothing
             where it records nothing. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
-          <Text accessibilityRole="header" numberOfLines={1}
-            style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center', paddingHorizontal: sp.sm }}>
-            Exercise Demo
-          </Text>
-          <View style={{ width: 38 }} />
-        </View>
+        <PageHead title="Exercise Demo" onBack={goBack} />
         <View style={{ marginTop: sp.lg, marginBottom: sp.lg }}>
           {/* What the client sees, in the language they see it in — this
               screen's whole claim is that it shows their view, and it was
@@ -424,21 +417,20 @@ export default function TrainerExercise() {
               ) : null}
             </Section>
 
+            {/* ── the muscles, on the body ─────────────────────────────────
+                The same figure the client's screen draws, so a coach previewing
+                what their client sees is looking at the picture the client
+                gets. The words are under it, not replaced by it — see
+                src/ui/ExerciseMuscles.tsx on why the body is a two-band picture
+                with its own key. Gated on the catalogue naming something: a row
+                that names no muscles is a gap, not a movement that works
+                nothing. */}
             {detail.primaryMuscles.length || detail.secondaryMuscles.length ? (
               <>
                 <Rule />
                 <Section>
                   <SectionHead title="Muscles Worked" />
-                  {detail.primaryMuscles.length ? (
-                    <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
-                      <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
-                    </Text>
-                  ) : null}
-                  {detail.secondaryMuscles.length ? (
-                    <Text style={{ ...ty.body, color: t.ink2 }}>
-                      <Text style={{ fontWeight: '600' }}>Also: </Text>{detail.secondaryMuscles.map(cap).join(', ')}
-                    </Text>
-                  ) : null}
+                  <ExerciseMuscles primary={detail.primaryMuscles} secondary={detail.secondaryMuscles} status={status} />
                 </Section>
               </>
             ) : null}

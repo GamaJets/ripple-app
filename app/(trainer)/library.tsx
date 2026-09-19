@@ -60,9 +60,10 @@ import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Notice, Ghost, PageHead, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
+import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
@@ -99,7 +100,7 @@ import {
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { isStarterId } from '../../src/lib/templateLibrary';
 import { isWhole } from '../../src/ui/loadStatus';
-import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 
 const ALL = 'All';
@@ -438,20 +439,11 @@ export default function TrainerLibrary() {
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── the head, the board's way (coach page 6) ─────────────────────
-            Back at the leading edge and the title centred between it and a
-            spacer the width of the button — centred on the row alone it sits
-            visibly off-centre beside a 38pt circle. The eyebrow that sat over
-            the title, and the catalogue figure that sat under it, are on the
-            card at the foot of the screen now: the board opens on the search
-            and the rows, not on a sentence about them. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
-          <Text accessibilityRole="header" numberOfLines={1}
-            style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center', paddingHorizontal: sp.sm }}>
-            Exercise Library
-          </Text>
-          <View style={{ width: 38 }} />
-        </View>
+            Back at the leading edge and the title centred. The eyebrow that
+            sat over the title, and the catalogue figure that sat under it,
+            are on the card at the foot of the screen now: the board opens on
+            the search and the rows, not on a sentence about them. */}
+        <PageHead title="Exercise Library" onBack={goBack} />
 
         {/* ── finding one ────────────────────────────────────────────────── */}
         {/* The board's search row, the pill Meals draws over its catalogue. */}
@@ -676,6 +668,17 @@ export default function TrainerLibrary() {
                               <Text style={{ ...ty.caption, color: t.ink2 }}>{note}</Text>
                             </View>
                           ) : null}
+                          {/* Where the movement lands on the body, before the
+                              chevron; the round still stays at the leading
+                              edge. A coach choosing between two hinges is
+                              choosing between two pictures, and this is the
+                              second one. Decorative — the spoken label names
+                              the group. 'ready' and not `status`: a truncated
+                              list is still made of whole rows, and this row's
+                              muscle columns are its own; ungraded it would
+                              draw primary and secondary in one colour. Nothing
+                              when the row names no drawable muscle. */}
+                          <ExerciseMuscles compact primary={r.primaryMuscles} secondary={r.secondaryMuscles} status="ready" />
                           <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                         </Pressable>
 

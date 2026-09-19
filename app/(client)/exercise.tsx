@@ -59,9 +59,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Section, SectionHead, Notice, Ghost, Flag, Cta, fig } from '../../src/ui/kit';
+import { Section, SectionHead, Notice, Ghost, PageHead, Flag, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, value } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
+import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
@@ -101,7 +102,6 @@ import { reportError } from '../../src/lib/reportError';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
-import { BACK_ICON } from '../../src/ui/direction';
 // ── the tracker's own dependencies ───────────────────────────────────────
 // Every one of these is the same module the guided runner reads, on purpose:
 // the rest clock, the countdown ticks, the estimated 1RM a record is judged on
@@ -553,6 +553,72 @@ export default function ExerciseScreen() {
     .filter((x): x is string => !!x)
     .map(cap);
 
+  /* ── the written guide: the steps, the cues, and the muscles on the body ─
+     ONE element, drawn by the ready view and the demo view alike. It was the
+     demo view's alone, so a member who opened a movement from the library and
+     never pressed the play control got the demonstration and nothing about
+     how to do it — reported in those words: "the exercises are missing the
+     tips and instructions on how to do the exercise". Sharing the element is
+     what stops the two views drifting apart the next time one is edited.
+
+     "Muscles Worked" is the body, not a line of words: the same figure the
+     Training Summary draws on, lit with the catalogue's primary and secondary
+     lists, and the words underneath it. src/ui/ExerciseMuscles.tsx says what
+     that picture does and does not claim. */
+  const guide = detail ? (
+    <>
+      {detail.instructions.length ? (
+        <Section>
+          <SectionHead title="Instructions" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
+          {detail.instructions.map((step, n) => (
+            <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
+              <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
+              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
+            </View>
+          ))}
+        </Section>
+      ) : status === 'ready' ? (
+        <Section>
+          <SectionHead title="Instructions" />
+          {/* 41 of the original rows carry no instructions because nobody
+              has confirmed which catalogue movement they are. Saying so
+              is the point — an empty section would read as an app that
+              forgot to render, not as a gap we know about. */}
+          <Text style={{ ...ty.label, color: t.ink3 }}>
+            No written steps for this one yet.
+          </Text>
+        </Section>
+      ) : null}
+
+      {/* ── coaching cues ────────────────────────────────────────────────
+          Kept apart from the numbered steps rather than appended to them. A
+          client following the sequence needs it in order; a client who
+          already knows the movement wants the cue, and a cue buried at step
+          six is a cue they have stopped reading before they reach. */}
+      {detail.tips.length ? (
+        <Section>
+          <SectionHead title="Tips" note={`${detail.tips.length}`} />
+          {detail.tips.map((tip, n) => (
+            <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.sm }}>
+              <Text style={{ ...ty.body, color: t.brand }}>·</Text>
+              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{tip}</Text>
+            </View>
+          ))}
+        </Section>
+      ) : null}
+
+      {/* Gated on the catalogue naming SOMETHING. A row that names no muscles
+          is a gap in the catalogue, and a heading over an empty body would
+          state the movement works nothing. */}
+      {detail.primaryMuscles.length || detail.secondaryMuscles.length ? (
+        <Section>
+          <SectionHead title="Muscles Worked" />
+          <ExerciseMuscles primary={detail.primaryMuscles} secondary={detail.secondaryMuscles} status={status} />
+        </Section>
+      ) : null}
+    </>
+  ) : null;
+
   /* ── the demonstration ─────────────────────────────────────────────────── */
   const demonstration = status === 'loading' ? (
     <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
@@ -822,15 +888,12 @@ export default function ExerciseScreen() {
   ) : null;
 
   /* ── the board's header: a round back control, the title centred ─────────
-     The trailing 38pt is the width of the back control, so the title is
-     centred on the page and not on what is left of it. */
+     Three views, three heads, and each one's back goes somewhere different:
+     the set screen returns to the exercise, not to wherever the exercise was
+     opened from, which is why `onBack` and `backLabel` are passed through
+     rather than left to the kit's default. */
   const nav = (title: string, onBack: () => void, backLabel: string) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-      <Ghost icon={BACK_ICON} a11yLabel={backLabel} onPress={onBack} />
-      <Text accessibilityRole="header" numberOfLines={2}
-        style={{ ...ty.head, color: t.ink, flex: 1, textAlign: 'center' }}>{title}</Text>
-      <View style={{ width: 38 }} />
-    </View>
+    <PageHead title={title} onBack={onBack} backLabel={backLabel} />
   );
 
   const shownName = display?.name.text || exName || 'Exercise';
@@ -990,66 +1053,13 @@ export default function ExerciseScreen() {
             {/* ── what it is ──────────────────────────────────────────────── */}
             {detail ? (
               <>
-                {/* The steps lead, as the board's page 5 has them, and the
-                    description sits with the chips underneath: somebody who has
-                    just pressed "demo" wants the sequence, and the sentence
-                    saying what the movement IS is still here for the person
-                    who does not know it. */}
-                {detail.instructions.length ? (
-                  <Section>
-                    <SectionHead title="Instructions" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
-                    {detail.instructions.map((step, n) => (
-                      <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-                        <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
-                        <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
-                      </View>
-                    ))}
-                  </Section>
-                ) : status === 'ready' ? (
-                  <Section>
-                    <SectionHead title="Instructions" />
-                    {/* 41 of the original rows carry no instructions because nobody
-                        has confirmed which catalogue movement they are. Saying so
-                        is the point — an empty section would read as an app that
-                        forgot to render, not as a gap we know about. */}
-                    <Text style={{ ...ty.label, color: t.ink3 }}>
-                      No written steps for this one yet.
-                    </Text>
-                  </Section>
-                ) : null}
-
-                {/* ── coaching cues ────────────────────────────────────────
-                    Kept apart from the numbered steps rather than appended to them. A
-                    client following the sequence needs it in order; a client who
-                    already knows the movement wants the cue, and a cue buried at step
-                    six is a cue they have stopped reading before they reach. */}
-                {detail.tips.length ? (
-                  <Section>
-                    <SectionHead title="Tips" note={`${detail.tips.length}`} />
-                    {detail.tips.map((tip, n) => (
-                      <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.sm }}>
-                        <Text style={{ ...ty.body, color: t.brand }}>·</Text>
-                        <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{tip}</Text>
-                      </View>
-                    ))}
-                  </Section>
-                ) : null}
-
-                {detail.primaryMuscles.length || detail.secondaryMuscles.length ? (
-                  <Section>
-                    <SectionHead title="Muscles Worked" />
-                    {detail.primaryMuscles.length ? (
-                      <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
-                        <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
-                      </Text>
-                    ) : null}
-                    {detail.secondaryMuscles.length ? (
-                      <Text style={{ ...ty.body, color: t.ink2 }}>
-                        <Text style={{ fontWeight: '600' }}>Also: </Text>{detail.secondaryMuscles.map(cap).join(', ')}
-                      </Text>
-                    ) : null}
-                  </Section>
-                ) : null}
+                {/* The steps, the cues and the body lead, as the board's page 5
+                    has them, and the description sits with the chips underneath:
+                    somebody who has just pressed "demo" wants the sequence, and
+                    the sentence saying what the movement IS is still here for the
+                    person who does not know it. The three sections are `guide`,
+                    the same element the ready view draws. */}
+                {guide}
 
                 {/* The description — the one thing the original request asked
                     for that the previous dataset had no field for at all — over
@@ -1159,6 +1169,16 @@ export default function ExerciseScreen() {
 
             {cueBlock}
             {injuryLine}
+
+            {/* ── how to do it, without opening the demo ───────────────────
+                The steps, the tips and the body, straight under the controls
+                — the board's page 4 stops at the three round controls, and a
+                member standing at the machine was pressing "demo" to find out
+                how the movement goes. The coach's cue and the injury caution
+                keep their place ABOVE the catalogue's steps: one is the person
+                who trains them and the other is a safety line, and both are a
+                few lines where the steps are a page. */}
+            {guide}
 
             {/* ── log a set of it, here ─────────────────────────────────────
                 The quick row, for a set already done: the whole point of this

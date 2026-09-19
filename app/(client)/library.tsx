@@ -62,6 +62,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { tapLight, notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead, Field } from '../../src/ui/kit';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
 import { catalogueValue as cap, num } from '../../src/lib/format';
 // expo-image is required through src/ui/nativeModules.ts, never imported. Its
 // entry point resolves to `requireNativeModule('ExpoImage')`, which THROWS on a
@@ -817,6 +818,16 @@ export default function Library() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>Matched “{via}”</Text>
            ) : null}
           </View>
+          {/* Where the movement lands on the body, at the trailing edge. A
+              sliver of lit figure says hips-or-back-or-arms at a glance, which
+              is the one thing the group word does not: "Legs" is a squat and a
+              calf raise. Decorative — the spoken label above names the group.
+              'ready' and not `cat.status`: a truncated LIST is still made of
+              whole ROWS, and this row's two muscle columns are its own. Drawn
+              ungraded it would show primary and secondary in one colour,
+              misreading the row to say something about the list. Nothing at
+              all when the row names no muscle the artwork can draw. */}
+          <ExerciseMuscles compact primary={e.primaryMuscles} secondary={e.secondaryMuscles} status="ready" />
           <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
          </Pressable>
         </View>
