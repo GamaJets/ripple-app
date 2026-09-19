@@ -41,6 +41,12 @@ import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { brandColorOf, parseGymName } from '../../src/lib/gymSettings';
 import { Icon } from '../../src/ui/Icon';
+// The two measurements the preview states in words. `brandInkFor` (src/theme/
+// tokens.ts) already CHOOSES the more readable of black and white for the
+// button label; what it cannot do is make a mid-toned colour clear 4.5:1 with
+// either, and an owner is the only person who can pick a different one.
+import { contrastRatio, meetsText, meetsMark } from '../../src/lib/a11y';
+import { num1 } from '../../src/lib/format';
 
 export default function OwnerBrand() {
   const t = useTheme();
@@ -212,9 +218,17 @@ export default function OwnerBrand() {
 
         <Fetched at={fetchedAt} onRefresh={() => { refresh(); }} busy={status === 'loading'} />
 
-        {/* ── the gym's name ─────────────────────────────────────────────── */}
+        {/* ── one flow, three steps ─────────────────────────────────────────
+            Name, colour, then look at what the two of them did. They were three
+            unrelated cards and a fourth holding a lone "clear" button; the
+            heads now number them, each head says in words whether its step is
+            done, and clearing the colour lives with the colour it clears. The
+            order is the order of consequence: the name reaches every member's
+            app, the colour reaches this app and the console, and the preview
+            is where both are checked before an owner walks away. */}
+        {/* ── step 1: the gym's name ─────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Gym Name" />
+          <SectionHead title="Step 1 · Gym Name" note={!known ? undefined : tenant?.name?.trim() ? 'Set' : 'Not set yet'} />
           {status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your gym…</Text>
           ) : status === 'error' ? (
@@ -246,7 +260,12 @@ export default function OwnerBrand() {
 
         {/* ── the colours are the content, not decoration ────────────────── */}
         <Section>
-          <SectionHead title="Primary Palette" note={palettes.find((p) => p.key === palette)?.name} />
+          {/* The note names the palette only when the GYM holds a colour. It
+              read the device's palette key unconditionally, so a gym that had
+              chosen nothing was headed with the name of whichever swatch this
+              phone happened to be drawn in — a choice nobody made, stated as
+              the gym's. */}
+          <SectionHead title="Step 2 · Colour" note={!known ? undefined : gymColor ? (palettes.find((p) => p.key === palette)?.name ?? 'Chosen') : 'Not chosen yet'} />
           {/* Four states, four sentences — the Gym Name section above has
               handled all four since it was written, and this one had two.
               `status === 'error'` was stated; everything else fell through to
@@ -284,31 +303,13 @@ export default function OwnerBrand() {
               );
             })}
           </View>
-        </Section>
-
-
-        {/* ── live preview: chrome and the primary action, no invented data ─ */}
-        <Section>
-          <SectionHead title="Live Preview" />
-          <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, overflow: 'hidden', ...elevation.e1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
-              <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: t.brand }} />
-              {/* The gym's name where it is known, and this app's own label
-                  otherwise — never a placeholder standing in for a real one. */}
-              <Text style={{ ...ty.head, color: t.ink }}>{known && tenant?.name ? tenant.name : appName}</Text>
-            </View>
-            <View style={{ padding: sp.lg }}>
-              <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>Body copy, headings and the primary action, in your colours.</Text>
-              <View style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Start today's workout</Text>
-              </View>
-            </View>
+          {/* Clearing, beside the swatches it undoes. It was a card of its own
+              at the foot of the screen, under the preview, where it read as a
+              reset for the whole page. */}
+          <View style={{ marginTop: sp.xl }}>
+            <Rule />
           </View>
-        </Section>
-
-
-        <Section>
-          <View style={{ alignSelf: 'flex-start' }}>
+          <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
             {/* Off while a swatch write is in flight — this button and those
                 swatches write the same column of the same row. */}
             <Ghost label="Clear the Gym's Colour" disabled={colorBusy} onPress={() => { void clearColor(); }} />
@@ -316,6 +317,121 @@ export default function OwnerBrand() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Puts the gym back to having chosen no colour, and the app back to its own. Not the same as picking teal.
           </Text>
+        </Section>
+
+
+        {/* ── step 3: the preview — controls, labels and status, no invented data ─
+            The preview was a header strip and one button, which shows a colour
+            and not what the colour DOES. An accent is drawn on four kinds of
+            thing in this app — the primary action, a selected control, an icon
+            in a row, and the "fine" end of a status scale — and a colour that
+            looks right as a swatch can fail on any of them. Each is drawn here
+            from the live theme, so it is the app's own rendering rather than a
+            mock of it. The words are the names of the controls; nothing here is
+            a figure, a member or a session. */}
+        <Section>
+          <SectionHead title="Step 3 · Check the Preview" />
+          <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, overflow: 'hidden', ...elevation.e1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
+              <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: t.brand }} />
+              {/* The gym's name where it is known, and this app's own label
+                  otherwise — never a placeholder standing in for a real one. */}
+              <Text style={{ ...ty.head, color: t.ink, flex: 1 }}>{known && tenant?.name ? tenant.name : appName}</Text>
+            </View>
+            <View style={{ padding: sp.lg }}>
+              <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>Body copy, headings and the controls below, in your colours.</Text>
+
+              {/* A selected chip beside an unselected one: the board's "chosen"
+                  state is the brand fill, and this is where an accent too close
+                  to the card's own grey stops reading as chosen. Said as
+                  images — they are pictures of controls, not controls. */}
+              <View accessible accessibilityRole="image" accessibilityLabel="Sample: a selected chip in your colour beside an unselected one"
+                style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.brand, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
+                  <Icon name="check" size={13} color={t.brandInk} />
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Selected</Text>
+                </View>
+                <View style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Not Selected</Text>
+                </View>
+              </View>
+
+              {/* A list row as the kit draws one: the accent as an ICON on the
+                  row's grey circle, which is the 3:1 "mark" case below. */}
+              <View accessible accessibilityRole="image" accessibilityLabel="Sample: a list row with its icon in your colour"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
+                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="calendar" size={17} color={t.brand} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>A Row Title</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>The line under it, which never takes your colour</Text>
+                </View>
+              </View>
+
+              {/* Status. Only the first of the three follows the accent — the
+                  warning and critical colours are the theme's own and do not
+                  move — and each carries its word, because the colour is never
+                  the only channel. An accent near amber or red is the case
+                  this row exists to show. */}
+              <View accessible accessibilityRole="image" accessibilityLabel="Sample: three status marks. Fine takes your colour; warning and critical keep their own."
+                style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg, marginBottom: sp.lg }}>
+                {([['Fine', t.brand], ['Warning', t.warn], ['Critical', t.crit]] as const).map(([l, c]) => (
+                  <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: c }} />
+                    <Text style={{ ...ty.caption, color: t.ink2 }}>{l}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View accessible accessibilityRole="image" accessibilityLabel="Sample: the primary button in your colour"
+                style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Primary Action</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* ── is it readable: measured, and said in words ─────────────────
+              The label on the button is already the better of black and white
+              for this colour — `brandInkFor` measures both. About one colour in
+              twenty-five is too mid-toned for EITHER to clear 4.5:1, and the
+              app cannot fix that by choosing; only a different colour does. So
+              the ratio is stated with its verdict, and a failing one says what
+              to do. Null is a colour that could not be parsed, which is said as
+              that rather than as a pass. */}
+          {(() => {
+            const onBrand = contrastRatio(t.brandInk, t.brand);
+            const asMark = contrastRatio(t.brand, t.surface2);
+            const textOk = meetsText(t.brandInk, t.brand, ty.label.fontSize, '600');
+            const markOk = meetsMark(t.brand, t.surface2);
+            return (
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Readability</Text>
+                {/* A mark and words, never the warning colour as ink: a status
+                    colour is a 3:1 mark in this theme and is not measured as
+                    text — which is the very thing this readout is about. */}
+                {([
+                  [textOk, onBrand == null
+                    ? 'Button text on your colour could not be measured, so nothing here says it is readable.'
+                    : `Button text on your colour · ${num1(onBrand)} to 1 · ${textOk ? 'reads clearly' : 'hard to read — the app already uses the better of black and white, so a lighter or darker colour is the fix'}`],
+                  [markOk, asMark == null
+                    ? 'Your colour as an icon could not be measured.'
+                    : `Your colour as an icon on a row · ${num1(asMark)} to 1 · ${markOk ? 'stands out' : 'faint against the row — icons and selected states will be hard to find'}`],
+                ] as const).map(([ok, line], ix) => (
+                  <View key={ix} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: ix === 0 ? 0 : 3 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, marginTop: 5, backgroundColor: ok ? t.good : t.warn }} />
+                    <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{line}</Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
+        </Section>
+
+
+        {/* ── where the two of them reach ────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Where Your Brand Shows" />
           {/* ── A paragraph selling four things that do not exist ───────────
               It read: "On Studio plans each trainer gets this panel for their
               own client app — their logo, colours, and domain. You keep the
@@ -358,7 +474,7 @@ export default function OwnerBrand() {
               reason an owner picks a colour. One who reads this, picks their
               green, and then opens the member app expecting to see it has been
               told a false thing by the screen that sold them the feature. */}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
             The name and the colour are the whole of the branding today, and they do not reach the same places. The name is the gym’s everywhere — every owner’s device, and what your members and coaches see their app called. The colour is drawn by this app and by the web console only; a member’s app and a coach’s app keep their own accent.
           </Text>
         </Section>

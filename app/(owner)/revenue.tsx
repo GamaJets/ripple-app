@@ -588,7 +588,7 @@ export default function OwnerRevenue() {
               0.002 rounds to nothing at whole percents, and the old expression
               signed it anyway — "+0%/mo" over a six-month forecast line, which
               reads as growth an owner can plan against. */}
-          <SectionHead title="6-month forecast" note={canForecast ? deltaLabel(growth * 100, { since: null, unit: '%/mo', decimals: 0, noChange: 'flat' }) : undefined} />
+          <SectionHead title="6-Month Forecast" note={canForecast ? deltaLabel(growth * 100, { since: null, unit: '%/mo', decimals: 0, noChange: 'flat' }) : undefined} />
           {canForecast ? (<>
             <Spark data={[roll.sessions30, ...forecast]} labels={forecastLabels} h={58} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>

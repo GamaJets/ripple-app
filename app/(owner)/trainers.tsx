@@ -9,13 +9,13 @@
 // Inviting is kept because it is the one action here that was always real: it
 // writes a `trainer_invites` row the invitee accepts in their own app.
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { num } from '../../src/lib/format';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, AttentionRow, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { Fetched } from '../../src/ui/fetched';
@@ -25,6 +25,7 @@ import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { parseEmail } from '../../src/lib/csvImport';
 import { trainerHealth, gymRollup } from '../../src/lib/ownerAnalytics';
+import { riskLabel } from '../../src/lib/status';
 
 export default function OwnerTrainers() {
   const t = useTheme();
@@ -150,6 +151,78 @@ export default function OwnerTrainers() {
   const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
 
   const riskDot: Record<string, string> = { ok: t.brand, watch: t.warn, high: t.crit, idle: t.ink3 };
+  /**
+   * A gym with nobody on its roster yet — a WHOLE read with no trainers in it.
+   * Never an unread or a loading roster: those are empty arrays too, and the
+   * screen tells an owner in so many words not to invite anyone on the strength
+   * of one.
+   */
+  const onboarding = !trainersUnknown && trainers.length === 0;
+  // Trainers sorted worst-health first so problems surface at the top, the way
+  // Overview's board sorts the same people.
+  const ranked = trainers.map((tr) => ({ tr, h: trainerHealth(tr) })).sort((a, b) => a.h.score - b.h.score);
+
+  // One block, drawn in one of two places — see the note where it is placed.
+  // A variable holding elements rather than a component declared in the render
+  // body: a component here would be a new type on every render and remount the
+  // list under it (scripts/check-remount.mjs).
+  const invitesBlock = (
+    <>
+      <Section>
+        <SectionHead title={onboarding ? 'Start Your Roster' : 'Add to the Roster'} />
+        <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+          {onboarding
+            ? 'Nobody coaches at your gym in this app yet. Invite a trainer by email and they join when they accept in their own app — their clients and sessions start counting here from then.'
+            : 'Invite a trainer by email. They join your gym when they accept in their own app.'}
+        </Text>
+        <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />
+      </Section>
+
+      {/* The section used to appear only when `pending.length > 0`, so a
+          REFUSED invite read — which leaves the list empty — removed it from
+          the screen without a word. An owner concludes nobody is waiting on
+          them and either re-invites somebody they already invited, or stops
+          chasing a hire. Every other unread state on this screen gets a
+          sentence; this one got a disappearance. */}
+      {/* `!invitesWhole` joins the gate for the same reason `invitesUnread`
+          did. Under a truncated read the sentence below — "more invitations
+          than fit in one read" — sat INSIDE a section that only rendered
+          when the prefix happened to contain a pending row. A gym whose open
+          invitations are all older than the newest rows that came back got no
+          section, no count and no sentence: the disclosure was hidden by the
+          very condition it exists to explain. */}
+      {pending.length > 0 || invitesUnread || !invitesWhole ? (<>
+        <Rule />
+        <Section>
+          <SectionHead title="Pending Invites" note={invitesWhole && pending.length ? String(pending.length) : undefined} />
+          {invitesUnread ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Your sent invitations could not be read, so this cannot say who is waiting on you.
+              That is a failed read, not an empty list — nobody&rsquo;s invitation has been
+              cancelled, and re-sending one on the strength of this screen would invite the same
+              person twice.
+            </Text>
+          ) : null}
+          {!invitesWhole && !invitesUnread ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+              More invitations than fit in one read, so the ones below are the most recent rather
+              than all of them and there is no count over them.
+            </Text>
+          ) : null}
+          {pending.map((i, ix) => (
+            <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: ix === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{i.email}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Awaiting sign-up / accept</Text>
+              </View>
+              <Ghost label="Cancel" onPress={() => { void revoke(i.id, i.email); }} />
+            </View>
+          ))}
+        </Section>
+      </>) : null}
+    </>
+  );
+
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -157,16 +230,107 @@ export default function OwnerTrainers() {
 
         {/* The board's tab-root opening: eyebrow, title, and the one global
             action as a round control. Inviting is that action — it is the only
-            write on this screen — and it stays as the full-width button in the
-            Roster card too, because a plus in the corner is not where a first
-            -time owner looks for "add somebody". */}
+            write on this screen — and it stays as a full-width button too,
+            in its own card under the roster (or leading the screen for a gym
+            with nobody on it yet), because a plus in the corner is not where a
+            first-time owner looks for "add somebody". */}
         <ScreenHeader
           eyebrow="Your Coaching Staff"
           title="Trainers"
           actions={<Ghost icon="plus" a11yLabel="Invite a trainer by email" onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />}
         />
 
-        {/* Sessions lead, because it is the number that moves. */}
+        {/* The whole screen is one list and the figures over it, so the reason
+            they are all dashes is worth one sentence rather than seven. */}
+        {trainersUnread ? (
+          <Notice tone={t.warn} kicker="Roster unread"
+            title="Your trainers could not be read"
+            note="Nothing below is a statement about your staff — an empty roster here means the read failed, not that nobody works for you.">
+            <View style={{ marginTop: sp.lg }}>
+              <Cta label="Try Again" wide onPress={refresh} />
+            </View>
+          </Notice>
+        ) : null}
+
+
+        {onboarding ? invitesBlock : null}
+
+        {/* ── roster health: the state of the staff, before anything else ──── */}
+        <Section>
+          {/* Every figure on this screen is over the same thirty days — the
+              window `fetchGymTrainers` reads — and the head says so once
+              rather than each row implying it. */}
+          <SectionHead title="Roster Health" note="Last 30 days" />
+          {/* All three are counts over `trainers`, which is empty under a failed
+              read as well as under an empty gym — hence fig() behind the same
+              flag rather than String() behind `loading` alone. */}
+          <KpiRow items={[
+            { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers) },
+            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)) },
+            { label: 'Need a Look', value: trainersUnknown ? '—' : fig(roll.atRiskCount) },
+          ]} />
+          {/* The gym-wide exception, with its consequence beside it: payroll is
+              withheld while ANY finished session has no outcome, and the rows
+              below say whose they are. */}
+          {!trainersUnknown && roll.unmarked30 > 0 ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
+              {`${num(roll.unmarked30)} finished session${roll.unmarked30 === 1 ? '' : 's'} ${roll.unmarked30 === 1 ? 'has' : 'have'} no outcome recorded, so the 30 days cannot be valued yet. The rows below show whose.`}
+            </Flag>
+          ) : null}
+        </Section>
+
+        {/* The age of all three reads, under the roster's figures rather than
+            in the header so the first viewport is the gym and not the plumbing. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
+
+        <Section>
+          {/* Worst first, as Overview's health board sorts the same people: the
+              provider's order is most clients first, which put the trainer an
+              owner most needs to see at the foot of the list. */}
+          <SectionHead title="Trainers" note={!trainersUnknown && trainers.length ? 'Worst first' : undefined} />
+          {loading ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
+          ) : trainersUnread ? (
+            // Ahead of the empty branch, because they are the same empty array.
+            // This one used to fall through to "No trainers yet. Invite one by
+            // email", which is the app telling a staffed gym it has no staff.
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Your roster could not be read, so nobody could be listed. This is a failed read,
+              not an empty gym — do not invite anyone on the strength of it.
+            </Text>
+          ) : trainers.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              No trainers yet. Once somebody you invite accepts, they appear here with their clients
+              and delivered sessions.
+            </Text>
+          ) : ranked.map(({ tr, h }, ix) => {
+            // Delivered OF booked, and whatever is still unmarked, over the
+            // same thirty days as the figures above — one period for every
+            // number on the row.
+            const work = `${num(tr.delivered30)} of ${num(tr.sessions30)} session${tr.sessions30 === 1 ? '' : 's'} delivered`;
+            const who = `${tr.clients} client${tr.clients === 1 ? '' : 's'}`;
+            return (
+              // The kit's AttentionRow: the state in WORDS beside its dot — the
+              // dot alone was the only thing on this row that said a trainer
+              // was flagged — and WHY on the row, so the sheet is for detail
+              // rather than for finding out what the warning meant. The health
+              // score keeps its noun: a bare "42" at the trailing edge was a
+              // number with nothing to say what it counted.
+              <AttentionRow key={tr.id} divider={ix > 0}
+                monogram={tr.name.split(' ').map((x) => x[0]).join('')}
+                name={tr.name} reason={h.reason}
+                status={riskLabel(h.risk)} tone={riskDot[h.risk]}
+                age={`Health ${h.score} of 100 · ${who} · ${work}${tr.unmarked30 > 0 ? ` · ${num(tr.unmarked30)} unmarked` : ''}`}
+                onPress={() => setSel(tr)} />
+            );
+          })}
+        </Section>
+
+        {/* Sessions led this screen, "because it is the number that moves". It
+            is the supporting evidence now: the review's order for Trainers is
+            roster health and exceptions first, and a gym-wide session count
+            says nothing about WHICH trainer needs the owner. It sits under the
+            roster it is a sum of. */}
         {/* ── "Delivered" was the one word this figure could not carry ─────
             The label read "Sessions Delivered · 30 Days" over `sessions30`,
             which is every booking whose clock has passed WHATEVER its outcome
@@ -227,125 +391,15 @@ export default function OwnerTrainers() {
           );
         })()}
 
-        {/* The age of all three reads, under the figure rather than in the
-            header so the first viewport is the gym and not the plumbing. */}
-        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
-
-        {/* The whole screen is one list and the figures over it, so the reason
-            they are all dashes is worth one sentence rather than seven. */}
-        {trainersUnread ? (
-          <Notice tone={t.warn} kicker="Roster unread"
-            title="Your trainers could not be read"
-            note="Nothing below is a statement about your staff — an empty roster here means the read failed, not that nobody works for you.">
-            <View style={{ marginTop: sp.lg }}>
-              <Cta label="Try Again" wide onPress={refresh} />
-            </View>
-          </Notice>
-        ) : null}
-
-
-        <Section>
-          <SectionHead title="Roster" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
-          {/* All three are counts over `trainers`, which is empty under a failed
-              read as well as under an empty gym — hence fig() behind the same
-              flag rather than String() behind `loading` alone. */}
-          <KpiRow items={[
-            { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers) },
-            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)) },
-            { label: 'Need a Look', value: trainersUnknown ? '—' : fig(roll.atRiskCount) },
-          ]} />
-          <View style={{ marginTop: sp.xl }}>
-            <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />
-          </View>
-        </Section>
-
-        {/* The section used to appear only when `pending.length > 0`, so a
-            REFUSED invite read — which leaves the list empty — removed it from
-            the screen without a word. An owner concludes nobody is waiting on
-            them and either re-invites somebody they already invited, or stops
-            chasing a hire. Every other unread state on this screen gets a
-            sentence; this one got a disappearance. */}
-        {/* `!invitesWhole` joins the gate for the same reason `invitesUnread`
-            did. Under a truncated read the sentence below — "more invitations
-            than fit in one read" — sat INSIDE a section that only rendered
-            when the prefix happened to contain a pending row. A gym whose open
-            invitations are all older than the newest rows that came back got no
-            section, no count and no sentence: the disclosure was hidden by the
-            very condition it exists to explain. */}
-        {pending.length > 0 || invitesUnread || !invitesWhole ? (<>
-          <Rule />
-          <Section>
-            <SectionHead title="Pending Invites" note={invitesWhole && pending.length ? String(pending.length) : undefined} />
-            {invitesUnread ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                Your sent invitations could not be read, so this cannot say who is waiting on you.
-                That is a failed read, not an empty list — nobody&rsquo;s invitation has been
-                cancelled, and re-sending one on the strength of this screen would invite the same
-                person twice.
-              </Text>
-            ) : null}
-            {!invitesWhole && !invitesUnread ? (
-              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                More invitations than fit in one read, so the ones below are the most recent rather
-                than all of them and there is no count over them.
-              </Text>
-            ) : null}
-            {pending.map((i, ix) => (
-              <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: ix === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{i.email}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Awaiting sign-up / accept</Text>
-                </View>
-                <Ghost label="Cancel" onPress={() => { void revoke(i.id, i.email); }} />
-              </View>
-            ))}
-          </Section>
-        </>) : null}
-
-
-        <Section>
-          <SectionHead title="Trainers" note={!trainersUnknown && trainers.length ? `${num(roll.clients)} clients` : undefined} />
-          {loading ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
-          ) : trainersUnread ? (
-            // Ahead of the empty branch, because they are the same empty array.
-            // This one used to fall through to "No trainers yet. Invite one by
-            // email", which is the app telling a staffed gym it has no staff.
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              Your roster could not be read, so nobody could be listed. This is a failed read,
-              not an empty gym — do not invite anyone on the strength of it.
-            </Text>
-          ) : trainers.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              No trainers yet. Invite one by email — they appear here with their clients and
-              delivered sessions as soon as they join.
-            </Text>
-          ) : trainers.map((tr, ix) => {
-            const h = trainerHealth(tr);
-            return (
-              <Pressable key={tr.id} onPress={() => setSel(tr)} style={{
-                flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
-                borderTopWidth: ix === 0 ? 0 : hairline, borderTopColor: t.ring,
-              }}>
-                {/* 36pt, the size the kit's ListRow draws every row's circle
-                    at, so a monogram row and an icon row sit on one grid. */}
-                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>{tr.name.split(' ').map((x) => x[0]).join('').slice(0, 2)}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: riskDot[h.risk] }} />
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tr.name}</Text>
-                  </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                    {tr.clients} client{tr.clients === 1 ? '' : 's'} · {tr.sessions30} session{tr.sessions30 === 1 ? '' : 's'} in 30 days
-                  </Text>
-                </View>
-                <Text style={{ ...value(17), color: t.ink }}>{h.score}</Text>
-              </Pressable>
-            );
-          })}
-        </Section>
+        {/* ── inviting: below the operating roster, unless there is no roster ──
+            The invite button used to sit inside the KPI card at the top, so the
+            first thing on a staffed gym's Trainers screen was a form for
+            adding somebody else. It follows the roster now. The exception is
+            the gym that has nobody yet — a whole read with no trainers in it —
+            where inviting IS the next action and this block leads instead.
+            Never on an unread roster: that is the state in which this screen
+            tells an owner not to invite anyone on the strength of it. */}
+        {onboarding ? null : invitesBlock}
       </ScrollView>
 
       {/* ── invite ─────────────────────────────────────────────────────── */}

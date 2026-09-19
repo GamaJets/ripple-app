@@ -289,7 +289,7 @@ export default function OwnerGrowth() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         {/* The board's tab-root opening: a quiet eyebrow and the title. */}
-        <ScreenHeader eyebrow="Members and Trainers" title="Growth" />
+        <ScreenHeader eyebrow="Trainers and Members" title="Growth" />
 
         {/* ── the figure ─────────────────────────────────────────────────── */}
         {/* A card rather than the kit's bare `Hero`: the one block on this
@@ -322,8 +322,8 @@ export default function OwnerGrowth() {
                   below, and pointed at from here so an owner reading the figure
                   knows where the other question is answered. */}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                This figure and the trainer sections lower down count trainers. Your
-                members are counted separately, in Member Churn below.
+                This figure and the trainer sections around it count trainers. Your
+                members are counted separately, in Member Retention below.
               </Text>
             </Section>
           );
@@ -334,13 +334,62 @@ export default function OwnerGrowth() {
         <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading || churn.loading} />
 
 
+        {/* ── retention ──────────────────────────────────────────────────── */}
+        <Section>
+          {/* Headed "Retention" over three trainer figures, one tap from a tab
+              called Growth. Named. */}
+          {/* First under the figure, which is also a trainer figure: the
+              review's order for Growth is trainer retention, then the member
+              base and its change, then cohorts, the funnel and the codes. The
+              two trainer blocks now sit together and the member blocks follow
+              under their own names, so nobody has to work out which population
+              a percentage is a share of. */}
+          <SectionHead title="Trainer Retention" note="Trainers, not members · last 30 days" />
+          <KpiRow items={[
+            // "0 of 0" under a dash is a fraction of nobody. `idlePct` is
+            // already null with an empty roster, so the caption says the same
+            // thing the figure does rather than inventing a denominator.
+            { label: 'Idle', value: trainersUnknown ? '—' : fig(idlePct), unit: trainersUnknown || idlePct == null ? undefined : '%',
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : idlePct == null ? 'no trainers yet' : `${idle} of ${roll.trainers}` },
+            // `avgSessionsPerTrainer` is NULL with no trainers — an average over
+            // an empty set — and this was the one interpolation on the screen
+            // that did not branch on it, so a gym with nobody on the roster read
+            // "null avg / trainer" under its session count. Two of the three
+            // owner gyms in the live database are in exactly that state. The
+            // sibling row below and both rows on Overview have always had this
+            // guard; this one had been missed.
+            { label: 'Sessions · 30d', value: trainersUnknown ? '—' : fig(num(roll.sessions30)),
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${plainExact(roll.avgSessionsPerTrainer)} avg / trainer` },
+            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(ca.total)),
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : ca.avgPerTrainer == null ? 'no trainers yet' : `${plainExact(ca.avgPerTrainer)} avg / trainer` },
+          ]} />
+          {/* The sample and the window, in a sentence. "12%" with nothing
+              beside it is a share of an unstated number of people over an
+              unstated period; idle is a share of THIS roster, judged on the
+              thirty days the roster read covers. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {loading ? 'Reading your roster…'
+              : trainersUnread ? 'Your roster could not be read, so nothing here is a statement about your trainers.'
+              : trainersUnknown ? 'Only part of your roster came back, so no share of it is stated.'
+              : roll.trainers === 0 ? 'No trainers on your roster yet, so there is nobody to be a share of.'
+              : `Over the ${num(roll.trainers)} trainer${roll.trainers === 1 ? '' : 's'} on your roster today. Idle means no clients and no sessions in the last 30 days. Members who joined or left are counted separately, in Member Retention below.`}
+          </Text>
+        </Section>
+
+
+
         {/* ── member churn ───────────────────────────────────────────────── */}
         {/* The question a gym owner came to a tab called Growth to ask, which
             this screen used to answer by explaining that it could not. */}
         <Section>
+          {/* "Member Retention", over a Churn figure. The section was headed by
+              its first KPI, which left the screen with a "Trainer Retention"
+              and no member one — and an owner looking for the second read the
+              first. The head names the population and the month; the figure
+              keeps the word the rate actually is. */}
           <SectionHead
-            title="Member Churn"
-            note={churn.headline.label ?? undefined}
+            title="Member Retention"
+            note={churn.headline.label ? `Members · ${churn.headline.label}` : 'Members'}
           />
           {/* A KpiRow and not a second <Hero>. The kit's hero is the screen's
               ONE figure and this screen already has one; two of them side by
@@ -428,32 +477,6 @@ export default function OwnerGrowth() {
         </Section>
 
 
-        {/* ── retention ──────────────────────────────────────────────────── */}
-        <Section>
-          {/* Headed "Retention" over three trainer figures, one tap from a tab
-              called Growth. Named. */}
-          <SectionHead title="Trainer Retention" note="Not member churn" />
-          <KpiRow items={[
-            // "0 of 0" under a dash is a fraction of nobody. `idlePct` is
-            // already null with an empty roster, so the caption says the same
-            // thing the figure does rather than inventing a denominator.
-            { label: 'Idle', value: trainersUnknown ? '—' : fig(idlePct), unit: trainersUnknown || idlePct == null ? undefined : '%',
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : idlePct == null ? 'no trainers yet' : `${idle} of ${roll.trainers}` },
-            // `avgSessionsPerTrainer` is NULL with no trainers — an average over
-            // an empty set — and this was the one interpolation on the screen
-            // that did not branch on it, so a gym with nobody on the roster read
-            // "null avg / trainer" under its session count. Two of the three
-            // owner gyms in the live database are in exactly that state. The
-            // sibling row below and both rows on Overview have always had this
-            // guard; this one had been missed.
-            { label: 'Sessions · 30d', value: trainersUnknown ? '—' : fig(num(roll.sessions30)),
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${plainExact(roll.avgSessionsPerTrainer)} avg / trainer` },
-            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(ca.total)),
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : ca.avgPerTrainer == null ? 'no trainers yet' : `${plainExact(ca.avgPerTrainer)} avg / trainer` },
-          ]} />
-        </Section>
-
-
         {/* ── platform client analytics ──────────────────────────────────── */}
         <Section>
           {/* "Platform Clients" was a survivor of the subscription console this
@@ -463,12 +486,12 @@ export default function OwnerGrowth() {
               this when it stopped saying "Repple HQ · Platform". */}
           {/* Members counted a SECOND way, and the difference matters enough to
               say: this is a headcount today through the coaches who carry them,
-              which is not the same population as the memberships Member Churn
+              which is not the same population as the memberships Member Retention
               is drawn from. A member with no coach is in the churn section and
               not in this one. Neither is wrong and they will not agree — so
               they are separately headed rather than folded together, and
               nothing here subtracts anybody. */}
-          <SectionHead title="Clients Of Your Trainers" note="Counted today, through the roster" />
+          <SectionHead title="Clients of Your Trainers" note="Counted today, through the roster" />
           <KpiRow items={[
             { label: 'Active Clients', value: trainersUnknown ? '—' : fig(num(ca.total)) },
             { label: 'Engaged', value: trainersUnknown ? '—' : fig(ca.engagementPct), unit: trainersUnknown || ca.engagementPct == null ? undefined : '%' },
@@ -524,7 +547,7 @@ export default function OwnerGrowth() {
 
         {/* ── trainer acquisition funnel ─────────────────────────────────── */}
         <Section>
-          <SectionHead title="Trainer Acquisition Funnel" note="From signup" />
+          <SectionHead title="Trainer Acquisition Funnel" note={trainersUnknown || roll.trainers === 0 ? 'From signup' : `Of ${num(roll.trainers)} on the roster today`} />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : trainersUnread ? (
@@ -546,60 +569,18 @@ export default function OwnerGrowth() {
               named the wrong audience entirely, on the one screen an owner
               reads aloud when explaining a promotion to somebody. */}
           <SectionHead title="Promo & Referral Codes" note="Redeemed by members" />
-          {/* Before the field, the same standing warning Lane 93 put on
-              app/(owner)/promotions.tsx, because this screen offers the SAME
-              create path from the same provider and said nothing at all. The
-              duplicate check `addPromo` runs is against the array this screen
-              holds: under 'error' that is the last successful read or nothing,
-              under 'partial' it is the first page of a longer list, so on both
-              a code that already exists can pass it. Creating is still offered
-              — a gym past the read ceiling cannot make itself smaller — and
-              what changes is that the screen says which check cannot run. */}
-          {promoStatus === 'error' || (promoStatus !== 'loading' && !isWhole(promoStatus)) ? (
-            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
-              {promoStatus === 'error'
-                ? 'Your existing codes could not be read, so nothing here can tell you whether the code you are about to type is already in use.'
-                : 'Your existing codes did not all come back, so the ones below are part of the list rather than all of it, and nothing here can tell you whether the code you are about to type is further down it.'}
-            </Flag>
-          ) : null}
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-            {/* Named. `CODE` is a placeholder, and a placeholder is gone the
-                moment somebody types into it. */}
-            <TextInput value={code} onChangeText={setCode}
-              accessibilityLabel="The promo or referral code to create"
-              placeholder="CODE" placeholderTextColor={t.ink3}
-              autoCapitalize="characters" autoCorrect={false}
-              style={{ ...ty.body, fontWeight: '500', letterSpacing: 1, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 }} />
-            <Cta label="Create" onPress={create} />
-          </View>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
-            {DISCOUNTS.map((d) => { const on = disc === d; return (
-              <Pressable key={d} onPress={() => setDisc(d)}
-                style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{d}%</Text>
-              </Pressable>); })}
-          </View>
-
-          {/* The caveat from the creation just made, kept on the screen after
-              the alert carrying it has been dismissed. It opens by saying the
-              code is live, because it is: this is a check that did not run, not
-              a failure to create, and it must not read as one. It stays until
-              the next creation, because the fact it records — that this
-              particular code went in unchecked — does not stop being true when
-              the owner taps OK. */}
-          {lastCaveat ? (
-            <Flag tone={t.warn} style={{ marginBottom: sp.xl }}>
-              “{lastCaveat.code}” is live. {lastCaveat.note} Two codes spelled the same
-              way can both be saved, and a member typing one of them gets whichever the
-              database reaches first — so pull down to read your codes again and check
-              this one is the only one.
-            </Flag>
-          ) : null}
-
+          {/* ── how the codes have done, then the tool that makes one ────────
+              The list leads. This section opened on the create field, so the
+              first thing under "Promo & Referral Codes" was a form, and what
+              the codes already out there had DONE — the only performance
+              figure this section has — was under it. "Used" is every
+              redemption on record for the code, with no window on it: there is
+              one row per member per code and nothing here buckets them by
+              month, so no period is claimed. */}
           {promoStatus === 'error' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Your codes could not be read just now — this is not a statement that you have none.</Text>
           ) : promos.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{promoStatus === 'loading' ? 'Loading.' : 'No codes yet — create one above.'}</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>{promoStatus === 'loading' ? 'Loading.' : 'No codes yet — create one below.'}</Text>
           ) : null}
           {promos.map((p, i) => (
             <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
@@ -616,7 +597,7 @@ export default function OwnerGrowth() {
                       reads a grouped figure in its own locale. -1 is the
                       provider's "could not be counted", which is a dash and
                       never a zero. */}
-                  {fig(p.discountPct)}% off · {p.redeemed < 0 ? '—' : num(p.redeemed)} used
+                  {fig(p.discountPct)}% off · {p.redeemed < 0 ? '—' : num(p.redeemed)} used, all time
                 </Text>
               </View>
               {/* Awaited. `toggleActive` and `removePromo` became server calls
@@ -635,6 +616,62 @@ export default function OwnerGrowth() {
               </Pressable>
             </View>
           ))}
+
+          <View style={{ marginTop: sp.xl }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Create a Code</Text>
+          </View>
+          {/* Before the field, the same standing warning Lane 93 put on
+              app/(owner)/promotions.tsx, because this screen offers the SAME
+              create path from the same provider and said nothing at all. The
+              duplicate check `addPromo` runs is against the array this screen
+              holds: under 'error' that is the last successful read or nothing,
+              under 'partial' it is the first page of a longer list, so on both
+              a code that already exists can pass it. Creating is still offered
+              — a gym past the read ceiling cannot make itself smaller — and
+              what changes is that the screen says which check cannot run. */}
+          {promoStatus === 'error' || (promoStatus !== 'loading' && !isWhole(promoStatus)) ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+              {promoStatus === 'error'
+                ? 'Your existing codes could not be read, so nothing here can tell you whether the code you are about to type is already in use.'
+                : 'Your existing codes did not all come back, so the ones above are part of the list rather than all of it, and nothing here can tell you whether the code you are about to type is further down it.'}
+            </Flag>
+          ) : null}
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+            {/* Named. `CODE` is a placeholder, and a placeholder is gone the
+                moment somebody types into it. */}
+            <TextInput value={code} onChangeText={setCode}
+              accessibilityLabel="The promo or referral code to create"
+              placeholder="CODE" placeholderTextColor={t.ink3}
+              autoCapitalize="characters" autoCorrect={false}
+              style={{ ...ty.body, fontWeight: '500', letterSpacing: 1, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 }} />
+            <Cta label="Create" onPress={create} />
+          </View>
+          {/* Last in the card now, so the trailing margin is only there when
+              the caveat follows it. */}
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: lastCaveat ? sp.xl : 0 }}>
+            {DISCOUNTS.map((d) => { const on = disc === d; return (
+              <Pressable key={d} onPress={() => setDisc(d)}
+                accessibilityRole="button" accessibilityLabel={`${d} percent off`} accessibilityState={{ selected: on }}
+                style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{d}%</Text>
+              </Pressable>); })}
+          </View>
+
+          {/* The caveat from the creation just made, kept on the screen after
+              the alert carrying it has been dismissed. It opens by saying the
+              code is live, because it is: this is a check that did not run, not
+              a failure to create, and it must not read as one. It stays until
+              the next creation, because the fact it records — that this
+              particular code went in unchecked — does not stop being true when
+              the owner taps OK. */}
+          {lastCaveat ? (
+            <Flag tone={t.warn}>
+              “{lastCaveat.code}” is live. {lastCaveat.note} Two codes spelled the same
+              way can both be saved, and a member typing one of them gets whichever the
+              database reaches first — so pull down to read your codes again and check
+              this one is the only one.
+            </Flag>
+          ) : null}
         </Section>
       </ScrollView>
     </SafeAreaView>

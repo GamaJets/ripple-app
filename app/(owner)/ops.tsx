@@ -35,6 +35,19 @@
 // No hero: this is a three-task console (write · triage · read), not a screen
 // with one live number to lead with.
 //
+// ── The order, since the data-layout review ────────────────────────────────
+//
+// Five groups, in the order an owner needs them: NEEDS ACTION (a merchant
+// problem, open support items, the deletion clock, kit due a service, and the
+// settings every figure elsewhere is waiting on) above everything, whichever
+// tab is open; then the three tabs, where the first now opens on MEMBER
+// OPERATIONS — the notice and what has been sent — with COMMERCIAL
+// CONFIGURATION under it (session fee, pay policy, class cancellations, card
+// payments) and the gym's clock after that; then PEOPLE AND FLOOR and
+// ADMINISTRATION, which are the old "Everywhere Else" split in two. Nothing was
+// removed and no route moved. The tab called Announce used to open on the
+// session fee, which is the reason for the first of those moves.
+//
 // Every list starts empty and fills from real activity — notices the owner
 // posts, and tickets from `useOwnerOps` plus real in-app feedback rows.
 // Nothing is seeded, so each tab now says so honestly instead of rendering a
@@ -56,12 +69,12 @@
 // somebody forgot one, and an owner reading a gap cannot tell a quiet Tuesday
 // from a missing writer. Nothing holds insert rights on it, so it cannot be
 // forged either.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, Cta, ListRow, Flag, Notice, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, Cta, ListRow, Flag, Notice, Ghost, Segmented, AttentionRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { useAnnouncements } from '../../src/ui/announcements';
@@ -140,6 +153,23 @@ import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
  * refusal instead of drawing "Saved" over an unchanged row.
  */
 import { saveGymProfile } from '../../src/lib/gymPolicy';
+/* ── the two queues "Needs Action" reads that this screen never held ─────────
+ *
+ * The review's first group for Ops is what needs the owner: a merchant
+ * problem, open support items, the deletion clock and kit due a service. The
+ * first two were already read here. The other two lived only behind rows in
+ * "Everywhere Else", which named the screens and said nothing about whether
+ * anything was waiting in them — and one of the two is a statutory clock.
+ *
+ * Both go through the readers their own screens use, so this console cannot
+ * come to a different answer from the screen it sends the owner to:
+ * `fetchEquipment` pages the register and throws rather than degrading, and
+ * `summariseRegister` is the same count /equipment prints. The deletion queue
+ * is the `pending_deletions` view, which is security_invoker and already
+ * scoped to the caller's gym (see the header of app/(owner)/deletions.tsx).
+ */
+import { fetchEquipment, summariseRegister, type Equipment } from '../../src/lib/gymEquipment';
+import { gymTodayWindow } from '../../src/lib/gymToday';
 /* ── what this gym pays a coach FOR ────────────────────────────────────────
  *
  * `tenants.session_pay_policy` is written from the web console and from nowhere
@@ -714,8 +744,68 @@ export default function OwnerOps() {
   // read that failed is every ticket counted as open, which reads as a backlog
   // that is not there.
   useEffect(() => { if (noticeStatus === 'ready') setNoticesAt(Date.now()); }, [noticeStatus]);
-  /** One line over five reads, and it is the age of the oldest of them. */
-  const fetchedAt = oldestFetch(merchantAt, resolvedAtStamp, eventsAt, inboxAt, noticesAt);
+
+  /* ── the deletion clock, for Needs Action ────────────────────────────────
+     Only the clocks are read — this console says how many are waiting and how
+     long the soonest has, and the names stay on the screen that actions them.
+     Null is "not known": a refused read must never be able to say "nobody is
+     waiting", which is the false all-clear app/(owner)/deletions.tsx calls the
+     single worst thing that screen could do. It is no better one screen up. */
+  const [delQueue, setDelQueue] = useState<{ count: number; overdue: number; soonest: number | null } | null>(null);
+  const [delStatus, setDelStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [delAt, setDelAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!USE_SUPABASE) { setDelStatus('ready'); return; }
+    let off = false;
+    (async () => {
+      const { data, error } = await supabase.from('pending_deletions').select('days_remaining')
+        .order('deletion_requested_at', { ascending: true }).limit(capLimit());
+      if (off) return;
+      if (error) { reportError('ownerOps.deletions', error); setDelStatus('error'); return; }
+      // One row past the ceiling is asked for so a full page and a truncated
+      // one stop looking identical; a prefix of the queue carries no count.
+      const page = capped(data);
+      const clocks = page.rows.map((r: any) => (typeof r.days_remaining === 'number' ? r.days_remaining as number : null));
+      const known = clocks.filter((d): d is number => d != null);
+      setDelQueue({
+        count: page.rows.length,
+        overdue: known.filter((d) => d <= 0).length,
+        soonest: known.length ? Math.min(...known) : null,
+      });
+      setDelStatus(page.truncated ? 'partial' : 'ready');
+      setDelAt(Date.now());
+    })();
+    return () => { off = true; };
+  }, [readTick]);
+
+  /* ── and the equipment register ──────────────────────────────────────────
+     `fetchEquipment` throws on a refusal and on a truncation alike, so what
+     lands here is the whole register or nothing. Null stays "not known". */
+  const [kit, setKit] = useState<Equipment[] | null>(null);
+  const [kitStatus, setKitStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [kitAt, setKitAt] = useState<number | null>(null);
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      if (!USE_SUPABASE) { setKitStatus('ready'); return; }
+      // No gym to read a register for. Settled rather than left on 'loading',
+      // and as 'error' only when the tenant read itself failed — the same
+      // ladder the merchant read above climbs.
+      if (!tenant?.id) { if (tenantStatus !== 'loading') setKitStatus(tenantStatus === 'error' ? 'error' : 'ready'); return; }
+      try {
+        const rows = await fetchEquipment(supabase as any, tenant.id);
+        if (off) return;
+        setKit(rows); setKitStatus('ready'); setKitAt(Date.now());
+      } catch (e) {
+        if (off) return;
+        reportError('ownerOps.equipment', e);
+        setKitStatus('error');
+      }
+    })();
+    return () => { off = true; };
+  }, [tenant?.id, tenantStatus, readTick]);
+  /** One line over seven reads, and it is the age of the oldest of them. */
+  const fetchedAt = oldestFetch(merchantAt, resolvedAtStamp, eventsAt, inboxAt, noticesAt, delAt, kitAt);
   /**
    * Everything on this tab, read again — the merchant row, the support inbox
    * and its resolved-state map, the event feed, the notices this owner has sent
@@ -773,134 +863,387 @@ export default function OwnerOps() {
   const [openT, setOpenT] = useState<string | null>(null);
   const G = layout.gutter;
 
+  /* ── Needs Action ─────────────────────────────────────────────────────────
+   *
+   * Every row is a fact one of this screen's reads returned, with the reason in
+   * the row and the way to deal with it on the tap. Three rules hold it honest:
+   *
+   *  · a source that FAILED is named as unchecked, never left out — an empty
+   *    queue under a failed read is the false all-clear;
+   *  · "nothing needs you" is only said when every source came back whole;
+   *  · the count in the head is only offered under the same condition, because
+   *    a count over the sources that happened to answer is a subtotal.
+   */
+  const scroller = useRef<ScrollView>(null);
+  /** Where each in-page section sits, for the rows that lead to one. `tab` is
+   *  the y of the tab's own wrapper; the rest are relative to it. */
+  const ys = useRef<Record<string, number>>({});
+  const goTo = (key: 'fee' | 'zone' | 'cards') => {
+    setTab('announce');
+    // After the tab has had a frame to lay out. When the tab was already open
+    // the positions are in hand and this is only a short delay.
+    setTimeout(() => {
+      const y = (ys.current.tab ?? 0) + (ys.current[key] ?? 0);
+      scroller.current?.scrollTo({ y: Math.max(0, y - sp.md), animated: true });
+    }, 80);
+  };
+  const mState = merchantStatus === 'ready' && tenant ? merchantState(merchant) : null;
+  const kitSum = kit ? summariseRegister(kit, gymTodayWindow(zone).day) : null;
+  type Need = { key: string; icon: 'wrench' | 'message' | 'clock' | 'settings' | 'calendar' | 'info'; name: string; reason: string; status: string; tone: string; age?: string; onPress: () => void };
+  const needs: Need[] = [];
+  // Only the two merchant states somebody HERE can act on. "Stripe is still
+  // verifying" is waiting on nobody in this building, and "never started" is
+  // an offer rather than a problem — both stay in the Card Payments section.
+  if (mState?.kind === 'blocked') {
+    needs.push({ key: 'cards', icon: 'info', name: 'Card Payments', tone: t.crit, status: 'Blocked',
+      reason: 'Your gym’s Stripe account is not the kind that can take payments, and Stripe will not change it. Contact support.',
+      onPress: () => goTo('cards') });
+  } else if (mState?.kind === 'pending' && merchant && !merchant.detailsSubmitted) {
+    needs.push({ key: 'cards', icon: 'info', name: 'Card Payments', tone: t.warn, status: 'Unfinished',
+      reason: 'Stripe setup was started and not finished, so nothing can be bought in the app yet.',
+      onPress: () => goTo('cards') });
+  }
+  if (inboxKnown && openCount > 0) {
+    needs.push({ key: 'support', icon: 'message', name: 'Support Inbox', tone: t.warn, status: 'Open',
+      reason: `${openCount} item${openCount === 1 ? '' : 's'} nobody has marked resolved.`,
+      onPress: () => setTab('support') });
+  }
+  if (delQueue && isWhole(delStatus) && delQueue.count > 0) {
+    needs.push({ key: 'deletions', icon: 'clock', name: 'Deletion Requests',
+      tone: delQueue.overdue > 0 ? t.crit : t.warn,
+      status: delQueue.overdue > 0 ? 'Overdue' : 'Clock running',
+      reason: delQueue.overdue > 0
+        ? `${delQueue.overdue} of ${delQueue.count} ${delQueue.overdue === 1 ? 'is' : 'are'} past the 30 days members are promised.`
+        : `${delQueue.count} member${delQueue.count === 1 ? ' has' : 's have'} asked to be erased.`,
+      age: delQueue.overdue > 0 || delQueue.soonest == null ? undefined
+        : `Soonest has ${delQueue.soonest} day${delQueue.soonest === 1 ? '' : 's'} left`,
+      onPress: () => router.push('/(owner)/deletions') });
+  }
+  if (kitSum && (kitSum.overdue > 0 || kitSum.due > 0 || kitSum.unrecorded > 0)) {
+    const parts = [
+      kitSum.overdue > 0 ? `${kitSum.overdue} overdue a service` : '',
+      kitSum.due > 0 ? `${kitSum.due} due` : '',
+      kitSum.unrecorded > 0 ? `${kitSum.unrecorded} on a schedule with no service ever logged` : '',
+    ].filter(Boolean);
+    needs.push({ key: 'kit', icon: 'wrench', name: 'Equipment',
+      tone: kitSum.overdue > 0 ? t.crit : kitSum.due > 0 ? t.warn : t.ink3,
+      status: kitSum.overdue > 0 ? 'Overdue' : kitSum.due > 0 ? 'Due' : 'Never serviced',
+      reason: `${parts.join(' · ')}.`,
+      onPress: () => router.push('/(owner)/equipment') });
+  }
+  // The settings other screens are waiting on. Each is asked only of a read
+  // that answered: an unset fee under a failed tenant read is not an unset fee.
+  if (feeKnown && tenant?.currency == null) {
+    needs.push({ key: 'currency', icon: 'settings', name: 'Currency', tone: t.warn, status: 'Not set',
+      reason: 'Your gym has no currency, so every money figure in the app is a dash.',
+      onPress: () => goTo('fee') });
+  }
+  if (feeKnown && tenant?.sessionFee == null) {
+    needs.push({ key: 'fee', icon: 'settings', name: 'Session Fee', tone: t.warn, status: 'Not set',
+      reason: 'Delivered sessions cannot be valued, so payroll on Overview, Revenue and Trainers is withheld.',
+      onPress: () => goTo('fee') });
+  }
+  if (USE_SUPABASE && zoneRead && !zoneErr && !zone && tenant) {
+    needs.push({ key: 'zone', icon: 'calendar', name: 'Timezone', tone: t.warn, status: 'Not set',
+      reason: 'Every date in the console is drawn on whichever machine reads it until this gym says where it is.',
+      onPress: () => goTo('zone') });
+  }
+  /** What could not be asked. Named, because each of these is a queue that may
+   *  have something in it. */
+  const unchecked = [
+    merchantStatus === 'error' ? 'card payments' : '',
+    fbFailed || resolvedFailed ? 'the support inbox' : '',
+    delStatus === 'error' ? 'deletion requests' : '',
+    kitStatus === 'error' ? 'the equipment register' : '',
+    tenantStatus === 'error' ? 'your gym’s settings' : '',
+    zoneErr ? 'your gym’s timezone' : '',
+  ].filter(Boolean);
+  /** Read, and not all of it — no count is offered over these. */
+  const shortRead = [
+    inboxShort ? 'the support inbox' : '',
+    delStatus === 'partial' ? 'deletion requests' : '',
+  ].filter(Boolean);
+  const needsReading = merchantStatus === 'loading' || (!inboxKnown && !fbFailed && !resolvedFailed && !inboxShort)
+    || delStatus === 'loading' || kitStatus === 'loading' || tenantStatus === 'loading';
+  const needsWhole = !needsReading && unchecked.length === 0 && shortRead.length === 0;
+  const listOf = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
+      <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* The board's tab-root opening, from the kit rather than by hand.
             "Platform" named Repple, not this gym — the same drift Overview
             settled when it dropped "Repple HQ · Platform". Everything on this
             screen belongs to the owner's own gym. */}
         <ScreenHeader eyebrow="Your Gym" title="Operations"
-          subtitle="Your session fee · notices to members · support · gym activity" />
+          subtitle="What needs you, then notices, support, fees and the floor" />
+
+        {/* ── 1 · needs action ───────────────────────────────────────────── */}
+        {/* Above the bar, because it is about the gym and not about a tab: an
+            overdue deletion is as overdue on Activity as it is on Announce. */}
+        <Section>
+          <SectionHead title="Needs Action" note={needsWhole && needs.length ? String(needs.length) : undefined} />
+          {needs.map((n, i) => (
+            <AttentionRow key={n.key} divider={i > 0} icon={n.icon} name={n.name} reason={n.reason}
+              status={n.status} tone={n.tone} age={n.age} onPress={n.onPress} />
+          ))}
+          {/* A failed read is never an empty queue. Said even when other rows
+              are showing, since the rows that ARE here say nothing about the
+              source that did not answer. */}
+          {unchecked.length > 0 ? (
+            <Flag tone={t.warn} style={{ marginTop: needs.length ? sp.md : 0 }}>
+              {`Could not be checked: ${listOf(unchecked)}. That is a read that failed, not an all-clear — pull down to try again.`}
+            </Flag>
+          ) : null}
+          {shortRead.length > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {`Only part of ${listOf(shortRead)} came back, so nothing here counts ${shortRead.length === 1 ? 'it' : 'them'}.`}
+            </Text>
+          ) : null}
+          {needsReading ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: needs.length || unchecked.length ? sp.md : 0 }}>Checking what needs you…</Text>
+          ) : needsWhole && needs.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Nothing needs you right now. Card payments, the support inbox, deletion requests, the equipment
+              register and your gym’s settings were all read, and none has anything outstanding.
+            </Text>
+          ) : null}
+        </Section>
 
         {/* ── the three jobs this screen does ────────────────────────────── */}
         {/* The board's segmented bar: a pill of `surface2`, equal segments,
             the chosen one filled in ink. Said as tabs, which is what they are. */}
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
-          {/* The open count is only offered when the inbox is actually in hand:
-              a badge counting the tickets we managed to read is a smaller
-              number than the truth, and reads as the whole of it. */}
-          {([['announce', 'Announce'], ['support', `Support${inboxKnown && openCount ? ' (' + openCount + ')' : ''}`], ['activity', 'Activity']] as const).map(([k, label]) => {
-            const on = tab === k;
-            return (
-              <Pressable key={k} onPress={() => setTab(k)} accessibilityRole="tab" accessibilityState={{ selected: on }}
-                style={{ flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: on ? t.ink : 'transparent' }}>
-                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {/* The kit's Segmented — the tab roles, the selected state and what
+            the bar does at large text are its business now, not this file's. */}
+        <Segmented style={{ marginTop: sp.lg }} value={tab} onChange={setTab}
+          options={[
+            { key: 'announce', label: 'Announce' },
+            /* The open count is only offered when the inbox is actually in hand:
+               a badge counting the tickets we managed to read is a smaller
+               number than the truth, and reads as the whole of it. */
+            { key: 'support', label: `Support${inboxKnown && openCount ? ' (' + openCount + ')' : ''}` },
+            { key: 'activity', label: 'Activity' },
+          ] as const} />
 
         {/* The age of this screen. It began as the merchant read alone —
             "payouts enabled" from a read half an hour old, read by an owner
             in a plant room with no signal, is something about their money
-            that may no longer be true — and it now speaks for all five reads
-            the tabs below draw on, at the age of the oldest. Refresh and the
+            that may no longer be true — and it now speaks for all seven reads
+            this screen draws on, at the age of the oldest. Refresh and the
             pull gesture both run every one of them. Under the bar rather than
             in the header, so the header is the board's. */}
         <Fetched at={fetchedAt} busy={merchantStatus === 'loading'} onRefresh={refreshAll} />
 
         {tab === 'announce' ? (
-          <View>
-            {/* ── the session fee three other screens send owners here for ──── */}
-            <Section>
-              <SectionHead title="Session Fee"
-                note={feeKnown && tenant?.sessionFee != null ? (gymMoney(tenant.sessionFee, cur) ?? undefined) : undefined} />
-              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                What one delivered session is worth. Payroll, value per client and every "at your session fee"
-                figure on Overview, Revenue and Trainers is counted against this.
-              </Text>
-              {tenantStatus === 'loading' ? (
-                <Empty tone={t.ink3}>Reading your gym…</Empty>
-              ) : tenantStatus === 'error' ? (
-                // An empty field under a failed read is not "no fee set", and
-                // saving over it would write a value read off a failure.
-                <Empty tone={t.warn}>
-                  Your gym could not be read, so the fee it currently holds is not known — this is not a
-                  statement that none is set. Nothing can be changed until it can be read.
-                </Empty>
-              ) : !tenant ? (
-                <Empty tone={t.ink3}>This account is not attached to a gym, so there is no fee to set.</Empty>
-              ) : (<>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <Text style={{ ...ty.label, color: t.ink3 }}>{cur ?? GYM_CURRENCY}</Text>
-                  {/* ── the caveat the one person who cannot see it was missing ──
-                      The label was `Session fee in ${cur ?? GYM_CURRENCY}`, so a
-                      gym that has not set a currency told a screen reader,
-                      flatly, that the box is in dirhams — while the caption
-                      below explained to everybody else that AED is only a
-                      placeholder. The reader who cannot see that caption is the
-                      one told the gym charges in AED, on the field that sets
-                      what every session in the product is priced at.
-                      src/ui/tenant.tsx:106 states the rule: pass the currency
-                      honestly, `?? null`, never `|| GYM_CURRENCY`. */}
-                  <TextInput value={feeField} onChangeText={(v) => { setFeeDraft(v); if (feeMsg) setFeeMsg(null); }}
-                    placeholder="Not set" placeholderTextColor={t.ink3} keyboardType="decimal-pad"
-                    accessibilityLabel={cur
-                      ? `Session fee in ${cur}`
-                      : `Session fee. Your gym has not said what it charges in, so this field is only labelled ${GYM_CURRENCY} as a placeholder — set your currency below first.`}
-                    style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
-                </View>
-                {/* ── the currency, ALWAYS offered ────────────────────────
-                    This whole block was `{cur ? null : (…)}` — the picker
-                    appeared only while the gym had no currency, and disappeared
-                    the instant one was chosen. So a gym that picked the wrong
-                    one on day one had no path back from ANY surface in the
-                    product: the console's /settings did not exist yet, and this
-                    was the only control. The write itself was never the problem
-                    — `updateTenant` has always admitted `currency` — the gate
-                    was.
+          <View onLayout={(e) => { ys.current.tab = e.nativeEvent.layout.y; }}>
+            {/* ── 2 · member operations ─────────────────────────────────────
+                First in the tab called Announce, which used to open on the
+                session fee. What the gym is telling its members, and what it
+                has told them; what is happening in the gym is the Activity
+                tab beside this one. */}
+        {/* ── a notice to the gym's members ─────────────────────────────────
+                This section used to write to a `useState` in src/ui/ownerOps.tsx
+                and say so — "Saved to this device only — announcements do not
+                reach trainers yet" — which was at least honest about being a
+                notepad. It now posts a real row to `announcements` with this
+                gym's tenant_id, which `ann_write` admits only for an owner of
+                that tenant, and fans it out to every member's notifications.
 
-                    supabase/parts/150 removed every money column's default
-                    precisely so a wrong currency could not hide. A control that
-                    hides itself once a wrong answer is stored undoes that. */}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  {cur
-                    ? `This gym is priced in ${cur}. Everything written from here on is denominated in it.`
-                    : `Your gym has not told us what it charges in, so the field above is only labelled ${GYM_CURRENCY} as a placeholder. Set your currency once and every screen follows.`}
-                </Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-                  {CURRENCY_CHOICES.map((c) => {
-                    const on = c === cur;
-                    return (
-                      <Pressable key={c} onPress={() => { askCurrency(c); }}
-                        disabled={curBusy || on} accessibilityRole="button"
-                        accessibilityState={{ selected: on, disabled: curBusy || on }}
-                        accessibilityLabel={on ? `This gym is priced in ${c}` : `Price this gym in ${c}`}
-                        style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                        <Text style={{ ...ty.label, ...numeric, color: on ? t.brandInk : t.ink2 }}>{c}</Text>
-                      </Pressable>
-                    );
-                  })}
+                WHO GETS IT: every member row in this gym, from all_member_ids()
+                — the same list the promotions push uses. Not "active members":
+                `clients` has no such column, and `memberships` (which does)
+                covered one client row in ten in the live database, so an
+                "active only" rule would silently drop nine members in ten from
+                a closure notice. See src/ui/announcements.tsx for the whole
+                argument.
+
+                It reaches MEMBERS, not trainers. The old copy promised trainers
+                and there is still no trainer-facing reader for one, so saying
+                "trainers" here would be the same false sentence in a new
+                direction. */}
+            <Section>
+              <SectionHead title="Notice to Members" />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Every member of your gym sees this in their notifications and on their Notices screen, where it stays after today.
+              </Text>
+              {/* Named. A placeholder disappears the moment somebody types, so
+                  it is not a label for anybody — and this is the box whose
+                  contents reach every member's phone. */}
+              <TextInput value={text} onChangeText={setText}
+                accessibilityLabel="The notice every member of your gym will see"
+                placeholder="e.g. We are closed Monday for the public holiday…" placeholderTextColor={t.ink3} multiline
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
+
+              {/* The push is a separate decision with its consequence written
+                  on it. An owner who can ring every phone in the building is
+                  exactly the capability worth being plain about, and this app
+                  has no scheduler and no record of anybody's timezone — so the
+                  only truthful offer is "now, wherever they are". */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('gym', null)}</Text>
                 </View>
-                {feeMsg ? (
-                  feeMsg.bad
-                    ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{feeMsg.text}</Flag>
-                    : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{feeMsg.text}</Text>
-                ) : (
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    {tenant.sessionFee == null
-                      ? 'Not set. Until it is, delivered sessions are counted but not valued.'
-                      : 'Clear the field and save to withdraw it — an empty fee is not a fee of zero.'}
-                  </Text>
-                )}
-                <View style={{ marginTop: sp.lg }}>
-                  <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
-                    onPress={() => { void saveFee(); }} />
-                </View>
-              </>)}
+                {/* This switch is the difference between a note in the app and
+                    a push notification to every member of the gym, and it
+                    announced nothing at all: to a screen reader it was "switch,
+                    on" with no statement of what was on. The sentence beside it
+                    is sighted-only. */}
+                <Switch value={annPush} onValueChange={setAnnPush}
+                  accessibilityLabel="Also send this as a push notification to every member"
+                  accessibilityHint={pushConsequence('gym', null)} />
+              </View>
+
+              <View pointerEvents={annBusy ? 'none' : 'auto'} style={{ opacity: annBusy ? 0.6 : 1 }}>
+                <Cta wide label={annBusy ? 'Posting…' : 'Post to Members'}
+                  onPress={async () => {
+                    if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; }
+                    setAnnBusy(true);
+                    let res;
+                    try { res = await addGymAnnouncement(text, { push: annPush }); } finally { setAnnBusy(false); }
+                    // The text stays in the box on a failure: they wrote it
+                    // once, and a cleared field after a refused write is how a
+                    // notice gets lost between the owner and the server.
+                    if (!res.ok || !res.delivery) {
+                      Alert.alert('Not posted', 'That could not be posted, so no member has seen it. Your words are still here — try again in a moment.');
+                      return;
+                    }
+                    setText(''); setAnnPush(false);
+                    Alert.alert('Posted', deliverySummary(res.delivery));
+                  }} />
+              </View>
             </Section>
+
+            <Rule />
+
+            <Section>
+              {/* The count is only stated over a whole read. Under 'error' the
+                  list in hand is whatever survived, and "0 sent" to an owner
+                  who posted three on Friday is the sentence
+                  src/ui/loadStatus.ts exists to stop. */}
+              <SectionHead title="Sent" note={noticeStatus === 'ready' && myNotices.length ? `${myNotices.length} sent` : undefined} />
+              {noticeStatus === 'error' ? (
+                <Empty tone={t.ink3}>Your notices could not be read just now. This is not a statement that you have sent none.</Empty>
+              ) : myNotices.length === 0 ? (
+                <Empty tone={t.ink3}>
+                  {/* Only 'error' and 'loading' were branched, so 'partial' fell
+                      into the assertion. `useAnnouncements` reads the gym's
+                      announcements newest-first at `capLimit()` and reports
+                      'partial' on truncation — so an owner whose own notices are
+                      older than the newest thousand TENANT-WIDE rows was told
+                      they had sent none. The count one line up was already gated
+                      on 'ready'; the sentence below it was not. */}
+                  {noticeStatus === 'loading' ? 'Reading your notices…'
+                    : !isWhole(noticeStatus)
+                    ? 'More notices than fit in one read, and none of yours is among the ones that came back. That is not the same as having sent none — pull down to read them again.'
+                    : 'Nothing sent yet — notices you post appear here.'}
+                </Empty>
+              ) : myNotices.map((a, i) => (
+                <View key={a.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{a.body}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{ago(a.at)}</Text>
+                </View>
+              ))}
+            </Section>
+
+            {/* ── 3 · commercial configuration ─────────────────────────────
+                What a session is worth, what a coach is paid for, what a late
+                cancellation costs and whether the gym can take a card. Set
+                rarely and read by every money figure in the app, so they sit
+                together under the day-to-day work rather than above it. The
+                rows in Needs Action scroll here when one of them is unset. */}
+            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: sp.xl, marginBottom: sp.xs }}>Commercial Configuration</Text>
+            <View onLayout={(e) => { ys.current.fee = e.nativeEvent.layout.y; }}>
+              {/* ── the session fee three other screens send owners here for ──── */}
+              <Section>
+                <SectionHead title="Session Fee"
+                  note={feeKnown && tenant?.sessionFee != null ? (gymMoney(tenant.sessionFee, cur) ?? undefined) : undefined} />
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                  What one delivered session is worth. Payroll, value per client and every "at your session fee"
+                  figure on Overview, Revenue and Trainers is counted against this.
+                </Text>
+                {tenantStatus === 'loading' ? (
+                  <Empty tone={t.ink3}>Reading your gym…</Empty>
+                ) : tenantStatus === 'error' ? (
+                  // An empty field under a failed read is not "no fee set", and
+                  // saving over it would write a value read off a failure.
+                  <Empty tone={t.warn}>
+                    Your gym could not be read, so the fee it currently holds is not known — this is not a
+                    statement that none is set. Nothing can be changed until it can be read.
+                  </Empty>
+                ) : !tenant ? (
+                  <Empty tone={t.ink3}>This account is not attached to a gym, so there is no fee to set.</Empty>
+                ) : (<>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    <Text style={{ ...ty.label, color: t.ink3 }}>{cur ?? GYM_CURRENCY}</Text>
+                    {/* ── the caveat the one person who cannot see it was missing ──
+                        The label was `Session fee in ${cur ?? GYM_CURRENCY}`, so a
+                        gym that has not set a currency told a screen reader,
+                        flatly, that the box is in dirhams — while the caption
+                        below explained to everybody else that AED is only a
+                        placeholder. The reader who cannot see that caption is the
+                        one told the gym charges in AED, on the field that sets
+                        what every session in the product is priced at.
+                        src/ui/tenant.tsx:106 states the rule: pass the currency
+                        honestly, `?? null`, never `|| GYM_CURRENCY`. */}
+                    <TextInput value={feeField} onChangeText={(v) => { setFeeDraft(v); if (feeMsg) setFeeMsg(null); }}
+                      placeholder="Not set" placeholderTextColor={t.ink3} keyboardType="decimal-pad"
+                      accessibilityLabel={cur
+                        ? `Session fee in ${cur}`
+                        : `Session fee. Your gym has not said what it charges in, so this field is only labelled ${GYM_CURRENCY} as a placeholder — set your currency below first.`}
+                      style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+                  </View>
+                  {/* ── the currency, ALWAYS offered ────────────────────────
+                      This whole block was `{cur ? null : (…)}` — the picker
+                      appeared only while the gym had no currency, and disappeared
+                      the instant one was chosen. So a gym that picked the wrong
+                      one on day one had no path back from ANY surface in the
+                      product: the console's /settings did not exist yet, and this
+                      was the only control. The write itself was never the problem
+                      — `updateTenant` has always admitted `currency` — the gate
+                      was.
+
+                      supabase/parts/150 removed every money column's default
+                      precisely so a wrong currency could not hide. A control that
+                      hides itself once a wrong answer is stored undoes that. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {cur
+                      ? `This gym is priced in ${cur}. Everything written from here on is denominated in it.`
+                      : `Your gym has not told us what it charges in, so the field above is only labelled ${GYM_CURRENCY} as a placeholder. Set your currency once and every screen follows.`}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                    {CURRENCY_CHOICES.map((c) => {
+                      const on = c === cur;
+                      return (
+                        <Pressable key={c} onPress={() => { askCurrency(c); }}
+                          disabled={curBusy || on} accessibilityRole="button"
+                          accessibilityState={{ selected: on, disabled: curBusy || on }}
+                          accessibilityLabel={on ? `This gym is priced in ${c}` : `Price this gym in ${c}`}
+                          style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                          <Text style={{ ...ty.label, ...numeric, color: on ? t.brandInk : t.ink2 }}>{c}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  {feeMsg ? (
+                    feeMsg.bad
+                      ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{feeMsg.text}</Flag>
+                      : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{feeMsg.text}</Text>
+                  ) : (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      {tenant.sessionFee == null
+                        ? 'Not set. Until it is, delivered sessions are counted but not valued.'
+                        : 'Clear the field and save to withdraw it — an empty fee is not a fee of zero.'}
+                    </Text>
+                  )}
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
+                      onPress={() => { void saveFee(); }} />
+                  </View>
+                </>)}
+              </Section>
+            </View>
 
             <Rule />
 
@@ -1062,253 +1405,152 @@ export default function OwnerOps() {
 
             <Rule />
 
-            {/* ── where this gym is ────────────────────────────────────────
-                The setting every gym on the platform is missing, and the only
-                one on this screen that is WRONG rather than empty while it is
-                unset: with no zone, "today", the month close, the payroll month
-                and footfall by hour are each cut on whichever machine the page
-                is open on. Read at the front desk they are right by accident.
+            <View onLayout={(e) => { ys.current.cards = e.nativeEvent.layout.y; }}>
+              {/* ── the gym's own Stripe account ─────────────────────────────
+                  Until this exists, a member can read the price of the plan they
+                  are on and cannot buy it, renew it or move off it, and the gym's
+                  price book is a document rather than a shop. `gym_connect_
+                  accounts` (part 280) is one row per GYM and it is deliberately
+                  NOT the owner's own coach row in `connect_accounts`: a
+                  membership sold on a coach's account makes a different legal
+                  entity the merchant of record for it, and nothing in the app
+                  would look wrong about that until a chargeback arrived.
 
-                No "use this phone's zone" button, and the phone's own zone is
-                shown as a fact about the phone with nothing to press. Part 710
-                makes the argument about a laptop and it holds harder here: an
-                owner going through their books in an airport would set the gym
-                to Europe/Amsterdam with one tap and never find out. */}
-            <Section>
-              <SectionHead title="Where This Gym Is"
-                note={zoneRead && !zoneErr && zone ? (gymTimeLabel(tick, zone) ?? undefined) : undefined} />
-              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                Whose day this gym’s day is. The month close, the payroll month and every “today”
-                in the owner console are cut on it.
-              </Text>
-              {tenantStatus === 'loading' || (tenant?.id && !zoneRead) ? (
-                <Empty tone={t.ink3}>Reading your gym…</Empty>
-              ) : !tenant ? (
-                <Empty tone={t.ink3}>This account is not attached to a gym, so there is no timezone to set.</Empty>
-              ) : zoneErr ? (
-                <Empty tone={t.warn}>
-                  This gym’s timezone could not be read, so whether one is set is not known — this is
-                  not a statement that none is. Nothing can be changed until it can be read.
-                </Empty>
-              ) : (<>
-                {zone ? (
-                  <View style={{ marginBottom: sp.md }}>
-                    <Text style={{ ...ty.body, color: t.ink }}>{zone}</Text>
-                    {/* The check anybody can actually perform. A null clock is a
-                        stored zone this runtime cannot resolve — said as that,
-                        rather than left blank. */}
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                      {gymTimeLabel(tick, zone) && gymDay(tick, zone)
-                        ? `It is ${gymTimeLabel(tick, zone)} on ${gymDay(tick, zone)} there. If that is not the time at the gym, this is the wrong zone.`
-                        : 'This phone cannot resolve that zone, so the clock cannot be shown against it. Search below to set one it knows.'}
-                    </Text>
-                  </View>
-                ) : (
-                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
-                    Not set. Until it is, every date in the owner console is drawn on whichever
-                    machine it is read from — right at the front desk by accident, and wrong for
-                    anyone reading from another country.
-                  </Flag>
-                )}
-
-                <TextInput value={zoneQuery} onChangeText={(v) => { setZoneQuery(v); if (zoneMsg) setZoneMsg(null); }}
-                  placeholder={zoneAll.length ? 'Search a city — London, Dubai' : 'Europe/London'}
-                  placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
-                  accessibilityLabel="Search for the city this gym is in"
-                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
-
-                {zoneAll.length === 0 ? (
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{NO_ZONE_LIST_NOTE}</Text>
-                ) : null}
-
-                {/* Typed a full zone name that this runtime knows, and it is not
-                    already in the list below. The only path on a runtime with no
-                    list, and a shortcut for anybody who knows the name. */}
-                {typedZone.kind === 'zone' && !zoneHits.some((h) => h.zone === typedZone.zone) ? (
-                  <ZoneRow zone={typedZone.zone} where="typed" tick={tick} busy={zoneBusy}
-                    onPress={() => { askZone(typedZone.zone); }} />
-                ) : null}
-
-                {zoneHits.map((h) => (
-                  <ZoneRow key={h.zone} zone={h.zone} where={h.where} tick={tick} busy={zoneBusy}
-                    onPress={() => { askZone(h.zone); }} />
-                ))}
-
-                {zoneQuery.trim() && zoneHits.length === 0 && typedZone.kind !== 'zone' ? (
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    {typedZone.kind === 'bad'
-                      ? typedZone.reason
-                      : `Nothing matches “${zoneQuery.trim()}”. Search the nearest large city rather than the town — zones are named after the city whose clock a place keeps.`}
-                  </Text>
-                ) : null}
-
-                {zoneMsg ? (
-                  zoneMsg.bad
-                    ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{zoneMsg.text}</Flag>
-                    : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{zoneMsg.text}</Text>
-                ) : null}
-
-                {/* A fact about this phone, labelled as one. Not a suggestion,
-                    and not something to press — see the note above the section. */}
-                {readerZone() ? (
+                  Four states and three of them need different words. "Never
+                  started" is one tap from starting; "Stripe is still verifying"
+                  is waiting on nobody here; and an account of the wrong KIND can
+                  never take payments, because Stripe fixes an account's type at
+                  creation and will not change it. A read that FAILED is the
+                  fourth and says nothing about the gym at all. */}
+              <Section>
+                <SectionHead title="Card Payments"
+                  note={merchantStatus === 'ready' ? (merchant && merchantState(merchant).kind === 'live' ? 'On' : 'Off') : undefined} />
+                {merchantStatus === 'loading' ? (
+                  <Empty tone={t.ink3}>Reading your gym’s payment account…</Empty>
+                ) : merchantStatus === 'error' ? (
+                  <Empty tone={t.warn}>
+                    Your gym’s payment account could not be read, so whether it takes cards is not known. This is
+                    not a statement that it does not.
+                  </Empty>
+                ) : !tenant ? (
+                  <Empty tone={t.ink3}>This account is not attached to a gym, so there is nothing to set up.</Empty>
+                ) : (<>
+                  <Text style={{ ...ty.label, color: t.ink3 }}>{merchantState(merchant).note}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                    This phone’s own clock is set to {readerZone()}. That is where the phone is, which
-                    is not necessarily where the gym is — so it is not filled in for you.
+                    The account is your gym’s own, in your gym’s name. Stripe holds your gym responsible for
+                    refunds and disputes on it, and the money never passes through a coach’s account.
                   </Text>
-                ) : null}
-              </>)}
-            </Section>
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta wide label={merchantBusy ? 'Opening…' : merchantState(merchant).cta} disabled={merchantBusy}
+                      onPress={() => { void openStripeSetup(); }} />
+                  </View>
+                  {merchantMsg ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{merchantMsg}</Flag> : null}
+                </>)}
+              </Section>
+            </View>
 
-            <Rule />
+            {/* ── the gym's own clock ───────────────────────────────────────
+                Not money, and not day-to-day: the zone every date in the
+                console, the rota and the month close is drawn on. */}
+            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: sp.xl, marginBottom: sp.xs }}>Gym Clock</Text>
+            <View onLayout={(e) => { ys.current.zone = e.nativeEvent.layout.y; }}>
+              {/* ── where this gym is ────────────────────────────────────────
+                  The setting every gym on the platform is missing, and the only
+                  one on this screen that is WRONG rather than empty while it is
+                  unset: with no zone, "today", the month close, the payroll month
+                  and footfall by hour are each cut on whichever machine the page
+                  is open on. Read at the front desk they are right by accident.
 
-            {/* ── the gym's own Stripe account ─────────────────────────────
-                Until this exists, a member can read the price of the plan they
-                are on and cannot buy it, renew it or move off it, and the gym's
-                price book is a document rather than a shop. `gym_connect_
-                accounts` (part 280) is one row per GYM and it is deliberately
-                NOT the owner's own coach row in `connect_accounts`: a
-                membership sold on a coach's account makes a different legal
-                entity the merchant of record for it, and nothing in the app
-                would look wrong about that until a chargeback arrived.
-
-                Four states and three of them need different words. "Never
-                started" is one tap from starting; "Stripe is still verifying"
-                is waiting on nobody here; and an account of the wrong KIND can
-                never take payments, because Stripe fixes an account's type at
-                creation and will not change it. A read that FAILED is the
-                fourth and says nothing about the gym at all. */}
-            <Section>
-              <SectionHead title="Card Payments"
-                note={merchantStatus === 'ready' ? (merchant && merchantState(merchant).kind === 'live' ? 'On' : 'Off') : undefined} />
-              {merchantStatus === 'loading' ? (
-                <Empty tone={t.ink3}>Reading your gym’s payment account…</Empty>
-              ) : merchantStatus === 'error' ? (
-                <Empty tone={t.warn}>
-                  Your gym’s payment account could not be read, so whether it takes cards is not known. This is
-                  not a statement that it does not.
-                </Empty>
-              ) : !tenant ? (
-                <Empty tone={t.ink3}>This account is not attached to a gym, so there is nothing to set up.</Empty>
-              ) : (<>
-                <Text style={{ ...ty.label, color: t.ink3 }}>{merchantState(merchant).note}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  The account is your gym’s own, in your gym’s name. Stripe holds your gym responsible for
-                  refunds and disputes on it, and the money never passes through a coach’s account.
+                  No "use this phone's zone" button, and the phone's own zone is
+                  shown as a fact about the phone with nothing to press. Part 710
+                  makes the argument about a laptop and it holds harder here: an
+                  owner going through their books in an airport would set the gym
+                  to Europe/Amsterdam with one tap and never find out. */}
+              <Section>
+                <SectionHead title="Where This Gym Is"
+                  note={zoneRead && !zoneErr && zone ? (gymTimeLabel(tick, zone) ?? undefined) : undefined} />
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                  Whose day this gym’s day is. The month close, the payroll month and every “today”
+                  in the owner console are cut on it.
                 </Text>
-                <View style={{ marginTop: sp.lg }}>
-                  <Cta wide label={merchantBusy ? 'Opening…' : merchantState(merchant).cta} disabled={merchantBusy}
-                    onPress={() => { void openStripeSetup(); }} />
-                </View>
-                {merchantMsg ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{merchantMsg}</Flag> : null}
-              </>)}
-            </Section>
+                {tenantStatus === 'loading' || (tenant?.id && !zoneRead) ? (
+                  <Empty tone={t.ink3}>Reading your gym…</Empty>
+                ) : !tenant ? (
+                  <Empty tone={t.ink3}>This account is not attached to a gym, so there is no timezone to set.</Empty>
+                ) : zoneErr ? (
+                  <Empty tone={t.warn}>
+                    This gym’s timezone could not be read, so whether one is set is not known — this is
+                    not a statement that none is. Nothing can be changed until it can be read.
+                  </Empty>
+                ) : (<>
+                  {zone ? (
+                    <View style={{ marginBottom: sp.md }}>
+                      <Text style={{ ...ty.body, color: t.ink }}>{zone}</Text>
+                      {/* The check anybody can actually perform. A null clock is a
+                          stored zone this runtime cannot resolve — said as that,
+                          rather than left blank. */}
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                        {gymTimeLabel(tick, zone) && gymDay(tick, zone)
+                          ? `It is ${gymTimeLabel(tick, zone)} on ${gymDay(tick, zone)} there. If that is not the time at the gym, this is the wrong zone.`
+                          : 'This phone cannot resolve that zone, so the clock cannot be shown against it. Search below to set one it knows.'}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                      Not set. Until it is, every date in the owner console is drawn on whichever
+                      machine it is read from — right at the front desk by accident, and wrong for
+                      anyone reading from another country.
+                    </Flag>
+                  )}
 
-            <Rule />
+                  <TextInput value={zoneQuery} onChangeText={(v) => { setZoneQuery(v); if (zoneMsg) setZoneMsg(null); }}
+                    placeholder={zoneAll.length ? 'Search a city — London, Dubai' : 'Europe/London'}
+                    placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
+                    accessibilityLabel="Search for the city this gym is in"
+                    style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
 
-        {/* ── a notice to the gym's members ─────────────────────────────────
-                This section used to write to a `useState` in src/ui/ownerOps.tsx
-                and say so — "Saved to this device only — announcements do not
-                reach trainers yet" — which was at least honest about being a
-                notepad. It now posts a real row to `announcements` with this
-                gym's tenant_id, which `ann_write` admits only for an owner of
-                that tenant, and fans it out to every member's notifications.
+                  {zoneAll.length === 0 ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{NO_ZONE_LIST_NOTE}</Text>
+                  ) : null}
 
-                WHO GETS IT: every member row in this gym, from all_member_ids()
-                — the same list the promotions push uses. Not "active members":
-                `clients` has no such column, and `memberships` (which does)
-                covered one client row in ten in the live database, so an
-                "active only" rule would silently drop nine members in ten from
-                a closure notice. See src/ui/announcements.tsx for the whole
-                argument.
+                  {/* Typed a full zone name that this runtime knows, and it is not
+                      already in the list below. The only path on a runtime with no
+                      list, and a shortcut for anybody who knows the name. */}
+                  {typedZone.kind === 'zone' && !zoneHits.some((h) => h.zone === typedZone.zone) ? (
+                    <ZoneRow zone={typedZone.zone} where="typed" tick={tick} busy={zoneBusy}
+                      onPress={() => { askZone(typedZone.zone); }} />
+                  ) : null}
 
-                It reaches MEMBERS, not trainers. The old copy promised trainers
-                and there is still no trainer-facing reader for one, so saying
-                "trainers" here would be the same false sentence in a new
-                direction. */}
-            <Section>
-              <SectionHead title="Notice to Members" />
-              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                Every member of your gym sees this in their notifications and on their Notices screen, where it stays after today.
-              </Text>
-              {/* Named. A placeholder disappears the moment somebody types, so
-                  it is not a label for anybody — and this is the box whose
-                  contents reach every member's phone. */}
-              <TextInput value={text} onChangeText={setText}
-                accessibilityLabel="The notice every member of your gym will see"
-                placeholder="e.g. We are closed Monday for the public holiday…" placeholderTextColor={t.ink3} multiline
-                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
+                  {zoneHits.map((h) => (
+                    <ZoneRow key={h.zone} zone={h.zone} where={h.where} tick={tick} busy={zoneBusy}
+                      onPress={() => { askZone(h.zone); }} />
+                  ))}
 
-              {/* The push is a separate decision with its consequence written
-                  on it. An owner who can ring every phone in the building is
-                  exactly the capability worth being plain about, and this app
-                  has no scheduler and no record of anybody's timezone — so the
-                  only truthful offer is "now, wherever they are". */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.md }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
-                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('gym', null)}</Text>
-                </View>
-                {/* This switch is the difference between a note in the app and
-                    a push notification to every member of the gym, and it
-                    announced nothing at all: to a screen reader it was "switch,
-                    on" with no statement of what was on. The sentence beside it
-                    is sighted-only. */}
-                <Switch value={annPush} onValueChange={setAnnPush}
-                  accessibilityLabel="Also send this as a push notification to every member"
-                  accessibilityHint={pushConsequence('gym', null)} />
-              </View>
+                  {zoneQuery.trim() && zoneHits.length === 0 && typedZone.kind !== 'zone' ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      {typedZone.kind === 'bad'
+                        ? typedZone.reason
+                        : `Nothing matches “${zoneQuery.trim()}”. Search the nearest large city rather than the town — zones are named after the city whose clock a place keeps.`}
+                    </Text>
+                  ) : null}
 
-              <View pointerEvents={annBusy ? 'none' : 'auto'} style={{ opacity: annBusy ? 0.6 : 1 }}>
-                <Cta wide label={annBusy ? 'Posting…' : 'Post to Members'}
-                  onPress={async () => {
-                    if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; }
-                    setAnnBusy(true);
-                    let res;
-                    try { res = await addGymAnnouncement(text, { push: annPush }); } finally { setAnnBusy(false); }
-                    // The text stays in the box on a failure: they wrote it
-                    // once, and a cleared field after a refused write is how a
-                    // notice gets lost between the owner and the server.
-                    if (!res.ok || !res.delivery) {
-                      Alert.alert('Not posted', 'That could not be posted, so no member has seen it. Your words are still here — try again in a moment.');
-                      return;
-                    }
-                    setText(''); setAnnPush(false);
-                    Alert.alert('Posted', deliverySummary(res.delivery));
-                  }} />
-              </View>
-            </Section>
+                  {zoneMsg ? (
+                    zoneMsg.bad
+                      ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{zoneMsg.text}</Flag>
+                      : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{zoneMsg.text}</Text>
+                  ) : null}
 
-            <Rule />
-
-            <Section>
-              {/* The count is only stated over a whole read. Under 'error' the
-                  list in hand is whatever survived, and "0 sent" to an owner
-                  who posted three on Friday is the sentence
-                  src/ui/loadStatus.ts exists to stop. */}
-              <SectionHead title="Sent" note={noticeStatus === 'ready' && myNotices.length ? `${myNotices.length} sent` : undefined} />
-              {noticeStatus === 'error' ? (
-                <Empty tone={t.ink3}>Your notices could not be read just now. This is not a statement that you have sent none.</Empty>
-              ) : myNotices.length === 0 ? (
-                <Empty tone={t.ink3}>
-                  {/* Only 'error' and 'loading' were branched, so 'partial' fell
-                      into the assertion. `useAnnouncements` reads the gym's
-                      announcements newest-first at `capLimit()` and reports
-                      'partial' on truncation — so an owner whose own notices are
-                      older than the newest thousand TENANT-WIDE rows was told
-                      they had sent none. The count one line up was already gated
-                      on 'ready'; the sentence below it was not. */}
-                  {noticeStatus === 'loading' ? 'Reading your notices…'
-                    : !isWhole(noticeStatus)
-                    ? 'More notices than fit in one read, and none of yours is among the ones that came back. That is not the same as having sent none — pull down to read them again.'
-                    : 'Nothing sent yet — notices you post appear here.'}
-                </Empty>
-              ) : myNotices.map((a, i) => (
-                <View key={a.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <Text style={{ ...ty.body, color: t.ink2 }}>{a.body}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{ago(a.at)}</Text>
-                </View>
-              ))}
-            </Section>
+                  {/* A fact about this phone, labelled as one. Not a suggestion,
+                      and not something to press — see the note above the section. */}
+                  {readerZone() ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      This phone’s own clock is set to {readerZone()}. That is where the phone is, which
+                      is not necessarily where the gym is — so it is not filled in for you.
+                    </Text>
+                  ) : null}
+                </>)}
+              </Section>
+            </View>
           </View>
         ) : tab === 'support' ? (
           <View>
@@ -1452,14 +1694,26 @@ export default function OwnerOps() {
             in this file, which is all that check asks. A route named inside a
             branch that is false is reachable to a grep and unreachable to a
             person. */}
+        {/* ── 4 · people and floor ───────────────────────────────────────── */}
+        {/* "Everywhere Else" was one list of six unrelated destinations. Split
+            the way the review groups them: who is on the floor and what is on
+            it, then the account and its paperwork. */}
         <Section>
-          <SectionHead title="Everywhere Else" />
+          <SectionHead title="People and Floor" />
           <ListRow icon="calendar" title="Trainer Rota" note="Who is on the floor when, against what is booked"
             onPress={() => router.push('/(owner)/rota')} />
           <ListRow icon="wrench" title="Equipment Register" note="What the gym owns, and what is due a service"
             onPress={() => router.push('/(owner)/equipment')} />
           <ListRow icon="dumbbell" title="Exercise Library" note="Every movement the app can teach, and the kit each one needs"
             onPress={() => router.push('/(owner)/library')} />
+        </Section>
+
+        {/* ── 5 · administration ─────────────────────────────────────────── */}
+        {/* Deletion Requests keeps its row here as well as its line in Needs
+            Action: that line only draws while somebody is waiting, and this
+            is the only standing route to the screen and its audit log. */}
+        <Section>
+          <SectionHead title="Administration" />
           <ListRow icon="clock" title="Deletion Requests" note="Members who asked to be erased, and the 30-day clock"
             onPress={() => router.push('/(owner)/deletions')} />
           <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
