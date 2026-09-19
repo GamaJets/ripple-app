@@ -24,7 +24,7 @@
 //     clients.
 // Both providers are still mounted (they are shared context) but nothing on this
 // screen renders one person's data as another's.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import {
@@ -40,7 +40,7 @@ import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
 import {
-  compareDrift, bandTitle, bandNote,
+  compareDrift, bandTitle,
   DEFAULT_WINDOWS, localDayKey, type Drift,
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
@@ -48,6 +48,7 @@ import { useClientDrift } from '../../src/ui/clientDrift';
 import { reportError } from '../../src/lib/reportError';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, Switch, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { trialCard } from '../../src/lib/trialGate';
 import { useTrialReading } from '../../src/ui/trialReading';
@@ -58,12 +59,11 @@ import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag, AttentionRow } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
 import { sp, layout, radius, hairline, elevation, grown, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
-import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, booksInPerson, type CoachedMode } from '../../src/lib/types';
 import { lastActiveLine } from '../../src/lib/lastActiveLine';
@@ -147,7 +147,7 @@ import { minorMoney } from '../../src/lib/coachMoney';
 // current for as long as this tab is mounted — which, for a tab, is the life of
 // the app. See the note on `invoiceAgeing`.
 import { useToday, useNow } from '../../src/ui/today';
-import { FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_CHAR, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -275,6 +275,12 @@ function rowStatus(t: Theme, c: RosterClient, d: Drift | null, driftRead: boolea
   if (c.handAdded) return { words: `Added by you · ${c.goal}`, tone: null };
   if (d && d.status === 'idle') return { words: 'Missing progress', tone: driftTone(t, d) };
   if (d) return { words: 'On track', tone: driftTone(t, d) };
+  // No drift verdict to speak, and a figure THEY submitted that says something.
+  // This was a separate "Below target" flag on a second line of the row; the
+  // row has one line now, so it is that line's words where nothing above had
+  // a better claim to it. Never said of a hand-added client — they returned
+  // above, and they have no check-in to have scored.
+  if (c.adherence != null && c.adherence < 80) return { words: `Below target · ${c.adherence}% adherence`, tone: t.warn };
   return {
     words: driftRead
       ? `${c.goal} · ${c.lastActive} · no drift reading yet`
@@ -298,6 +304,97 @@ function Flag({ t, tone, text }: { t: Theme; tone: string; text: string }) {
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
       <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: tone }} />
       <Text style={{ ...ty.caption, color: t.ink2 }}>{text}</Text>
+    </View>
+  );
+}
+
+/** Where this tab keeps which of its folds a coach left open. One key and a
+ *  map under it, the way `repple.screenHelp.dismissed` keeps its list: it is a
+ *  preference about THIS handset's screen, not a fact about the account, so it
+ *  does not belong on the server and a reinstall forgetting it costs a tap. */
+const FOLDS_KEY = 'repple.coachHome.folds';
+
+/**
+ * A section of this tab that is shut until a coach opens it, and stays the way
+ * they left it on this phone.
+ *
+ * ── Why it exists ─────────────────────────────────────────────────────────
+ * A working coach, on TestFlight: "A way to minimise the coaching tools so
+ * like a drop down." Fourteen chips stood open between the day's agenda and
+ * the roster on every visit, and they are the lowest-frequency thing on the
+ * tab — the data-layout review's seventh rule: the first viewport holds the
+ * decision, and tools sit behind a row.
+ *
+ * ── Why it is not src/ui/Disclosure.tsx ───────────────────────────────────
+ * Nor the kit's `Expandable`, yet. Same shape as both on purpose — a
+ * `SectionHead` for the title so a folded heading reads exactly like an open
+ * one (the same tester: "the subheadings … blend in too much"; what the kit
+ * did to strengthen `SectionHead` lands here too), Expandable's turning
+ * chevron, the note saying what is inside while it is shut, and the state in
+ * `accessibilityState.expanded`. What neither of them does is REMEMBER: both
+ * keep `open` in their own `useState` with no way to be told or to tell, and
+ * a coach who uses Broadcast daily should not reopen the drawer daily.
+ * Expandable also draws its own `Section`, and the second fold here lives
+ * INSIDE the roster's card. Given an `open`/`onToggle` pair (or a storage
+ * key) and a bare variant, this becomes a wrapper round it and then goes.
+ *
+ * Shut until the stored answer is in, never open-then-shut: a block of
+ * fourteen chips that appears for a frame and collapses moves everything
+ * under it twice. A failed read is simply "shut", which is the default.
+ */
+function Fold({ id, title, note, children }: { id: string; title: string; note?: string; children: ReactNode }) {
+  const t = useTheme();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(FOLDS_KEY);
+        const map = raw ? JSON.parse(raw) : null;
+        if (live && map && typeof map === 'object' && map[id] === true) setOpen(true);
+      } catch { /* shut, which is what it already is */ }
+    })();
+    return () => { live = false; };
+  }, [id]);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    // Read-modify-write, because two folds share the key and neither may
+    // forget the other. Best effort: a preference that could not be written
+    // costs one tap on the next launch, and failing the tap would cost more.
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(FOLDS_KEY);
+        const was = raw ? JSON.parse(raw) : null;
+        const map = was && typeof was === 'object' && !Array.isArray(was) ? was : {};
+        await AsyncStorage.setItem(FOLDS_KEY, JSON.stringify({ ...map, [id]: next }));
+      } catch { /* on screen for this session either way */ }
+    })();
+  };
+  return (
+    <View>
+      <Pressable onPress={toggle} accessibilityRole="button" accessibilityState={{ expanded: open }}
+        accessibilityLabel={note ? `${title}. ${note}` : title} hitSlop={hitSlopFor(32)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+        {/* SectionHead carries its own bottom margin, which is right over a
+            section's contents and wrong inside a row centred on an icon — the
+            negative margin gives it back so the title and the mark share a
+            centre line whether the fold is open or shut. */}
+        <View style={{ flex: 1, minWidth: 0, marginBottom: -sp.md }}>
+          <SectionHead title={title} />
+        </View>
+        {/* The kit's own mark for this: the reader's forward chevron when
+            shut, turned down when open, through `turn()` so it is right in a
+            right-to-left locale too. Decoration — the state is in
+            `accessibilityState` on the row. */}
+        <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}>
+          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+        </View>
+      </Pressable>
+      {!open && note ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text>
+      ) : null}
+      {open ? <View style={{ marginTop: sp.md }}>{children}</View> : null}
     </View>
   );
 }
@@ -941,6 +1038,31 @@ export default function TrainerClients() {
     router.setParams({ start: '' });
   }, [startParam, openInvite, router]);
 
+  /* ── and landing on one client's tools ─────────────────────────────────
+   *
+   * `?sheet=<client id>`, set by the Notes and Coaching Tools row on
+   * app/(trainer)/client.tsx. The same consume-once-and-clear as `start`
+   * above and for the same reason: a tab keeps its params, and a sheet that
+   * sprang open every time a coach came back to Clients would be worse than
+   * no way in at all.
+   *
+   * It waits for the roster rather than giving up on it. This tab is mounted
+   * from launch so the roster is nearly always here already, but "nearly" is
+   * a cold deep link's whole problem; the effect re-runs when the roster
+   * lands and opens the sheet then. An id that is not in the roster once the
+   * read has SETTLED — whole, short or failed — is dropped quietly: they were
+   * removed between the two screens, or the read that would have found them
+   * did not land, and either way the roster in front of the coach already
+   * says so. Holding the param instead would open a sheet minutes later, on
+   * whichever refresh happened to bring the row back. */
+  const sheetParam = useLocalSearchParams<{ sheet?: string }>().sheet;
+  useEffect(() => {
+    if (!sheetParam) return;
+    const c = roster.find((x) => x.id === sheetParam);
+    if (c) { setSel(c); router.setParams({ sheet: '' }); return; }
+    if (rosterStatus !== 'loading') router.setParams({ sheet: '' });
+  }, [sheetParam, roster, rosterStatus, router]);
+
   // The verdict on ranking, computed once for the sheet. enoughToTell refuses
   // outright under anything but a completed read, and refuses again when the
   // two busiest codes cannot be told apart from a coin toss.
@@ -1583,7 +1705,23 @@ export default function TrainerClients() {
            : 'Could not send to ' + client.name.split(' ')[0] + ': ' + (r.error || 'unknown error') + '. Clients you added by hand cannot receive messages until they join.');
   };
   // Who needs proactive attention, and why — drives the suggested check-ins.
-  const attnReason = (c: RosterClient): string | null => {
+  //
+  // `attnFor` is the whole row and `attnReason` the sentence in it. It returned
+  // the sentence alone until the data-layout review's attention-row contract —
+  // identity, ONE reason, its age, the state in words, one direct action — and
+  // two of those five were not on the row: nothing said what KIND of problem
+  // it was, and every row offered the same "Nudge", including the one whose
+  // reason was that the client was already waiting on the coach. `state` is
+  // the kind, in the book's own band words where the reason is a drift
+  // verdict; `kind` picks the action. One reason per client, first match wins,
+  // in the order below — never a cloud of every flag they carry.
+  //
+  // `line` is what the row prints beside `state`; `reason` is the sentence the
+  // draft prompt and the draft sheet have always been given, left word for
+  // word as it was. They differ only for adherence, where the old sentence
+  // ends in the state and would say "below target" twice on one row.
+  type Attn = { kind: 'drift' | 'adherence' | 'unread'; state: string; line: string; reason: string; tone: string };
+  const attnFor = (c: RosterClient): Attn | null => {
     const d = driftFor(c);
     // Drift speaks first where it can, because it is the only signal that sees
     // a client with no record at all — but only where the read behind it can
@@ -1591,7 +1729,7 @@ export default function TrainerClients() {
     // client the database was never asked about both produce a confident
     // "nothing recorded in 56 days" out of rows that were never seen.
     const acting = driftActionable(c);
-    if (acting && d && (d.status === 'at_risk' || d.status === 'idle')) return d.reason;
+    if (acting && d && (d.status === 'at_risk' || d.status === 'idle')) return { kind: 'drift', state: bandTitle(d.status), line: d.reason, reason: d.reason, tone: driftTone(t, d) };
     // Where the record cannot be acted on, the fallback is the ONE clause that
     // is evidence about this person — a low adherence figure they submitted.
     //
@@ -1609,10 +1747,11 @@ export default function TrainerClients() {
     // absence of a record is not a reason to ring somebody; it is the reason
     // `idle` exists in src/lib/clientDrift.ts, and that band is raised here
     // only when the read behind it actually covered them.
-    if ((!d || !acting) && c.adherence != null && c.adherence < 80) return 'Adherence ' + c.adherence + '% — below target';
-    if (c.unread != null && c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
+    if ((!d || !acting) && c.adherence != null && c.adherence < 80) return { kind: 'adherence', state: 'Below target', line: `${c.adherence}% adherence at their latest check-in.`, reason: 'Adherence ' + c.adherence + '% — below target', tone: t.warn };
+    if (c.unread != null && c.unread > 0) { const said = c.unread + ' unread message' + (c.unread > 1 ? 's' : ''); return { kind: 'unread', state: 'Waiting on you', line: said + ' in your thread.', reason: said, tone: t.brand }; }
     return null;
   };
+  const attnReason = (c: RosterClient): string | null => attnFor(c)?.reason ?? null;
   const needsAttention = roster.filter((c) => attnReason(c)).sort((a, b) => {
     const da = driftFor(a), db = driftFor(b);
     if (da && db) return compareDrift(da, db);
@@ -2115,6 +2254,24 @@ export default function TrainerClients() {
    *  clears the 44pt target with room for the shadow. */
   const FAB = 56;
 
+  /**
+   * A name on this tab opens that person's PROFILE, not the sheet.
+   *
+   * The same coach, on TestFlight, of the roster: "this portion should be
+   * condensed down, to only see information of a client if I choose their
+   * profile." The roster is a catalogue of names with one line of state each;
+   * what a row used to carry, and what the sheet it opened went on to repeat
+   * (goal, weight change, adherence, a body-composition table), is the first
+   * screen of app/(trainer)/client.tsx — which reads each of those properly,
+   * re-reads on focus, and is the board's fourth page. The sheet is still
+   * here, holding the things a coach WRITES about somebody — notes, feedback,
+   * meal targets, tags, the weekly summary, removing them — and the profile
+   * has the row that opens it (`?sheet=<client id>`, below).
+   */
+  const openProfile = (c: RosterClient) => {
+    router.push({ pathname: '/(trainer)/client', params: { clientId: c.id, name: c.name } });
+  };
+
   /** Open the Add Client sheet. Lifted out of the button it used to live in
    *  because the button is now the pinned + at the bottom of the screen. */
   const openAdd = async () => {
@@ -2155,19 +2312,31 @@ export default function TrainerClients() {
 
         {/* ── three glanceable truths ───────────────────────────────────────
             The board's coach home opens on a count of clients, the day's
-            sessions and the book's adherence — not a display-size vanity
-            figure. Each stays honest the way the Hero this replaces was:
-            the count and the average are withheld until the roster read is
-            whole, and the day's sessions until the diary answered. The
-            sentence under the strip says which read is short, and why; a
-            dash on its own would only say "something". */}
+            sessions and a third figure — not a display-size vanity figure.
+            Each stays honest the way the Hero this replaces was: the counts
+            are withheld until the roster read is whole, and the day's
+            sessions until the diary answered. The sentence under the strip
+            says which read is short, and why; a dash on its own would only
+            say "something".
+
+            The third was the book's adherence, as the board draws it. The
+            data-layout review names the three — active clients, sessions
+            today, clients needing attention — because this tab's one question
+            is "who needs me today", and a mean of check-in scores does not
+            answer it: 78% is the same figure whether nobody needs a call or
+            four people do. The count is the length of the queue directly
+            under this strip, gated the way that queue's own head is — a
+            whole roster AND a drift read that landed, or a dash. Adherence is
+            not dropped: it is the line under the strip, with the two things
+            a bare percentage never said — what it is a mean OF, and of how
+            many (the review's second rule). */}
         <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
           <KpiRow
             onPress={(k) => { if (k.route) router.push(k.route as never); }}
             items={[
               { label: 'Active Clients', value: fig(rosterCount), route: '/(trainer)/analytics' },
               { label: 'Sessions Today', value: todaySessions === null ? fig(null) : fig(todaySessions.length), route: '/(trainer)/calendar' },
-              { label: 'Adherence', value: bookAdherence == null ? fig(null) : String(bookAdherence), unit: bookAdherence == null ? undefined : '%', route: '/(trainer)/analytics' },
+              { label: 'Need Attention', value: fig(isWhole(rosterStatus) && drift ? needsAttention.length : null), route: '/(trainer)/nudges' },
             ]}
           />
           {rosterStatus === 'error' || rosterStatus === 'partial' || rosterStatus === 'loading' || sessionsUnread ? (
@@ -2180,6 +2349,10 @@ export default function TrainerClients() {
                     ? 'Reading your roster…'
                     : 'Your diary could not be read, so today’s count is not none.'}
             </Text>
+          ) : bookAdherence != null && rosterCount != null ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Adherence across your book is {bookAdherence}% — the mean of the latest check-in from {adherenceValues.length} of your {rosterCount} {rosterCount === 1 ? 'client' : 'clients'}.
+            </Text>
           ) : null}
         </View>
 
@@ -2189,14 +2362,16 @@ export default function TrainerClients() {
             booking names one and the diary otherwise; a walk-in slot with no
             client on it has no record to open. */}
         <Section style={{ paddingBottom: 0 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Today</Text>
-            <Pressable onPress={() => router.push('/(trainer)/calendar')} accessibilityRole="button"
-              accessibilityLabel="Add a session in Schedule" hitSlop={hitSlopFor(38)}
-              style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="plus" size={18} color={t.brandInk} />
-            </Pressable>
-          </View>
+          {/* Through `SectionHead` like every other head on this tab, and not
+              the hand-built row it was. A coach on TestFlight: "the
+              subheadings … blend in too much with the other text, it's easy
+              to miss" — and a head built here in `ty.micro` is one the kit
+              cannot strengthen when it strengthens the rest. The green + that
+              sat beside it is the head's trailing link now, in words: a
+              second green circle on a screen whose one green + means Add
+              Client was two primaries, and this one only ever opened
+              Schedule. */}
+          <SectionHead title="Today" note="Add a Session" onPress={() => router.push('/(trainer)/calendar')} />
           {sessionsUnread ? (
             <Text style={{ ...ty.caption, color: t.ink3 }}>Today’s schedule could not be read — this is not an empty day. Open Schedule to try again.</Text>
           ) : todaySessions === null ? (
@@ -2238,6 +2413,128 @@ export default function TrainerClients() {
           )}
         </Section>
 
+        {/* ── the order of everything under the agenda ─────────────────────
+            The data-layout review's stack for this tab, which asks one
+            question — who needs me today: greeting · three figures · today's
+            agenda · NEEDS ATTENTION · the roster · invitations and onboarding
+            · then retention, the month and the tools. It used to run agenda ·
+            requests · unmarked sessions · money · help · setup · trial ·
+            invitations · needs attention · the month · departures · tools ·
+            pending invites · roster, so the queue the tab exists for sat
+            under seven other things and the roster under thirteen.
+
+            The decisions that arrive from somewhere else — a coaching request,
+            sessions waiting on an outcome, money owed, the trial, a platform
+            invitation — stay ABOVE the roster, directly under the queue:
+            each renders nothing when there is nothing to decide, each is a
+            thing somebody is waiting on, and under a book of forty names none
+            of them would ever be seen. They are below the queue and not over
+            it because the review is explicit that money does not outrank an
+            overdue coaching action. */}
+
+        {/* ── needs attention ───────────────────────────────────────────────
+            The operating question for this tab, asked before setup, billing
+            and the month's figures: who needs the coach now? It was a Notice
+            inside the interrupts block with a "Draft" button per row; the
+            board gives it a section of its own. Every row is backed by the
+            same drift, unread-message and adherence facts the roster below
+            uses, and a partial or failed read stays visibly partial or failed
+            so this queue can never masquerade as the whole book. */}
+        <Section>
+          <SectionHead
+            title="Needs Attention"
+            note={isWhole(rosterStatus) && drift ? `${needsAttention.length} now` : undefined}
+          />
+
+          {rosterStatus === 'error' ? (
+            <Notice tone={t.crit} kicker="Roster unavailable"
+              title="Could not build your attention queue"
+              note="The clients that did return are still listed below, but this is not an all-clear and the queue cannot be ranked safely." />
+          ) : rosterStatus === 'partial' ? (
+            <View style={{ marginBottom: sp.md }}>
+              <PartialRead what="clients" shown={roster.length} />
+            </View>
+          ) : null}
+
+          {/* Why this list is shorter than it should be, or null when it is not.
+              Shown whether or not there is anybody in it: an empty list of
+              suggested check-ins over a read that could not prove anybody's
+              silence is an all-clear made out of our own failure, and a coach
+              cannot tell it from a book with nothing wrong in it. */}
+          {driftActingNote && active > 0 ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Notice tone={t.ink3} kicker="Suggested check-ins" title="These are not built on their training"
+                note={driftActingNote} />
+            </View>
+          ) : null}
+
+          {!drift && !driftErr && roster.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>
+                Reading recent check-ins, workouts, sessions and visits before ranking the queue.
+              </Text>
+            </View>
+          ) : driftErr ? (
+            <Flag t={t} tone={t.warn} text="Recent activity could not be read. The roster below remains usable, but it is not ranked by who needs you." />
+          ) : needsAttention.length > 0 ? (
+            <View>
+              {/* ── the attention row's contract ─────────────────────────────
+                  Who · what KIND of problem, in words with its mark · the one
+                  reason · how old it is · one action that answers it. The
+                  review's test is that a coach can name the next three people
+                  to contact AND why without opening three records; the row
+                  used to stop at a reason and offer every client the same
+                  "Nudge", including the one whose reason was that they were
+                  already waiting on a reply. `attnFor` picks ONE reason per
+                  person — never a badge cloud — and the action follows it:
+                  somebody who wrote gets Reply and their thread, everybody
+                  else gets the AI draft the coach reviews before it is sent.
+                  The row itself opens their profile. */}
+              {needsAttention.slice(0, 4).map((c, index) => {
+                const a = attnFor(c);
+                const aged = /\bago$/.test(c.lastActive) ? `Last active ${c.lastActive}` : null;
+                return (
+                  /* The kit's AttentionRow, which is this contract as a
+                     component: it speaks the row as one sentence, names the
+                     client on the action's spoken label, and drops the action
+                     under the words at large text. The monogram is cut by
+                     this screen's own rule so it matches the roster below. */
+                  <AttentionRow key={c.id} divider={index > 0}
+                    monogram={c.name.split(' ').map((x) => x[0]).join('')}
+                    name={c.name}
+                    reason={a ? a.line : 'Needs a review.'}
+                    status={a ? a.state : undefined}
+                    tone={a ? a.tone : t.warn}
+                    /* The age, where the roster row has one to give. The four
+                       sentences `lastActive` can be instead of a figure
+                       (src/lib/lastActiveLine.ts) are not ages, and a drift
+                       reason already carries its own count of days. */
+                    age={aged ?? undefined}
+                    onPress={() => openProfile(c)}
+                    action={a && a.kind === 'unread'
+                      ? { label: 'Reply', onPress: () => router.push({ pathname: '/(trainer)/chat', params: { clientId: c.id, name: c.name } }) }
+                      /* Drafts a check-in with AI for the coach to review, then
+                         send — the same flow the old "Draft" button opened. */
+                      : { label: 'Nudge', onPress: () => draftNudge(c) }} />
+                );
+              })}
+              {needsAttention.length > 4 ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {needsAttention.length - 4} more {needsAttention.length - 4 === 1 ? 'client is' : 'clients are'} flagged in the roster below.
+                </Text>
+              ) : null}
+            </View>
+          ) : rosterStatus === 'ready' && roster.length === 0 ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>Add or invite your first client to start a coaching queue.</Text>
+          ) : rosterStatus === 'ready' && drift ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              {active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
+            </Text>
+          ) : null}
+        </Section>
+
+
         {/* Clients who found this coach in the public directory and asked to
             be coached. Renders nothing at all when there are none.
 
@@ -2253,22 +2550,6 @@ export default function TrainerClients() {
             an outcome holds up somebody's pay, and money already earned and not
             collected is the next most expensive thing to leave alone. */}
         <MoneyOwed m={owed} />
-
-        {/* What the band headings below actually mean. "At risk" is measured
-            against each client's OWN earlier rate and not against a target, and
-            "nothing to assess" is not "fine" — the two readings a coach gets
-            wrong are the two that cost a phone call to somebody who trained
-            yesterday. src/lib/screenHelp.ts holds the sentences; one row, shut,
-            gone for good once dismissed. */}
-        <ScreenHelp screen="coach-clients" />
-
-        {/* The first-run list, while it still has something to say. It removes
-            itself the moment every row is DONE — and not a moment earlier: a
-            row that could not be read keeps it here, because the coach whose
-            currency read failed is exactly the coach who needs the currency
-            step. Once it goes, Explore and Settings still reach the screen.
-            src/lib/coachFirstRun.ts holds the rule. */}
-        <CoachSetupRow />
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
@@ -2341,290 +2622,6 @@ export default function TrainerClients() {
 
         </View>
 
-        {/* ── needs attention ───────────────────────────────────────────────
-            The operating question for this tab, asked before setup, billing
-            and the month's figures: who needs the coach now? It was a Notice
-            inside the interrupts block with a "Draft" button per row; the
-            board gives it a section of its own. Every row is backed by the
-            same drift, unread-message and adherence facts the roster below
-            uses, and a partial or failed read stays visibly partial or failed
-            so this queue can never masquerade as the whole book. */}
-        <Section>
-          <SectionHead
-            title="Needs Attention"
-            note={isWhole(rosterStatus) && drift ? `${needsAttention.length} now` : undefined}
-          />
-
-          {rosterStatus === 'error' ? (
-            <Notice tone={t.crit} kicker="Roster unavailable"
-              title="Could not build your attention queue"
-              note="The clients that did return are still listed below, but this is not an all-clear and the queue cannot be ranked safely." />
-          ) : rosterStatus === 'partial' ? (
-            <View style={{ marginBottom: sp.md }}>
-              <PartialRead what="clients" shown={roster.length} />
-            </View>
-          ) : null}
-
-          {/* Why this list is shorter than it should be, or null when it is not.
-              Shown whether or not there is anybody in it: an empty list of
-              suggested check-ins over a read that could not prove anybody's
-              silence is an all-clear made out of our own failure, and a coach
-              cannot tell it from a book with nothing wrong in it. */}
-          {driftActingNote && active > 0 ? (
-            <View style={{ marginBottom: sp.md }}>
-              <Notice tone={t.ink3} kicker="Suggested check-ins" title="These are not built on their training"
-                note={driftActingNote} />
-            </View>
-          ) : null}
-
-          {!drift && !driftErr && roster.length > 0 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-              <ActivityIndicator size="small" color={t.ink3} />
-              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>
-                Reading recent check-ins, workouts, sessions and visits before ranking the queue.
-              </Text>
-            </View>
-          ) : driftErr ? (
-            <Flag t={t} tone={t.warn} text="Recent activity could not be read. The roster below remains usable, but it is not ranked by who needs you." />
-          ) : needsAttention.length > 0 ? (
-            <View>
-              {needsAttention.slice(0, 4).map((c, index) => (
-                <Pressable key={c.id} onPress={() => setSel(c)}
-                  accessibilityRole="button" accessibilityLabel={`Open ${c.name}`}
-                  style={{
-                    paddingTop: index ? sp.md : 0,
-                    marginTop: index ? sp.md : 0,
-                    borderTopWidth: index ? hairline : 0,
-                    borderTopColor: t.ring,
-                    flexDirection: 'row', alignItems: 'center', gap: sp.md,
-                  }}>
-                  <Initials t={t} name={c.name} size={38} />
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{c.name}</Text>
-                    <View style={{ marginTop: 3 }}>
-                      <Flag t={t} tone={t.warn} text={attnReason(c) || 'Needs a review'} />
-                    </View>
-                  </View>
-                  {/* Drafts a check-in with AI for the coach to review, then
-                      send — the same flow the old "Draft" button opened. */}
-                  <Ghost label="Nudge" a11yLabel={`Draft a check-in for ${c.name}`} onPress={() => draftNudge(c)} />
-                </Pressable>
-              ))}
-              {needsAttention.length > 4 ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  {needsAttention.length - 4} more {needsAttention.length - 4 === 1 ? 'client is' : 'clients are'} flagged in the roster below.
-                </Text>
-              ) : null}
-            </View>
-          ) : rosterStatus === 'ready' && roster.length === 0 ? (
-            <Text style={{ ...ty.body, color: t.ink2 }}>Add or invite your first client to start a coaching queue.</Text>
-          ) : rosterStatus === 'ready' && drift ? (
-            <Text style={{ ...ty.body, color: t.ink2 }}>
-              {active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
-            </Text>
-          ) : null}
-        </Section>
-
-
-        {/* ── the business, in three columns ──────────────────────────────── */}
-        <Section>
-          <SectionHead title="This Month" note="Analytics" onPress={() => router.push('/(trainer)/analytics')} />
-          <KpiRow items={[
-            // ── what used to be here, and why it is gone ────────────────
-            //
-            // "Est. Revenue", computed as `active clients × 4 × session fee`
-            // and printed with a hardcoded '$'.
-            //
-            // The 4 was a number nobody chose. No client of this app has ever
-            // been asked how often they train, nothing anywhere records it, and
-            // four a month is not a default — it is an invention, multiplied by
-            // a real headcount and a real fee to produce something with the
-            // shape of a measurement. A coach with eight clients and a £60 rate
-            // read "£1,920/mo" and had no way to tell it apart from a figure
-            // derived from their actual work.
-            //
-            // The '$' was the second invention, and part 99
-            // (supabase/parts/99-tenant-currency.sql) exists precisely to stop
-            // it: Repple is white-labelled, `tenants.currency` is nullable
-            // because a gym that has not said is not to be guessed at, and
-            // there is no currency column on `trainers` at all. So an
-            // independent coach's rate is a number whose unit this app does not
-            // know. Printing a dollar sign in front of it in front of a London
-            // trainer is not a formatting slip; it is a wrong number.
-            //
-            // What replaces it is a count of sessions with a RECORDED outcome
-            // of 'completed' in the last month — real work, really marked,
-            // needing no currency to state. A dash until the read lands.
-            // ── and each of the three now goes somewhere ────────────────
-            //
-            // `KpiRow` has taken an `onPress` and `KpiItem` a `route` since it
-            // was written, and this row passed neither — so all three tiles
-            // were inert. The Unread one is the reason that mattered: the
-            // comment beside `unread` above says a coach "reads that tile to
-            // decide whether anybody is waiting on them", and there was no
-            // route to /(trainer)/messages ANYWHERE on this screen. The tile
-            // that answers the question and the screen that acts on it were on
-            // the same phone with nothing between them.
-            //
-            // A tile with no `route` stays disabled and keeps no button role,
-            // so the row can be part live and stay honest to a screen reader.
-            { label: 'Delivered', value: fig(delivered), unit: delivered == null ? undefined : `/${DELIVERED_WINDOW_DAYS}d`, route: '/(trainer)/sessions' },
-            { label: 'Unread', value: fig(unread), route: '/(trainer)/messages' },
-            // Null until the record has been read: an em-dash, never a zero
-            // that would tell a coach nobody needs them this week. Still
-            // tappable on a dash: a coach whose count could not be read is
-            // exactly the one who should go and look.
-            //
-            // Quiet Clients, which is what `toContact` counts — drifting plus
-            // nothing-recorded — and the same screen `bookAlert`'s drift banner
-            // now opens, so the two agree about where this fact is dealt with.
-            { label: 'To Contact', value: fig(toContact), route: '/(trainer)/nudges' },
-          ]} onPress={(k) => { if (k.route) router.push(k.route as never); }} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {sessionsUnread
-              ? 'Your sessions could not be read, so this is not a count of none.'
-              : delivered == null
-                ? 'Reading your sessions…'
-                : unmarked
-                  ? `Sessions marked as delivered in the last ${DELIVERED_WINDOW_DAYS} days. ${unmarked} more ${unmarked === 1 ? 'is' : 'are'} waiting on an outcome and ${unmarked === 1 ? 'is' : 'are'} not counted here.`
-                  : `Sessions marked as delivered in the last ${DELIVERED_WINDOW_DAYS} days.`}
-          </Text>
-        </Section>
-
-        {/* Why people have left, and the ones still worth asking about — one
-            section off one read. src/ui/EndReasonSheet.tsx.
-
-            ── why it is HERE and not at the top ────────────────────────────
-            It sat between the first-run row and the block headed "interrupts:
-            things that need a decision now", which split that block in two and
-            put a ninety-day review above an expired trial and a platform
-            invitation. Read as one screen rather than as a stack of cards, this
-            is not a morning interrupt: nothing in it is holding up somebody's
-            pay or somebody's reply today, and its own deadline is measured in
-            months. It is a fact about the business, so it reads directly under
-            the business — the count above says how many clients there are, and
-            this says who stopped being one and why.
-
-            Renders nothing when there are none and nothing when the read
-            failed: this screen already carries four honest warnings and a fifth
-            saying "we could not check whether anybody left" is noise.
-
-            `readNonce` is threaded in so a pull down this screen re-reads it.
-            The card owns its own state, so without it the gesture refreshed
-            everything around this section and not the section itself — the same
-            gap `CoachRequests` at the top of the screen had.
-
-            ABOVE the `<Rule />` below and not under it, because the component
-            draws its own leading rule. Under it there are two hairlines on a
-            screen where this section renders and, on the far commoner screen
-            where it renders nothing, none at all between This Month and
-            Coaching Tools. */}
-        <UnexplainedDepartures reload={readNonce} />
-
-
-        {/* ── coaching tools ─────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Coaching Tools" />
-          {/* Seven destinations, and this was a horizontal ScrollView with its
-              indicator hidden — so Analytics, Leaderboard and Feedback sat past
-              the right edge of a phone with nothing on screen saying they were
-              there. The client app's Train tab had the identical fault and hid
-              most of its row; ChipGrid wraps instead. It has to be a plain View
-              to do it: flexWrap is inert inside a horizontal ScrollView, which
-              lays out on one unbounded axis, so this could not be fixed in
-              place. `tone` keeps the coach's icons in brand, as they were.
-              `key` is the route, so two chips sharing a word cannot collide. */}
-          {/* For a coach who works in the room, or one we do not know about,
-              this is the list it has always been. For a coach who has said they
-              work online and has nobody on the book training in person, the
-              in-person tools drop below the rest with the reason on them —
-              DE-EMPHASISED, never removed. `showsInPerson` resolves every
-              unknown to "show everything", so a roster that failed to load or a
-              question nobody answered hides nothing at all. */}
-          <ChipGrid
-            tone={t.brand}
-            items={[
-              ...(showsInPerson(delivery) ? SHORTCUTS : SHORTCUTS.filter((sc) => !IN_PERSON_SHORTCUTS.includes(sc)))
-                .map(([ic, label, route]) => ({
-                  icon: ic, label, key: route, onPress: () => router.push(route as any),
-                })),
-              // The door onto the notice composer, which had none. The sheet at
-              // the bottom of this file — composer, push switch, "Posted
-              // before" list — was complete and `bcOpen` was never set true
-              // anywhere in the repo, so the only way to post a gym-wide notice
-              // was unreachable while `reloadNotices` still paid for a read on
-              // every pull-to-refresh. It is a chip rather than a SHORTCUTS row
-              // because SHORTCUTS is a table of ROUTES and this is a modal on
-              // this screen; giving the table an action arm to hold one entry
-              // would make every other row carry a null.
-              //
-              // Beside Broadcast on purpose: those are the two all-client
-              // tools, and a coach who wants one has usually just considered
-              // the other. The sheet's own copy at the bottom of this file
-              // draws the line — a NOTICE is posted once and read on every
-              // client's dashboard; a MESSAGE lands in each person's thread.
-              {
-                icon: 'info' as IconName,
-                label: 'Post a Notice',
-                key: '/(trainer)/dashboard#post-a-notice',
-                onPress: () => setBcOpen(true),
-              },
-            ]}
-          />
-          {!showsInPerson(delivery) ? (
-            <View style={{ marginTop: sp.lg }}>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>In-person tools</Text>
-              <ChipGrid
-                tone={t.ink3}
-                items={IN_PERSON_SHORTCUTS.map(([ic, label, route]) => ({
-                  icon: ic, label, key: route, onPress: () => router.push(route as any),
-                }))}
-              />
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {deliveryNote(delivery)} {HIDDEN_NOT_GONE}
-              </Text>
-            </View>
-          ) : null}
-        </Section>
-
-        {/* ── pending invites ──────────────────────────────────────────────
-            The section used to VANISH when the read failed, because `sent` is
-            `[]` under 'error' and the only test was `length > 0`. So the coach
-            re-invited people who already have a live invitation, and part 37's
-            partial unique index refused it — a second failure with an even less
-            useful explanation. This screen already refuses to trust this list
-            twice over, for `openInviteEmails` and for the CSV import; this is
-            the third place and it was the one a coach reads first. */}
-        {inviteStatus === 'error' ? (<>
-          <Rule />
-          <Section>
-            <SectionHead title="Pending Invites" />
-            <Flag t={t} tone={t.warn}
-              text={'Your open invitations could not be read, so none are listed. That is not a statement that '
-                + 'nobody is waiting on you — anyone you have already invited still has a live invitation, and '
-                + 'inviting them again will be refused.'} />
-          </Section>
-        </>) : sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
-          <Rule />
-          <Section>
-            <SectionHead title="Pending Invites"
-              note={inviteStatus === 'ready' ? `${sentInvites.filter((i) => i.status === 'pending').length} awaiting` : undefined} />
-            {sentInvites.filter((i) => i.status === 'pending').map((i, idx) => (
-              <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="message" size={16} color={t.brand} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{i.email}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHED_MODE_SHORT[i.mode]} · awaiting sign-up / accept</Text>
-                </View>
-                <Ghost label="Cancel" onPress={() => cancelInvite(i.id, i.email)} />
-              </View>
-            ))}
-          </Section>
-        </>) : null}
-
-
         {/* ── the roster ─────────────────────────────────────────────────── */}
         <Section>
           {/* `isWhole(rosterStatus)`, not `active > 0`. `active` is
@@ -2640,6 +2637,33 @@ export default function TrainerClients() {
             note={!isWhole(rosterStatus)
               ? undefined
               : active > 0 ? driftNote() : undefined} />
+
+          {/* ── the two ways onto the book, first ───────────────────────────
+              Back over the list, where the coach who tests this build found
+              them and said so: "I like the tabs of invite and import, maybe
+              have 'view client' … a catalogue of names". Last round moved them
+              under the rows; on a book of forty that is forty rows away from
+              the moment somebody asks how to get a client in. The catalogue
+              they asked for is the list under these — a name and one line.
+
+              Two buttons, and they used to be called "Add a client" and
+              "Add client" — eight characters apart, side by side, doing
+              different things. The prominent one made a roster entry; the
+              other opened the sheet that shows the coaching code. A coach
+              pressed the prominent one and asked "is this the only way? I
+              don't see a trainer's code", which is the only reasonable
+              reading of that pair. The sheet's own failure text already
+              called it "Invite a client"; the button label had drifted.
+              Add Client itself is the green + pinned over the screen now —
+              `openAdd` — so it is one control, reachable from anywhere in
+              the scroll, rather than a third button in this row. */}
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={() => { void openInvite(); }} /></View>
+            {/* Import sits beside Invite rather than under a menu, because the
+                moment a coach needs it is their first hour in the product —
+                and the alternative to finding it is typing forty clients. */}
+            <View style={{ flex: 1 }}><Ghost label="Import Clients" onPress={() => { resetImport(); setImpOpen(true); }} /></View>
+          </View>
 
           {/* The read failed. Say so, say what it cost, and do NOT let the
               ordinary order pass for the drift order. */}
@@ -2756,47 +2780,54 @@ export default function TrainerClients() {
           ) : null}
 
           {driftRows.map(({ c, d }, idx) => {
-            const prev = idx > 0 ? driftRows[idx - 1].d : null;
-            const opensBand = !!d && (!prev || prev.status !== d.status);
-            // Drift is stated on the row only where there is something to act
-            // on. "Holding their pattern" is said once, by the band heading.
-            const showDrift = !!d && d.status !== 'on_track';
-            const nextLine = nextBookedLine(c.id);
             const st = rowStatus(t, c, d, !!drift, today);
+            // Drift is what tints a row: the two states a coach acts on.
+            const showDrift = !!d && (d.status === 'at_risk' || d.status === 'watch' || d.status === 'idle');
+            // The one line. The state first, then the two facts that are a
+            // reason to open THIS row today and were flags on a second line:
+            // somebody waiting on a reply, and an injury — which the review
+            // wants in front of a coach before they change a program, and a
+            // new one is said as new. Words, not marks, so the line reads
+            // whole to a screen reader and at any text size.
+            const extras = [
+              c.unread != null && c.unread > 0 ? `${c.unread} unread` : null,
+              c.injuries && c.injuries.length ? (c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury') : null,
+            ].filter(Boolean) as string[];
+            const line = [st.words, ...extras].join(' · ');
             return (
-            <View key={c.id}>
-              {opensBand ? (
-                <View style={{ marginTop: idx === 0 ? 0 : sp.xl, marginBottom: sp.sm }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: driftTone(t, d!) }} />
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>{bandTitle(d!.status)}</Text>
-                  </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{bandNote(d!.status, DEFAULT_WINDOWS)}</Text>
-                </View>
-              ) : null}
-            {/* ── one row per client, the board's way ────────────────────
-                A 40pt monogram, name, ONE line of status in words with its
-                mark, a chevron. This row used to carry a weight delta, a
-                next-session line, a rate line, a flags row, a reason line, a
-                tags row, a 3px adherence bar and then an adherence figure —
-                most of which are the lead figure of the client's own record
-                one tap away (the sheet's first line still says the
-                adherence). What stays is what a coach scanning a list of
-                forty needs to pick the next one to open: the state where
-                there is one, the goal and last-active where there is not
-                (the bar was colour alone — see the kit's second rule).
-                Unread, injury and below-target keep a mark, because each is a
-                reason to open the row today. */}
-            {/* A tinted row for the states a coach acts on, the way the board
-                tints its "Needs check-in" and "Missing progress" rows — at
-                `surface2` strength, never a red or yellow ground: the state is
-                already in the words and the dot, and a coloured surface would
-                be a third, louder copy of it. The negative margin lets the
-                tint run to the card's own padding edge. */}
-            <Pressable onPress={() => setSel(c)} accessibilityRole="button" accessibilityLabel={`Open ${c.name}, ${st.words}`}
+            /* ── one row per client: a catalogue, not a record ────────────
+                A 40pt monogram, the name, ONE line, a chevron — the board's
+                third page, and what the coach who tests this build asked for
+                in as many words: "this portion should be condensed down, to
+                only see information of a client if I choose their profile."
+
+                This row has been cut twice. It first carried a weight delta,
+                a next-session line, a rate line, a flags row, a reason line,
+                a tags row, a 3px adherence bar and an adherence figure; the
+                last round left the state line, the drift reason, the Next
+                line, a flags row and a tags row, under band headings with a
+                sentence each. What went this time, and where each now lives:
+                  · the drift reason — on the Needs Attention row above for
+                    anybody it is a reason to call, and the lead line of their
+                    profile for everybody;
+                  · Next — the profile's own "when you are seeing them next",
+                    and the Training block of their tools sheet;
+                  · tags — the segment bar filters by them and the tools sheet
+                    edits them;
+                  · the band headings — every row already says its own state,
+                    the list is still in drift order, the segment bar still
+                    counts each band, and the help row under this section
+                    still says what the words mean.
+                A tinted row for the states a coach acts on, the way the board
+                tints "Needs check-in" and "Missing progress" — at `surface2`
+                strength, never a red or yellow ground: the state is already
+                in the words and the dot. The negative margin lets the tint
+                run to the card's own padding edge. */
+            <Pressable key={c.id} onPress={() => openProfile(c)} accessibilityRole="button" accessibilityLabel={`Open ${c.name}, ${line}`}
               style={{ paddingVertical: sp.md, paddingHorizontal: sp.sm, marginHorizontal: -sp.sm, borderRadius: radius.sm,
                 backgroundColor: showDrift ? t.surface2 : 'transparent',
-                borderTopWidth: idx === 0 || opensBand || showDrift ? 0 : hairline, borderTopColor: t.ring }}>
+                marginTop: showDrift && idx ? 2 : 0,
+                borderTopWidth: idx === 0 || showDrift ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                 <Initials t={t} name={c.name} size={40} />
                 <View style={{ flex: 1, minWidth: 0 }}>
@@ -2804,105 +2835,32 @@ export default function TrainerClients() {
                   {/* The state in words with its mark beside it — see
                       `rowStatus` for where each word comes from. The dot is
                       6pt so it reads at arm's length; the words are what a
-                      screen reader gets. */}
+                      screen reader gets. Two lines allowed, so a large text
+                      size wraps the line rather than cutting a figure. */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     {st.tone ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: st.tone }} /> : null}
-                    <Text style={{ ...ty.caption, color: st.tone ? t.ink2 : t.ink3, flexShrink: 1 }} numberOfLines={2}>{st.words}</Text>
+                    <Text style={{ ...ty.caption, color: st.tone ? t.ink2 : t.ink3, flexShrink: 1 }} numberOfLines={2}>{line}</Text>
                   </View>
-                  {/* The drift verdict's reason where there is one to act on —
-                      "Holding their pattern" is said once, by the band heading,
-                      not on every row under it. */}
-                  {showDrift ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{d!.reason}</Text>
-                  ) : null}
-                  {/* There IS a Next now, and it is read rather than declared —
-                      see `nextBooked`. The one line on this row about the
-                      future. Absent, never dashed, when the diary did not
-                      answer or the fortnight is empty; the difference between
-                      those two is said once under the list. */}
-                  {nextLine ? (
-                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }} numberOfLines={1}>{nextLine}</Text>
-                  ) : null}
                 </View>
-                {/* The adherence figure that sat here is the book's figure in
-                    the strip at the top and this client's in the sheet's
-                    first line; the row is the board's — avatar, name, one
-                    line of state, chevron. A "Below target" mark below keeps
-                    the one reading of it that is a reason to open the row. */}
                 <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
               </View>
-
-              {((c.unread != null && c.unread > 0) || (!d && lowAdherence(c)) || (c.injuries && c.injuries.length)) ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginStart: 40 + sp.md }}>
-                  {/* Only where a figure they submitted says so. This was
-                      `atRiskClient(c)`, true of every hand-added client for
-                      ever — so a coach with twenty cash clients opened their
-                      home screen to twenty amber flags that could never clear,
-                      and learned inside a week to read past all of them,
-                      including the one that was real. */}
-                  {!d && lowAdherence(c) ? <Flag t={t} tone={t.warn} text="Below target" /> : null}
-                  {c.unread != null && c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
-                  {c.injuries && c.injuries.length ? <Flag t={t} tone={t.s3} text={c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury'} /> : null}
-                </View>
-              ) : null}
-
-              {tagsFor(c.id).length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: sp.sm, marginStart: 40 + sp.md }}>
-                  {tagsFor(c.id).map((tg) => (
-                    <View key={tg} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 2 }}>
-                      <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{tg}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
             </Pressable>
-            </View>
             );
           })}
 
-          {/* What the Next line on those rows is and is not.
-              Said once, under the list, rather than as a caveat on thirty rows.
-              Three things it has to carry:
-                · a diary that did not answer is not an empty diary, and without
-                  this sentence a book with no Next lines on it looks exactly
-                  like a book where nobody is coming in;
-                · the window is a fortnight, so "no Next" means nothing in the
-                  next 14 days and not nothing ever;
-                · these are the COACH's own rows. A client training with another
-                  coach in the same gym has a session this screen cannot see,
-                  and reading a blank as "they have stopped booking" is the one
-                  wrong conclusion available here. The same sentence
-                  src/lib/bookedAhead.ts ends its header with. */}
-          {driftRows.length > 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-              {nextBooked === null
-                ? 'Your diary could not be read, so no row below says when you next see anybody. That is the read, not an empty book.'
-                : `“Next” is the first session in your own diary in the next ${BOOKED_AHEAD_DAYS} days. A row without one has nothing booked with you in that fortnight — it does not mean they have nothing booked with anybody.`}
-            </Text>
-          ) : null}
-
           {/* ── acting on what is listed ─────────────────────────────────────
-              Under the list rather than over it, which is where the board
-              leaves room for them: the rows are what a coach opens this tab
-              for, and every control here acts on exactly the rows above. */}
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, marginBottom: sp.md }}>
-            {/* Two buttons, and they used to be called "Add a client" and
-                "Add client" — eight characters apart, side by side, doing
-                different things. The prominent one made a roster entry; the
-                other opened the sheet that shows the coaching code. A coach
-                pressed the prominent one and asked "is this the only way? I
-                don't see a trainer's code", which is the only reasonable
-                reading of that pair. The sheet's own failure text already
-                called it "Invite a client"; the button label had drifted.
-                Add Client itself is the green + pinned over the screen now —
-                `openAdd` — so it is one control, reachable from anywhere in
-                the scroll, rather than a third button in this row. */}
-            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={() => { void openInvite(); }} /></View>
-            {/* Import sits beside Invite rather than under a menu, because the
-                moment a coach needs it is their first hour in the product —
-                and the alternative to finding it is typing forty clients. */}
-            <View style={{ flex: 1 }}><Ghost label="Import Clients" onPress={() => { resetImport(); setImpOpen(true); }} /></View>
-          </View>
+              Under the list, and behind a fold. Export, message everybody
+              listed, assign them all a program, remove them all: each acts on
+              exactly the rows above, none is a thing a coach does on most
+              visits, and the last cannot be taken back — four full-width
+              buttons standing open under the names were the loudest thing in
+              the section (they fill the tester's screenshot of it). Shut by
+              default and remembered, like Coaching Tools. Nothing about what
+              they do, refuse or count has changed. */}
+          {roster.length > 0 || rosterStatus !== 'ready' ? (
+          <View style={{ marginTop: sp.lg }}>
+          <Fold id="rosterActions" title="Roster Actions"
+            note="Export your roster, or message, assign a program to, or remove everyone listed above.">
 
           {/* Out of the app, and only ever the whole book. `exportRoster`
               refuses on a read that failed and marks the file INCOMPLETE on one
@@ -2964,6 +2922,229 @@ export default function TrainerClients() {
                 }} />
             </View>
           ) : null}
+          </Fold>
+          </View>
+          ) : null}
+        </Section>
+
+        {/* What the states on the rows above actually mean. "At risk" is measured
+            against each client's OWN earlier rate and not against a target, and
+            "nothing to assess" is not "fine" — the two readings a coach gets
+            wrong are the two that cost a phone call to somebody who trained
+            yesterday. src/lib/screenHelp.ts holds the sentences; one row, shut,
+            gone for good once dismissed. */}
+        <ScreenHelp screen="coach-clients" />
+
+        {/* ── pending invites ──────────────────────────────────────────────
+            The section used to VANISH when the read failed, because `sent` is
+            `[]` under 'error' and the only test was `length > 0`. So the coach
+            re-invited people who already have a live invitation, and part 37's
+            partial unique index refused it — a second failure with an even less
+            useful explanation. This screen already refuses to trust this list
+            twice over, for `openInviteEmails` and for the CSV import; this is
+            the third place and it was the one a coach reads first. */}
+        {inviteStatus === 'error' ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Pending Invites" />
+            <Flag t={t} tone={t.warn}
+              text={'Your open invitations could not be read, so none are listed. That is not a statement that '
+                + 'nobody is waiting on you — anyone you have already invited still has a live invitation, and '
+                + 'inviting them again will be refused.'} />
+          </Section>
+        </>) : sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Pending Invites"
+              note={inviteStatus === 'ready' ? `${sentInvites.filter((i) => i.status === 'pending').length} awaiting` : undefined} />
+            {sentInvites.filter((i) => i.status === 'pending').map((i, idx) => (
+              <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="message" size={16} color={t.brand} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{i.email}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHED_MODE_SHORT[i.mode]} · awaiting sign-up / accept</Text>
+                </View>
+                <Ghost label="Cancel" onPress={() => cancelInvite(i.id, i.email)} />
+              </View>
+            ))}
+          </Section>
+        </>) : null}
+
+
+        {/* The first-run list, while it still has something to say. It removes
+            itself the moment every row is DONE — and not a moment earlier: a
+            row that could not be read keeps it here, because the coach whose
+            currency read failed is exactly the coach who needs the currency
+            step. Once it goes, Explore and Settings still reach the screen.
+            src/lib/coachFirstRun.ts holds the rule. */}
+        <CoachSetupRow />
+
+        {/* ── the business, in three columns ──────────────────────────────── */}
+        <Section>
+          <SectionHead title="This Month" note="Analytics" onPress={() => router.push('/(trainer)/analytics')} />
+          <KpiRow items={[
+            // ── what used to be here, and why it is gone ────────────────
+            //
+            // "Est. Revenue", computed as `active clients × 4 × session fee`
+            // and printed with a hardcoded '$'.
+            //
+            // The 4 was a number nobody chose. No client of this app has ever
+            // been asked how often they train, nothing anywhere records it, and
+            // four a month is not a default — it is an invention, multiplied by
+            // a real headcount and a real fee to produce something with the
+            // shape of a measurement. A coach with eight clients and a £60 rate
+            // read "£1,920/mo" and had no way to tell it apart from a figure
+            // derived from their actual work.
+            //
+            // The '$' was the second invention, and part 99
+            // (supabase/parts/99-tenant-currency.sql) exists precisely to stop
+            // it: Repple is white-labelled, `tenants.currency` is nullable
+            // because a gym that has not said is not to be guessed at, and
+            // there is no currency column on `trainers` at all. So an
+            // independent coach's rate is a number whose unit this app does not
+            // know. Printing a dollar sign in front of it in front of a London
+            // trainer is not a formatting slip; it is a wrong number.
+            //
+            // What replaces it is a count of sessions with a RECORDED outcome
+            // of 'completed' in the last month — real work, really marked,
+            // needing no currency to state. A dash until the read lands.
+            // ── and each of the three now goes somewhere ────────────────
+            //
+            // `KpiRow` has taken an `onPress` and `KpiItem` a `route` since it
+            // was written, and this row passed neither — so all three tiles
+            // were inert. The Unread one is the reason that mattered: the
+            // comment beside `unread` above says a coach "reads that tile to
+            // decide whether anybody is waiting on them", and there was no
+            // route to /(trainer)/messages ANYWHERE on this screen. The tile
+            // that answers the question and the screen that acts on it were on
+            // the same phone with nothing between them.
+            //
+            // A tile with no `route` stays disabled and keeps no button role,
+            // so the row can be part live and stay honest to a screen reader.
+            { label: 'Delivered', value: fig(delivered), unit: delivered == null ? undefined : `/${DELIVERED_WINDOW_DAYS}d`, route: '/(trainer)/sessions' },
+            { label: 'Unread', value: fig(unread), route: '/(trainer)/messages' },
+            // Null until the record has been read: an em-dash, never a zero
+            // that would tell a coach nobody needs them this week. Still
+            // tappable on a dash: a coach whose count could not be read is
+            // exactly the one who should go and look.
+            //
+            // Quiet Clients, which is what `toContact` counts — drifting plus
+            // nothing-recorded — and the same screen `bookAlert`'s drift banner
+            // now opens, so the two agree about where this fact is dealt with.
+            { label: 'To Contact', value: fig(toContact), route: '/(trainer)/nudges' },
+          ]} onPress={(k) => { if (k.route) router.push(k.route as never); }} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {sessionsUnread
+              ? 'Your sessions could not be read, so this is not a count of none.'
+              : delivered == null
+                ? 'Reading your sessions…'
+                : unmarked
+                  ? `Sessions marked as delivered in the last ${DELIVERED_WINDOW_DAYS} days. ${unmarked} more ${unmarked === 1 ? 'is' : 'are'} waiting on an outcome and ${unmarked === 1 ? 'is' : 'are'} not counted here.`
+                  : `Sessions marked as delivered in the last ${DELIVERED_WINDOW_DAYS} days.`}
+          </Text>
+        </Section>
+
+        {/* Why people have left, and the ones still worth asking about — one
+            section off one read. src/ui/EndReasonSheet.tsx.
+
+            ── why it is HERE and not at the top ────────────────────────────
+            It sat between the first-run row and the block headed "interrupts:
+            things that need a decision now", which split that block in two and
+            put a ninety-day review above an expired trial and a platform
+            invitation. Read as one screen rather than as a stack of cards, this
+            is not a morning interrupt: nothing in it is holding up somebody's
+            pay or somebody's reply today, and its own deadline is measured in
+            months. It is a fact about the business, so it reads directly under
+            the business — the count above says how many clients there are, and
+            this says who stopped being one and why.
+
+            Renders nothing when there are none and nothing when the read
+            failed: this screen already carries four honest warnings and a fifth
+            saying "we could not check whether anybody left" is noise.
+
+            `readNonce` is threaded in so a pull down this screen re-reads it.
+            The card owns its own state, so without it the gesture refreshed
+            everything around this section and not the section itself — the same
+            gap `CoachRequests` at the top of the screen had.
+
+            ABOVE the `<Rule />` below and not under it, because the component
+            draws its own leading rule. Under it there are two hairlines on a
+            screen where this section renders and, on the far commoner screen
+            where it renders nothing, none at all between This Month and
+            Coaching Tools. */}
+        <UnexplainedDepartures reload={readNonce} />
+
+
+        {/* ── coaching tools ─────────────────────────────────────────────── */}
+        <Section>
+          {/* Shut by default and remembered per phone — see `Fold`. The note is
+              what a shut drawer owes the reader: what is in it, by name, so
+              nobody has to open it to find out whether Broadcast lives here. */}
+          <Fold id="tools" title="Coaching Tools"
+            note="Your code, broadcast, programs, schedule, videos, analytics, leaderboard, referrals, feedback, your own training, and posting a notice.">
+          {/* Seven destinations, and this was a horizontal ScrollView with its
+              indicator hidden — so Analytics, Leaderboard and Feedback sat past
+              the right edge of a phone with nothing on screen saying they were
+              there. The client app's Train tab had the identical fault and hid
+              most of its row; ChipGrid wraps instead. It has to be a plain View
+              to do it: flexWrap is inert inside a horizontal ScrollView, which
+              lays out on one unbounded axis, so this could not be fixed in
+              place. `tone` keeps the coach's icons in brand, as they were.
+              `key` is the route, so two chips sharing a word cannot collide. */}
+          {/* For a coach who works in the room, or one we do not know about,
+              this is the list it has always been. For a coach who has said they
+              work online and has nobody on the book training in person, the
+              in-person tools drop below the rest with the reason on them —
+              DE-EMPHASISED, never removed. `showsInPerson` resolves every
+              unknown to "show everything", so a roster that failed to load or a
+              question nobody answered hides nothing at all. */}
+          <ChipGrid
+            tone={t.brand}
+            items={[
+              ...(showsInPerson(delivery) ? SHORTCUTS : SHORTCUTS.filter((sc) => !IN_PERSON_SHORTCUTS.includes(sc)))
+                .map(([ic, label, route]) => ({
+                  icon: ic, label, key: route, onPress: () => router.push(route as any),
+                })),
+              // The door onto the notice composer, which had none. The sheet at
+              // the bottom of this file — composer, push switch, "Posted
+              // before" list — was complete and `bcOpen` was never set true
+              // anywhere in the repo, so the only way to post a gym-wide notice
+              // was unreachable while `reloadNotices` still paid for a read on
+              // every pull-to-refresh. It is a chip rather than a SHORTCUTS row
+              // because SHORTCUTS is a table of ROUTES and this is a modal on
+              // this screen; giving the table an action arm to hold one entry
+              // would make every other row carry a null.
+              //
+              // Beside Broadcast on purpose: those are the two all-client
+              // tools, and a coach who wants one has usually just considered
+              // the other. The sheet's own copy at the bottom of this file
+              // draws the line — a NOTICE is posted once and read on every
+              // client's dashboard; a MESSAGE lands in each person's thread.
+              {
+                icon: 'info' as IconName,
+                label: 'Post a Notice',
+                key: '/(trainer)/dashboard#post-a-notice',
+                onPress: () => setBcOpen(true),
+              },
+            ]}
+          />
+          {!showsInPerson(delivery) ? (
+            <View style={{ marginTop: sp.lg }}>
+              <SectionHead title="In-Person Tools" />
+              <ChipGrid
+                tone={t.ink3}
+                items={IN_PERSON_SHORTCUTS.map(([ic, label, route]) => ({
+                  icon: ic, label, key: route, onPress: () => router.push(route as any),
+                }))}
+              />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {deliveryNote(delivery)} {HIDDEN_NOT_GONE}
+              </Text>
+            </View>
+          ) : null}
+          </Fold>
         </Section>
 
       </ScrollView>
@@ -3024,6 +3205,19 @@ export default function TrainerClients() {
             <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 4, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta == null ? 'no scans yet' : deltaLabel(weightDeltaIn(sel.weightDelta, coachUnit), { since: null, unit: coachUnit, noChange: 'no change', noBaseline: 'no scans yet' })} · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
 
+              {/* First, not last. It was the final row of a sheet several
+                  screens long, so the profile — where how this person is doing
+                  is actually read — was behind everything a coach might WRITE
+                  about them. The roster opens the profile directly now and this
+                  sheet is reached from it; when it is opened some other way
+                  (a deep link, the Needs Attention draft), this is the way
+                  back to the record. */}
+              <View style={{ marginBottom: sp.xl }}>
+                <ListRow icon="people" title={`Open ${sel.name.split(' ')[0]}`}
+                  note="How they are doing, and the way in to their goals, week, checklist, photos, program, sessions and thread"
+                  onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/client', params: { clientId: id, name: nm } }); }} />
+              </View>
+
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Delivery" />
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
@@ -3034,32 +3228,32 @@ export default function TrainerClients() {
                 </View>
               </View>
 
-              {sel.metrics && Object.values(sel.metrics).some((v) => v != null) ? (
-                <View style={{ marginBottom: sp.xl }}>
-                  <SheetHead t={t} title="Body Composition · latest scan" />
-                  {METRIC_GROUPS.map((g) => {
-                    const items = METRIC_DEFS.filter((d) => d.group === g && sel.metrics && sel.metrics[d.key] != null);
-                    if (!items.length) return null;
-                    return (
-                      <View key={g} style={{ marginBottom: sp.md }}>
-                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 4 }}>{g}</Text>
-                        {items.map((d) => (
-                          <View key={String(d.key)} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
-                            <Text style={{ ...ty.label, color: t.ink2 }}>{d.label}</Text>
-                            <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: t.ink }}>{sel.metrics![d.key]} {d.unit}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    );
-                  })}
-                  {(() => {
-                    const m = sel.metrics!; const out: string[] = [];
-                    const pair = (l?: number, r?: number, name?: string) => { if (l == null || r == null || !l || !r) return; const diff = Math.abs(l - r) / Math.max(l, r); if (diff >= 0.1) out.push(name + ': ' + (l < r ? 'left' : 'right') + ' ' + Math.round(diff * 100) + '% behind'); };
-                    pair(m.leanArmLKg, m.leanArmRKg, 'Arms'); pair(m.leanLegLKg, m.leanLegRKg, 'Legs');
-                    return out.length ? <Flag t={t} tone={t.warn} text={out.join('  ·  ') + ' — cue the weaker side.'} /> : null;
-                  })()}
-                </View>
-              ) : null}
+              {/* ── the body-composition table that stood here ───────────────
+                  "Body Composition · Latest Scan", and a coach reported of it:
+                  "Can't see the updated body scan." It was not the latest scan.
+
+                  The block drew `sel.metrics`, which src/ui/roster.tsx fills by
+                  walking the client's scans newest-first and keeping the first
+                  one that HAS a `metrics` breakdown. Only a photographed InBody
+                  sheet has one — a scan the client types in is stored as
+                  'InBody (manual)' with weight, body fat and muscle and no
+                  `metrics` (app/(client)/scans.tsx) — so after a typed scan
+                  this went on showing the thirteen figures off the sheet
+                  BEFORE it, undated, under the words "latest scan", and the
+                  new scan's own three figures appeared nowhere on the sheet.
+                  `sel` is also a copy of the roster row taken at the tap, so
+                  it could not move while the sheet was open either.
+
+                  Nothing was wrong with what the coach may read: the policy
+                  `scans_trainer_read` asks only whose client the scan belongs
+                  to, never when it was added. The answer was one screen away
+                  and correct — app/(trainer)/client-body.tsx reads every
+                  scan, dated and sourced, typed ones included — so the copy
+                  is gone rather than repaired: a second table here is a second
+                  place to be out of date, and the review asks that a summary
+                  surface not duplicate its detail route. The profile this
+                  sheet is opened from carries the live row into it, saying
+                  when they were last scanned. */}
 
               {/* ── progress photos this client sent ─────────────────────────
                   The ONLY route by which a progress photo reaches a coach. There
@@ -3180,6 +3374,20 @@ export default function TrainerClients() {
                     from the value instead, and tells the four facts apart. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                   {lastActiveLine(sel.lastActive)} What they have actually trained is under What They've Actually Done on their profile.
+                </Text>
+                {/* There IS a Next, and it is read rather than declared — see
+                    `nextBooked`. It was a line on every roster row until the
+                    roster became a catalogue of names; it is said here, once,
+                    for the person the sheet is about. Absent, never dashed,
+                    when the fortnight is empty, and the sentence says which
+                    of "nothing booked" and "could not be read" this is —
+                    these are the COACH's own diary rows, so a blank is never
+                    "they have nothing booked with anybody". */}
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
+                  {nextBooked === null
+                    ? 'Your diary could not be read, so this cannot say when you next see them. That is the read, not an empty book.'
+                    : nextBookedLine(sel.id)
+                      ?? `Nothing booked with you in the next ${BOOKED_AHEAD_DAYS} days — which is not the same as nothing booked with anybody.`}
                 </Text>
               </View>
 
@@ -3533,9 +3741,6 @@ export default function TrainerClients() {
                   when this person was last seen at all. Nothing has been taken
                   away; the same seven screens are one tap further on and one
                   sentence better described. */}
-              <ListRow icon="people" title={`Open ${sel.name.split(' ')[0]}`}
-                note="How they are doing, and the way in to their goals, week, checklist, photos, program, sessions and thread"
-                onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/client', params: { clientId: id, name: nm } }); }} />
 
               {/* Logging a session was FOUR taps from here — this sheet, then
                   Open, then the client screen, then the row on it — and it is
