@@ -1,4 +1,4 @@
-// One exercise, explained.
+// One exercise, explained — and, since the redesign, performed.
 //
 // Reported by a trainer: "when an instructor has not provided a video for the
 // exercise there should be an automation of the exercise being demo'd." Until
@@ -19,7 +19,32 @@
 // back to a stranger's clip. Rule 3 is what this screen adds. Rule 4 is the one
 // that must never be dressed up as rule 3: a placeholder silhouette shown where
 // we have no picture is a lie a client acts on under load.
-import { useEffect, useMemo, useState, useCallback } from 'react';
+//
+// ── The three views (approved board, client pages 4, 5 and 6) ──────────────
+//
+// The board draws this screen three ways and the member moves between them
+// without leaving it:
+//
+//   ready   page 4 — the movement's name, its prescription, the demonstration,
+//           and three round controls: start a set, watch the demo, pick another
+//           movement. Everything else the screen has always carried (the
+//           coach's cue, the quick log row, the member's own trail) sits below
+//           the fold in the same order it always did.
+//   demo    page 5 — the same demonstration over the written steps, the
+//           muscles, the tips and the catalogue's filing.
+//   set     page 6 — a clock as the figure, the movement, "Set n of N", reps
+//           and load as two big boxes, one green Complete Set and a plain Skip.
+//
+// The set view is a tracker, not a second log path: a set completed there is
+// written through the same `logWorkouts` as the row below it, with the same
+// three outcomes said out loud, the same bodyweight and timed flags, the same
+// personal-record guards the guided runner in app/(client)/workouts.tsx uses,
+// and the runner's rest countdown. What it does NOT know is the programme —
+// this screen is opened by a movement's name, so the sets and reps it prints
+// are the ones handed to it on the route (`sets`, `reps`), and when nothing was
+// handed over it says what the member did last time rather than inventing a
+// prescription.
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 // expo-image is required through src/ui/nativeModules.ts, never imported. Its
 // entry point resolves to `requireNativeModule('ExpoImage')`, which THROWS on a
 // binary that predates the dependency — and expo-image landed on 30 Aug, three
@@ -34,8 +59,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, Notice, Ghost, Flag, Cta, fig } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, value } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
@@ -60,7 +85,7 @@ import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 // screen — the one reached from the library, from a demo, from a search — could
 // not log anything at all.
 import { ExerciseTrail } from '../../src/ui/ExerciseHistory';
-import { LogSetRow } from '../../src/ui/LogSetRow';
+import { LogSetRow, SetKindChip, type LoggedSet } from '../../src/ui/LogSetRow';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 import { pickFormClip, sendFormClip, fetchFormClip, deleteFormClip, type FormClip } from '../../src/ui/formClips';
@@ -77,12 +102,36 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
 import { BACK_ICON } from '../../src/ui/direction';
+// ── the tracker's own dependencies ───────────────────────────────────────
+// Every one of these is the same module the guided runner reads, on purpose:
+// the rest clock, the countdown ticks, the estimated 1RM a record is judged on
+// and the coach's notification of it. A second definition of any of them would
+// be a second answer to "what is a personal record", and the runner's own
+// comments explain at length why there must be exactly one.
+import { isWhole } from '../../src/ui/loadStatus';
+import { plain, liftIn, liftLabel, readLift } from '../../src/lib/units';
+import { readHold, setListLabel, isTimedPrescription } from '../../src/lib/timedSets';
+import { est1RM } from '../../src/lib/streaks';
+import { priorBest1RM } from '../../src/lib/progression';
+import { announcePersonalBest } from '../../src/lib/prNotifyStore';
+import { DEFAULT_REST_SEC, restClock, shouldTick } from '../../src/lib/restTimer';
+import { playSound } from '../../src/ui/sounds';
+import { Confetti } from '../../src/ui/Confetti';
+import { injuryFlag } from '../../src/lib/injuries';
+import type { WorkoutEntry } from '../../src/lib/mockData';
 
+/** Which of the board's three drawings of this screen is up. */
+type ExerciseView = 'ready' | 'demo' | 'set';
 
 export default function ExerciseScreen() {
   const t = useTheme();
   const router = useRouter();
-  const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
+  // `sets` and `reps` are the prescription, when the screen that opened this
+  // one had a programme to hand over. They are strings off the route and are
+  // only ever printed or counted — never written into a set. Absent means "no
+  // prescription", not "0 sets", and the screen then says what was done last
+  // time instead.
+  const { name: raw, from, sets: setsParam, reps: repsParam } = useLocalSearchParams<{ name?: string; from?: string; sets?: string; reps?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
   const { detail, display, status, signedOut, reload: reloadDetail } = useExerciseDetail(name);
@@ -219,11 +268,572 @@ export default function ExerciseScreen() {
   );
   const [saving, setSaving] = useState(false);
 
+  // The identity a set is written under: the catalogue's spelling once the
+  // movement has been looked up, and the route's until then.
+  const exName = detail?.name || name;
+
+  /* ── what was done last time ─────────────────────────────────────────────
+     The newest entry of this movement that carries sets, read straight off the
+     log rather than through `exerciseOutings`, and for one reason: an outing
+     prices a bodyweight set at the person's own weight, which is right for a
+     tonnage and wrong for a box the member is about to type a barbell load
+     into. The raw row still carries what was actually typed — the added load
+     and the two flags — and that is what the tracker opens on.
+
+     A prefill is a convenience and not a claim, so a truncated read is allowed
+     to supply one: the set it names was genuinely done. What it is never used
+     for is a figure on the page — "Set n of N" comes from the route or from
+     nothing. */
+  const lastEntry = useMemo(() => {
+    if (!slug) return null;
+    let newest: WorkoutEntry | null = null;
+    for (const e of log) {
+      if (!e.sets?.length || exerciseSlug(e.exercise) !== slug) continue;
+      if (!newest || e.t > newest.t) newest = e;
+    }
+    return newest;
+  }, [log, slug]);
+  const lastSets = lastEntry ? setListLabel(lastEntry, (kg) => fig(liftIn(kg, wu)), wu) : null;
+
+  /* ── the prescription, if one arrived ────────────────────────────────────
+     Counted only when it is a positive whole number; "3 sets" is a promise the
+     page makes about the programme, and a route carrying "abc" or "0" has not
+     made it. `reps` is left as the coach wrote it — "8-12", "AMRAP", "45 sec"
+     — because rewriting it is how a hold became forty-five repetitions once
+     already (src/lib/timedSets.ts). */
+  const plannedSets = (() => { const n = parseInt((setsParam || '').trim(), 10); return Number.isFinite(n) && n > 0 ? n : null; })();
+  const plannedReps = (repsParam || '').trim() || null;
+  const prescription = plannedSets && plannedReps
+    ? `${plannedSets} set${plannedSets === 1 ? '' : 's'} × ${plannedReps}${isTimedPrescription(plannedReps) ? '' : ' reps'}`
+    : plannedSets
+      ? `${plannedSets} set${plannedSets === 1 ? '' : 's'}`
+      : lastSets
+        ? `Last time · ${lastSets}`
+        : [detail?.group, detail?.equipment].filter((x): x is string => !!x).map(cap).join(' · ') || null;
+
+  /* ── the set tracker (board page 6) ──────────────────────────────────────
+     Two clocks share one figure. While a set is being done it counts UP from
+     the moment Start (or the previous rest ending) was pressed; once a set is
+     completed it counts DOWN the rest, and when that reaches zero the next
+     set's clock starts on its own. Both are wall-clock instants held in refs
+     and read by one interval, exactly as the runner does it, so a phone that
+     goes in a pocket comes back showing the truth rather than however many
+     ticks JavaScript was allowed. */
+  const [view, setView] = useState<ExerciseView>('ready');
+  const [setNo, setSetNo] = useState(1);
+  const [repsText, setRepsText] = useState('');
+  const [loadText, setLoadText] = useState('');
+  const [bwOn, setBwOn] = useState(false);
+  const [timedOn, setTimedOn] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [rest, setRest] = useState(0);
+  const setStartedAt = useRef<number | null>(null);
+  const restEndsAt = useRef<number | null>(null);
+  const prevLeft = useRef<number | null>(null);
+  // The loaded, repped sets completed on THIS visit. A record is judged against
+  // the whole history AND against these, because a set we watched happen a
+  // minute ago is part of what "best ever" means even before the write lands.
+  const doneHere = useRef<{ reps: number; kg: number }[]>([]);
+  const [prMsg, setPrMsg] = useState<string | null>(null);
+  const [confetti, setConfetti] = useState(false);
+  const inSet = view === 'set';
+  const pastPlan = plannedSets != null && setNo > plannedSets;
+
+  useEffect(() => {
+    if (!inSet) return;
+    const id = setInterval(() => {
+      const now = Date.now();
+      const end = restEndsAt.current;
+      if (end != null) {
+        const left = Math.max(0, Math.ceil((end - now) / 1000));
+        // Fired on the TRANSITION and tracked in refs, for the runner's reason:
+        // a haptic and a chime are side effects that must happen exactly as
+        // often as the thing they announce, and an interval reads the same
+        // second more than once. playSound refuses on its own when the member
+        // has the sound switched off, so nothing here reads the preference.
+        if (left === 0) {
+          restEndsAt.current = null;
+          prevLeft.current = null;
+          tapLight();
+          playSound('restOver');
+          // The next set's clock starts as the rest ends — the member is
+          // looking at the bar, not at a Start button.
+          setStartedAt.current = now;
+          setElapsed(0);
+        } else if (shouldTick(left, prevLeft.current)) {
+          playSound('countdown');
+        }
+        prevLeft.current = left;
+        setRest(left);
+        return;
+      }
+      const from = setStartedAt.current;
+      setElapsed(from == null ? 0 : Math.floor((now - from) / 1000));
+    }, 500);
+    return () => clearInterval(id);
+  }, [inSet]);
+
+  /** Open set `i` (0-based) on what the same set held last time, if it was done. */
+  const prefill = (i: number) => {
+    const s = lastEntry?.sets?.[i];
+    if (!lastEntry || !s) return;
+    setRepsText(String(Number(s[0]) || ''));
+    // A load that was never written down stays an empty box, not a 0 kg lift:
+    // the third state is carried as null until the box is drawn.
+    const kg = s[1] == null ? null : Number(s[1]);
+    const shown = kg != null && Number.isFinite(kg) && kg > 0 ? liftIn(kg, wu) : null;
+    setLoadText(shown != null ? plain(shown) : '');
+    setBwOn(!!lastEntry.bw?.[i]);
+    setTimedOn(!!lastEntry.timed?.[i]);
+  };
+  const startSets = () => {
+    setSetNo(1);
+    doneHere.current = [];
+    setPrMsg(null);
+    restEndsAt.current = null; prevLeft.current = null; setRest(0);
+    setStartedAt.current = Date.now(); setElapsed(0);
+    prefill(0);
+    setView('set');
+    tapLight();
+  };
+  const leaveSets = () => {
+    setStartedAt.current = null; restEndsAt.current = null; prevLeft.current = null;
+    setRest(0);
+    setView('ready');
+  };
+  const skipRest = () => {
+    restEndsAt.current = null; prevLeft.current = null; setRest(0);
+    setStartedAt.current = Date.now(); setElapsed(0);
+  };
+  /** Move to the next set, resting first when a set was actually done. */
+  const advance = (afterASet: boolean) => {
+    const next = setNo + 1;
+    setSetNo(next);
+    prefill(next - 1);
+    // No rest after the last prescribed set — there is nothing to rest for,
+    // and a countdown under "Finish" is a countdown to nothing.
+    if (afterASet && !(plannedSets != null && next > plannedSets)) {
+      restEndsAt.current = Date.now() + DEFAULT_REST_SEC * 1000;
+      prevLeft.current = null;
+      setRest(DEFAULT_REST_SEC);
+      setStartedAt.current = null; setElapsed(0);
+    } else {
+      restEndsAt.current = null; prevLeft.current = null; setRest(0);
+      setStartedAt.current = Date.now(); setElapsed(0);
+    }
+  };
+
+  /* ── one set, written ────────────────────────────────────────────────────
+     Shared by the quick row below the fold and the tracker's Complete Set, so
+     the two cannot drift on what "saved" means. It writes through the same
+     provider Train does, so a set logged here is the same row, on the same
+     timestamp discipline, with the same three outcomes said out loud — a set
+     the server refused is not in anybody's log and must never be reported as
+     one. */
+  const logOne = async (set: LoggedSet): Promise<'stored' | 'unsent' | 'refused' | 'busy'> => {
+    if (saving) return 'busy';
+    setSaving(true);
+    try {
+      const at = new Date().toISOString();
+      const out = await logWorkouts([{
+        t: at,
+        exercise: exName,
+        sets: [[set.value, set.kg ?? 0]],
+        ...(set.bw ? { bw: [true] } : {}),
+        ...(set.timed ? { timed: [true] } : {}),
+      }]);
+      if (out === 'stored') {
+        tapLight();
+        // Offered only after the set is actually on the server.
+        // A clip attached to a set that is still queued would
+        // have no row to hang off.
+        setClipFor({ t: at, exercise: exName });
+        setClipNote('');
+        setClipSaid(null);
+        // And the clip held from the PREVIOUS set, or the Delete
+        // control below would still be pointing at it. `clipSent`
+        // is a row, not a flag: `deleteFormClip(clipSent)` acts on
+        // whichever (workout_id, set_index) is in it, so leaving
+        // last set's row here put a "Delete It" button under the
+        // block that has just been opened for a NEW set — and
+        // pressing it deleted the earlier set's clip while the
+        // screen said "Deleted" about this one. A destructive
+        // control must never outlive the thing it was built for.
+        setClipSent(null);
+        return 'stored';
+      }
+      if (out === 'unsent') {
+        Alert.alert('Saved on this phone',
+          'No connection, so this set has not reached your training log yet — nothing is lost. It is saved here and goes up on its own next time you have signal.');
+        return 'unsent';
+      }
+      Alert.alert('Not saved',
+        'Your training log rejected this set, so it has not been recorded and it is not waiting to send.');
+      return 'refused';
+    } finally { setSaving(false); }
+  };
+
+  /* ── a personal record, judged the runner's way ──────────────────────────
+     Zero for a bodyweight set, on purpose: `priorBest1RM` reads a set's second
+     number as the load, so a whole history of pull-ups reads there as zeros
+     and a real bodyweight load compared against it would fire "New PR!" on
+     every set of every calisthenics session forever. Never for a hold either —
+     Epley over seconds is a strength figure computed from a stopwatch.
+
+     And only when the WHOLE history was read. `priorBest1RM` over an unread
+     log returns 0, and every set beats 0, so a failed read would turn the first
+     set into a record with confetti, mid-workout, in front of a coach. Under
+     'partial' the record it is compared against may be in the half that did
+     not arrive. The coach is told from inside the same branch so every guard
+     is inherited by the notification for free — see the runner for why that
+     placement is the whole design. */
+  const checkRecord = (set: LoggedSet) => {
+    const wkg = set.kg ?? 0;
+    const r = set.value;
+    if (!wkg || !r || set.bw || set.timed) return;
+    const newE1 = est1RM(wkg, r);
+    const historyWhole = isWhole(logStatus);
+    const priorBest = Math.max(
+      historyWhole ? priorBest1RM(log, exName) : 0,
+      ...doneHere.current.map((s) => est1RM(s.kg, s.reps)),
+      0,
+    );
+    if (historyWhole && newE1 > 0 && newE1 > priorBest) {
+      // `wkg` is a positive finite load here, so `liftLabel` has a figure for it;
+      // the guard is for the type, not for a dash in a sentence.
+      const lifted = liftLabel(wkg, wu);
+      setPrMsg(lifted ? `New PR on ${exName}! ${lifted} × ${r}` : `New PR on ${exName}!`);
+      setConfetti(true);
+      void announcePersonalBest(
+        cd.trainerId,
+        cd.id === 'unknown' ? null : cd.id,
+        { movement: exName, kg: wkg, reps: r },
+        cd.profileStatus === 'ready' ? cd.name : null,
+      );
+    }
+    doneHere.current.push({ reps: r, kg: wkg });
+  };
+
+  /* ── Complete Set ────────────────────────────────────────────────────────
+     The reps check, `readHold` and `readLift` are the ones LogSetRow applies,
+     in the same words, so a hold or a load this screen accepts in the row it
+     also accepts in the tracker. LogSetRow's own header explains why a third
+     copy of these guards is a risk; it is taken here because the board's two
+     big boxes cannot be that row, and the guards themselves live in pure
+     modules the row and this share. */
+  const completeSet = async () => {
+    let v: number;
+    if (timedOn) {
+      const held = readHold(repsText);
+      if (!held.ok) { Alert.alert('How long was the hold?', held.reason); return; }
+      v = held.secs;
+    } else {
+      const r = parseInt(repsText, 10);
+      if (!Number.isFinite(r) || r <= 0) {
+        Alert.alert('How many reps?', `Type the reps you did before completing the set. The ${wu} box can stay empty for a bodyweight set.`);
+        return;
+      }
+      v = r;
+    }
+    const read = readLift(loadText, wu);
+    // Left in the box on a refusal, with the reason said, rather than cleared
+    // — the number was typed once and the app has no better guess.
+    if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
+    // An empty load box IS a bodyweight set. Recorded rather than inferred
+    // later: a stored 0 cannot be told apart from a load nobody typed.
+    const set: LoggedSet = { value: v, kg: read.kg, bw: bwOn || read.kg == null, timed: timedOn };
+    const out = await logOne(set);
+    // A queued set was done and is on the phone; a refused one was not
+    // recorded anywhere and the tracker stays on it.
+    if (out === 'stored' || out === 'unsent') { checkRecord(set); advance(true); }
+  };
 
   const G = layout.gutter;
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
     .filter((x): x is string => !!x)
     .map(cap);
+
+  /* ── the demonstration ─────────────────────────────────────────────────── */
+  const demonstration = status === 'loading' ? (
+    <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
+      <ActivityIndicator />
+      <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Looking this movement up…</Text>
+    </View>
+  ) : status === 'error' ? (
+    <Notice tone={t.warn} kicker="Exercise" title="This could not be read"
+      note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
+  ) : clip ? (
+    <ExerciseVideo video={clip} exerciseName={exName} />
+  ) : animUrl ? (
+    <>
+      <DemoAnimation uri={animUrl} label={exName}
+        // The stills, so the box is never empty while 1.6 MB of clip is on
+        // its way, and so a clip that never arrives lands on the picture we
+        // already had rather than on a hole.
+        stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
+      {detail?.demoLicence !== 'commercial' ? (
+        <View style={{ marginTop: sp.sm }}>
+          <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+        </View>
+      ) : null}
+    </>
+  ) : frames.length ? (
+    <>
+      <FrameLoop urls={frames} label={exName} />
+      {caption ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{caption}</Text>
+      ) : null}
+      {/* Beside the artwork, not two screens away. The licence asks for
+          one visible credit and the Credits card in settings is it; this
+          costs a line and is worth more where somebody is looking. */}
+      {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
+    </>
+  ) : equipmentUrl ? (
+    // A handful of catalogue rows name a machine rather than a movement
+    // — Cable Machine, Ski Erg, Smith Machine — so there is no
+    // illustration of "performing" them and never will be. A picture of
+    // the kit is the useful thing to show, kept visibly apart from a
+    // demonstration: still, not cross-faded, and captioned as equipment.
+    <>
+      <GuardedImage
+        source={{ uri: equipmentUrl }}
+        contentFit="contain"
+        cachePolicy="disk"
+        accessibilityLabel={`${exName}, equipment`}
+        style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
+      />
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+        The equipment, not a demonstration — this is a machine rather than a movement.
+      </Text>
+      {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
+    </>
+  ) : (
+    // No clip and no frames. Said plainly, with the one action that
+    // actually changes it, rather than a grey silhouette implying a
+    // demonstration we do not have.
+    <Notice tone={t.ink3} kicker="Demonstration"
+      // Sentence case. A <Notice title> is a sentence, not a label — it
+      // renders at ty.head with no transform, and every other one in
+      // app/(client) is written as prose, including the one on line 108
+      // of this same file ("This could not be read"). With no clip and no
+      // grant anywhere on the platform, this branch is the most-read
+      // string in the product, and it was the only Title-Cased sentence
+      // among them.
+      title={videoStatus === 'loading' ? 'Looking for a clip…'
+        : videoStatus === 'error' ? 'We couldn’t check for a clip'
+        // 'partial' used to fall through to "No demonstration yet", which
+        // is the same false claim the error arm below exists to refuse,
+        // reached from a read that succeeded. The log half of this very
+        // file already carries the third arm — see logStatus === 'partial'
+        // further down — and the video half did not.
+        : videoStatus === 'partial' ? 'We couldn’t check the whole library'
+        : detail ? 'No demonstration yet' : signedOut ? 'Sign in to see this' : 'Not in our catalogue'}
+      note={videoStatus === 'loading'
+        ? 'Your coach’s video library is still being read.'
+        : videoStatus === 'error'
+        // "Nobody has filmed this" is a claim about the coach's library,
+        // and a failed read of that library is not evidence for it.
+        ? 'Your coach’s video library could not be read, so we cannot say whether there is a clip for this movement. There may well be one. The written guide is unaffected.'
+        : videoStatus === 'partial'
+        // A truncated read is not evidence for it either: the clip may be
+        // one row past where the read stopped.
+        ? 'There are more clips in your coach’s library than we can read at once, and none of the ones we read were for this movement. That is not a statement that nobody has filmed it. The written guide is unaffected.'
+        : detail
+        ? 'Nobody has filmed this movement and the catalogue has no reference frames for it. Your coach can add a clip from their app.'
+        // Not "this movement is not in our catalogue" — that is a claim
+        // about our data, and while signed out we have not been allowed
+        // to look. The catalogue reads `to authenticated`, so a
+        // signed-out session is handed zero rows with no error, which is
+        // indistinguishable from an absent movement unless we say so.
+        : signedOut
+          ? 'The exercise library is only available once you are signed in, so this screen could not look this movement up. It is very likely in there.'
+          : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your program, ask them how they want it done.'} />
+  );
+
+  /* ── what your coach says about this one ─────────────────────────────────
+     Drawn only when there IS a cue. Absence is silent on purpose:
+     a member whose coach has written none, and a member whose gym has
+     not had this switched on, are owed no sentence about a feature
+     that is not theirs to use — and any sentence here would be a claim
+     about their coach made from an empty answer. A read that FAILED is
+     different and does say so, because the alternative is a member
+     standing at the machine who is not shown the one thing their coach
+     wanted them to remember and has no way to know. */
+  const cueBlock = coachCue ? (
+    <View style={{ marginTop: sp.lg, padding: sp.lg, borderRadius: radius.md, backgroundColor: t.surface2 }}>
+      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>From your coach</Text>
+      <Text style={{ ...ty.body, color: t.ink }} accessibilityLabel={`From your coach: ${coachCue}`}>{coachCue}</Text>
+    </View>
+  ) : cueFailed ? (
+    <View style={{ marginTop: sp.lg }}>
+      <Flag tone={t.ink3}>
+        Your coach’s note for this movement could not be read just now. That is not a record that they have not
+        written one — pull down to try again.
+      </Flag>
+    </View>
+  ) : null;
+
+  /* ── the injury caution, the runner's way ────────────────────────────────
+     `cd.injuries` is `[]` under a failed read as well as under a member who
+     has disclosed nothing, so no caution here would mean two different things
+     and only one of them is "this movement is fine for you". The three arms
+     are drawn apart for that reason. `isWhole`, not `!== 'error'`: 'partial'
+     is an unread list, and half an injury list is not a softer thing. */
+  const injuryLine = !isWhole(cd.profileStatus) ? (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: sp.md }}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cd.profileStatus === 'loading' ? t.ink3 : t.crit, marginTop: 5 }} />
+      <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+        {cd.profileStatus === 'loading'
+          ? 'Still reading what you have disclosed — this movement has not been checked against your injuries yet.'
+          : 'Your injuries could not be read, so this movement has not been checked against them. Go easy if something is hurt.'}
+      </Text>
+    </View>
+  ) : (() => {
+    const f = injuryFlag(exName, detail?.group ?? '', cd.injuries);
+    return f ? (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
+        <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{f.reason}. Ease off, keep it pain-free, or pick another movement.</Text>
+      </View>
+    ) : null;
+  })();
+
+  /* ── send your coach a clip of that set ──────────────────────────────────
+     The consent sentence is shown BEFORE the camera opens, not
+     after the upload: consent that arrives once the file exists
+     is not consent. src/lib/formCheck.ts owns it, and the
+     storage policies in supabase/parts/2617 are what make it
+     true. Rendered under whichever control logged the set. */
+  const clipOffer = clipFor ? (
+    <View style={{ marginTop: sp.lg, padding: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
+      {(() => {
+        const stop = clipRefusal({
+          hasCoach: !!cd.trainerId,
+          setExists: !!clipWorkoutId,
+        });
+        // A set still being saved is not a member without a coach,
+        // and the two must not share a sentence.
+        if (stop === 'no-set') {
+          return <Text style={{ ...ty.label, color: t.ink3 }}>Saving that set… the form check appears once it lands.</Text>;
+        }
+        if (stop) {
+          return <Text style={{ ...ty.label, color: t.ink3 }}>{clipRefusalLine(stop)}</Text>;
+        }
+        return (<>
+          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>Send your coach a form check</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{MEMBER_CONSENT_NOTE}</Text>
+          <TextInput
+            value={clipNote}
+            onChangeText={setClipNote}
+            placeholder="What do you want them to look at?"
+            placeholderTextColor={t.ink3}
+            accessibilityLabel="What to ask your coach about this set"
+            style={{ ...ty.body, color: t.ink, backgroundColor: t.surface, borderRadius: radius.sm, padding: sp.md, marginTop: sp.md }}
+          />
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
+            {(['camera', 'library'] as const).map((src) => (
+              <Ghost
+                key={src}
+                // `clipBusy` was set on the way in and cleared on the
+                // way out and NOTHING read it, so the only thing a
+                // second press met was the silent `return` at the top
+                // of the handler. A clip is megabytes over gym wifi:
+                // for those seconds both buttons looked live and did
+                // nothing at all. `disabled` refuses the press, drops
+                // the fill and announces the state, and the line
+                // below says which of the two things is happening —
+                // relabelling both buttons "Sending…" would have said
+                // it twice and named neither.
+                disabled={clipBusy}
+                label={src === 'camera' ? 'Film It' : 'Choose a Clip'}
+                a11yLabel={src === 'camera' ? 'Film this set now' : 'Choose a clip already on this phone'}
+                onPress={async () => {
+                  if (clipBusy || !clipWorkoutId) return;
+                  setClipBusy(true); setClipSaid(null);
+                  try {
+                    const picked = await pickFormClip(src);
+                    if (picked.error) { setClipSaid(picked.error); return; }
+                    if (!picked.clip) return;
+                    const out = await sendFormClip({
+                      memberId: cd.id === 'unknown' ? '' : cd.id,
+                      workoutId: clipWorkoutId,
+                      setIndex: 0,
+                      clip: picked.clip,
+                      note: clipNote,
+                      hasCoach: !!cd.trainerId,
+                    });
+                    setClipSaid(out.ok
+                      ? 'Sent. Your coach sees it against this set.'
+                      : out.error);
+                    if (out.ok) {
+                      setClipNote('');
+                      // Read back rather than assumed: the row is
+                      // what the coach sees, so the control that
+                      // removes it is built from the row that
+                      // actually exists.
+                      setClipSent(await fetchFormClip(clipWorkoutId, 0));
+                    }
+                  } finally { setClipBusy(false); }
+                }}
+              />
+            ))}
+          </View>
+          {clipBusy ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>Sending your clip…</Text>
+          ) : clipSaid ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{clipSaid}</Text>
+          ) : null}
+          {clipSent ? (
+            <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+              <Ghost
+                label="Delete It"
+                a11yLabel="Delete the clip you sent your coach"
+                onPress={() => {
+                  Alert.alert(
+                    'Delete this clip?',
+                    'It goes from your coach’s screen and from this app. Deleting it is final — there is no copy anywhere else.',
+                    [
+                      { text: 'Keep it', style: 'cancel' },
+                      { text: 'Delete', style: 'destructive', onPress: async () => {
+                        const gone = await deleteFormClip(clipSent);
+                        // `deleteFormClip` counts the rows, so a
+                        // delete that matched nothing says so
+                        // rather than reporting success over a
+                        // video that is still there.
+                        setClipSaid(gone.ok ? 'Deleted. Your coach can no longer see it.' : gone.error);
+                        if (gone.ok) setClipSent(null);
+                      } },
+                    ],
+                  );
+                }}
+              />
+            </View>
+          ) : null}
+        </>);
+      })()}
+    </View>
+  ) : null;
+
+  // Sets on this phone that the server has not taken. They are
+  // not lost and they are not in the log a coach reads, and only
+  // one of those two is obvious from looking at the screen.
+  const unsentLine = unsentNote(unsentSets, 'set') ? (
+    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unsentNote(unsentSets, 'set')}</Text>
+  ) : null;
+
+  /* ── the board's header: a round back control, the title centred ─────────
+     The trailing 38pt is the width of the back control, so the title is
+     centred on the page and not on what is left of it. */
+  const nav = (title: string, onBack: () => void, backLabel: string) => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+      <Ghost icon={BACK_ICON} a11yLabel={backLabel} onPress={onBack} />
+      <Text accessibilityRole="header" numberOfLines={2}
+        style={{ ...ty.head, color: t.ink, flex: 1, textAlign: 'center' }}>{title}</Text>
+      <View style={{ width: 38 }} />
+    </View>
+  );
+
+  const shownName = display?.name.text || exName || 'Exercise';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -241,514 +851,377 @@ export default function ExerciseScreen() {
         automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive"
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
-            <Icon name={BACK_ICON} size={20} color={t.ink} />
-          </Pressable>
-          {/* The reader's own language where the catalogue has it, English
-              where it does not — and `display.note` below says which, so an
-              English name among German ones is never passed off as the German
-              one. The identity is still `name`: that is what this screen was
-              opened with and what a logged set is written under. */}
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
-        </View>
-        {display?.note ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>
-        ) : null}
-
-        {/* ── what your coach says about this one ────────────────────────
-            Drawn only when there IS a cue. Absence is silent on purpose:
-            a member whose coach has written none, and a member whose gym has
-            not had this switched on, are owed no sentence about a feature
-            that is not theirs to use — and any sentence here would be a claim
-            about their coach made from an empty answer. A read that FAILED is
-            different and does say so, because the alternative is a member
-            standing at the machine who is not shown the one thing their coach
-            wanted them to remember and has no way to know. */}
-        {coachCue ? (
-          <View style={{ marginBottom: sp.lg, padding: sp.lg, borderRadius: radius.md, backgroundColor: t.surface2 }}>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>From your coach</Text>
-            <Text style={{ ...ty.body, color: t.ink }} accessibilityLabel={`From your coach: ${coachCue}`}>{coachCue}</Text>
-          </View>
-        ) : cueFailed ? (
-          <View style={{ marginBottom: sp.lg }}>
-            <Flag tone={t.ink3}>
-              Your coach’s note for this movement could not be read just now. That is not a record that they have not
-              written one — pull down to try again.
-            </Flag>
-          </View>
-        ) : null}
-
-        {/* ── the demonstration ─────────────────────────────────────────── */}
-        {status === 'loading' ? (
-          <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
-            <ActivityIndicator />
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Looking this movement up…</Text>
-          </View>
-        ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Exercise" title="This could not be read"
-            note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
-        ) : clip ? (
-          <ExerciseVideo video={clip} exerciseName={detail?.name || name} />
-        ) : animUrl ? (
+        {view === 'set' ? (
+          /* ── page 6: Workout Tracking ─────────────────────────────────── */
           <>
-            <DemoAnimation uri={animUrl} label={detail?.name || name}
-              // The stills, so the box is never empty while 1.6 MB of clip is on
-              // its way, and so a clip that never arrives lands on the picture we
-              // already had rather than on a hole.
-              stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
-            {detail?.demoLicence !== 'commercial' ? (
-              <View style={{ marginTop: sp.sm }}>
-                <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+            {nav('Workout Tracking', leaveSets, 'Back to the exercise')}
+            {/* The clock is the figure. One Text, one spoken sentence, and
+                which clock it is said in words above the digits — a resting
+                member and a working member are looking at the same digits. */}
+            <View accessible accessibilityLabel={`${rest > 0 ? 'Rest' : 'Set'} ${restClock(rest > 0 ? rest : elapsed)}`}
+              style={{ alignItems: 'center', marginTop: sp.xl }}>
+              <Text style={{ ...ty.micro, color: rest > 0 ? t.brand : t.ink3 }}>{rest > 0 ? 'Rest' : 'Set'}</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(56), color: t.ink, marginTop: sp.xs }}>
+                {restClock(rest > 0 ? rest : elapsed)}
+              </Text>
+            </View>
+            {rest > 0 ? (
+              <View style={{ alignItems: 'center' }}>
+                {/* Whose number this is. Nobody has set a rest for a movement
+                    opened by name, so the fallback names itself rather than
+                    borrowing a coach's authority. */}
+                <Text style={{ ...ty.caption, color: t.ink3 }}>App default of {DEFAULT_REST_SEC} seconds</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={skipRest}
+                  hitSlop={8} style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md }}>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Skip rest</Text>
+                </Pressable>
               </View>
             ) : null}
-          </>
-        ) : frames.length ? (
-          <>
-            <FrameLoop urls={frames} label={detail?.name || name} />
-            {caption ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{caption}</Text>
-            ) : null}
-            {/* Beside the artwork, not two screens away. The licence asks for
-                one visible credit and the Credits card in settings is it; this
-                costs a line and is worth more where somebody is looking. */}
-            {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
-          </>
-        ) : equipmentUrl ? (
-          // A handful of catalogue rows name a machine rather than a movement
-          // — Cable Machine, Ski Erg, Smith Machine — so there is no
-          // illustration of "performing" them and never will be. A picture of
-          // the kit is the useful thing to show, kept visibly apart from a
-          // demonstration: still, not cross-faded, and captioned as equipment.
-          <>
-            <GuardedImage
-              source={{ uri: equipmentUrl }}
-              contentFit="contain"
-              cachePolicy="disk"
-              accessibilityLabel={`${detail?.name || name}, equipment`}
-              style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
-            />
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
-              The equipment, not a demonstration — this is a machine rather than a movement.
+            <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.lg }}>{shownName}</Text>
+            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
+              {pastPlan
+                ? `All ${plannedSets} sets done`
+                : plannedSets != null ? `Set ${setNo} of ${plannedSets}` : `Set ${setNo}`}
             </Text>
-            {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
+
+            {/* Reps and load as the two figures. They are boxes, not labels,
+                because they are what gets written: a figure a member cannot
+                correct is a figure they will log wrong rather than not log. */}
+            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.xl }}>
+              <Section style={{ flex: 1, marginTop: 0, alignItems: 'center' }}>
+                <TextInput
+                  value={repsText}
+                  onChangeText={setRepsText}
+                  keyboardType="numeric"
+                  placeholder={fig(null)}
+                  placeholderTextColor={t.ink3}
+                  accessibilityLabel={timedOn ? 'How long you held it, in seconds' : 'How many reps you did'}
+                  style={{ ...value(34), color: t.ink, textAlign: 'center', minWidth: 64, padding: 0 }}
+                />
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{timedOn ? 'Seconds' : 'Reps'}</Text>
+              </Section>
+              <Section style={{ flex: 1, marginTop: 0, alignItems: 'center' }}>
+                <TextInput
+                  value={loadText}
+                  onChangeText={setLoadText}
+                  keyboardType="decimal-pad"
+                  placeholder={fig(null)}
+                  placeholderTextColor={t.ink3}
+                  accessibilityLabel={bwOn
+                    ? (wu === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight')
+                    : (wu === 'kg' ? 'Load in kilograms' : 'Load in pounds')}
+                  style={{ ...value(34), color: t.ink, textAlign: 'center', minWidth: 64, padding: 0 }}
+                />
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{bwOn ? `Added ${wu}` : wu}</Text>
+              </Section>
+            </View>
+            {/* The same two answers about a set, in the same words, as the
+                row below the fold and the runner — one drawing of the
+                control, three keyboards. */}
+            <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <SetKindChip
+                t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)}
+                label="Bodyweight set"
+                onLabel={`Bodyweight set — the box is what you added, in ${wu}`}
+                a11yHint={bwOn
+                  ? `The box holds what you added on top of your own weight, in ${wu}. Turn this off for a set on a bar or a machine.`
+                  : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'}
+              />
+              <SetKindChip
+                t={t} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
+                label="Timed set"
+                onLabel="Timed set — the first box is seconds held"
+                a11yHint={timedOn
+                  ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
+                  : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'}
+              />
+            </View>
+
+            <View style={{ marginTop: sp.xl }}>
+              {pastPlan ? (
+                <Cta wide label="Finish" a11yLabel="Finish, back to the exercise" onPress={leaveSets} />
+              ) : (
+                <Cta wide label="Complete Set" disabled={saving}
+                  a11yLabel={`Complete set ${setNo}${plannedSets != null ? ` of ${plannedSets}` : ''}`}
+                  onPress={() => { void completeSet(); }} />
+              )}
+            </View>
+            {!pastPlan ? (
+              // Plain, under the green one, as the board draws it. Nothing is
+              // written by a skip, so nothing is asked first; it moves the
+              // count on and starts the next set's clock.
+              <Pressable accessibilityRole="button" accessibilityLabel={`Skip set ${setNo}`} onPress={() => advance(false)}
+                style={{ alignSelf: 'stretch', alignItems: 'center', paddingVertical: sp.md, marginTop: sp.sm, minHeight: 44, justifyContent: 'center' }}>
+                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Skip</Text>
+              </Pressable>
+            ) : null}
+
+            {prMsg ? (
+              <View style={{ marginTop: sp.md }}>
+                <Flag tone={t.brand}>{prMsg}</Flag>
+              </View>
+            ) : null}
+            {injuryLine}
+            {cueBlock}
+            {clipOffer}
+            {unsentLine}
+          </>
+        ) : view === 'demo' ? (
+          /* ── page 5: Exercise Demo ────────────────────────────────────── */
+          <>
+            {nav('Exercise Demo', () => setView('ready'), 'Back to the exercise')}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.title, color: t.ink }}>{shownName}</Text>
+                {prescription ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 2 }}>{prescription}</Text> : null}
+              </View>
+              <Ghost icon="dumbbell" a11yLabel="Start a set" onPress={startSets} />
+            </View>
+            {display?.note ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{display.note}</Text>
+            ) : null}
+            <View style={{ marginTop: sp.lg }}>{demonstration}</View>
+            {FRAMES_ARE_UNHOSTED && frames.length ? (
+              <View style={{ marginTop: sp.sm }}>
+                <Flag tone={t.warn}>Reference frames are served from the source dataset — not for release.</Flag>
+              </View>
+            ) : null}
+
+            {/* ── what it is ──────────────────────────────────────────────── */}
+            {detail ? (
+              <>
+                {/* The steps lead, as the board's page 5 has them, and the
+                    description sits with the chips underneath: somebody who has
+                    just pressed "demo" wants the sequence, and the sentence
+                    saying what the movement IS is still here for the person
+                    who does not know it. */}
+                {detail.instructions.length ? (
+                  <Section>
+                    <SectionHead title="Instructions" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
+                    {detail.instructions.map((step, n) => (
+                      <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
+                        <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
+                        <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
+                      </View>
+                    ))}
+                  </Section>
+                ) : status === 'ready' ? (
+                  <Section>
+                    <SectionHead title="Instructions" />
+                    {/* 41 of the original rows carry no instructions because nobody
+                        has confirmed which catalogue movement they are. Saying so
+                        is the point — an empty section would read as an app that
+                        forgot to render, not as a gap we know about. */}
+                    <Text style={{ ...ty.label, color: t.ink3 }}>
+                      No written steps for this one yet.
+                    </Text>
+                  </Section>
+                ) : null}
+
+                {/* ── coaching cues ────────────────────────────────────────
+                    Kept apart from the numbered steps rather than appended to them. A
+                    client following the sequence needs it in order; a client who
+                    already knows the movement wants the cue, and a cue buried at step
+                    six is a cue they have stopped reading before they reach. */}
+                {detail.tips.length ? (
+                  <Section>
+                    <SectionHead title="Tips" note={`${detail.tips.length}`} />
+                    {detail.tips.map((tip, n) => (
+                      <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.sm }}>
+                        <Text style={{ ...ty.body, color: t.brand }}>·</Text>
+                        <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{tip}</Text>
+                      </View>
+                    ))}
+                  </Section>
+                ) : null}
+
+                {detail.primaryMuscles.length || detail.secondaryMuscles.length ? (
+                  <Section>
+                    <SectionHead title="Muscles Worked" />
+                    {detail.primaryMuscles.length ? (
+                      <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
+                        <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
+                      </Text>
+                    ) : null}
+                    {detail.secondaryMuscles.length ? (
+                      <Text style={{ ...ty.body, color: t.ink2 }}>
+                        <Text style={{ fontWeight: '600' }}>Also: </Text>{detail.secondaryMuscles.map(cap).join(', ')}
+                      </Text>
+                    ) : null}
+                  </Section>
+                ) : null}
+
+                {/* The description — the one thing the original request asked
+                    for that the previous dataset had no field for at all — over
+                    the attribute chips. */}
+                <Section>
+                  {display?.description ? (
+                    <Text style={{ ...ty.body, color: t.ink, marginBottom: sp.md }}>{display.description.text}</Text>
+                  ) : null}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                    {detail.group ? (
+                      <View style={{ backgroundColor: t.brand, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
+                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{detail.group}</Text>
+                      </View>
+                    ) : null}
+                    {chips.map((c) => (
+                      <View key={c} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
+                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{c}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </Section>
+
+                {/* What the movement is FOR, and how it is filed. Last, because it is
+                    the least useful thing to somebody standing in front of the bar. */}
+                {detail.goals.length || detail.tags.length ? (
+                  <Section>
+                    {detail.goals.length ? (
+                      <>
+                        <SectionHead title="Good For" />
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: detail.tags.length ? sp.lg : 0 }}>
+                          {detail.goals.map((g) => (
+                            <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
+                              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{cap(g)}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </>
+                    ) : null}
+                    {detail.tags.length ? (
+                      <>
+                        <SectionHead title="Tags" />
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                          {detail.tags.map((g) => (
+                            <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
+                              <Text style={{ ...ty.caption, color: t.ink3 }}>{cap(g)}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </>
+                    ) : null}
+                  </Section>
+                ) : null}
+              </>
+            ) : null}
           </>
         ) : (
-          // No clip and no frames. Said plainly, with the one action that
-          // actually changes it, rather than a grey silhouette implying a
-          // demonstration we do not have.
-          <Notice tone={t.ink3} kicker="Demonstration"
-            // Sentence case. A <Notice title> is a sentence, not a label — it
-            // renders at ty.head with no transform, and every other one in
-            // app/(client) is written as prose, including the one on line 108
-            // of this same file ("This could not be read"). With no clip and no
-            // grant anywhere on the platform, this branch is the most-read
-            // string in the product, and it was the only Title-Cased sentence
-            // among them.
-            title={videoStatus === 'loading' ? 'Looking for a clip…'
-              : videoStatus === 'error' ? 'We couldn’t check for a clip'
-              // 'partial' used to fall through to "No demonstration yet", which
-              // is the same false claim the error arm below exists to refuse,
-              // reached from a read that succeeded. The log half of this very
-              // file already carries the third arm — see logStatus === 'partial'
-              // further down — and the video half did not.
-              : videoStatus === 'partial' ? 'We couldn’t check the whole library'
-              : detail ? 'No demonstration yet' : signedOut ? 'Sign in to see this' : 'Not in our catalogue'}
-            note={videoStatus === 'loading'
-              ? 'Your coach’s video library is still being read.'
-              : videoStatus === 'error'
-              // "Nobody has filmed this" is a claim about the coach's library,
-              // and a failed read of that library is not evidence for it.
-              ? 'Your coach’s video library could not be read, so we cannot say whether there is a clip for this movement. There may well be one. The written guide below is unaffected.'
-              : videoStatus === 'partial'
-              // A truncated read is not evidence for it either: the clip may be
-              // one row past where the read stopped.
-              ? 'There are more clips in your coach’s library than we can read at once, and none of the ones we read were for this movement. That is not a statement that nobody has filmed it. The written guide below is unaffected.'
-              : detail
-              ? 'Nobody has filmed this movement and the catalogue has no reference frames for it. Your coach can add a clip from their app.'
-              // Not "this movement is not in our catalogue" — that is a claim
-              // about our data, and while signed out we have not been allowed
-              // to look. The catalogue reads `to authenticated`, so a
-              // signed-out session is handed zero rows with no error, which is
-              // indistinguishable from an absent movement unless we say so.
-              : signedOut
-                ? 'The exercise library is only available once you are signed in, so this screen could not look this movement up. It is very likely in there.'
-                : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your program, ask them how they want it done.'} />
-        )}
-
-        {FRAMES_ARE_UNHOSTED && frames.length ? (
-          <View style={{ marginTop: sp.sm }}>
-            <Flag tone={t.warn}>Reference frames are served from the source dataset — not for release.</Flag>
-          </View>
-        ) : null}
-
-        {/* ── what it is ────────────────────────────────────────────────── */}
-        {detail ? (
+          /* ── page 4: Workout View ─────────────────────────────────────── */
           <>
-            {/* The description leads, above the attribute chips. Somebody who
-                does not know a movement needs to be told what it is before
-                being told that it is compound and intermediate — and this was
-                the one thing the original request asked for that the previous
-                dataset had no field for at all. */}
-            {display?.description ? (
-              <>
-                <Rule />
-                <Section>
-                  <Text style={{ ...ty.body, color: t.ink }}>{display.description.text}</Text>
-                </Section>
-              </>
-            ) : null}
-            <Rule />
-            <Section>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                {detail.group ? (
-                  <View style={{ backgroundColor: t.brand, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{detail.group}</Text>
-                  </View>
-                ) : null}
-                {chips.map((c) => (
-                  <View key={c} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{c}</Text>
-                  </View>
-                ))}
+            {nav(shownName, goBack, 'Back')}
+            {/* The reader's own language where the catalogue has it, English
+                where it does not — and `display.note` says which, so an
+                English name among German ones is never passed off as the German
+                one. The identity is still `name`: that is what this screen was
+                opened with and what a logged set is written under. */}
+            <View style={{ alignItems: 'center', marginTop: sp.xl }}>
+              <Text style={{ ...ty.title, color: t.ink, textAlign: 'center' }}>{shownName}</Text>
+              {prescription ? (
+                <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 2 }}>{prescription}</Text>
+              ) : null}
+              {display?.note ? (
+                <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{display.note}</Text>
+              ) : null}
+            </View>
+
+            <View style={{ marginTop: sp.lg }}>{demonstration}</View>
+            {FRAMES_ARE_UNHOSTED && frames.length ? (
+              <View style={{ marginTop: sp.sm }}>
+                <Flag tone={t.warn}>Reference frames are served from the source dataset — not for release.</Flag>
               </View>
-            </Section>
-
-            {detail.primaryMuscles.length || detail.secondaryMuscles.length ? (
-              <>
-                <Rule />
-                <Section>
-                  <SectionHead title="Muscles Worked" />
-                  {detail.primaryMuscles.length ? (
-                    <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
-                      <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
-                    </Text>
-                  ) : null}
-                  {detail.secondaryMuscles.length ? (
-                    <Text style={{ ...ty.body, color: t.ink2 }}>
-                      <Text style={{ fontWeight: '600' }}>Also: </Text>{detail.secondaryMuscles.map(cap).join(', ')}
-                    </Text>
-                  ) : null}
-                </Section>
-              </>
             ) : null}
 
-            {detail.instructions.length ? (
-              <>
-                <Rule />
-                <Section>
-                  <SectionHead title="How to Do It" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
-                  {detail.instructions.map((step, n) => (
-                    <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-                      <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
-                      <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
-                    </View>
-                  ))}
-                </Section>
-              </>
-            ) : status === 'ready' && detail ? (
-              <>
-                <Rule />
-                <Section>
-                  {/* 41 of the original rows carry no instructions because nobody
-                      has confirmed which catalogue movement they are. Saying so
-                      is the point — an empty section would read as an app that
-                      forgot to render, not as a gap we know about. */}
-                  <Text style={{ ...ty.label, color: t.ink3 }}>
-                    No written steps for this one yet.
-                  </Text>
-                </Section>
-              </>
+            {/* The board's three round controls: start, in the accent; the
+                demo and another movement in ink. The third is the Exercise
+                Library this screen has always linked to at its foot, moved up
+                to where the board puts it. Every one of them is named, since
+                none has a word on it. */}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: sp.xl, marginTop: sp.xl }}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Start a set"
+                accessibilityHint="Opens the set tracker with a clock, reps and load"
+                onPress={startSets}
+                style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: t.brandInk }} />
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Exercise demo"
+                accessibilityHint="The demonstration with the written steps"
+                onPress={() => setView('demo')}
+                style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.ink, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="play" size={20} color={t.bg} />
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Another exercise"
+                accessibilityHint="Opens the exercise library"
+                onPress={() => router.push('/(client)/library')}
+                style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.ink, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="swap" size={20} color={t.bg} />
+              </Pressable>
+            </View>
+
+            {cueBlock}
+            {injuryLine}
+
+            {/* ── log a set of it, here ─────────────────────────────────────
+                The quick row, for a set already done: the whole point of this
+                screen being reachable from a machine, and still here under the
+                tracker for the member who did not start a clock. */}
+            {name ? (
+              <Section>
+                <SectionHead title="Log a Set" />
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Straight into today, without going back to Train. Leave the load box empty for a
+                  bodyweight set, or tick Timed for a hold.
+                </Text>
+                <LogSetRow t={t} unit={wu} onLog={(set) => { void logOne(set); }} />
+                {clipOffer}
+                {unsentLine}
+              </Section>
             ) : null}
-          </>
-        ) : null}
 
-        {/* ── coaching cues ──────────────────────────────────────────────
-            Kept apart from the numbered steps rather than appended to them. A
-            client following the sequence needs it in order; a client who
-            already knows the movement wants the cue, and a cue buried at step
-            six is a cue they have stopped reading before they reach. */}
-        {detail && detail.tips.length ? (
-          <>
-            <Rule />
+            {/* ── what you have done on it ──────────────────────────────────── */}
             <Section>
-              <SectionHead title="Tips" note={`${detail.tips.length}`} />
-              {detail.tips.map((tip, n) => (
-                <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.body, color: t.brand }}>·</Text>
-                  <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{tip}</Text>
-                </View>
-              ))}
+              {logStatus === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Reading your training log&hellip;</Text>
+              ) : logStatus === 'error' ? (
+                <Flag tone={t.warn}>
+                  Your training log could not be read, so we cannot say what you have done on this. That
+                  is not the same as having done none of it.
+                </Flag>
+              ) : summary ? (
+                <ExerciseTrail
+                  summary={summary}
+                  log={log}
+                  status={logStatus}
+                  /* Unwindowed, as above — so nothing here loses the sentences it
+                     has today. */
+                  windowDays={null}
+                  unit={wu}
+                  voice={{ they: 'You', their: 'your', have: 'have' }}
+                  history={weightSeries}
+                />
+              ) : logStatus === 'partial' ? (
+                // 'partial' had no arm and fell into "You have not logged this
+                // movement yet" — said on the movement's own page to a lifter whose
+                // squats all predate the row cap. A truncated read holds the newest
+                // thousand sessions and nothing behind them, so an absence in it is
+                // silence rather than a fact. Same arm records.tsx and
+                // progression.tsx already carry, for the reason written on
+                // src/lib/rowCap.ts: a confident empty state is strictly worse than
+                // a failed read.
+                <Flag tone={t.warn}>
+                  You have logged more sessions than this screen can read in one go, and none of the ones
+                  it read were this movement. That is not a statement that you have never done it.
+                </Flag>
+              ) : (
+                <Text style={{ ...ty.body, color: t.ink2 }}>
+                  You have not logged this movement yet. The first set you log above starts the trail —
+                  every day you do it, the sets, the reps and the load as they were recorded.
+                </Text>
+              )}
             </Section>
           </>
-        ) : null}
-
-        {/* What the movement is FOR, and how it is filed. Last, because it is
-            the least useful thing to somebody standing in front of the bar. */}
-        {detail && (detail.goals.length || detail.tags.length) ? (
-          <>
-            <Rule />
-            <Section>
-              {detail.goals.length ? (
-                <>
-                  <SectionHead title="Good For" />
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: detail.tags.length ? sp.lg : 0 }}>
-                    {detail.goals.map((g) => (
-                      <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{cap(g)}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </>
-              ) : null}
-              {detail.tags.length ? (
-                <>
-                  <SectionHead title="Tags" />
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                    {detail.tags.map((g) => (
-                      <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                        <Text style={{ ...ty.caption, color: t.ink3 }}>{cap(g)}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </>
-              ) : null}
-            </Section>
-          </>
-        ) : null}
-
-        {/* ── log a set of it, here ─────────────────────────────────────
-            The whole point of this screen being reachable from a machine. It
-            writes through the same provider Train does, so a set logged here
-            is the same row, on the same timestamp discipline, with the same
-            three outcomes said out loud — a set the server refused is not in
-            anybody's log and must never be reported as one. */}
-        {name ? (
-          <>
-            <Rule />
-            <Section>
-              <SectionHead title="Log a Set" />
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                Straight into today, without going back to Train. Leave the load box empty for a
-                bodyweight set, or tick Timed for a hold.
-              </Text>
-              <LogSetRow
-                t={t}
-                unit={wu}
-                onLog={async (set) => {
-                  if (saving) return;
-                  setSaving(true);
-                  try {
-                    const at = new Date().toISOString();
-                    const out = await logWorkouts([{
-                      t: at,
-                      exercise: detail?.name || name,
-                      sets: [[set.value, set.kg ?? 0]],
-                      ...(set.bw ? { bw: [true] } : {}),
-                      ...(set.timed ? { timed: [true] } : {}),
-                    }]);
-                    if (out === 'stored') {
-                      tapLight();
-                      // Offered only after the set is actually on the server.
-                      // A clip attached to a set that is still queued would
-                      // have no row to hang off.
-                      setClipFor({ t: at, exercise: detail?.name || name });
-                      setClipNote('');
-                      setClipSaid(null);
-                      // And the clip held from the PREVIOUS set, or the Delete
-                      // control below would still be pointing at it. `clipSent`
-                      // is a row, not a flag: `deleteFormClip(clipSent)` acts on
-                      // whichever (workout_id, set_index) is in it, so leaving
-                      // last set's row here put a "Delete It" button under the
-                      // block that has just been opened for a NEW set — and
-                      // pressing it deleted the earlier set's clip while the
-                      // screen said "Deleted" about this one. A destructive
-                      // control must never outlive the thing it was built for.
-                      setClipSent(null);
-                      return;
-                    }
-                    if (out === 'unsent') {
-                      Alert.alert('Saved on this phone',
-                        'No connection, so this set has not reached your training log yet — nothing is lost. It is saved here and goes up on its own next time you have signal.');
-                      return;
-                    }
-                    Alert.alert('Not saved',
-                      'Your training log rejected this set, so it has not been recorded and it is not waiting to send.');
-                  } finally { setSaving(false); }
-                }}
-              />
-              {/* ── send your coach a clip of that set ────────────────────
-                  The consent sentence is shown BEFORE the camera opens, not
-                  after the upload: consent that arrives once the file exists
-                  is not consent. src/lib/formCheck.ts owns it, and the
-                  storage policies in supabase/parts/2617 are what make it
-                  true. */}
-              {clipFor ? (
-                <View style={{ marginTop: sp.lg, padding: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
-                  {(() => {
-                    const stop = clipRefusal({
-                      hasCoach: !!cd.trainerId,
-                      setExists: !!clipWorkoutId,
-                    });
-                    // A set still being saved is not a member without a coach,
-                    // and the two must not share a sentence.
-                    if (stop === 'no-set') {
-                      return <Text style={{ ...ty.label, color: t.ink3 }}>Saving that set… the form check appears once it lands.</Text>;
-                    }
-                    if (stop) {
-                      return <Text style={{ ...ty.label, color: t.ink3 }}>{clipRefusalLine(stop)}</Text>;
-                    }
-                    return (<>
-                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>Send your coach a form check</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{MEMBER_CONSENT_NOTE}</Text>
-                      <TextInput
-                        value={clipNote}
-                        onChangeText={setClipNote}
-                        placeholder="What do you want them to look at?"
-                        placeholderTextColor={t.ink3}
-                        accessibilityLabel="What to ask your coach about this set"
-                        style={{ ...ty.body, color: t.ink, backgroundColor: t.surface, borderRadius: radius.sm, padding: sp.md, marginTop: sp.md }}
-                      />
-                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
-                        {(['camera', 'library'] as const).map((src) => (
-                          <Ghost
-                            key={src}
-                            // `clipBusy` was set on the way in and cleared on the
-                            // way out and NOTHING read it, so the only thing a
-                            // second press met was the silent `return` at the top
-                            // of the handler. A clip is megabytes over gym wifi:
-                            // for those seconds both buttons looked live and did
-                            // nothing at all. `disabled` refuses the press, drops
-                            // the fill and announces the state, and the line
-                            // below says which of the two things is happening —
-                            // relabelling both buttons "Sending…" would have said
-                            // it twice and named neither.
-                            disabled={clipBusy}
-                            label={src === 'camera' ? 'Film It' : 'Choose a Clip'}
-                            a11yLabel={src === 'camera' ? 'Film this set now' : 'Choose a clip already on this phone'}
-                            onPress={async () => {
-                              if (clipBusy || !clipWorkoutId) return;
-                              setClipBusy(true); setClipSaid(null);
-                              try {
-                                const picked = await pickFormClip(src);
-                                if (picked.error) { setClipSaid(picked.error); return; }
-                                if (!picked.clip) return;
-                                const out = await sendFormClip({
-                                  memberId: cd.id === 'unknown' ? '' : cd.id,
-                                  workoutId: clipWorkoutId,
-                                  setIndex: 0,
-                                  clip: picked.clip,
-                                  note: clipNote,
-                                  hasCoach: !!cd.trainerId,
-                                });
-                                setClipSaid(out.ok
-                                  ? 'Sent. Your coach sees it against this set.'
-                                  : out.error);
-                                if (out.ok) {
-                                  setClipNote('');
-                                  // Read back rather than assumed: the row is
-                                  // what the coach sees, so the control that
-                                  // removes it is built from the row that
-                                  // actually exists.
-                                  setClipSent(await fetchFormClip(clipWorkoutId, 0));
-                                }
-                              } finally { setClipBusy(false); }
-                            }}
-                          />
-                        ))}
-                      </View>
-                      {clipBusy ? (
-                        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>Sending your clip…</Text>
-                      ) : clipSaid ? (
-                        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{clipSaid}</Text>
-                      ) : null}
-                      {clipSent ? (
-                        <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
-                          <Ghost
-                            label="Delete It"
-                            a11yLabel="Delete the clip you sent your coach"
-                            onPress={() => {
-                              Alert.alert(
-                                'Delete this clip?',
-                                'It goes from your coach’s screen and from this app. Deleting it is final — there is no copy anywhere else.',
-                                [
-                                  { text: 'Keep it', style: 'cancel' },
-                                  { text: 'Delete', style: 'destructive', onPress: async () => {
-                                    const gone = await deleteFormClip(clipSent);
-                                    // `deleteFormClip` counts the rows, so a
-                                    // delete that matched nothing says so
-                                    // rather than reporting success over a
-                                    // video that is still there.
-                                    setClipSaid(gone.ok ? 'Deleted. Your coach can no longer see it.' : gone.error);
-                                    if (gone.ok) setClipSent(null);
-                                  } },
-                                ],
-                              );
-                            }}
-                          />
-                        </View>
-                      ) : null}
-                    </>);
-                  })()}
-                </View>
-              ) : null}
-
-              {/* Sets on this phone that the server has not taken. They are
-                  not lost and they are not in the log a coach reads, and only
-                  one of those two is obvious from looking at the screen. */}
-              {unsentNote(unsentSets, 'set') ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unsentNote(unsentSets, 'set')}</Text>
-              ) : null}
-            </Section>
-          </>
-        ) : null}
-
-        {/* ── what you have done on it ──────────────────────────────────── */}
-        <Section>
-          {logStatus === 'loading' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your training log&hellip;</Text>
-          ) : logStatus === 'error' ? (
-            <Flag tone={t.warn}>
-              Your training log could not be read, so we cannot say what you have done on this. That
-              is not the same as having done none of it.
-            </Flag>
-          ) : summary ? (
-            <ExerciseTrail
-              summary={summary}
-              log={log}
-              status={logStatus}
-              /* Unwindowed, as above — so nothing here loses the sentences it
-                 has today. */
-              windowDays={null}
-              unit={wu}
-              voice={{ they: 'You', their: 'your', have: 'have' }}
-              history={weightSeries}
-            />
-          ) : logStatus === 'partial' ? (
-            // 'partial' had no arm and fell into "You have not logged this
-            // movement yet" — said on the movement's own page to a lifter whose
-            // squats all predate the row cap. A truncated read holds the newest
-            // thousand sessions and nothing behind them, so an absence in it is
-            // silence rather than a fact. Same arm records.tsx and
-            // progression.tsx already carry, for the reason written on
-            // src/lib/rowCap.ts: a confident empty state is strictly worse than
-            // a failed read.
-            <Flag tone={t.warn}>
-              You have logged more sessions than this screen can read in one go, and none of the ones
-              it read were this movement. That is not a statement that you have never done it.
-            </Flag>
-          ) : (
-            <Text style={{ ...ty.body, color: t.ink2 }}>
-              You have not logged this movement yet. The first set you log above starts the trail —
-              every day you do it, the sets, the reps and the load as they were recorded.
-            </Text>
-          )}
-        </Section>
-
-        <Section>
-          <Ghost label="Exercise Library" icon="video" onPress={() => router.push('/(client)/library')} />
-        </Section>
+        )}
       </ScrollView>
+      <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
   );
 }
