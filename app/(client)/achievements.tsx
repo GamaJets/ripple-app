@@ -137,12 +137,14 @@ export default function Achievements() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
+        {/* The board has no page for this screen, so it takes its sibling's
+            opening — Challenges, board page 14: the title centred between
+            the back control and an equal space at the trailing edge. Two
+            screens reached from the same rows should open the same way. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Earned from your log</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Achievements</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Achievements</Text>
+          <View style={{ width: 38 }} />
         </View>
 
         {/* ── the hero: how much of the set is unlocked ───────────────────── */}

@@ -79,7 +79,7 @@ import { useToast } from '../../src/ui/toast';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
-import { fmtFullDay, monthNamesShort, numUpTo } from '../../src/lib/format';
+import { fmtFullDay, monthNamesShort, num, numUpTo } from '../../src/lib/format';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
@@ -728,6 +728,11 @@ export default function Scans() {
   const [mxOpen, setMxOpen] = useState<string | null>(null);
   const [scanMx, setScanMx] = useState<ScanMetrics | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  // The dated list under the chart shows the newest handful and offers the
+  // rest behind one tap. A member with three years of monthly scans has forty
+  // rows, and forty rows between the chart and everything else on this screen
+  // is a wall; the first eight are the ones that answer "what happened lately".
+  const [showAllScans, setShowAllScans] = useState(false);
   // The record, read when the sheet that can add to it opens, and again after
   // every decision so the row a member has just made is on screen where they
   // made it. Back to 'loading' first: leaving the previous rows up under a read
@@ -1720,6 +1725,24 @@ export default function Scans() {
   });
   const progressNow = progressMetric === 'weight' ? wNow : bfNow;
   const progressWas = progressMetric === 'weight' ? wWas : bfWas;
+  // The movement itself, in the metric's own unit, and whether it is the right
+  // way for THIS member's goal — which is what decides whether the board's
+  // green is honest on it. `movementIsProgress` answers undefined where the
+  // goal has no opinion (Tone, or no goal recorded), and that is drawn in ink:
+  // a loss is only "good" for somebody who asked to lose.
+  const progressDelta = progressNow && progressWas
+    ? (progressMetric === 'weight'
+        ? weightDeltaIn(progressNow.value - progressWas.value, wu)
+        : +(progressNow.value - progressWas.value).toFixed(1))
+    : null;
+  const progressGood = progressNow && progressWas
+    ? movementIsProgress(progressNow.value - progressWas.value, cd.goal, progressMetric === 'weight' ? 'weight' : 'bodyFat')
+    : undefined;
+  // The list under the chart, newest first, cut to the first few unless the
+  // member asks for all of them. `chrono` is the scans oldest-first.
+  const newestFirst = [...chrono].reverse();
+  const shownScans = showAllScans ? newestFirst : newestFirst.slice(0, 8);
+  const hiddenScans = newestFirst.length - shownScans.length;
   // Said once above the row rather than three times inside it, and only when
   // the figures genuinely have different dates or different instruments behind
   // them — a client whose every number came off one scan is told nothing.
@@ -1813,21 +1836,29 @@ export default function Scans() {
               <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{progressMetric === 'weight' ? wu : '%'}</Text>
             ) : null}
           </View>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-            {progressNow
-              ? `${progressWas
-                  ? deltaLabel(
-                      progressMetric === 'weight'
-                        ? weightDeltaIn(progressNow.value - progressWas.value, wu)
-                        : +(progressNow.value - progressWas.value).toFixed(1),
-                      { since: bodyDayLabel(progressWas.at), unit: progressMetric === 'weight' ? wu : '%' },
-                    )
-                  : 'First reading'} · ${measuredNote(progressNow, today)}`
-              : scansReading ? 'Reading your scans…'
-              : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
-              : progressMetric === 'weight' ? 'No weight on record yet — add a check-in or an InBody scan.'
-              : 'No scans yet — add your InBody report to start tracking.'}
-          </Text>
+          {progressNow ? (
+            <>
+              {/* The movement on its own line under the figure, the way the
+                  board draws "−2.4 kg" — and green only where it is progress
+                  towards the member's own goal. Ink where the goal has no
+                  opinion or the number went the other way: the colour is a
+                  verdict, and this screen does not hand one out it cannot
+                  back. The day it is measured FROM is in the sentence. */}
+              <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: progressGood ? t.brand : t.ink2, marginTop: 3 }}>
+                {progressWas
+                  ? deltaLabel(progressDelta, { since: bodyDayLabel(progressWas.at), unit: progressMetric === 'weight' ? wu : '%' })
+                  : 'First reading'}
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{measuredNote(progressNow, today)}</Text>
+            </>
+          ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+              {scansReading ? 'Reading your scans…'
+                : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
+                : progressMetric === 'weight' ? 'No weight on record yet — add a check-in or an InBody scan.'
+                : 'No scans yet — add your InBody report to start tracking.'}
+            </Text>
+          )}
         </Pressable>
 
         {/* The trend over the chosen range. `labels` is what puts a DATE on
@@ -1864,19 +1895,92 @@ export default function Scans() {
           </Text>
         ) : null}
 
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginBottom: sp.lg }}>
+        {/* The range as four chips rather than one bar, which is how the
+            board draws them under the chart: the chosen one filled green. */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: sp.sm }}>
           {(['1M', '3M', '6M', '1Y'] as const).map((range) => {
             const selected = progressRange === range;
             return (
               <Pressable key={range} accessibilityRole="tab" accessibilityState={{ selected }}
                 accessibilityLabel={range === '1M' ? 'Last month' : range === '3M' ? 'Last 3 months' : range === '6M' ? 'Last 6 months' : 'Last year'}
                 onPress={() => setProgressRange(range)}
-                style={{ flex: 1, minHeight: 36, borderRadius: radius.sm, backgroundColor: selected ? t.surface : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.caption, ...numeric, fontWeight: selected ? '600' : '400', color: selected ? t.ink : t.ink3 }}>{range}</Text>
+                style={{ flex: 1, minHeight: 36, borderRadius: radius.pill, backgroundColor: selected ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: selected ? t.brandInk : t.ink2 }}>{range}</Text>
               </Pressable>
             );
           })}
         </View>
+
+        {/* ── the dated list, as the board draws it under the chart ────────
+            One row per InBody scan, newest first: the day, the instrument,
+            and the chosen metric's figure at the trailing edge. Each row is a
+            control that opens the correction sheet — this list is the only
+            place in the app that shows the individual scans at all, and it
+            used to sit inside the Add sheet, where a mistyped scan was three
+            taps from being found. The count in the head is only named when
+            the read was whole; under 'partial' the rows are the most recent
+            part of the record and the sentence at the foot says so. */}
+        <Section>
+          <SectionHead title="Scans" note={scansReading ? undefined : scansWhole ? `${num(scans.length)} scans` : 'Not all read'} />
+          {scans.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {scansReading ? 'Reading your scans…'
+                : scansWhole ? 'No scans yet. Add your InBody report and it appears here.'
+                : 'Your scans could not be read — this list is empty for that reason, not because there are none.'}
+            </Text>
+          ) : null}
+          {shownScans.map((s, i) => (
+            <View key={s.id}>
+              {i > 0 ? <Rule /> : null}
+              <Pressable onPress={() => openEdit(s)}
+                accessibilityRole="button"
+                // The weight is dropped from the sentence rather than dashed
+                // when it cannot be converted. `fig` gives a dash, and a dash
+                // read aloud inside a sentence is a word that has gone missing
+                // — "Scan from 14 March, dash, 22 percent body fat" reads as a
+                // broken row rather than as an unconverted figure. The date and
+                // the body fat still identify the row, which is what this
+                // label is for.
+                accessibilityLabel={[
+                  `Scan from ${fmt(s.takenAt)}`,
+                  weightLabel(s.weightKg, wu),
+                  `${s.bodyFatPct} percent body fat`,
+                ].filter(Boolean).join(', ') + '. Correct its figures or its date, or delete it.'}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                {/* The sheet's own photograph where there is one; a round
+                    plate otherwise, as the board draws every row's icon. */}
+                {s.image
+                  ? <Image source={{ uri: s.image }} style={{ width: 36, height: 36, borderRadius: radius.pill }} />
+                  : (
+                    <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name={progressMetric === 'weight' ? 'scale' : 'chart'} size={17} color={t.ink2} />
+                    </View>
+                  )}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmt(s.takenAt)}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.source}</Text>
+                </View>
+                {/* The figure follows the segment above: weight under Weight,
+                    body fat under Body Fat, so the list reads as the chart's
+                    own points. */}
+                <Text style={{ ...value(15), color: t.ink }}>
+                  {progressMetric === 'weight' ? fig(weightLabel(s.weightKg, wu)) : `${fig(s.bodyFatPct)}%`}
+                </Text>
+                <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
+              </Pressable>
+            </View>
+          ))}
+          {hiddenScans > 0 ? (
+            <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+              <Ghost label={`Show All ${num(scans.length)}`} a11yLabel={`Show all ${num(scans.length)} scans`} onPress={() => setShowAllScans(true)} />
+            </View>
+          ) : null}
+          {cd.scansStatus === 'partial' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              You have more scans on record than we can read at once. These are the most recent, and they are not all of them.
+            </Text>
+          ) : null}
+        </Section>
 
         <ScreenHelp screen="progress" />
         {/* ── What they are aiming at ─────────────────────────────────────
@@ -2547,41 +2651,11 @@ export default function Scans() {
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{weightNote}</Text> : null}
             <Cta label="Save Scan & Update Profile" wide onPress={saveScan} />
 
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.xl, marginBottom: sp.sm }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Scan history</Text><Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{scansWhole ? `${scans.length} scans` : 'not all read'}</Text>
-            </View>
-            {scans.length === 0 ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                {scansReading ? 'Reading…' : scansWhole ? 'No scans yet.' : 'Your scans could not be read — this list is empty for that reason, not because there are none.'}
-              </Text>
-            ) : null}
-            {/* Each row is now a control. It was a flat list with no way in, so
-                a mistyped scan was permanent — and this list is the only place
-                in the app that shows the individual scans at all. */}
-            {[...chrono].reverse().map((s, i, arr) => (
-              <Pressable key={s.id} onPress={() => openEdit(s)}
-                accessibilityRole="button"
-                // The weight is dropped from the sentence rather than dashed
-                // when it cannot be converted. `fig` gives a dash, and a dash
-                // read aloud inside a sentence is a word that has gone missing
-                // — "Scan from 14 March, dash, 22 percent body fat" reads as a
-                // broken row rather than as an unconverted figure. The date and
-                // the body fat still identify the row, which is what this
-                // label is for.
-                accessibilityLabel={[
-                  `Scan from ${fmt(s.takenAt)}`,
-                  weightLabel(s.weightKg, wu),
-                  `${s.bodyFatPct} percent body fat`,
-                ].filter(Boolean).join(', ') + '. Correct its figures or its date, or delete it.'}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: i < arr.length - 1 ? hairline : 0, borderBottomColor: t.ring }}>
-                {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: radius.sm }} /> : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={16} color={t.ink3} /></View>}
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fig(weightLabel(s.weightKg, wu))} · {s.bodyFatPct}% BF</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{fmt(s.takenAt)} · {s.source}</Text>
-                </View>
-                <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
-              </Pressable>
-            ))}
+            {/* The scan history itself — every row a control that opens the
+                correction sheet — is on the screen behind this one now, under
+                the chart, where the board draws it. It sat here so that a
+                mistyped scan could be found at all; it can be found sooner
+                without opening Add. */}
 
             {/* ── what has actually been sent, and to whom ─────────────────
                 The point of writing the answer down is that the member can go

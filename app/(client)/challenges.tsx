@@ -30,6 +30,22 @@
 // leaderboard shows one person's activity to another; the note under the sheet
 // says exactly what is shared (a first name and a score) and what is not, and
 // it is the same sentence the test holds against the server's select list.
+//
+// ── The board's composition (19 Sep) ───────────────────────────────────────
+//
+// Board page 14 draws this screen as a centred title over an Active /
+// Completed bar, then one row per challenge: a round icon, the name, a "Day 17
+// of 30" caption and a thin green bar under it. That is the whole of the first
+// viewport, so the list here is exactly that. Everything the row used to carry
+// — the score meter, the standing line, Join and Leave — is one tap away in the
+// sheet the row opens, which already held the board, the rank and the same two
+// controls. Nothing was removed; the row stopped being a control panel.
+//
+// The caption is COMPUTED, every render, from the row's own window and the
+// live clock (`dayOf` below). It is not a stored figure, and it is not the
+// score: a member three days into a thirty-day challenge is on day three
+// whatever they have logged, and the bar under it is time elapsed, not
+// progress made. The score is the sheet's business.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -38,7 +54,7 @@ import { num } from '../../src/lib/format';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Meter, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, Meter, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useChallenges, type BoardResult, type ChallengeRow } from '../../src/ui/challenges';
 import {
@@ -47,9 +63,7 @@ import {
   challengeActionsAllowed, staleChallengeNote,
 } from '../../src/lib/challenges';
 import { notifySuccess } from '../../src/ui/haptics';
-// This sentence sits where the Join/Leave control was, at the trailing edge of
-// the row, so it follows the reading direction rather than a physical side.
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { useReachability } from '../../src/ui/reachability';
 // The clock this screen judges every challenge against, kept live. See the note
 // at `useNow()` below and src/ui/today.ts.
@@ -57,6 +71,30 @@ import { useNow } from '../../src/ui/today';
 import { retryLine } from '../../src/lib/reachability';
 
 const EMPTY_BOARD: BoardResult = { rows: [], status: 'loading', message: null };
+
+const DAY = 86_400_000;
+
+/**
+ * "Day 17 of 30": where `now` falls inside one challenge's own window.
+ *
+ * Worked out from `startsAt` and `endsAt` — the two instants `shapeChallenges`
+ * already refused to render a row without — and never read from a stored
+ * field, so it cannot drift from the window it describes. Whole days, the
+ * first day being day 1 rather than day 0, because that is how a person counts
+ * them; the total is rounded UP so a window of 29½ days is a 30-day challenge
+ * and not a 29-day one. Clamped at both ends: before the start it is day 1 of
+ * N (the caption says "Starts in…" instead, see `phaseCaption`), and after the
+ * end it stays at N of N rather than counting past the finish.
+ *
+ * Same arithmetic as `windowLine` in src/lib/challenges.ts, and it belongs
+ * beside it with a test — kept here for now because that module is outside
+ * this screen's lane.
+ */
+function dayOf(c: ChallengeRow, now: number): { day: number; total: number } {
+  const total = Math.max(1, Math.ceil((c.endsAt - c.startsAt) / DAY));
+  const day = Math.min(total, Math.max(1, Math.floor((now - c.startsAt) / DAY) + 1));
+  return { day, total };
+}
 
 export default function Challenges() {
   const t = useTheme();
@@ -87,6 +125,11 @@ export default function Challenges() {
   // app comes back to the foreground, which is both of the moments that matter.
   const now = useNow();
   const nowMs = now.getTime();
+  // Which half of the list is showing. The board's two segments, and the split
+  // is by PHASE, not by whether the member joined: a challenge that has not
+  // started yet is something they can still act on, so it sits under Active
+  // with a "Starts in…" caption rather than being hidden until it opens.
+  const [tab, setTab] = useState<'active' | 'completed'>('active');
   const [open, setOpen] = useState<ChallengeRow | null>(null);
   const [board, setBoard] = useState<BoardResult>(EMPTY_BOARD);
   // What went wrong with the last Join or Leave. A write that silently did not
@@ -122,18 +165,20 @@ export default function Challenges() {
   useEffect(() => {
     // The notice is about ONE challenge and names it: "You are not on Summer
     // Streak — that did not save". It was set by `doJoin`/`doLeave` and cleared
-    // by nothing except the next attempt, and it is rendered in two places — at
-    // the foot of the list and inside the sheet. So a failed Join on Summer
-    // Streak, followed by opening any other challenge, printed Summer Streak's
-    // failure inside that challenge's sheet, under that challenge's title,
-    // directly above its own Join button. A member reading it has been told the
-    // thing they are looking at did not save, about a thing they never tapped.
+    // by nothing except the next attempt, and it used to be rendered in two
+    // places — at the foot of the list and inside the sheet. So a failed Join
+    // on Summer Streak, followed by opening any other challenge, printed Summer
+    // Streak's failure inside that challenge's sheet, under that challenge's
+    // title, directly above its own Join button. A member reading it has been
+    // told the thing they are looking at did not save, about a thing they
+    // never tapped.
     //
     // Retired here rather than in the two handlers, because "the sheet changed"
     // is the one event that covers opening a different challenge, opening the
     // one it is about, and dismissing the sheet altogether. `doJoin` and
     // `doLeave` still clear it on their own way in, so a second attempt does not
-    // read the first one's answer.
+    // read the first one's answer. Both controls now live only in the sheet,
+    // so the sheet is the one place the notice is drawn.
     setNotice(null);
     if (!open) { boardRun.current += 1; setBoard(EMPTY_BOARD); return; }
     loadBoard(open.id);
@@ -146,7 +191,7 @@ export default function Challenges() {
   // The first half now names which way round it is. `join` and `leave` both
   // check the rows PostgREST returns, so a false is either a refusal the server
   // read (the challenge closed, a cohort the client is not in, a row already
-  // gone) or a request nobody answered; the screen's Join/Leave control is
+  // gone) or a request nobody answered; the sheet's Join/Leave control is
   // drawn from `c.joined`, which has not moved either way, so the member is
   // looking at a control that still says what it said before the tap and needs
   // telling which of those two it is.
@@ -170,23 +215,56 @@ export default function Challenges() {
     if (open && open.id === c.id) setOpen(null);
   };
 
+  // The two halves of the list. `shapeChallenges` already sorted the whole
+  // set — running first, soonest-to-end at the top; then upcoming; then
+  // finished, most recent first — so each half keeps that order by filtering
+  // rather than re-sorting.
+  const active = ch.challenges.filter((c) => challengePhase(c, nowMs) !== 'finished');
+  const completed = ch.challenges.filter((c) => challengePhase(c, nowMs) === 'finished');
+  const shown = tab === 'active' ? active : completed;
+
+  /** The row's one caption, and how far along its bar is drawn. */
+  const phaseCaption = (c: ChallengeRow): { caption: string; fraction: number } => {
+    const phase = challengePhase(c, nowMs);
+    // Before the start there is no day to be on, and after the end the day
+    // count would only ever say N of N; `windowLine` already has the right
+    // words for both — "Starts in 3 days", "Finished yesterday".
+    if (phase === 'upcoming') return { caption: windowLine(c, nowMs), fraction: 0 };
+    if (phase === 'finished') return { caption: windowLine(c, nowMs), fraction: 1 };
+    const { day, total } = dayOf(c, nowMs);
+    return { caption: `Day ${num(day)} of ${num(total)}`, fraction: day / total };
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
+        {/* The board centres this title between the back control and an
+            equal space at the trailing edge, so the title sits on the
+            screen's axis rather than on the control's. The spacer is the
+            round Ghost's own width. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>You, and everyone else in it</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Challenges</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Challenges</Text>
+          <View style={{ width: 38 }} />
+        </View>
+
+        {/* ── Active / Completed, as the board draws it ─────────────────── */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
+          {([['active', 'Active'], ['completed', 'Completed']] as const).map(([key, label]) => {
+            const on = tab === key;
+            return (
+              <Pressable key={key} onPress={() => setTab(key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         <Section>
-          <SectionHead title="Open Challenges" />
-
-          {ch.status === 'loading' ? (
+          {ch.status === 'loading' && ch.challenges.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.lg }}>Loading your challenges…</Text>
           ) : null}
 
@@ -203,88 +281,62 @@ export default function Challenges() {
           ) : null}
 
           {/* Safe to say only under 'ready': the server answered, and the
-              answer was none. */}
-          {ch.status === 'ready' && ch.challenges.length === 0 ? (
+              answer was none. Two sentences, because the two halves are empty
+              for different reasons — the server keeps a finished challenge for
+              a month and then drops it, so an empty Completed is not "you have
+              never finished one". */}
+          {ch.status === 'ready' && shown.length === 0 ? (
             <View style={{ paddingVertical: sp.lg }}>
-              <Text style={{ ...ty.label, color: t.ink2 }}>Nothing is running right now.</Text>
+              <Text style={{ ...ty.label, color: t.ink2 }}>
+                {tab === 'active' ? 'Nothing is running right now.' : 'Nothing has finished recently.'}
+              </Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                Your gym or your coach sets these up. When one opens it appears here.
+                {tab === 'active'
+                  ? 'Your gym or your coach sets these up. When one opens it appears here.'
+                  : 'A finished challenge stays here for a month after it ends.'}
               </Text>
             </View>
           ) : null}
 
-          {ch.challenges.map((c, ci) => {
-            const phase = challengePhase(c, nowMs);
+          {/* One row per challenge, the board's way: the icon, the name, the
+              day it is on, a bar. The whole row opens the sheet — the score,
+              the standing and the Join/Leave controls are all in there. The
+              rows below a "we couldn’t check" banner are the last thing that
+              was true, and they stay: hiding them would say the gym is running
+              nothing, which is the claim the provider deliberately refuses to
+              make. The sheet is where the controls come off under that read. */}
+          {shown.map((c, ci) => {
+            const { caption, fraction } = phaseCaption(c);
             return (
               <View key={c.id}>
                 {ci > 0 ? <Rule /> : null}
-                <View style={{ paddingVertical: sp.lg }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                    <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name={c.icon as any} size={17} color={c.joined ? t.brand : t.ink2} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
-                        {cohortLabel(c)}{c.blurb ? ' · ' + c.blurb : ''}
-                      </Text>
+                <Pressable onPress={() => setOpen(c)} accessibilityRole="button"
+                  // The standing is said here as well as in the sheet, because
+                  // a sighted reader gets it from the bar's colour and a screen
+                  // reader gets nothing from a bar. Only for a joined row: the
+                  // sentence `standingLine` writes for an unjoined one has an
+                  // em dash in it where the score would be.
+                  accessibilityLabel={`${c.title}. ${caption}.${c.joined ? ` ${standingLine(ch.status, c)}.` : ' Not joined.'} Opens the leaderboard.`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
+                  {/* Filled green for a challenge the member is in, quiet for
+                      one they are not: the same distinction the old meter
+                      carried by dimming, now on the one mark the row keeps. */}
+                  <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: c.joined ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name={c.icon as any} size={17} color={c.joined ? t.brandInk : t.ink2} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{caption}</Text>
+                    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+                      style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.sm, overflow: 'hidden' }}>
+                      <View style={{ height: 3, borderRadius: 2, width: `${Math.round(fraction * 100)}%`, backgroundColor: t.brand }} />
                     </View>
                   </View>
-
-                  {/* The meter is only drawn from a score the server computed.
-                      A null score under a ready read is rendered as a dash — it
-                      must never fall back to zero, which on a board is last. */}
-                  {ch.status === 'ready' && c.myScore != null ? (
-                    <Meter label="Your Score" val={c.myScore} target={c.goal} unit={' ' + c.unit} dim={!c.joined} />
-                  ) : (
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.md }}>
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>Your Score</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-                        {scoreText(c.metric, null)} / {c.goal} {c.unit}
-                      </Text>
-                    </View>
-                  )}
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.lg }}>
-                    <Pressable onPress={() => setOpen(c)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                      <Icon name="trophy" size={14} color={t.ink3} />
-                      <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={1}>{standingLine(ch.status, c)}</Text>
-                    </Pressable>
-                    <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{windowLine(c, nowMs)}</Text>
-                      {/* The rows below a "we couldn’t check" banner are the
-                          last thing that was true, and they stay — hiding them
-                          would say the gym is running nothing, which is the
-                          claim the provider deliberately refuses to make. What
-                          comes off is the pair of controls that CHANGE a state
-                          the screen has just said it cannot see. */}
-                      {!challengeActionsAllowed(ch.status) ? (
-                        <Text style={{ ...ty.caption, color: t.ink3, flexShrink: 1, textAlign: END_ALIGN }}>
-                          {staleChallengeNote(ch.status)}
-                        </Text>
-                      ) : c.joined ? (
-                        // "Joined" is a STATUS, and this control does not
-                        // report it — it removes the member from the
-                        // leaderboard, with no confirmation. VoiceOver read it
-                        // out as "Joined, button" to somebody about to lose
-                        // their place. A button says what it does; the sheet
-                        // behind it has always said "Leave Challenge".
-                        <Ghost label="Leave" a11yLabel={`Leave ${c.title}`} onPress={() => doLeave(c)} />
-                      ) : (
-                        <Cta label={phase === 'upcoming' ? 'Join Early' : 'Join'} disabled={!canJoin(c, nowMs)}
-                          a11yLabel={`${phase === 'upcoming' ? 'Join early' : 'Join'}: ${c.title}`}
-                          onPress={() => doJoin(c)} />
-                      )}
-                    </View>
-                  </View>
-                </View>
+                  <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+                </Pressable>
               </View>
             );
           })}
-
-          {notice ? (
-            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{notice}</Flag>
-          ) : null}
         </Section>
 
 
@@ -302,6 +354,24 @@ export default function Challenges() {
             <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>{cohortLabel(sheet)} · {windowLine(sheet, nowMs)}</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{sheet.title}</Text>
+              {sheet.blurb ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{sheet.blurb}</Text> : null}
+
+              {/* The score, which the row used to carry and the sheet now
+                  does. The meter is only drawn from a score the server
+                  computed. A null score under a ready read is rendered as a
+                  dash — it must never fall back to zero, which on a board is
+                  last. */}
+              {ch.status === 'ready' && sheet.myScore != null ? (
+                <Meter label="Your Score" val={sheet.myScore} target={sheet.goal} unit={' ' + sheet.unit} dim={!sheet.joined} />
+              ) : (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.md }}>
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>Your Score</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+                    {scoreText(sheet.metric, null)} / {sheet.goal} {sheet.unit}
+                  </Text>
+                </View>
+              )}
+
               {/* Only a participant has a board to be ranked on. The effect
                   above fetches one whenever a sheet opens, joined or not, and
                   `challenge_board()` deliberately raises 42501 for everybody
@@ -310,16 +380,24 @@ export default function Challenges() {
                   a working refusal being reported as a broken server, sitting
                   directly above the paragraph that correctly explains joining.
                   The error block further down was gated on `joined` for this
-                  reason; this line was missed by the same gate. */}
+                  reason; this line was missed by the same gate.
+
+                  The standing — "12 athletes on this board", or under a read
+                  that was not whole, why there is no figure — sits over the
+                  rank, because the head count comes from the list read and
+                  the rank from the board read, and either can fail alone. */}
               {sheet.joined ? (
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>{rankLine(board.status, board.rows)}</Text>
+                <View style={{ marginTop: sp.md, marginBottom: sp.lg, gap: 4 }}>
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{standingLine(ch.status, sheet)}</Text>
+                  <Text style={{ ...ty.label, color: t.ink3 }}>{rankLine(board.status, board.rows)}</Text>
+                </View>
               ) : null}
 
               {/* Not on the board yet. challenge_board() refuses with 42501 and
                   its own words rather than answering with an empty list, so
                   "you have not joined" can never be drawn as "nobody is here". */}
               {!sheet.joined ? (
-                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, marginBottom: sp.lg }}>
                   {/* `scoreText` returns an em dash for a score that could not
                       be worked out, and an em dash is an answer in a slot and a
                       hole in a sentence: this read "your score so far is — days
@@ -404,15 +482,21 @@ export default function Challenges() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{BOARD_VISIBILITY_NOTE}</Text>
 
               <View style={{ marginTop: sp.lg }}>
-                {/* Same rule as the row behind this sheet: a control that
-                    changes a state the screen has said it cannot see is not
-                    offered. */}
+                {/* A control that changes a state the screen has said it
+                    cannot see is not offered. The rows behind this sheet stay
+                    under a failed or partial read — they are the last thing
+                    that was true — and this is where the controls come off. */}
                 {!challengeActionsAllowed(ch.status) ? (
                   <Flag tone={t.warn}>{staleChallengeNote(ch.status)}</Flag>
                 ) : sheet.joined ? (
+                  // "Joined" is a STATUS, and this control does not report it —
+                  // it removes the member from the leaderboard, with no
+                  // confirmation. A button says what it does.
                   <Ghost label="Leave Challenge" onPress={() => doLeave(sheet)} />
                 ) : (
-                  <Cta label="Join Challenge" wide disabled={!canJoin(sheet, nowMs)} onPress={() => doJoin(sheet)} />
+                  <Cta label={challengePhase(sheet, nowMs) === 'upcoming' ? 'Join Early' : 'Join Challenge'} wide disabled={!canJoin(sheet, nowMs)}
+                    a11yLabel={`${challengePhase(sheet, nowMs) === 'upcoming' ? 'Join early' : 'Join'}: ${sheet.title}`}
+                    onPress={() => doJoin(sheet)} />
                 )}
               </View>
               {notice ? (
