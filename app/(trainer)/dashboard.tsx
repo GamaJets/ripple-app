@@ -41,7 +41,7 @@ import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
 import {
   compareDrift, bandTitle, bandNote,
-  DRIFT_LABEL, DEFAULT_WINDOWS, localDayKey, type Drift,
+  DEFAULT_WINDOWS, localDayKey, type Drift,
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
 import { useClientDrift } from '../../src/ui/clientDrift';
@@ -67,6 +67,10 @@ import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, booksInPerson, type CoachedMode } from '../../src/lib/types';
 import { lastActiveLine } from '../../src/lib/lastActiveLine';
+// Calendar days, not elapsed hours: "new this week" is a statement about which
+// week somebody joined, and `joinedAt` is a `created_at` timestamptz on one
+// path and a date-only string on the other. Same helper `tenureLabel` uses.
+import { daysBetween } from '../../src/lib/bodyFigures';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askAboutClient } from '../../src/lib/coach';
@@ -237,6 +241,46 @@ function driftTone(t: Theme, d: Drift): string {
     case 'watch': return t.warn;
     default: return t.brand;
   }
+}
+
+/** How many days a client counts as "new" on their roster row. A week — the
+ *  board's word for it — and past that the row says what they have done. */
+const NEW_THIS_WEEK_DAYS = 7;
+
+/**
+ * The one line of status under a name on the roster, in words, and the mark
+ * beside it.
+ *
+ * The board writes four states — On track, Needs check-in, Missing progress,
+ * New this week — and every one of them is DERIVED here from facts the screen
+ * already reads rather than declared: the drift verdict (src/lib/clientDrift.ts,
+ * measured against the client's own earlier rate), the joined date, and the
+ * two facts a hand-added client carries. The order is the order a coach acts
+ * in: a client who is slipping is said to be slipping even if they joined on
+ * Monday, and "new this week" is only ever said about somebody nothing has yet
+ * been able to judge.
+ *
+ * `tone` is null where there is no state to mark — a book with no drift read
+ * yet, or a client added by hand, about whom "missing progress" would be a
+ * claim that there was a record to be missing from. Never colour alone: the
+ * words carry the state and the dot repeats it (kit rule two).
+ */
+function rowStatus(t: Theme, c: RosterClient, d: Drift | null, driftRead: boolean, today: string): { words: string; tone: string | null } {
+  if (d && d.status === 'at_risk') return { words: 'Needs check-in', tone: driftTone(t, d) };
+  if (d && d.status === 'watch') return { words: 'Slipping', tone: driftTone(t, d) };
+  const days = c.joinedAt ? daysBetween(c.joinedAt, today) : null;
+  if (days != null && days >= 0 && days < NEW_THIS_WEEK_DAYS) return { words: 'New this week', tone: t.brand };
+  // No account behind them, so there is no activity to be missing — see the
+  // note on `attnReason`, which learned this the expensive way.
+  if (c.handAdded) return { words: `Added by you · ${c.goal}`, tone: null };
+  if (d && d.status === 'idle') return { words: 'Missing progress', tone: driftTone(t, d) };
+  if (d) return { words: 'On track', tone: driftTone(t, d) };
+  return {
+    words: driftRead
+      ? `${c.goal} · ${c.lastActive} · no drift reading yet`
+      : `${c.goal} · ${COACHED_MODE_SHORT[c.mode]} · ${c.lastActive}`,
+    tone: null,
+  };
 }
 
 /** A client's initials — the roster's only ornament. */
@@ -2067,10 +2111,25 @@ export default function TrainerClients() {
   const now = useNow();
   const hi = now.getHours() < 12 ? 'Good Morning' : now.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
   const G = layout.gutter;
+  /** The green + over the screen. 56pt is the size the board draws it and
+   *  clears the 44pt target with room for the shadow. */
+  const FAB = 56;
+
+  /** Open the Add Client sheet. Lifted out of the button it used to live in
+   *  because the button is now the pinned + at the bottom of the screen. */
+  const openAdd = async () => {
+    setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true);
+    // The code is needed by the alert at the end of THIS flow, so it has to be
+    // loaded on this path too. It was only ever fetched by the Invite button.
+    if (!myCode) {
+      const r = await fetchMyJoinCode();
+      if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
+    }
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 + FAB + sp.lg }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <ScreenHeader
@@ -2158,13 +2217,19 @@ export default function TrainerClients() {
                     ? router.push({ pathname: '/(trainer)/client', params: { clientId: session.clientId, name: session.clientName || undefined } })
                     : router.push('/(trainer)/calendar')}
                   accessibilityRole="button"
-                  accessibilityLabel={`${fmtTime(session.startsAt)}, ${name}, ${session.durationMin} minutes`}
+                  accessibilityLabel={`${fmtTime(session.startsAt)}, ${name}, PT session, ${session.durationMin} minutes`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: index ? hairline : 0, borderTopColor: t.ring }}>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 58 }}>{fmtTime(session.startsAt)}</Text>
-                  <Initials t={t} name={name} size={34} />
+                  {/* The board's agenda row: the hour first, in figures, then
+                      the name, then what kind of session it is. The time is
+                      a fixed column so the names line up under each other;
+                      it is the thing a coach reads down the list. */}
+                  <Text style={{ ...ty.label, ...numeric, color: t.ink, minWidth: 72 }}>{fmtTime(session.startsAt)}</Text>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={{ ...ty.label, fontWeight: '600', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{name}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{session.durationMin} min session</Text>
+                    {/* Every row in `mySessions` is a PT slot — that is the
+                        table — so the kind is stated, and the length is the
+                        only figure that varies between them. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>PT Session · {session.durationMin} min</Text>
                   </View>
                   <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
                 </Pressable>
@@ -2571,7 +2636,7 @@ export default function TrainerClients() {
               section head kept the old gate. Every other consumer of `bands`
               on this screen already asks (`toContact`, `segN`,
               `bookState.clientsDrifting`). */}
-          <SectionHead title="Your Clients"
+          <SectionHead title="Clients"
             note={!isWhole(rosterStatus)
               ? undefined
               : active > 0 ? driftNote() : undefined} />
@@ -2592,64 +2657,26 @@ export default function TrainerClients() {
               note={`No check-ins, logged workouts, sessions or visits in the last ${DEFAULT_WINDOWS.historyDays} days. That is not the same as everyone being fine — it means there is nothing here to judge them on.`} />
           ) : null}
 
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-            {/* Two buttons, and they used to be called "Add a client" and
-                "Add client" — eight characters apart, side by side, doing
-                different things. The prominent one made a roster entry; the
-                other opened the sheet that shows the coaching code. A coach
-                pressed the prominent one and asked "is this the only way? I
-                don't see a trainer's code", which is the only reasonable
-                reading of that pair. The sheet's own failure text already
-                called it "Invite a client"; the button label had drifted. */}
-            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={() => { void openInvite(); }} /></View>
-            {/* Import sits beside Add rather than under a menu, because the
-                moment a coach needs it is their first hour in the product —
-                and the alternative to finding it is typing forty clients. */}
-            <View style={{ flex: 1 }}><Ghost label="Import Clients" onPress={() => { resetImport(); setImpOpen(true); }} /></View>
-            <View style={{ flex: 1 }}><Cta label="Add Client" wide onPress={async () => {
-                setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true);
-                // The code is needed by the alert at the end of THIS flow, so
-                // it has to be loaded on this path too. It was only ever
-                // fetched by the button beside this one.
-                if (!myCode) {
-                  const r = await fetchMyJoinCode();
-                  if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
-                }
-              }} /></View>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2, marginBottom: sp.md }} contentContainerStyle={{ gap: sp.sm, paddingHorizontal: 2 }}>
-            {AUTO_SEGS.map((sg) => (
-              <Pressable key={sg.key} onPress={() => setSeg(sg.key)}
-                style={{ backgroundColor: seg === sg.key ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: seg === sg.key ? t.brandInk : t.ink2 }}>{sg.label} {fig(sg.n)}</Text>
-              </Pressable>
-            ))}
-            {allTags.map((tg) => (
-              <Pressable key={tg} onPress={() => setSeg(tg)}
-                style={{ backgroundColor: seg === tg ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={{ ...ty.label, color: seg === tg ? t.brandInk : t.ink3 }}>#</Text>
-                <Text style={{ ...ty.label, fontWeight: '500', color: seg === tg ? t.brandInk : t.ink2, textTransform: 'capitalize' }}>{tg}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
           {/* ── find one person ──────────────────────────────────────────────
-              The chips above answer "which kind of client"; this answers "which
-              client", which is the question a coach with eighty of them actually
-              has. It was answerable nowhere on this screen: the magnifying glass
-              in the header opens Explore, and Explore searches the list of
-              SCREENS.
+              The segments under this answer "which kind of client"; this
+              answers "which client", which is the question a coach with eighty
+              of them actually has. It was answerable nowhere on this screen:
+              the magnifying glass in the header opens Explore, and Explore
+              searches the list of SCREENS.
 
               It narrows the segment rather than replacing it, and everything
               below — the bulk controls, their counts, the drift order — is built
-              from the result, so what the buttons act on is what is listed. */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginBottom: sp.md }}>
-            <Icon name="search" size={16} color={t.ink3} />
+              from the result, so what the buttons act on is what is listed.
+
+              First under the title, the way the board's Clients page opens:
+              a search field, then the segment bar, then the rows. The pill is
+              the same shape Meals' search row takes. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2, marginBottom: sp.md }}>
+            <Icon name="search" size={17} color={t.ink3} />
             <TextInput value={rosterQ} onChangeText={setRosterQ}
-              placeholder="Find a client by name" placeholderTextColor={t.ink3}
-              autoCapitalize="none" autoCorrect={false} accessibilityLabel="Find a client by name"
-              style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+              placeholder="Search clients" placeholderTextColor={t.ink3}
+              autoCapitalize="none" autoCorrect={false} accessibilityLabel="Find a client by name" returnKeyType="search"
+              style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }} />
             {rosterQ ? (
               <Pressable onPress={() => setRosterQ('')} hitSlop={hitSlopFor(24)}
                 accessibilityRole="button" accessibilityLabel="Clear the client search">
@@ -2657,6 +2684,42 @@ export default function TrainerClients() {
               </Pressable>
             ) : null}
           </View>
+
+          {/* ── the segment bar ─────────────────────────────────────────────
+              The board draws an Active / Inactive bar here. There is no honest
+              "inactive" list on this screen without a second read of
+              `coaching_relationships` — `UnexplainedDepartures` below already
+              reads the endings, and this file's own history (see its header)
+              is of the same table read twice by two hands — so the bar holds
+              the segments this book actually has, in the board's shape: one
+              `surface2` pill, the selected segment in ink. Scrolls once there
+              are more than fit, and the segments keep their own width rather
+              than squeezing a label to a syllable. Every count is still a
+              count OF THE ROSTER (`segN`) and dashes under anything but a
+              whole read. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: sp.md }}
+            contentContainerStyle={{ flexDirection: 'row', minWidth: '100%', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, gap: 2 }}
+            accessibilityRole="tablist">
+            {AUTO_SEGS.map((sg) => {
+              const on = seg === sg.key;
+              return (
+                <Pressable key={sg.key} onPress={() => setSeg(sg.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                  style={{ flexGrow: 1, minHeight: 40, paddingHorizontal: sp.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+                  <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', ...numeric, color: on ? t.bg : t.ink2 }}>{sg.label} {fig(sg.n)}</Text>
+                </Pressable>
+              );
+            })}
+            {allTags.map((tg) => {
+              const on = seg === tg;
+              return (
+                <Pressable key={tg} onPress={() => setSeg(tg)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                  style={{ flexGrow: 1, minHeight: 40, paddingHorizontal: sp.md, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: on ? t.ink : 'transparent' }}>
+                  <Text style={{ ...ty.label, color: on ? t.bg : t.ink3 }}>#</Text>
+                  <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2, textTransform: 'capitalize' }}>{tg}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
 
           {/* What the search actually searched. Under anything but a whole read
               that is not the roster, and "nobody matches" said over a read that
@@ -2666,6 +2729,180 @@ export default function TrainerClients() {
           {rosterQLine ? (
             <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{rosterQLine}</Text>
           ) : null}
+
+          {/* An empty list has four causes and they are not interchangeable.
+              A search that matched nobody is already spoken for by the line
+              under the field — which is the one that knows whether the roster
+              was read at all — so this does not say "no clients in this
+              segment" over a filtered list and send a coach to check a segment
+              that has people in it. */}
+          {shownRoster.length === 0 && !rosterQLine ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {rosterUnread && roster.length === 0
+                ? 'Your roster could not be read, so this is not "no clients" — pull down to try again.'
+                : roster.length === 0 ? 'No clients yet. Add or invite your first — they connect once they accept in the app.' : 'No clients in this segment.'}
+            </Text>
+          ) : null}
+
+          {/* Not read yet. The list is on screen and usable; it just is not
+              sorted by drift, and it says so rather than implying it is. */}
+          {!drift && !driftErr && shownRoster.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                Reading check-ins, logs, sessions and visits — the order below is not by drift yet.
+              </Text>
+            </View>
+          ) : null}
+
+          {driftRows.map(({ c, d }, idx) => {
+            const prev = idx > 0 ? driftRows[idx - 1].d : null;
+            const opensBand = !!d && (!prev || prev.status !== d.status);
+            // Drift is stated on the row only where there is something to act
+            // on. "Holding their pattern" is said once, by the band heading.
+            const showDrift = !!d && d.status !== 'on_track';
+            const nextLine = nextBookedLine(c.id);
+            const st = rowStatus(t, c, d, !!drift, today);
+            return (
+            <View key={c.id}>
+              {opensBand ? (
+                <View style={{ marginTop: idx === 0 ? 0 : sp.xl, marginBottom: sp.sm }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: driftTone(t, d!) }} />
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>{bandTitle(d!.status)}</Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{bandNote(d!.status, DEFAULT_WINDOWS)}</Text>
+                </View>
+              ) : null}
+            {/* ── one row per client, the board's way ────────────────────
+                A 40pt monogram, name, ONE line of status in words with its
+                mark, a chevron. This row used to carry a weight delta, a
+                next-session line, a rate line, a flags row, a reason line, a
+                tags row, a 3px adherence bar and then an adherence figure —
+                most of which are the lead figure of the client's own record
+                one tap away (the sheet's first line still says the
+                adherence). What stays is what a coach scanning a list of
+                forty needs to pick the next one to open: the state where
+                there is one, the goal and last-active where there is not
+                (the bar was colour alone — see the kit's second rule).
+                Unread, injury and below-target keep a mark, because each is a
+                reason to open the row today. */}
+            {/* A tinted row for the states a coach acts on, the way the board
+                tints its "Needs check-in" and "Missing progress" rows — at
+                `surface2` strength, never a red or yellow ground: the state is
+                already in the words and the dot, and a coloured surface would
+                be a third, louder copy of it. The negative margin lets the
+                tint run to the card's own padding edge. */}
+            <Pressable onPress={() => setSel(c)} accessibilityRole="button" accessibilityLabel={`Open ${c.name}, ${st.words}`}
+              style={{ paddingVertical: sp.md, paddingHorizontal: sp.sm, marginHorizontal: -sp.sm, borderRadius: radius.sm,
+                backgroundColor: showDrift ? t.surface2 : 'transparent',
+                borderTopWidth: idx === 0 || opensBand || showDrift ? 0 : hairline, borderTopColor: t.ring }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                <Initials t={t} name={c.name} size={40} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{c.name}</Text>
+                  {/* The state in words with its mark beside it — see
+                      `rowStatus` for where each word comes from. The dot is
+                      6pt so it reads at arm's length; the words are what a
+                      screen reader gets. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    {st.tone ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: st.tone }} /> : null}
+                    <Text style={{ ...ty.caption, color: st.tone ? t.ink2 : t.ink3, flexShrink: 1 }} numberOfLines={2}>{st.words}</Text>
+                  </View>
+                  {/* The drift verdict's reason where there is one to act on —
+                      "Holding their pattern" is said once, by the band heading,
+                      not on every row under it. */}
+                  {showDrift ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{d!.reason}</Text>
+                  ) : null}
+                  {/* There IS a Next now, and it is read rather than declared —
+                      see `nextBooked`. The one line on this row about the
+                      future. Absent, never dashed, when the diary did not
+                      answer or the fortnight is empty; the difference between
+                      those two is said once under the list. */}
+                  {nextLine ? (
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }} numberOfLines={1}>{nextLine}</Text>
+                  ) : null}
+                </View>
+                {/* The adherence figure that sat here is the book's figure in
+                    the strip at the top and this client's in the sheet's
+                    first line; the row is the board's — avatar, name, one
+                    line of state, chevron. A "Below target" mark below keeps
+                    the one reading of it that is a reason to open the row. */}
+                <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+              </View>
+
+              {((c.unread != null && c.unread > 0) || (!d && lowAdherence(c)) || (c.injuries && c.injuries.length)) ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginStart: 40 + sp.md }}>
+                  {/* Only where a figure they submitted says so. This was
+                      `atRiskClient(c)`, true of every hand-added client for
+                      ever — so a coach with twenty cash clients opened their
+                      home screen to twenty amber flags that could never clear,
+                      and learned inside a week to read past all of them,
+                      including the one that was real. */}
+                  {!d && lowAdherence(c) ? <Flag t={t} tone={t.warn} text="Below target" /> : null}
+                  {c.unread != null && c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
+                  {c.injuries && c.injuries.length ? <Flag t={t} tone={t.s3} text={c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury'} /> : null}
+                </View>
+              ) : null}
+
+              {tagsFor(c.id).length > 0 ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: sp.sm, marginStart: 40 + sp.md }}>
+                  {tagsFor(c.id).map((tg) => (
+                    <View key={tg} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 2 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{tg}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </Pressable>
+            </View>
+            );
+          })}
+
+          {/* What the Next line on those rows is and is not.
+              Said once, under the list, rather than as a caveat on thirty rows.
+              Three things it has to carry:
+                · a diary that did not answer is not an empty diary, and without
+                  this sentence a book with no Next lines on it looks exactly
+                  like a book where nobody is coming in;
+                · the window is a fortnight, so "no Next" means nothing in the
+                  next 14 days and not nothing ever;
+                · these are the COACH's own rows. A client training with another
+                  coach in the same gym has a session this screen cannot see,
+                  and reading a blank as "they have stopped booking" is the one
+                  wrong conclusion available here. The same sentence
+                  src/lib/bookedAhead.ts ends its header with. */}
+          {driftRows.length > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+              {nextBooked === null
+                ? 'Your diary could not be read, so no row below says when you next see anybody. That is the read, not an empty book.'
+                : `“Next” is the first session in your own diary in the next ${BOOKED_AHEAD_DAYS} days. A row without one has nothing booked with you in that fortnight — it does not mean they have nothing booked with anybody.`}
+            </Text>
+          ) : null}
+
+          {/* ── acting on what is listed ─────────────────────────────────────
+              Under the list rather than over it, which is where the board
+              leaves room for them: the rows are what a coach opens this tab
+              for, and every control here acts on exactly the rows above. */}
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, marginBottom: sp.md }}>
+            {/* Two buttons, and they used to be called "Add a client" and
+                "Add client" — eight characters apart, side by side, doing
+                different things. The prominent one made a roster entry; the
+                other opened the sheet that shows the coaching code. A coach
+                pressed the prominent one and asked "is this the only way? I
+                don't see a trainer's code", which is the only reasonable
+                reading of that pair. The sheet's own failure text already
+                called it "Invite a client"; the button label had drifted.
+                Add Client itself is the green + pinned over the screen now —
+                `openAdd` — so it is one control, reachable from anywhere in
+                the scroll, rather than a third button in this row. */}
+            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={() => { void openInvite(); }} /></View>
+            {/* Import sits beside Invite rather than under a menu, because the
+                moment a coach needs it is their first hour in the product —
+                and the alternative to finding it is typing forty clients. */}
+            <View style={{ flex: 1 }}><Ghost label="Import Clients" onPress={() => { resetImport(); setImpOpen(true); }} /></View>
+          </View>
 
           {/* Out of the app, and only ever the whole book. `exportRoster`
               refuses on a read that failed and marks the file INCOMPLETE on one
@@ -2716,7 +2953,7 @@ export default function TrainerClients() {
               refuses rather than warns, and forty irreversible writes over a
               list nobody read whole is the case it was written for. */}
           {shownRoster.length > 0 ? (
-            <View style={{ marginBottom: sp.md }}>
+            <View>
               <Ghost
                 label={!segClaim.allowed
                   ? 'Cannot Remove This Segment'
@@ -2727,153 +2964,22 @@ export default function TrainerClients() {
                 }} />
             </View>
           ) : null}
-
-          {/* An empty list has four causes and they are not interchangeable.
-              A search that matched nobody is already spoken for by the line
-              under the field — which is the one that knows whether the roster
-              was read at all — so this does not say "no clients in this
-              segment" over a filtered list and send a coach to check a segment
-              that has people in it. */}
-          {shownRoster.length === 0 && !rosterQLine ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {rosterUnread && roster.length === 0
-                ? 'Your roster could not be read, so this is not "no clients" — pull down to try again.'
-                : roster.length === 0 ? 'No clients yet. Add or invite your first — they connect once they accept in the app.' : 'No clients in this segment.'}
-            </Text>
-          ) : null}
-
-          {/* Not read yet. The list is on screen and usable; it just is not
-              sorted by drift, and it says so rather than implying it is. */}
-          {!drift && !driftErr && shownRoster.length > 0 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
-              <ActivityIndicator size="small" color={t.ink3} />
-              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-                Reading check-ins, logs, sessions and visits — the order below is not by drift yet.
-              </Text>
-            </View>
-          ) : null}
-
-          {driftRows.map(({ c, d }, idx) => {
-            const prev = idx > 0 ? driftRows[idx - 1].d : null;
-            const opensBand = !!d && (!prev || prev.status !== d.status);
-            // Drift is stated on the row only where there is something to act
-            // on. "Holding their pattern" is said once, by the band heading.
-            const showDrift = !!d && d.status !== 'on_track';
-            const nextLine = nextBookedLine(c.id);
-            return (
-            <View key={c.id}>
-              {opensBand ? (
-                <View style={{ marginTop: idx === 0 ? 0 : sp.xl, marginBottom: sp.sm }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: driftTone(t, d!) }} />
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>{bandTitle(d!.status)}</Text>
-                  </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{bandNote(d!.status, DEFAULT_WINDOWS)}</Text>
-                </View>
-              ) : null}
-            {/* ── one row per client, the board's way ────────────────────
-                Avatar, name, ONE line of status, the adherence figure, a
-                chevron. This row used to carry a weight delta, a next-session
-                line, a rate line, a flags row, a reason line, a tags row and
-                a 3px adherence bar — eight things, most of which are the lead
-                figure of the client's own record one tap away. What stays is
-                what a coach scanning a list of forty needs to pick the next
-                one to open: the drift verdict where there is one, the goal
-                and last-active where there is not, and adherence as a number
-                rather than a bar (the bar was colour alone — see the kit's
-                second rule). Unread, injury and below-target keep a mark,
-                because each is a reason to open the row today. */}
-            <Pressable onPress={() => setSel(c)} accessibilityRole="button" accessibilityLabel={`Open ${c.name}`}
-              style={{ paddingVertical: sp.md, borderTopWidth: idx === 0 || opensBand ? 0 : hairline, borderTopColor: t.ring }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                <Initials t={t} name={c.name} size={36} />
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{c.name}</Text>
-                  {/* The drift verdict and its reason where there is one —
-                      "Holding their pattern" is said once, by the band heading,
-                      not on every row under it. Where the read has not covered
-                      this client yet the line says so rather than implying a
-                      clean sheet; where there is no drift read at all the row
-                      falls back to what it always said. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
-                    {showDrift
-                      ? `${DRIFT_LABEL[d!.status]} · ${d!.reason}`
-                      : drift && !d
-                        ? `${c.goal} · ${c.lastActive} · no drift reading yet`
-                        : `${c.goal} · ${COACHED_MODE_SHORT[c.mode]} · ${c.lastActive}`}
-                  </Text>
-                  {/* There IS a Next now, and it is read rather than declared —
-                      see `nextBooked`. The one line on this row about the
-                      future. Absent, never dashed, when the diary did not
-                      answer or the fortnight is empty; the difference between
-                      those two is said once under the list. */}
-                  {nextLine ? (
-                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }} numberOfLines={1}>{nextLine}</Text>
-                  ) : null}
-                </View>
-                <View style={{ alignItems: 'flex-end', minWidth: 52 }}>
-                  {/* A number, never a bar: the bar's only channel was
-                      colour, and "no check-ins yet" is a dash rather than a
-                      zero — a client with no submitted check-in is not at 0%. */}
-                  <Text style={{ ...ty.label, fontWeight: '600', ...numeric, color: t.ink }}>
-                    {c.adherence != null ? `${c.adherence}%` : fig(null)}
-                  </Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>adherence</Text>
-                </View>
-                <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
-              </View>
-
-              {((c.unread != null && c.unread > 0) || (!d && lowAdherence(c)) || (c.injuries && c.injuries.length)) ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginStart: 36 + sp.md }}>
-                  {/* Only where a figure they submitted says so. This was
-                      `atRiskClient(c)`, true of every hand-added client for
-                      ever — so a coach with twenty cash clients opened their
-                      home screen to twenty amber flags that could never clear,
-                      and learned inside a week to read past all of them,
-                      including the one that was real. */}
-                  {!d && lowAdherence(c) ? <Flag t={t} tone={t.warn} text="Below target" /> : null}
-                  {c.unread != null && c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
-                  {c.injuries && c.injuries.length ? <Flag t={t} tone={t.s3} text={c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury'} /> : null}
-                </View>
-              ) : null}
-
-              {tagsFor(c.id).length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: sp.sm, marginStart: 36 + sp.md }}>
-                  {tagsFor(c.id).map((tg) => (
-                    <View key={tg} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 2 }}>
-                      <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{tg}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-            </Pressable>
-            </View>
-            );
-          })}
-
-          {/* What the Next line on those rows is and is not.
-              Said once, under the list, rather than as a caveat on thirty rows.
-              Three things it has to carry:
-                · a diary that did not answer is not an empty diary, and without
-                  this sentence a book with no Next lines on it looks exactly
-                  like a book where nobody is coming in;
-                · the window is a fortnight, so "no Next" means nothing in the
-                  next 14 days and not nothing ever;
-                · these are the COACH's own rows. A client training with another
-                  coach in the same gym has a session this screen cannot see,
-                  and reading a blank as "they have stopped booking" is the one
-                  wrong conclusion available here. The same sentence
-                  src/lib/bookedAhead.ts ends its header with. */}
-          {driftRows.length > 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-              {nextBooked === null
-                ? 'Your diary could not be read, so no row below says when you next see anybody. That is the read, not an empty book.'
-                : `“Next” is the first session in your own diary in the next ${BOOKED_AHEAD_DAYS} days. A row without one has nothing booked with you in that fortnight — it does not mean they have nothing booked with anybody.`}
-            </Text>
-          ) : null}
         </Section>
 
       </ScrollView>
+
+      {/* ── the board's one green + ──────────────────────────────────────
+          Pinned over the scroll at the bottom end, above the tab bar (this
+          view ends where the tab bar begins, so `bottom` is measured from
+          it), at `e1` so it sits on the cards without floating like a sheet.
+          It is the Add Client action that was the third button in the roster
+          row: one control, reachable from wherever a coach is in the scroll.
+          The scroll's bottom padding leaves room for it so the last row is
+          never under it. */}
+      <Pressable onPress={() => { void openAdd(); }} accessibilityRole="button" accessibilityLabel="Add Client"
+        style={{ position: 'absolute', end: G, bottom: sp.lg, width: FAB, height: FAB, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center', ...elevation.e1 }}>
+        <Icon name="plus" size={26} color={t.brandInk} />
+      </Pressable>
 
       {/* ── client detail ────────────────────────────────────────────────── */}
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
