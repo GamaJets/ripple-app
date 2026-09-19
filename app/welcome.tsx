@@ -24,16 +24,8 @@ import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
 import { Card, Cta, Ghost } from '../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
+import { BrandMark } from '../src/ui/BrandMark';
 
-function Ripple({ size, color }: { size: number; color: string }) {
-  return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: color, opacity: 0.35 }} />
-      <View style={{ position: 'absolute', width: size * 0.6, height: size * 0.6, borderRadius: size, borderWidth: 2.5, borderColor: color, opacity: 0.65 }} />
-      <View style={{ width: size * 0.24, height: size * 0.24, borderRadius: size, backgroundColor: color }} />
-    </View>
-  );
-}
 
 /** What this build signs you up as, said plainly, plus where to go if the
  *  reader has the wrong one of the three apps. */
@@ -177,7 +169,7 @@ export default function Welcome() {
      so a white-label brand's palette, a member's chosen palette and the
      phone's light mode all still hold — the default palette IS the board's
      dark, so the default install looks like the board. The mark is the same
-     Ripple the form uses; the wordmark is the brand's name set plainly,
+     mark the icon carries; the wordmark is the brand's name set plainly,
      because the board's stylised mark is a raster and cannot be resolved
      from one — see the handoff. */
   if (!showForm) {
@@ -202,7 +194,7 @@ export default function Welcome() {
         <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingVertical: sp.xl, justifyContent: 'space-between' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
             <View style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: VARIANT_TILE[VARIANT], alignItems: 'center', justifyContent: 'center' }}>
-              <Ripple size={24} color="#ffffff" />
+              <BrandMark size={26} ink="#ffffff" signal="#22c55e" />
             </View>
             <View>
               <Text style={{ ...ty.head, color: t.ink, letterSpacing: 1.2 }}>{appName.toUpperCase()}</Text>
@@ -215,7 +207,7 @@ export default function Welcome() {
           <View style={{ alignItems: 'center', paddingHorizontal: sp.md }}>
             <View style={{ width: 82, height: 82, borderRadius: 24, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', marginBottom: sp.xl }}
               accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <Ripple size={54} color={t.brand} />
+              <BrandMark size={64} />
             </View>
             <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', maxWidth: 300 }}>{strap}</Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{VARIANT_LABEL[VARIANT]}</Text>
@@ -241,7 +233,7 @@ export default function Welcome() {
             {/* The tile the user just tapped on their home screen — teal for
                 Repple, indigo for Coach, amber for Studio. */}
             <View style={{ width: 46, height: 46, borderRadius: radius.md, backgroundColor: VARIANT_TILE[VARIANT], alignItems: 'center', justifyContent: 'center' }}>
-              <Ripple size={28} color="#ffffff" />
+              <BrandMark size={30} ink="#ffffff" signal="#22c55e" />
             </View>
             <Text style={{ ...ty.title, color: t.ink }}>{appName}</Text>
           </View>

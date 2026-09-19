@@ -55,12 +55,14 @@ export function groupAllowed(group: AppVariant): boolean {
  * of the UI stays on the shared brand accent.
  */
 export const VARIANT_TILE: Record<AppVariant, string> = {
-  // Three steps of the family green, darkest for the studio. The plates are
-  // still distinct so the three icons can be told apart on a home screen,
-  // and all three sit in the accent's hue so each app matches its own logo.
-  client: '#15803d',
-  trainer: '#166534',
-  owner: '#14532d',
+  // The near-black the board's splash screens use, in three green-tinted
+  // steps — the plates behind the redesign's mark (assets/repple-icon-*.svg).
+  // Still distinct, so the three icons can be told apart on a home screen,
+  // and all three sit in the accent's hue family so each app matches its
+  // own logo; coverage.test.ts holds both.
+  client: '#0b0f0e',
+  trainer: '#0c1210',
+  owner: '#0a1311',
 };
 
 /**

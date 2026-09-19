@@ -180,9 +180,9 @@ export const BRANDS: Record<string, Brand> = {
     id: 'repple',
     label: 'Repple',
     apps: {
-      client:  { name: 'Repple',        bundle: 'com.washateria.repple',        scheme: 'repple',       icon: './assets/icon.png',        tile: '#15803d' },
-      trainer: { name: 'Repple Coach',  bundle: 'com.washateria.repple.coach',  scheme: 'repplecoach',  icon: './assets/icon-coach.png',  tile: '#166534' },
-      owner:   { name: 'Repple Studio', bundle: 'com.washateria.repple.studio', scheme: 'repplestudio', icon: './assets/icon-studio.png', tile: '#14532d' },
+      client:  { name: 'Repple',        bundle: 'com.washateria.repple',        scheme: 'repple',       icon: './assets/icon.png',        tile: '#0b0f0e' },
+      trainer: { name: 'Repple Coach',  bundle: 'com.washateria.repple.coach',  scheme: 'repplecoach',  icon: './assets/icon-coach.png',  tile: '#0c1210' },
+      owner:   { name: 'Repple Studio', bundle: 'com.washateria.repple.studio', scheme: 'repplestudio', icon: './assets/icon-studio.png', tile: '#0a1311' },
     },
     joinOrigin: 'https://www.repplefitness.com',
     // Deliberately apex, no www — this is the exact literal deepLink.ts has

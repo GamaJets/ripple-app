@@ -11,16 +11,8 @@ import { useTheme } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { VARIANT, HOME_ROUTE } from '../src/lib/variant';
 import { hasSeenTour } from './tour';
+import { BrandMark } from '../src/ui/BrandMark';
 
-function Ripple({ size, color }: { size: number; color: string }) {
-  return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: color, opacity: 0.35 }} />
-      <View style={{ position: 'absolute', width: size * 0.6, height: size * 0.6, borderRadius: size, borderWidth: 2.5, borderColor: color, opacity: 0.65 }} />
-      <View style={{ width: size * 0.24, height: size * 0.24, borderRadius: size, backgroundColor: color }} />
-    </View>
-  );
-}
 
 export default function Home() {
   const t = useTheme();
@@ -37,7 +29,7 @@ export default function Home() {
   if (loading || (authed && seenTour === null)) {
     return (
       <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <Ripple size={52} color={t.brand} />
+        <BrandMark size={60} />
       </View>
     );
   }
