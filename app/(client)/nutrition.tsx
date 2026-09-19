@@ -21,7 +21,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
-  buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryFromWeek, planWeek, slotsFor,
+  buildPlan, snackIdeas, SNACK_SHARE, swapIndex, searchMeals, mealAt, catalogSize, groceryFromWeek, planWeek, slotsFor,
   planGaps, mealAllergens, allergenGapNote, allergenLabel, mealRowSpoken,
   DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen, type Slot,
 } from '../../src/lib/meals';
@@ -415,6 +415,10 @@ export default function Nutrition() {
   // segments over the rows. null is "the first slot of the plan", so a plan
   // rebuilt with fewer meals never points at a slot it no longer has.
   const [slotPick, setSlotPick] = useState<Slot | null>(null);
+  // The board's search row searches THIS list — the slot's catalogue — not the
+  // food log. Cleared when the slot changes: a query about breakfast is not a
+  // query about dinner.
+  const [mealQuery, setMealQuery] = useState('');
   const [showAvoid, setShowAvoid] = useState(false);
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
   const [dayInfo, setDayInfo] = useState(false);
@@ -735,6 +739,33 @@ export default function Nutrition() {
   const planSlots = useMemo(() => Array.from(new Set(plan.map((m) => m.slot))), [plan]);
   const slotSel: Slot | null = slotPick && planSlots.includes(slotPick) ? slotPick : planSlots[0] ?? null;
   const slotMeals = plan.filter((m) => m.slot === slotSel);
+  /** Pick a named meal for a slot — the swap the board's list offers, by
+      choice rather than by stepping to the next one. */
+  const choose = (pos: number, idx: number) => setOverride({ ...override, [pos]: idx });
+  // The rest of the slot's catalogue, portioned like the planned meal so the
+  // calories on the rows are the calories the plan would carry. The planned
+  // meal leads and is not repeated. Real search over real rows; an empty
+  // query lists the first of the catalogue, which is what the board draws.
+  const slotOptions = useMemo((): PlannedMeal[] => {
+    const lead = slotMeals[0];
+    if (!slotSel || !lead) return [];
+    const q = mealQuery.trim();
+    // Neighbouring indices differ only in the last component — "Berry oats",
+    // "Berry oats — warm", "Berry oats — chilled" — so the catalogue is
+    // sampled at a stride when nothing is typed, and a search is thinned to
+    // one row per base dish. Eight different breakfasts, not eight oats.
+    const size = catalogSize(diet, slotSel, c.avoid);
+    const stride = Math.max(1, Math.floor(size / 8));
+    const raw = q
+      ? searchMeals(diet, slotSel, q, 60, c.avoid)
+      : Array.from({ length: 8 }, (_, i) => mealAt(diet, slotSel, (lead.idx + stride * (i + 1) + i * 7) % size, c.avoid));
+    const seen = new Set<string>([lead.n.split(' — ')[0]]);
+    return raw
+      .filter((m) => { const base = m.n.split(' — ')[0]; if (m.idx === lead.idx || seen.has(base)) return false; seen.add(base); return true; })
+      .slice(0, 12)
+      .map((m) => ({ ...m, pos: lead.pos, servings: lead.servings,
+        K: Math.round(m.k * lead.servings), P: Math.round(m.p * lead.servings), C: Math.round(m.c * lead.servings), F: Math.round(m.f * lead.servings) }));
+  }, [slotMeals, slotSel, mealQuery, diet, c.avoid]);
   const coachPick = (pos: number) => coachOverride[pos] != null && override[pos] == null;
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   // The seven days the member is actually shown, decided ONCE and used by both
@@ -1068,11 +1099,18 @@ export default function Nutrition() {
 
         {/* ── the plan: today or the week ────────────────────────────────── */}
         <Section>
-          {/* The week is one tap from the head of the list rather than a
-              second bar above it: the board goes straight from the figure to
-              the meals. */}
-          <SectionHead title={view === 'today' ? `${plan.length} Meals · ${tot.K.toLocaleString()} kcal` : 'This Week'}
-            note={view === 'today' ? 'This week' : 'Today'} onPress={() => setView((v) => (v === 'today' ? 'week' : 'today'))} />
+          {/* The board's page head: the count centred, the week a word to
+              the right rather than a second bar above the list. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: layout.section, minHeight: 32 }}>
+            <View style={{ flex: 1 }} />
+            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink }}>{view === 'today' ? `${plan.length} Meals` : 'This Week'}</Text>
+            <View style={{ flex: 1, alignItems: 'flex-end' }}>
+              <Pressable onPress={() => setView((v) => (v === 'today' ? 'week' : 'today'))} accessibilityRole="button" hitSlop={hitSlopFor(32)}
+                accessibilityLabel={view === 'today' ? 'Show this week' : 'Show today'}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{view === 'today' ? 'This week' : 'Today'}</Text>
+              </Pressable>
+            </View>
+          </View>
 
           {/* An exclusion the engine could not honour, said before the plan
               rather than buried in it. `poolFilter` falls back to the
@@ -1095,41 +1133,41 @@ export default function Nutrition() {
               {/* One slot at a time, the way the board lists meals. The slots
                   come from the plan itself, so a 4- or 5-meal day shows its
                   snacks as a segment rather than losing them. */}
-              <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
-                {planSlots.map((slot) => {
+              <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginBottom: sp.md }}>
+                {planSlots.map((slot, i) => {
                   const on = slot === slotSel;
                   return (
-                    <Pressable key={slot} onPress={() => setSlotPick(slot)} accessibilityRole="tab" accessibilityState={{ selected: on }}
-                      style={{ minHeight: 40, paddingHorizontal: sp.lg, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : t.surface2 }}>
-                      <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{slot}</Text>
+                    <Pressable key={`${slot}-${i}`} onPress={() => { setSlotPick(slot); setMealQuery(''); }} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                      style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+                      <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{slot}</Text>
                     </Pressable>
                   );
                 })}
               </View>
-              {/* The search row opens the food log's search, the one search
-                  the app has; it is not a second index of the plan. */}
-              <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button" accessibilityLabel="Search foods to log"
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+              {/* The board's search row, searching the list under it. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
                 <Icon name="search" size={17} color={t.ink3} />
-                <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Search foods…</Text>
-                <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
-              </Pressable>
-              {slotMeals.map((m, i) => {
+                <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder={`Search ${slotSel ? slotSel.toLowerCase() : 'meals'}…`} placeholderTextColor={t.ink3}
+                  accessibilityLabel={`Search ${slotSel ?? 'meals'}`} returnKeyType="search" autoCorrect={false} clearButtonMode="while-editing"
+                  style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }} />
+              </View>
+              {[...(mealQuery.trim() ? slotMeals.filter((m) => m.n.toLowerCase().includes(mealQuery.trim().toLowerCase())) : slotMeals), ...slotOptions].map((m, i) => {
                 // Read once and used twice — for the mark and for the sentence.
                 // Two reads is how the two come to disagree.
                 const inIt = mealAllergens(m, c.avoid);
+                const planned = slotMeals.some((x) => x.idx === m.idx);
                 return (
-                <View key={m.pos}>
+                <View key={`${m.pos}-${m.idx}`}>
                   {i > 0 ? <Rule /> : null}
                   <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
                     // Not `m.n`. A Pressable is one accessibility element, so a
                     // label on it REPLACES the lines below rather than adding
                     // to them — and the line it was replacing hardest is the
                     // allergen mark. See `mealRowSpoken`.
-                    accessibilityLabel={mealRowSpoken({
-                      slot: m.slot, coachPick: coachPick(m.pos), name: m.n,
+                    accessibilityLabel={`${mealRowSpoken({
+                      slot: m.slot, coachPick: planned && coachPick(m.pos), name: m.n,
                       allergens: inIt, kcal: String(m.K),
-                    })}
+                    })}${planned ? ', in your plan' : ''}`}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                     {/* The dish's own glyph in a circle where the board puts a
                         photograph. There is no photography of a generated
@@ -1140,8 +1178,13 @@ export default function Nutrition() {
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }} numberOfLines={2}>{m.n}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }} numberOfLines={1}>
-                        {m.ing.slice(0, 3).map((x) => x[0]).join(', ')}{coachPick(m.pos) ? " · Coach's pick" : ''}
+                        {m.ing.slice(0, 3).map((x) => x[0]).join(', ')}
                       </Text>
+                      {/* Which row is the plan's, said in words: the list is
+                          the whole catalogue now, and one of them is today's. */}
+                      {planned ? (
+                        <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand, marginTop: 2 }}>{coachPick(m.pos) ? "In your plan · Coach's pick" : 'In your plan'}</Text>
+                      ) : null}
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(m.K)} kcal · P{m.P} · C{m.C} · F{m.F}</Text>
                       {/* On the row somebody is about to cook, not only at the
                           top of the screen. A warning about the plan does not
@@ -1609,7 +1652,9 @@ export default function Nutrition() {
                 <Ghost label="Log This Snack" icon="plus" onPress={() => { void logPlanned(recipe, batch); setRecipe(null); }} />
               ) : (<>
                 <Ghost label="Log This Meal" icon="plus" onPress={() => { void logPlanned(recipe, batch); setRecipe(null); }} />
-                <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
+                {plan[recipe.pos]?.idx === recipe.idx
+                  ? <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
+                  : <Ghost label="Use This Meal" icon="check" onPress={() => { choose(recipe.pos, recipe.idx); setRecipe(null); }} />}
               </>)}
               {mealAllergens(recipe, c.avoid).length ? (
                 <View style={{ marginTop: sp.md }}>
