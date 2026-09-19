@@ -36,7 +36,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, fig, Flag, Ghost, Cta, Notice, SyncBadge } from '../../src/ui/kit';
+// The zone every time on this screen is drawn in — `when` formats in the phone's
+// own — so a coach marking Tuesday's sessions from another country can see whose
+// Tuesday it is. The same reader the Schedule tab names its zone with.
+import { deviceTimeZone } from '../../src/ui/availability';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 // The instant `awaitingOutcome`, `pastSessions` and `windowStart` are ALL judged
@@ -928,6 +932,14 @@ export default function TrainerSessions() {
           title="Mark Sessions"
           subtitle="Clear outstanding outcomes first, then review what already happened."
         />
+        {(() => {
+          const tz = deviceTimeZone();
+          return (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
+              {tz ? `Times in ${tz.replace(/_/g, ' ')}` : 'Times in this phone’s time zone'}
+            </Text>
+          );
+        })()}
 
         {/* ── the figure card ──────────────────────────────────────────────
             The Hero this replaces drew the count on the ground; the board
@@ -1339,6 +1351,17 @@ export default function TrainerSessions() {
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                         {when(e.s.startsAt)} · {OUTCOMES.find((o) => o.id === e.outcome)?.label}
                       </Text>
+                      {/* Beside the mark it is about. "Marked Just Now" reads
+                          as done, and for a mark made with no signal it is not:
+                          the decision is on this phone, the gym cannot see it
+                          and no credit has moved. The banner above counts what
+                          is waiting; only the row can say WHICH. Read off the
+                          queue itself, so it clears the moment the act goes up. */}
+                      {floor.pending.some((q) => q.act.kind === 'session-outcome' && q.act.sessionId === e.s.id) ? (
+                        <View style={{ marginTop: 3 }}>
+                          <SyncBadge state="queued" label="On this phone · waiting to send" />
+                        </View>
+                      ) : null}
                     </View>
                     <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>Undo</Text>
                   </Pressable>

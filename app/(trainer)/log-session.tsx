@@ -185,7 +185,23 @@ import type { MyCurrency } from '../../src/lib/currencySource';
 // a performed set.
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { planOffer, prefillDay, prefillLine, targetLine } from '../../src/lib/planPrefill';
-import { notifySuccess } from '../../src/ui/haptics';
+import { notifySuccess, tapLight } from '../../src/ui/haptics';
+// The two clocks a coach on the floor asked for — "No timer when logging". The
+// rest arithmetic, the digits and the three-two-one rule are the member
+// runner's own (src/lib/restTimer.ts), and the noise goes through the one door
+// that asks the sound switch first (src/ui/sounds.ts). Nothing about either is
+// re-derived here: a coach and the client beside them must hear the same cue at
+// the same instant for the same rest.
+import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
+import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
+// A still for each movement on the sheet — "Pictures with the exercises on the
+// coaching app". The same catalogue read, the same exact-slug match and the
+// same one-request signing the program builder uses, so the picture beside a
+// movement here is the picture beside it there.
+import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
+import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
+import { exerciseSlug } from '../../src/lib/exerciseId';
 // Ticking a set off standing next to the person doing it, and the one rule that
 // makes a tick safe on a screen that writes to somebody else's permanent
 // record: it may only put a figure in a box where the plan states a definite
@@ -249,8 +265,42 @@ const PICKER_SHOWN = 12;
  * else: it is never parsed, never written, and `entriesToWrite` does not know
  * it exists. What goes into the client's record is `reps` and `kg`, which are
  * what the coach typed or confirmed.
+ *
+ * `restSec` is the rest the coach's own programme states for the movement, in
+ * seconds, and null where it states none or the row was added by hand. It
+ * feeds the rest countdown and nothing else; like `target` it is never written.
+ *
+ * ── `held`, which is a tick taken back off ────────────────────────────────
+ *
+ * "Can't untick a log if accidentally press." A tick here is drawn from the
+ * reps box — a box with a count in it IS a set that will be saved — so on a row
+ * whose figure the coach typed there was nothing for a second tap to do except
+ * erase the figure, and src/lib/sheetTick.ts rightly refuses that: this screen
+ * has no undo. So a filled tick on a typed row was a control that could not be
+ * pressed, which on the floor reads as stuck.
+ *
+ * `held` is the second tap. The figures STAY in the boxes and the set is simply
+ * not counted: not written by `entriesToWrite`, not in the totals, not drawn as
+ * ticked. Tapping again counts it; so does typing a new rep count, because
+ * typing reps is recording a set. The invariant the tick was built on is kept
+ * whole — A FILLED TICK IS A SET THAT WILL BE SAVED — and nothing a person typed
+ * is erased by a control they brushed with a thumb. `counts` below is the one
+ * reader of it, and every total on this screen asks `counts`.
  */
-interface Row { key: string; name: string; sets: { reps: string; kg: string; target?: string | null }[] }
+interface SheetSet { reps: string; kg: string; target?: string | null; held?: boolean }
+interface Row { key: string; name: string; restSec?: number | null; sets: SheetSet[] }
+
+/** Whether this set, as the sheet stands, is one Save will write. The same
+ *  `> 0` test on the coach's own rep box `entriesToWrite` has always applied —
+ *  a blank or unreadable box is a row never filled in, not a set of no reps —
+ *  with the one addition that a set the coach has unticked is not written. */
+// zero-ok: the coach's own text box, and zero is the arm that SKIPS the set.
+const counts = (st: SheetSet): boolean => !st.held && (parseInt(st.reps, 10) || 0) > 0;
+
+/** A rest that is running: which set it followed, and the wall-clock instant it
+ *  ends. An instant and not a count, for the runner's reason — iOS suspends the
+ *  interval in a pocket, and only the wall clock is still right afterwards. */
+interface RestRun { gen: number; endsAt: number; rowKey: string; setIdx: number; name: string; fromPlan: boolean }
 
 let SEQ = 0;
 const mkKey = () => `ex-${SEQ++}`;
@@ -507,6 +557,112 @@ export default function LogSession() {
   const saving = useRef(false);
   const [failure, setFailure] = useState<string | null>(null);
 
+  /* ── the two clocks ────────────────────────────────────────────────────────
+   *
+   * "No timer when logging." This screen was written as a WRITE-UP — the head
+   * used to say, in so many words, that a stopwatch on it would be counting how
+   * long the typing took — and the coach who filed that was standing next to a
+   * client mid-set, using it as the session itself. Both are real. So:
+   *
+   *   · THE SESSION CLOCK is elapsed wall-clock time from an instant, and the
+   *     instant is either an explicit Start or the first tick of a set. It has
+   *     no pause: a PT hour does not pause, and a clock that could be paused is
+   *     a clock somebody forgot to resume. It can be stopped, which also turns
+   *     the rest bar off until Start is pressed again — that is the write-up
+   *     coach's way out of a chime after every tick.
+   *   · THE REST COUNTDOWN starts when a set becomes done: the tick tapped, or
+   *     — while the clock is running — a rep count typed into an empty box and
+   *     left. It counts the programme's own rest for that movement where the
+   *     programme states one and `DEFAULT_REST_SEC` where it does not, and says
+   *     which. The end cue is the member runner's, through the same two calls.
+   *
+   * Both are offered ONLY for a session filed under today. A session being
+   * written up for yesterday is not happening now, and a rest timer chiming
+   * over it would be the app timing the typing after all.
+   *
+   * NEITHER IS WRITTEN. `workouts` has no duration for strength work and this
+   * screen invents no figure for somebody else's record; the clock is for the
+   * two people on the floor and the line under it says so.
+   *
+   * The ticking itself lives in the two small components at the foot of this
+   * file, so that a clock redraws a line of digits twice a second and not a
+   * two-thousand-line form with a keyboard up.
+   */
+  const isLive = logDay === isoDay(now);
+  const [clockFrom, setClockFrom] = useState<number | null>(null);
+  const [timersOff, setTimersOff] = useState(false);
+  const [rest, setRest] = useState<RestRun | null>(null);
+  const restGen = useRef(0);
+  // Whether the reps box in focus already counted when it was entered, so that
+  // leaving it starts a rest only for a set that BECAME done in between — not
+  // for every coach who taps into a finished row to read it.
+  const repsFocus = useRef<{ at: string; counted: boolean } | null>(null);
+  // The day was moved off today with the clocks running: they stop, for the
+  // reason above. An effect and not a derived mask, so moving the day back does
+  // not resurrect a clock that has silently been counting the whole time.
+  useEffect(() => {
+    if (!isLive) { setClockFrom(null); setRest(null); }
+  }, [isLive]);
+  // Players built when the clock starts and let go when it stops, as the runner
+  // does on open and close: decoding a file at the instant a cue is due makes
+  // the cue late. This screen never unmounts, so "stops" is the only release.
+  const clockOn = clockFrom != null;
+  useEffect(() => {
+    if (!clockOn) return;
+    primeSounds();
+    return () => { releaseSounds(); };
+  }, [clockOn]);
+  const startClock = () => { setTimersOff(false); setClockFrom((v) => v ?? Date.now()); };
+  const stopClocks = () => { setTimersOff(true); setClockFrom(null); setRest(null); };
+  const startRest = (row: Row, i: number) => {
+    if (!isLive || timersOff) return;
+    // The first tick starts the session clock too — a coach who ticks the
+    // opening set has started the hour whether or not they pressed Start.
+    setClockFrom((v) => v ?? Date.now());
+    restGen.current += 1;
+    const secs = restSecondsFor({ restSec: row.restSec });
+    setRest({
+      gen: restGen.current, endsAt: Date.now() + secs * 1000,
+      rowKey: row.key, setIdx: i, name: row.name, fromPlan: row.restSec != null,
+    });
+  };
+  /** A set that stopped being done takes its own rest with it. Somebody else's
+   *  rest is left alone: unticking set 1 while resting after set 3 says nothing
+   *  about set 3. */
+  const dropRestFor = (key: string, i: number) =>
+    setRest((cur) => (cur && cur.rowKey === key && cur.setIdx === i ? null : cur));
+
+  /* ── a picture for each movement on the sheet ──────────────────────────────
+   *
+   * Exact slug equality and nothing else, which is the builder's rule and the
+   * builder's reason: similarity pairs Back Squat with Hack Squat, and a wrong
+   * picture beside a movement being logged into somebody's record is worse
+   * than none. A movement the catalogue does not hold — a coach's own name for
+   * something — gets the empty tile, and so does every row while the catalogue
+   * is loading or if it could not be read: a still is an illustration, and no
+   * sentence on this screen is made from whether one arrived.
+   */
+  const cat = useExerciseCatalogue();
+  const catByName = useMemo(() => {
+    const m = new Map<string, typeof cat.rows[number]>();
+    for (const c of cat.rows) m.set(exerciseSlug(c.name), c);
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cat.rows]);
+  const stillFor = (nm: string) => catByName.get(exerciseSlug(nm)) ?? null;
+  // The sheet's rows and, while it is open, the Add Exercise list — one batch,
+  // because they are signed in one request and two effects would be two waits.
+  // The list is only asked for while the sheet is up: sixteen built-ins and a
+  // coach's saved names are stills nobody is looking at otherwise.
+  const thumbRows = useMemo(
+    () => [...rows.map((row) => row.name), ...(picker ? mergeExerciseLists(coachEx.saved, LIB).map((x) => x.name) : [])]
+      .map((nm) => catByName.get(exerciseSlug(nm)) ?? null)
+      .filter((c): c is typeof cat.rows[number] => !!c),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, catByName, picker, coachEx.saved],
+  );
+  const thumbFor = useCatalogueThumbs(thumbRows);
+
   /* ── the draft belongs to the route it was typed under ─────────────────────
    *
    * `picked` following the route is only half of the fix above. `rows` — the
@@ -555,6 +711,8 @@ export default function LogSession() {
     // beside it cannot come from two different instants.
     setChosenDay(null);
     setChosenHour(null);
+    // The clocks belong to the session that has just left the screen.
+    setClockFrom(null); setRest(null); setTimersOff(false);
   }
 
   const pickedRow = r.roster.find((c) => c.id === picked) ?? null;
@@ -634,11 +792,24 @@ export default function LogSession() {
    */
   const loadPlanDay = (opt: NonNullable<typeof chosenPlanDay>) => {
     const p = prefillDay(opt.day);
+    // The programme's own rest for each movement, looked up by the name
+    // `prefillDay` kept — it drops nameless rows, so positions do not line up
+    // and an index would hand one movement another's rest. Only a usable
+    // positive figure is carried: `restSecondsFor` treats everything else as
+    // "nobody set one", and the bar must not say "from your programme" over the
+    // app's default.
+    const restByName = new Map<string, number>();
+    for (const ex of Array.isArray(opt.day?.exercises) ? opt.day.exercises : []) {
+      const v = ex?.restSec;
+      const nm = String(ex?.name ?? '').trim();
+      if (nm && typeof v === 'number' && Number.isFinite(v) && v > 0 && !restByName.has(nm)) restByName.set(nm, v);
+    }
     setRows((prev) => [
       ...prev,
       ...p.exercises.map((e) => ({
         key: mkKey(),
         name: e.name,
+        restSec: restByName.get(e.name) ?? null,
         sets: e.sets.map((s) => ({
           reps: s.reps == null ? '' : String(s.reps),
           kg: loadBox(s.loadKg),
@@ -880,8 +1051,17 @@ export default function LogSession() {
   };
   const addSet = (key: string) =>
     setRows((p) => p.map((r) => (r.key === key ? { ...r, sets: [...r.sets, { reps: '', kg: '' }] } : r)));
+  // A new rep count takes `held` off with it: typing reps is recording a set,
+  // and a row that kept refusing to count after being retyped would be the
+  // stuck tick again from the other side. The load box does not — correcting
+  // the weight on a set that was unticked says nothing about whether it ran.
   const patchSet = (key: string, i: number, patch: Partial<{ reps: string; kg: string }>) =>
-    setRows((p) => p.map((r) => (r.key === key ? { ...r, sets: r.sets.map((s, x) => (x === i ? { ...s, ...patch } : s)) } : r)));
+    setRows((p) => p.map((r) => (r.key === key
+      ? { ...r, sets: r.sets.map((s, x) => (x === i ? { ...s, ...patch, ...(patch.reps !== undefined ? { held: false } : null) } : s)) }
+      : r)));
+  /** Untick or re-tick a set whose figures the coach typed. See `held`. */
+  const holdSet = (key: string, i: number, held: boolean) =>
+    setRows((p) => p.map((r) => (r.key === key ? { ...r, sets: r.sets.map((s, x) => (x === i ? { ...s, held } : s)) } : r)));
   const removeRow = (key: string) => setRows((p) => p.filter((r) => r.key !== key));
   /**
    * Take one set off an exercise, leaving the rest.
@@ -943,6 +1123,10 @@ export default function LogSession() {
     // And what was said about the rows that have just gone. See the same three
     // setters in the subject-change block above.
     setLoadedDays([]); setPickedPlanDay(null); setPlanNote(null);
+    // And the clocks. They were timing THIS session, and this screen is never
+    // unmounted — a clock left running would be counting the next client's
+    // hour from the middle of the last one's.
+    setClockFrom(null); setRest(null); setTimersOff(false);
   };
 
   // Only sets with a rep count are real. A blank row the coach tabbed past is
@@ -966,7 +1150,9 @@ export default function LogSession() {
           // figure anybody reported. A blank or unreadable box is not a set of
           // zero reps — it is a row that was never filled in — and the `> 0`
           // here is exactly the filter that drops it. See the comment above.
-          .filter((s) => (parseInt(s.reps, 10) || 0) > 0)
+          // …and, since the tick can be taken back off, a set the coach has
+          // unticked. `counts` is both halves.
+          .filter(counts)
           .map((s) => {
             const load = readLift(s.kg, wu);
             // A refused load is not written as a number at all. `ready` below
@@ -991,7 +1177,9 @@ export default function LogSession() {
         // zero-ok: the coach's own rep box again, and the zero is the arm that
         // SKIPS the row rather than one that gets written. A blank set is a row
         // they tabbed past; its load is not asked about because there is no set.
-        if ((parseInt(st.reps, 10) || 0) <= 0) continue;
+        // An unticked set is skipped for the same reason: it is not going to
+        // be written, so an unreadable load on it holds nothing up.
+        if (!counts(st)) continue;
         const load = readLift(st.kg, wu);
         if (!load.ok) return `${r.name}: ${load.reason}`;
       }
@@ -1005,7 +1193,7 @@ export default function LogSession() {
   // zero-ok: the same rep box and the same `> 0` validity test `entriesToWrite`
   // applies, asked of the whole sheet. An empty box reads as zero and means
   // "nothing typed here yet", which is what this question is for.
-  const hasSets = rows.some((r) => r.sets.some((st) => (parseInt(st.reps, 10) || 0) > 0));
+  const hasSets = rows.some((r) => r.sets.some(counts));
 
   /** Why the day and hour on the picker cannot be used, or null. A session
    *  dated into the future counts towards a streak nobody has earned, and the
@@ -1330,11 +1518,44 @@ export default function LogSession() {
                 : `${first} has no Repple account yet, so there is no record for this to go into.`}
           </Text>
 
+          {/* ── the session clock ─────────────────────────────────────────────
+              Context before state: how long the two of them have been at it
+              sits in the head, above the totals it puts in proportion. Offered
+              only for a session filed under today — see `isLive` — and it says
+              under itself that it is not written anywhere, because every other
+              figure on this screen ends up in somebody's record and this one
+              must not be mistaken for one that does. */}
+          {isLive ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
+              <Icon name="clock" size={18} color={clockFrom != null ? t.brand : t.ink3} />
+              <View style={{ flex: 1, minWidth: 140 }}>
+                {clockFrom != null ? (
+                  <SessionClock from={clockFrom} ink={t.ink} />
+                ) : (
+                  <Text style={{ ...ty.body, color: t.ink2 }}>Session clock</Text>
+                )}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  {clockFrom != null
+                    ? 'Running on this phone for the two of you. It is not written to their record.'
+                    : timersOff
+                      ? 'Stopped, and the rest timer with it. Start brings both back.'
+                      : 'Starts here, or with the first set you tick. A rest countdown follows each set.'}
+                </Text>
+              </View>
+              {clockFrom != null ? (
+                <Ghost label="Stop" a11yLabel="Stop the session clock and the rest timer" onPress={stopClocks} />
+              ) : (
+                <Ghost label="Start" a11yLabel="Start the session clock" onPress={() => { startClock(); tapLight(); }} />
+              )}
+            </View>
+          ) : null}
+
           {/* ── what is on the sheet, as it is typed ──────────────────────────
               Volume and Sets, the two running totals a coach can check against
-              what they just watched. Duration is deliberately absent: this
-              screen writes up a session that has already finished, and a
-              stopwatch on it would be counting how long the typing took.
+              what they just watched. Duration is not among them: the clock
+              above is the floor's, and a session written up afterwards has no
+              honest duration to show — a figure here would be how long the
+              typing took.
 
               Both come from `sheetTally`, the same fold the Previous column's
               history is measured with, so the strip cannot disagree with the
@@ -1344,7 +1565,7 @@ export default function LogSession() {
           {rows.length ? (() => {
             const all = sheetTally(rows.flatMap((r) => r.sets.reduce<[number, number | null][]>((acc, st) => {
               const n = parseInt(st.reps, 10);
-              if (!Number.isFinite(n) || n <= 0) return acc;
+              if (!counts(st) || !Number.isFinite(n)) return acc;
               const load = readLift(st.kg, wu);
               acc.push([n, load.ok && load.kg != null ? load.kg : null]);
               return acc;
@@ -1736,7 +1957,7 @@ export default function LogSession() {
                * through as an unknown load rather than as zero. */
               const nowSets = r.sets.reduce<[number, number | null][]>((acc, s) => {
                 const n = parseInt(s.reps, 10);
-                if (!Number.isFinite(n) || n <= 0) return acc;
+                if (!counts(s) || !Number.isFinite(n)) return acc;
                 const load = readLift(s.kg, wu);
                 acc.push([n, load.ok && load.kg != null ? load.kg : null]);
                 return acc;
@@ -1748,6 +1969,13 @@ export default function LogSession() {
               return (
               <View key={r.key} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md }}>
+                  {/* The still, leading the row the way the builder's rows and
+                      the member's meals do. Decorative to a screen reader: the
+                      name beside it is the label, and a picture of a squat
+                      announced before "Back Squat" is the same thing twice. */}
+                  <View accessible={false} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+                    <ExerciseThumb uri={thumbFor(stillFor(r.name) ?? { thumbPath: null })} t={t} size={44} />
+                  </View>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{movement(r.name)}</Text>
                   <Pressable onPress={() => removeRow(r.key)} hitSlop={8} accessibilityRole="button"
                     accessibilityLabel={`Remove ${movement(r.name)}`}
@@ -1865,6 +2093,18 @@ export default function LogSession() {
                         // field to the nearest name and picks up "weight". The
                         // keyboard here is right and the attribution is not.
                         keyboardType="numeric"
+                        // A set that BECAME done while this box had the focus
+                        // starts its rest when the box is left — the range and
+                        // AMRAP rows, which have no tick to tap because the
+                        // figure has to be typed. Only with the clock running:
+                        // a coach writing the hour up afterwards has started no
+                        // clock and gets no chime for typing.
+                        onFocus={() => { repsFocus.current = { at: `${r.key}:${i}`, counted: counts(s) }; }}
+                        onBlur={() => {
+                          const f = repsFocus.current;
+                          repsFocus.current = null;
+                          if (clockFrom != null && f && f.at === `${r.key}:${i}` && !f.counted && counts(s)) startRest(r, i);
+                        }}
                         accessibilityLabel={`${movement(r.name)} set ${i + 1} reps`}
                         // The prescription, spoken. A coach using VoiceOver
                         // cannot see the caption below the row, and the box
@@ -1894,22 +2134,46 @@ export default function LogSession() {
                           and the fastest control on the screen must not make
                           that call on the coach's behalf. Nor may it erase a
                           figure the coach typed by hand — this screen has no
-                          undo. */}
+                          undo.
+
+                          ── and it comes back off ─────────────────────────────
+                          "Can't untick a log if accidentally press." On a row
+                          whose figure was typed (`done`) the tick used to be
+                          inert for exactly the reason above, and an inert
+                          filled tick is a stuck one. The second tap now HOLDS
+                          the set — see `held` on the Row type: the figures stay
+                          where they are, the set stops counting, and a third
+                          tap counts it again. `sheetTick` is still asked what
+                          the boxes say; `held` only decides whether a row the
+                          boxes call saveable is one the coach has taken back. */}
                       {(() => {
                         const tick = sheetTick(s.target, s.reps);
-                        const on = willSave(tick);
-                        const tappable = isTappable(tick);
+                        const held = !!s.held && willSave(tick);
+                        const on = willSave(tick) && !held;
+                        const tappable = isTappable(tick) || tick.state === 'done';
+                        const where = `${movement(r.name)} set ${i + 1}`;
+                        const press = () => {
+                          tapLight();
+                          if (held) { holdSet(r.key, i, false); startRest(r, i); return; }
+                          if (tick.state === 'fill') { patchSet(r.key, i, { reps: String(tick.reps) }); startRest(r, i); return; }
+                          // Out of a done state, either way, and its rest goes
+                          // with it. `clear` empties the box because the tick is
+                          // what filled it; `done` holds, because a person did.
+                          dropRestFor(r.key, i);
+                          if (tick.state === 'clear') patchSet(r.key, i, { reps: '' });
+                          else holdSet(r.key, i, true);
+                        };
                         return (
                           <Pressable
-                            onPress={tappable
-                              ? () => patchSet(r.key, i, {
-                                  reps: tick.state === 'fill' ? String(tick.reps) : '',
-                                })
-                              : undefined}
+                            onPress={tappable ? press : undefined}
                             disabled={!tappable}
                             accessibilityRole="checkbox"
                             accessibilityState={{ checked: on, disabled: !tappable }}
-                            accessibilityLabel={sheetTickLabel(tick, movement(r.name), i + 1)}
+                            accessibilityLabel={held
+                              ? `${where} is unticked and will not be saved. Its figures are still in the boxes. Tap to count it again.`
+                              : tick.state === 'done'
+                                ? `${where} is done and will be saved. Tap to untick it; the figures stay in the boxes.`
+                                : sheetTickLabel(tick, movement(r.name), i + 1)}
                             hitSlop={{ top: hitSlopFor(28), bottom: hitSlopFor(28), left: 6, right: 6 }}
                             style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
                             <View style={{
@@ -1957,6 +2221,19 @@ export default function LogSession() {
                         and nothing else: never parsed, never written, and the
                         reason a reps box can legitimately be empty on a row
                         that was loaded rather than typed. */}
+                    {/* Said in words beside the set it is about. An empty circle
+                        next to two full boxes is otherwise a contradiction the
+                        coach has to work out, and the consequence — this set
+                        is not going into the record — is the one thing here
+                        that must not be left to a shade of grey. */}
+                    {s.held && counts({ ...s, held: false }) ? (
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 3 }}>
+                        <View style={{ width: 46 }} />
+                        <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+                          Unticked, so this set will not be saved. The figures stay here — tap the tick to count it again.
+                        </Text>
+                      </View>
+                    ) : null}
                     {targetLine(s.target) ? (
                       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 3 }}>
                         <View style={{ width: 46 }} />
@@ -1980,17 +2257,21 @@ export default function LogSession() {
                 empty reps box looks exactly like a row with a full one until
                 you read it. Null on an empty sheet: nought out of nought is not
                 a fact about anybody's session. */}
-            {sheetTicksLine(
-              rows.reduce((n, r) => n + r.sets.filter((st) => willSave(sheetTick(st.target, st.reps))).length, 0),
-              rows.reduce((n, r) => n + r.sets.length, 0),
-            ) ? (
-              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
-                {sheetTicksLine(
-                  rows.reduce((n, r) => n + r.sets.filter((st) => willSave(sheetTick(st.target, st.reps))).length, 0),
-                  rows.reduce((n, r) => n + r.sets.length, 0),
-                )}
-              </Text>
-            ) : null}
+            {(() => {
+              const total = rows.reduce((n, r) => n + r.sets.length, 0);
+              const saved = rows.reduce((n, r) => n + r.sets.filter(counts).length, 0);
+              const heldN = rows.reduce((n, r) => n + r.sets.filter((st) => st.held && counts({ ...st, held: false })).length, 0);
+              // `sheetTicksLine` speaks of sets that "have a rep count", which
+              // is the whole story until a set is unticked — and then it is
+              // false of exactly the sets it is there to account for. With one
+              // held, the count is said in the tick's own terms instead.
+              const line = heldN > 0 && total > 0
+                ? `${num(saved)} of ${num(total)} sets are ticked and will be saved. ${heldN === 1 ? 'One you unticked keeps its figures' : `${num(heldN)} you unticked keep their figures`} on this sheet and will not be.`
+                : sheetTicksLine(saved, total);
+              return line ? (
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{line}</Text>
+              ) : null;
+            })()}
 
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Add Exercise" onPress={() => setPicker(true)} />
@@ -2062,6 +2343,21 @@ export default function LogSession() {
             ) : null}
           </View>
         </ScrollView>
+        {/* ── the rest, where it can be seen from any row ──────────────────
+            Under the scroll and above the tab bar, inside the keyboard's own
+            view so it rides up with it: the coach typing the next set's load
+            is exactly the person who needs to see the rest running out. Keyed
+            by the rest's generation, so a new rest is a new countdown with no
+            memory of the last one's final seconds — the runner resets the same
+            thing by hand in `startRest`. */}
+        {rest && isLive ? (
+          <RestBar key={rest.gen} t={t} endsAt={rest.endsAt}
+            title={`${movement(rest.name)} · set ${rest.setIdx + 1}`}
+            note={rest.fromPlan ? 'Rest from your programme' : `App default of ${DEFAULT_REST_SEC} seconds`}
+            onAdd={() => setRest((cur) => (cur && cur.gen === rest.gen ? { ...cur, endsAt: cur.endsAt + 15000 } : cur))}
+            onSkip={() => setRest((cur) => (cur && cur.gen === rest.gen ? null : cur))}
+            onDone={() => setRest((cur) => (cur && cur.gen === rest.gen ? null : cur))} />
+        ) : null}
       </KeyboardAvoidingView>
 
       <Modal visible={picker} transparent animationType="slide" onRequestClose={() => setPicker(false)}>
@@ -2100,7 +2396,10 @@ export default function LogSession() {
                 <Pressable key={x.name} onPress={() => addExercise(x.name)}
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
                     paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(x.name)}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1 }}>
+                    <ExerciseThumb uri={thumbFor(stillFor(x.name) ?? { thumbPath: null })} t={t} size={40} />
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{movement(x.name)}</Text>
+                  </View>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{x.group}</Text>
                 </Pressable>
               ))}
@@ -2109,5 +2408,97 @@ export default function LogSession() {
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/**
+ * Elapsed time since `from`, redrawn once a second.
+ *
+ * Read off the wall clock on every draw rather than counted up, so a phone that
+ * spent ten minutes in a pocket — where iOS runs no intervals at all — shows the
+ * right figure the moment it comes back out. Its own component so that the
+ * second hand redraws one line and not the form around it.
+ */
+function SessionClock({ from, ink }: { from: number; ink: string }) {
+  const [, setBeat] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setBeat((b) => b + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secs = Math.max(0, Math.floor((Date.now() - from) / 1000));
+  // `restClock` is minutes and seconds, which is right for a rest and reads
+  // "75:03" for a session that has run over; the hour is split off in front.
+  const hrs = Math.floor(secs / 3600);
+  const face = hrs > 0 ? `${hrs}:${restClock(secs % 3600).padStart(5, '0')}` : restClock(secs);
+  return (
+    <Text accessibilityLabel={`Session clock, ${face}`}
+      style={{ ...ty.title, color: ink, ...numeric }}>{face}</Text>
+  );
+}
+
+/**
+ * The rest countdown: a slim bar with the digits, what it is resting from,
+ * where the figure came from, +15s and Skip.
+ *
+ * The cues are the member runner's, made by the same calls for the same
+ * reasons (app/(client)/workouts.tsx): a light tap and `restOver` on the
+ * TRANSITION to zero, once, guarded by a ref because a cue must happen exactly
+ * as often as the thing it announces; `countdown` on three, two and one, decided
+ * by `shouldTick`, which is what stops a 500 ms interval that reads each second
+ * twice from ticking twice. `playSound` asks the sound switch itself.
+ *
+ * What the runner has and this does not is the OS alert for a rest that ends
+ * with the app in a pocket. The member puts the phone down to lift; the coach
+ * is holding theirs.
+ */
+function RestBar({ t, endsAt, title, note, onAdd, onSkip, onDone }: {
+  t: ReturnType<typeof useTheme>; endsAt: number; title: string; note: string;
+  onAdd: () => void; onSkip: () => void; onDone: () => void;
+}) {
+  const leftAt = (end: number) => Math.max(0, Math.ceil((end - Date.now()) / 1000));
+  const [left, setLeft] = useState(() => leftAt(endsAt));
+  // Read through refs by an interval armed once: +15s moves `endsAt` under a
+  // running countdown, and the parent hands a fresh `onDone` on every render.
+  const endRef = useRef(endsAt);
+  endRef.current = endsAt;
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
+  const prevLeft = useRef<number | null>(null);
+  const over = useRef(false);
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (over.current) return;
+      const now = leftAt(endRef.current);
+      if (now === 0) {
+        over.current = true;
+        tapLight();
+        playSound('restOver');
+        doneRef.current();
+      } else if (shouldTick(now, prevLeft.current)) {
+        playSound('countdown');
+      }
+      prevLeft.current = now;
+      setLeft(now);
+    }, 500);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <View style={{
+      flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.md,
+      paddingHorizontal: layout.gutter, paddingVertical: sp.sm,
+      backgroundColor: t.surface, borderTopWidth: hairline, borderTopColor: t.ring,
+    }}>
+      <View accessible accessibilityLabel={`Rest, ${restClock(left)} left. ${title}. ${note}.`}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1, minWidth: 160 }}>
+        <Icon name="clock" size={18} color={t.brand} />
+        <Text style={{ ...ty.title, color: t.ink, ...numeric }}>{restClock(left)}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ ...ty.caption, color: t.ink2 }}>Rest · {title}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{note}</Text>
+        </View>
+      </View>
+      <Ghost label="+15s" a11yLabel="Add fifteen seconds to this rest" onPress={() => { onAdd(); tapLight(); }} />
+      <Ghost label="Skip" a11yLabel="Skip the rest of this rest" onPress={() => { onSkip(); tapLight(); }} />
+    </View>
   );
 }
