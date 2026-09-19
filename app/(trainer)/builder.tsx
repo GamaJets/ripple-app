@@ -50,7 +50,7 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -132,7 +132,7 @@ import {
 } from '../../src/lib/builderDraft';
 import { useAuth } from '../../src/ui/auth';
 import { notifySuccess } from '../../src/ui/haptics';
-import { WEEK_DAYS } from '../../src/lib/weekStart';
+import { WEEK_DAYS, WEEK_DAY_NAMES } from '../../src/lib/weekStart';
 import { ProgramBuilderFlow } from '../../src/ui/coach/ProgramBuilderFlow';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { useBackTo } from '../../src/ui/backTo';
@@ -1341,6 +1341,15 @@ export default function Builder() {
   // without the four-thousand-line editor under it.
   const [editorOpen, setEditorOpen] = useState(false);
   const toggleDay = (di: number) => setFoldedDays((p) => ({ ...p, [di]: !p[di] }));
+  /** A day circle tapped while that day is in the week: open the editor at
+   *  it, or — once the editor is up — fold and unfold it, which is what the
+   *  editor's own fold control does. Never a removal: this is the one screen
+   *  where the standing fear is losing work, and a circle that empties a day
+   *  on a single tap is that fear made into a control. Taking a day out stays
+   *  where it is confirmed, in the editor. */
+  const openDay = (di: number) => {
+    if (!editorOpen) { setEditorOpen(true); if (foldedDays[di]) toggleDay(di); } else toggleDay(di);
+  };
 
   /**
    * ── Whose draft this is ───────────────────────────────────────────────────
@@ -1510,6 +1519,19 @@ export default function Builder() {
     const free = DAYS.find((d) => !used.has(d)) ?? DAYS[0];
     return [...ds, { day: free, focus: 'Training', exercises: [] }];
   });
+  /** The board's day circle, tapped while that day is NOT in the week: add a
+   *  session on exactly that weekday and open the editor at it. `addDay`
+   *  above picks the first free weekday for the editor's own Add Training Day
+   *  control; this one is told which day the coach pointed at. The new day
+   *  lands at the end of the list, so its fold slot is cleared by index
+   *  before it renders — the map is keyed by position and a stale `true`
+   *  there would open the editor on a day that had shut itself. */
+  const addDayOn = (day: string) => {
+    const at = days.length;
+    setDays((ds) => [...ds, { day, focus: 'Training', exercises: [] }]);
+    setFoldedDays((p) => ({ ...p, [at]: false }));
+    setEditorOpen(true);
+  };
   const cycleDay = (di: number) => setDays((ds) => ds.map((d, i) => {
     if (i !== di) return d;
     const idx = DAYS.indexOf(d.day);
@@ -2259,55 +2281,71 @@ export default function Builder() {
           the drag being broken rather than as two gestures competing. */}
       <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 112 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* ── header ─────────────────────────────────────────────────────── */}
-        <ScreenHeader
-          eyebrow="Programmes"
-          title="Programme Builder"
-          leading={cameFrom ? <Ghost icon={BACK_ICON} onPress={goBack} a11yLabel="Back" /> : null}
-          actions={<Ghost label="Templates" icon="grid" onPress={() => router.push('/(trainer)/templates')} />}
-        />
-
-        {/* ── the block at a glance, as the board opens it ─────────────────
-            Weeks, days and exercises off the builder's own state — nothing
-            here is read, so nothing here can be unknown. `blockExercises`
-            rather than `totalExercises`, because the assign gate below counts
-            the block and this strip must agree with it. Under the strip, the
-            week's days as pills: each opens or folds its section below, which
-            is how the board's "Workout Days" circles behave here, and the plus
-            adds one. */}
-        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
-          <KpiRow items={[
-            { label: 'Weeks', value: String(blockWeeks.length) },
-            { label: 'Days', value: String(days.length), unit: blockWeeks.length > 1 ? 'this week' : undefined },
-            { label: 'Exercises', value: num(blockExercises) },
-          ]} />
+        {/* ── header: the board's compact opening ──────────────────────────
+            A round back control at the leading edge, the title centred, and a
+            round Templates control at the trailing edge — the same three
+            things the kit's ScreenHeader carries, laid out the way board page
+            5 draws them rather than left-aligned under an eyebrow. Built by
+            hand because the kit has no centred form yet and this screen must
+            not fork the kit to get one. The leading slot is reserved at the
+            round Ghost's 38pt even when the back control is absent (this is
+            the Programs tab's own root, with nothing to go back to), so the
+            title is centred on the page and not on whatever is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ width: 38, height: 38 }}>
+            {cameFrom ? <Ghost icon={BACK_ICON} onPress={goBack} a11yLabel="Back" /> : null}
+          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, minWidth: 0, textAlign: 'center' }}>
+            Build Program
+          </Text>
+          <Ghost icon="grid" onPress={() => router.push('/(trainer)/templates')} a11yLabel="Templates" />
         </View>
+
         {/* The programme's name, first — it is the template's name and the
             name every client sees over their week. */}
-        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.lg, marginBottom: 6 }}>Programme name</Text>
+        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xl, marginBottom: 6 }}>Program Name</Text>
         <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
-          accessibilityLabel="Programme name" style={inp} />
+          accessibilityLabel="Program name" style={inp} />
 
-        {/* ── the week's days as circles, the board's way ──────────────────
-            One round control per training day in the block, filled in the
-            brand where the day is open in the editor below; tapping one opens
-            the editor at that day. The plus adds a day and opens it. */}
+        {/* ── the week as seven circles, the board's way ───────────────────
+            Always the whole week, in the order src/lib/weekStart.ts draws one,
+            so an empty programme still reads as a week with nothing ticked
+            rather than as a blank. A day that is in the week is filled in the
+            brand; a tap on it opens the editor there (`openDay`), and a tap on
+            an empty one adds a session on that day (`addDayOn`). The plus that
+            used to sit beside the circles is gone: every day it could add is
+            now a circle, and the one thing it could do that a circle cannot —
+            a second session on a weekday already in use — is the editor's Add
+            Training Day plus its Change Day control, which is where a two-a-day
+            belongs.
+
+            `findIndex`, so a weekday with two sessions answers with its first:
+            the circle is a way in, not a count, and the spoken label says how
+            many sessions there are so the second is not a surprise. */}
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Workout Days</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.sm }}>
-          {days.map((day, index) => (
-            <Pressable key={`${day.day}-${index}`}
-              onPress={() => { if (!editorOpen) { setEditorOpen(true); if (foldedDays[index]) toggleDay(index); } else toggleDay(index); }}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: editorOpen && !foldedDays[index] }}
-              accessibilityLabel={`${day.day}, ${day.focus || 'training day'}, ${day.exercises.length === 1 ? '1 exercise' : `${day.exercises.length} exercises`}`}
-              style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: editorOpen && !foldedDays[index] ? t.brand : t.surface2 }}>
-              <Text style={{ ...ty.label, fontWeight: '700', color: editorOpen && !foldedDays[index] ? t.brandInk : t.ink2 }}>{day.day.slice(0, 2)}</Text>
-            </Pressable>
-          ))}
-          <Pressable onPress={() => { addDay(); setEditorOpen(true); }} accessibilityRole="button" accessibilityLabel="Add a training day"
-            style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface }}>
-            <Icon name="plus" size={18} color={t.brand} />
-          </Pressable>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: sp.sm }}>
+          {DAYS.map((abbr, i) => {
+            const di = days.findIndex((d) => d.day === abbr);
+            const selected = di >= 0;
+            const sessions = days.filter((d) => d.day === abbr);
+            const exercises = sessions.reduce((a, d) => a + d.exercises.length, 0);
+            const open = selected && editorOpen && !foldedDays[di];
+            const spoken = selected
+              ? `${WEEK_DAY_NAMES[i]}, in the week${sessions.length > 1 ? `, ${num(sessions.length)} sessions` : ''}, ${exercises === 1 ? '1 exercise' : `${num(exercises)} exercises`}`
+              : `${WEEK_DAY_NAMES[i]}, not in the week`;
+            return (
+              <Pressable key={abbr}
+                onPress={() => (selected ? openDay(di) : addDayOn(abbr))}
+                accessibilityRole="button"
+                accessibilityState={{ selected, expanded: selected ? open : undefined }}
+                accessibilityLabel={spoken}
+                accessibilityHint={selected ? (open ? 'Folds this day in the editor' : 'Opens this day in the editor') : 'Adds a training day'}
+                style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center',
+                         backgroundColor: selected ? t.brand : t.surface2 }}>
+                <Text style={{ ...ty.label, fontWeight: '700', color: selected ? t.brandInk : t.ink2 }}>{abbr.slice(0, 1)}</Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* Three rows with truthful counts, and the editor behind the first.
@@ -2323,6 +2361,17 @@ export default function Builder() {
           <ListRow icon="grid" title="Templates" note="Start from one you saved, or save this week as one"
             onPress={() => router.push('/(trainer)/templates')} />
         </Section>
+
+        {/* ── the block at a glance, under the rows ────────────────────────
+            Weeks, days and exercises off the builder's own state — nothing
+            here is read, so nothing here can be unknown. It was a KpiRow at
+            the top of the page; the board opens with the name and the week,
+            so the figures moved under the rows they describe, as one line.
+            `blockExercises` rather than `totalExercises`, because the assign
+            gate below counts the block and this line must agree with it. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, paddingHorizontal: sp.xs }}>
+          {`${num(blockWeeks.length)} week${s(blockWeeks.length)} · ${num(days.length)} day${s(days.length)}${blockWeeks.length > 1 ? ' this week' : ''} · ${num(blockExercises)} exercise${s(blockExercises)} in the block`}
+        </Text>
 
         {/* ── client ─────────────────────────────────────────────────────── */}
         <Section>
