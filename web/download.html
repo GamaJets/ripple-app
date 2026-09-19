@@ -144,7 +144,7 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <a class="brand" href="/">
       <span class="mark">
-        <svg width="26" height="18" viewBox="0 0 54 38" aria-hidden="true"><path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z" fill="currentColor"/><path d="m33 4 18 0-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z" fill="#22c55e"/></svg>
+        <svg class="brand-mark" width="26" height="18" viewBox="0 0 54 38" aria-hidden="true"><path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z" fill="currentColor"/><path class="signal" d="m33 4 18 0-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z" fill="#22c55e"/></svg>
       </span>
       Repple<span class="vh"> home</span>
     </a>
@@ -168,6 +168,14 @@ addEventListener('DOMContentLoaded', function () {
 <main id="main" tabindex="-1">
   <div class="wrap page">
 
+    <!-- The redesign's opening panel: eyebrow, title, lede and the store caveat
+         sit on one raised flow-panel (auth-support.css), the same shell the
+         sign-up and reset pages open with, so the three store tiles below read
+         as the page's content rather than as more of the hero. The caveat
+         stays inside the panel on purpose — it is the sentence check N in
+         scripts/check-site-claims.mjs holds the store badges against. -->
+    <div class="download-hero flow-panel">
+
     <p class="eyebrow">Get the apps</p>
     <h1 class="display">Three apps, one account. Pick the one that matches what you do.</h1>
     <p class="lede">They share a single record, so a set logged in one is the same row the
@@ -181,6 +189,8 @@ addEventListener('DOMContentLoaded', function () {
          changes when it does.</p>
       <p>You do not have to wait for it. Create an account on the web and start using it today;
          it is the same account the apps sign in with, so nothing you record now is lost.</p>
+    </div>
+
     </div>
 
     <h2 class="hd">Which one do you want?</h2>
@@ -346,7 +356,7 @@ addEventListener('DOMContentLoaded', function () {
       <div>
         <a class="brand" href="/">
           <span class="mark">
-            <svg width="26" height="18" viewBox="0 0 54 38" aria-hidden="true"><path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z" fill="currentColor"/><path d="m33 4 18 0-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z" fill="#22c55e"/></svg>
+            <svg class="brand-mark" width="26" height="18" viewBox="0 0 54 38" aria-hidden="true"><path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z" fill="currentColor"/><path class="signal" d="m33 4 18 0-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z" fill="#22c55e"/></svg>
           </span>
           Repple<span class="vh"> home</span>
     </a>
