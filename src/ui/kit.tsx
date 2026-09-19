@@ -114,6 +114,7 @@ export function Section({ children, style }: { children: ReactNode; style?: Styl
   return (
     <View style={[{
       backgroundColor: t.surface, borderRadius: radius.md,
+      borderWidth: hairline, borderColor: t.ring,
       paddingVertical: layout.section, paddingHorizontal: sp.lg,
       marginTop: sp.md,
     }, style]}>{children}</View>
@@ -780,7 +781,7 @@ export function QuickRow({ items }: { items: { icon: IconName; label: string; on
       {items.map((q) => (
         <Pressable key={q.label} onPress={q.onPress} accessibilityRole="button"
           style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.md, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring }}>
-          <Icon name={q.icon} size={18} color={t.ink2} />
+          <Icon name={q.icon} size={18} color={t.brand} />
           <Text style={{ ...ty.micro, letterSpacing: 0.3, color: t.ink2, marginTop: 7 }}>{q.label}</Text>
         </Pressable>
       ))}

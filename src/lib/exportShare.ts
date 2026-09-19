@@ -322,7 +322,7 @@ const esc = (v: string | number | null | undefined): string =>
 const page = (title: string, body: string, brand = 'Repple', accent?: string) =>
   `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;padding:26px;margin:0}
-   .h{background:${accent ? accent : 'linear-gradient(135deg,#2dd4bf,#0d9488)'};color:#fff;padding:18px 22px;border-radius:14px}
+   .h{background:${accent ? accent : 'linear-gradient(135deg,#4ade80,#15803d)'};color:#fff;padding:18px 22px;border-radius:14px}
    .h h1{margin:0;font-size:22px} .h p{margin:4px 0 0;opacity:.9;font-size:13px}
    table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14px}
    th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #e2e8f0}

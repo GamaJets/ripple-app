@@ -96,7 +96,9 @@ const STATUS = ['good', 'warn', 'serious', 'crit'] as const;
 // under WCAG 1.4.11 and needs 3:1 against what it is drawn on.
 const SERIES = ['s1', 's2', 's3', 's5', 's6'] as const;
 
-ok(PALETTES.length === 10, `there are ten palettes — found ${PALETTES.length}`);
+// Twelve: the ten selectable ones plus the approved board's pair, Repple and
+// Repple Dark, which became the default on 19 Sep 2026.
+ok(PALETTES.length === 12, `there are twelve palettes — found ${PALETTES.length}`);
 
 for (const p of PALETTES) {
   const t: Theme = p.theme;

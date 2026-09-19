@@ -56,7 +56,7 @@ const eq = (a: unknown, b: unknown, msg: string) =>
       eq(rampFor(p.theme.bg), ramp, `${p.key} reaches for the ${p.light ? 'light' : 'dark'} ramp`);
     }
   }
-  eq(checked, 160, 'ten palettes × four grounds × four bands were measured');
+  eq(checked, 192, 'twelve palettes × four grounds × four bands were measured');
   ok(worst >= AA_MARK, `every band clears 3:1 on its own ground — worst is ${worst.toFixed(2)}:1 at ${worstWhere}`);
   // Not merely "clears": the header quotes 3.13, and a change that scrapes past
   // 3.001 has moved the design without saying so.

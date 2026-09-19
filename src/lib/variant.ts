@@ -55,31 +55,30 @@ export function groupAllowed(group: AppVariant): boolean {
  * of the UI stays on the shared brand accent.
  */
 export const VARIANT_TILE: Record<AppVariant, string> = {
-  client: '#0d9488',
-  trainer: '#4338ca',
-  owner: '#b45309',
+  // Three steps of the family green, darkest for the studio. The plates are
+  // still distinct so the three icons can be told apart on a home screen,
+  // and all three sit in the accent's hue so each app matches its own logo.
+  client: '#15803d',
+  trainer: '#166534',
+  owner: '#14532d',
 };
 
 /**
  * The accent this build's interface is drawn in.
  *
- * NOT the same value as VARIANT_TILE, deliberately. The tile colours are
- * plate colours behind a 60-point home-screen icon, where a deep saturated
- * ground reads well. As a UI accent on a near-black background the trainer
- * indigo (#4338ca) and the owner amber (#b45309) are too dark: button labels
- * sit on them, small dots and 1px rules are drawn in them, and both fall below
- * a comfortable contrast at that size.
- *
- * These are the same hues lifted a step, and they are the values the marketing
- * site already uses for each app (--client / --coach / --studio in
- * web/styles.css). So the app, its icon and its page on the website now agree
- * about what colour each product is, which is what somebody means when they
- * say the screens should match the logo.
+ * One green for the whole family, as the approved board draws it. It used
+ * to be a hue per app — teal, indigo, amber, the same three the website's
+ * --client / --coach / --studio carried — and the board's reviewers chose
+ * one mark for the three products instead; what tells the apps apart on a
+ * screen is the wordmark's COACH / STUDIO line and the icon plate. This is
+ * the same value as the default palette's `brand` in src/theme/tokens.ts,
+ * and src/ui/components.tsx no longer overrides the palette with it; it is
+ * kept here because it is the value the build's icon plates are held to.
  */
 export const VARIANT_ACCENT: Record<AppVariant, string> = {
-  client: '#16b8a6',
-  trainer: '#7a70f0',
-  owner: '#e0912f',
+  client: '#15803d',
+  trainer: '#15803d',
+  owner: '#15803d',
 };
 
 /** Human name for the current build, used in copy and the user guide. */

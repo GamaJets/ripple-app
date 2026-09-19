@@ -1,4 +1,5 @@
-// Design tokens — 10 selectable palettes. Elevated Teal is the default. Every
+// Design tokens — 12 selectable palettes. Repple (the approved board's light
+// scheme) is the default, with Repple Dark as its counterpart. Every
 // palette carries the full token set so any screen renders on any palette.
 // The client & trainer pick a palette in Appearance; the owner can also set a
 // custom brand colour on top (white-label).
@@ -60,6 +61,20 @@ export const teal = {
 };
 export type Theme = typeof teal;
 
+// ── Repple (DEFAULT) — the approved board ──────────────────────────────────
+// White ground, neutral greys, near-black ink, one green. Every group on a
+// screen is a white card with a hairline edge on this ground, which is why
+// `ring` is a shade stronger than the other light palettes carry: on white it
+// is the only thing that makes a card a box. The green is green-700 rather
+// than the board's brighter fill because the Cta label is white on it and
+// 13pt/600 is not large text: #22c55e puts white at 2.3:1 and #16a34a at 3.3,
+// and the palette walk below holds every Cta label to 4.5. #15803d is 5.0.
+// The handoff already named it as the green that may be used as text.
+const repple: Theme = { bg: '#ffffff', surface: '#ffffff', surface2: '#f3f4f6', surface3: '#e5e7eb', ink: '#111827', ink2: '#374151', ink3: '#525b6b', ring: 'rgba(17,24,39,0.12)', brand: '#15803d', brandInk: '#ffffff', ...lightSem };
+// The board's dark mode: near-black with the same green, where the bright
+// fill is readable under dark ink (8.2:1) and so is what the board draws.
+const reppleDark: Theme = { bg: '#0b0f0e', surface: '#141a18', surface2: '#1b2320', surface3: '#252e2a', ink: '#f1f5f3', ink2: '#b8c4bf', ink3: '#93a09b', ring: 'rgba(255,255,255,0.10)', brand: '#22c55e', brandInk: '#111310', ...darkSem };
+
 const midnight: Theme = { bg: '#0a0f1e', surface: '#111a30', surface2: '#16223c', surface3: '#1e2b47', ink: '#eaf0ff', ink2: '#b9c6e0', ink3: '#8692ab', ring: 'rgba(255,255,255,0.08)', brand: '#5b9dff', brandInk: '#04122e', ...darkSem };
 const sage: Theme = { bg: '#0f1411', surface: '#16201a', surface2: '#1b281f', surface3: '#24322a', ink: '#e9f0e9', ink2: '#bcd0bc', ink3: '#899a89', ring: 'rgba(255,255,255,0.08)', brand: '#8fd694', brandInk: '#0c1f12', ...darkSem };
 const noir: Theme = { bg: '#000000', surface: '#101010', surface2: '#181818', surface3: '#242424', ink: '#ffffff', ink2: '#c8c8c8', ink3: '#8b8b8b', ring: 'rgba(255,255,255,0.12)', brand: '#f2f2f2', brandInk: '#000000', ...darkSem };
@@ -95,6 +110,8 @@ export interface PaletteMeta {
   counterpart: string;
 }
 export const PALETTES: PaletteMeta[] = [
+  { key: 'repple', name: 'Repple', theme: repple, light: true, counterpart: 'repple-dark' },
+  { key: 'repple-dark', name: 'Repple Dark', theme: reppleDark, light: false, counterpart: 'repple' },
   { key: 'teal', name: 'Elevated Teal', theme: teal, light: false, counterpart: 'clinical' },
   { key: 'midnight', name: 'Midnight Blue', theme: midnight, light: false, counterpart: 'clinical' },
   { key: 'sage', name: 'Sage', theme: sage, light: false, counterpart: 'cream' },
@@ -108,7 +125,7 @@ export const PALETTES: PaletteMeta[] = [
 ];
 export const paletteByKey = (k: string): Theme => (metaByKey(k)).theme;
 export const metaByKey = (k: string): PaletteMeta => PALETTES.find((p) => p.key === k) ?? PALETTES[0];
-export const DEFAULT_PALETTE = 'teal';
+export const DEFAULT_PALETTE = 'repple';
 
 /**
  * The palette to draw when the phone is in `scheme` and the member chose `key`.

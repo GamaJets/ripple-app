@@ -8,7 +8,6 @@ import {
   paletteByKey, paletteForScheme, highContrast, brandInkFor,
   DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta,
 } from '../theme/tokens';
-import { VARIANT, VARIANT_ACCENT } from '../lib/variant';
 import { Icon } from './Icon';
 import { passwordRules } from '../lib/passwordRules';
 import { passwordNeedsSpoken } from '../lib/passwordNeeds';
@@ -131,19 +130,13 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   const shownPalette = follow ? paletteForScheme(palette, scheme) : palette;
   const base = paletteByKey(shownPalette);
 
-  // Each app is drawn in its own colour. Applied only to the DEFAULT palette:
-  // if somebody has deliberately chosen midnight or cream, that is their choice
-  // and this must not quietly override it. An explicit accent still wins over
-  // both, which is the white-label case a gym uses for its own branding.
-  //
-  // The test is on the CHOSEN palette, not the shown one. A member on the
-  // default who is following their phone into Clinical Light has still not
-  // chosen a palette, and the variant colour is still the right mark for their
-  // app; `brandInkFor` measures the label against it either way, so the light
-  // ground does not cost them a readable button.
-  const withVariant: Theme = palette === DEFAULT_PALETTE
-    ? { ...base, brand: VARIANT_ACCENT[VARIANT], brandInk: brandInkFor(VARIANT_ACCENT[VARIANT]) }
-    : base;
+  // The three apps were each drawn in their own colour here, on the default
+  // palette only. The approved board draws the family in one green, which is
+  // now the default palette's own brand, so there is nothing to override: the
+  // palette carries it, and its `brandInk` was measured against it in
+  // tokens.ts rather than recomputed here. A white-label accent still wins
+  // below, exactly as before.
+  const withVariant: Theme = base;
 
   const branded: Theme = accent
     ? { ...withVariant, brand: accent, brandInk: brandInkFor(accent) }

@@ -1361,10 +1361,14 @@ for (const v of variants) {
   ok(/^#[0-9a-f]{6}$/i.test(VARIANT_TILE[v]), `${v} tile is a full hex value`);
 }
 
-// The whole point: three apps, three colours. A duplicate would mean two
-// products look identical, which is what this change exists to fix.
+// This used to assert three DIFFERENT accents — three apps, three colours.
+// The approved redesign board (docs/claude-handoff, 19 Sep 2026) draws the
+// family in one green, and the reviewers chose that on purpose: what tells
+// the apps apart is the wordmark's COACH / STUDIO line and the icon plate,
+// not the accent. So the rule inverted: one accent, held the same across all
+// three so no build can drift to its own.
 const accents = variants.map((v) => VARIANT_ACCENT[v]);
-ok(new Set(accents).size === 3, 'no two apps share an accent');
+ok(new Set(accents).size === 1, 'the three apps share the family accent');
 ok(new Set(variants.map((v) => VARIANT_TILE[v])).size === 3, 'no two apps share an icon tile');
 ok(new Set(variants.map((v) => VARIANT_LABEL[v])).size === 3, 'no two apps share a name');
 

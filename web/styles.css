@@ -60,9 +60,12 @@
 
   /* The reading accents. These are colours set as TEXT on the page, so each
      one is pitched for its background and therefore differs by scheme. */
-  --client:    #16b8a6;
-  --coach:     #7a70f0;
-  --studio:    #e0912f;
+  /* One green for the family, as the approved board draws the three apps;
+     three steps of it so the products can still be told apart on a page.
+     Measured as TEXT on the dark ground: 10.9, 8.3 and 9.9 to 1. */
+  --client:    #4ade80;
+  --coach:     #22c55e;
+  --studio:    #34d399;
 
   /* The app identity colours — what each icon actually looks like.
      ────────────────────────────────────────────────────────────────────────
@@ -83,9 +86,9 @@
      icon, not its character. These do not change with the colour scheme,
      because an app icon does not, and they are not redefined in either media
      block below. */
-  --client-tile: #1db4a3;  --client-tile-ink: #0d0a06;   /* 7.63:1 */
-  --coach-tile:  #6262e1;  --coach-tile-ink:  #ffffff;   /* 4.82:1 */
-  --studio-tile: #d78916;  --studio-tile-ink: #0d0a06;   /* 7.03:1 */
+  --client-tile: #22c55e;  --client-tile-ink: #0d0a06;   /* 8.67:1 */
+  --coach-tile:  #16a34a;  --coach-tile-ink:  #0d0a06;   /* 5.99:1 */
+  --studio-tile: #15803d;  --studio-tile-ink: #ffffff;   /* 5.02:1 */
 
   /* The accent as a SOLID FILL, as opposed to as text. Link text has to clear
      4.5:1 against the page, which forces the light theme down to the dark end
@@ -786,9 +789,9 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
        3.56:1 here and #4338ca is fine at 7.51:1 but kept in step. Studio is the
        shipped tile exactly: it passes, so there is no reason to invent a browner
        one. The unmodified tiles live in --*-tile and are what the app buttons use. */
-    --client:    #0a7e70;
-    --coach:     #4a3fc4;
-    --studio:    #b45309;
+    --client:    #15803d;   /* 4.77:1 on the light ground */
+    --coach:     #166534;   /* 6.78:1 */
+    --studio:    #14532d;   /* 8.66:1 */
 
     --good:  #1c7a4c;
     --warn:  #8a6300;
@@ -820,9 +823,9 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
     --brand-ink: #2a1503;
     --brand-soft: rgba(224,145,47,0.14);
 
-    --client:    #16b8a6;
-    --coach:     #7a70f0;
-    --studio:    #e0912f;
+    --client:    #4ade80;
+    --coach:     #22c55e;
+    --studio:    #34d399;
 
     --good:  #7ddba7;
     --warn:  #f0c04e;
