@@ -5,6 +5,31 @@
 // Every provider, handler and accessibility role is preserved — the three
 // bordered blocks became one hero figure and two hairline-separated sections.
 //
+// ── Against the board (client page 10, "Habit Tracking") ────────────────────
+//
+// The board opens with a centred "Daily Habits" title, then ONE card headed
+// "Daily Habits" with a round green check at its trailing edge, then a row per
+// habit: a round icon, the habit's name, and a FIGURE on the right — "0/8",
+// "8,483/10,000", "7.5/10". The hero percentage that led this screen is gone
+// (the card's head carries the day's count instead), and the figure beside
+// each row is a real read and never a sample:
+//
+//   · water  — today's glasses off the habits store, over the goal;
+//   · steps  — today's count off the connected watch (`useWearables().today`),
+//              over the step goal;
+//   · sleep  — last night off the connected devices (`useDeviceSleep`), or a
+//              night the member typed on Recovery this morning, over the goal;
+//   · everything else — the tick itself, 0/1 or 1/1.
+//
+// Every one of those has a way of NOT being known, and each of those draws
+// `fig(null)` and says why underneath. A dash on the steps row of somebody
+// with no watch is the truth; "0/10,000" is the app telling them they have not
+// moved today. The board's "8,483/10,000" is a member with a watch on.
+//
+// The water glasses, the +/− controls and the three goal boxes are still here,
+// under the card, because the card's water row is a tick and a figure and not
+// a place to log a glass.
+//
 // ── TF-31 ───────────────────────────────────────────────────────────────────
 //
 // The checklist is derived now (src/lib/checklist.ts), so it varies in length
@@ -21,12 +46,12 @@
 //     two it is before the client draws a conclusion about their own day.
 import { useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
-import { Icon } from '../../src/ui/Icon';
+import { Icon, type IconName } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag, Notice, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, Field, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { unsentNote } from '../../src/lib/offlineQueue';
@@ -36,10 +61,25 @@ import { streakFor, habitStreakFigure, habitStreakNote, habitStreakCaveat } from
 import { useClientData } from '../../src/ui/clientData';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { isWhole } from '../../src/ui/loadStatus';
-import { readNumber } from '../../src/lib/units';
+import { readNumber, plain } from '../../src/lib/units';
+import { num } from '../../src/lib/format';
 import { hitSlopFor } from '../../src/lib/a11y';
-import { BACK_ICON } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
+// The three figures the board draws beside a row that this store cannot
+// supply on its own. Steps come off the watch; last night off the devices
+// that record sleep, or off the night the member typed on Recovery. Same
+// hooks, same gating, as app/(client)/recovery.tsx — one arithmetic over the
+// same nights, so this row and that screen cannot disagree about a morning.
+import { useWearables } from '../../src/ui/wearables';
+import { useDeviceSleep } from '../../src/ui/deviceSleep';
+import { useWellness } from '../../src/ui/wellness';
+import { PROVIDERS } from '../../src/lib/wearables/registry';
+import { connectedProviders } from '../../src/lib/wearables/sleep';
+import type { ProviderId } from '../../src/lib/wearables/types';
+import { markNightsUnread } from '../../src/lib/sleepMerge';
+import { useToday } from '../../src/ui/today';
+import { dateParts } from '../../src/lib/localDate';
 
 // The same bounds clients_step_goal_check, clients_sleep_goal_hours_check
 // (supabase/parts/60) and clients_water_goal_glasses_check (part 70) enforce.
@@ -51,6 +91,22 @@ import { useScrollPad } from '../../src/ui/keyboardPad';
 const STEP_MIN = 500, STEP_MAX = 100000;
 const SLEEP_MIN = 3, SLEEP_MAX = 14;
 const WATER_MIN = 1, WATER_MAX = 30;
+
+// The board draws every row's icon as a glyph in a circle. The derived rows
+// have a kit icon each; a coach's own row keeps the emoji the coach chose,
+// because that is the one thing about the row that is theirs.
+const ROW_ICON: Record<string, IconName> = {
+  train: 'dumbbell', kcal: 'flame', protein: 'meals', water: 'water', steps: 'trending', sleep: 'moon',
+};
+
+/** What the trailing figure on a row is, and — when it is a dash — why. */
+interface RowFigure {
+  text: string;
+  /** The sentence under the name. Where the figure is a dash this is the
+   *  reason; where it is real this names the device it came from. Null when
+   *  there is nothing worth a line. */
+  note: string | null;
+}
 
 export default function Habits() {
   const t = useTheme();
@@ -87,9 +143,62 @@ export default function Habits() {
   const hydration = hydrationNote(h.waterStatus, c.profileStatus, h.water, h.waterGoal);
   // The count may be shown, and therefore counted from and written to.
   const waterCounted = hydration.showCount;
+
+  // ── the watch, for the steps row ─────────────────────────────────────────
+  //
+  // `states` is empty until the provider has looked, and an empty map is not
+  // the claim "no watch is connected" — src/ui/wearables.tsx told a client with
+  // a live WHOOP token exactly that, for exactly this reason. The home screen
+  // draws the same two lines for the same reason.
+  const wear = useWearables();
+  const wearableKnown = Object.keys(wear.states).length > 0;
+  const wearableConnected = Object.values(wear.states).some((v) => v === 'connected');
+  // `todayFrom`, not "the first connected provider that publishes this field":
+  // app/(client)/devices.tsx :701 records the Apple Watch being credited with
+  // WHOOP's number that way.
+  const stepsDevice = (() => {
+    const id = wear.todayFrom.steps;
+    return (id ? PROVIDERS.find((p) => p.meta.id === id)?.meta.name : null) ?? 'your device';
+  })();
+
+  // ── last night, for the sleep row ────────────────────────────────────────
+  //
+  // The merge lives in DeviceSleepProvider and is not redone here — see the
+  // long note in app/(client)/recovery.tsx on why re-merging on a second
+  // screen put two screens on separate arithmetic over the same nights. The
+  // one thing decided here is the same one Recovery decides: a WALK that
+  // failed reports 'error' with an empty `reads`, and an empty `reads` carries
+  // no failures, so every night in the window would read 'no-record'. That is
+  // a read that never completed printed as a fact about how the member slept;
+  // `markNightsUnread` turns those nights back into 'unknown'.
+  const deviceSleep = useDeviceSleep();
+  const deviceProviderIds = connectedProviders(wear.states).map((p: { meta: { id: string } }) => p.meta.id as ProviderId);
+  const deviceNights = deviceSleep.status === 'error'
+    ? markNightsUnread(deviceSleep.nights, deviceProviderIds)
+    : deviceSleep.nights;
+  const lastNight = deviceNights[0] ?? null;
+  // A night the member typed on Recovery this morning stands in when no device
+  // measured it. "This morning" is the member's own day, through `dateParts`,
+  // because `sleep_logs.at` is a timestamp and a bare comparison of its date
+  // slice would file a 23:30 entry under tomorrow for anyone east of Greenwich.
+  const wellness = useWellness();
+  const today = useToday();
+  const todayParts = dateParts(today);
+  const typedNight = isWhole(wellness.status) && todayParts
+    ? wellness.sleep.find((e) => {
+      const p = dateParts(e.at);
+      return !!p && p[0] === todayParts[0] && p[1] === todayParts[1] && p[2] === todayParts[2];
+    }) ?? null
+    : null;
+
   // The ticks and the water count come from the habits provider; the targets
-  // they are measured against are on the profile. Both are server reads.
-  const pull = usePullToRefresh(useCallback(() => { h.reload(); c.reload(); }, [h.reload, c.reload]));
+  // they are measured against are on the profile. Both are server reads. The
+  // watch and the devices are the other two reads on this screen now, and the
+  // gesture asks for them too — a pull that refreshed the ticks and left the
+  // step count where it was would make the count look confirmed.
+  const pull = usePullToRefresh(useCallback(() => {
+    h.reload(); c.reload(); void wear.syncAll(); deviceSleep.refresh(); wellness.reload();
+  }, [h.reload, c.reload, wear, deviceSleep, wellness]));
   // The three targets below live on `clients` and are read once, with no local
   // copy under USE_SUPABASE. A null one therefore has two meanings — "you have
   // not set this" and "the row that holds it could not be read" — and this
@@ -122,6 +231,81 @@ export default function Habits() {
   const [sleepDraft, setSleepDraft] = useState('');
   const [waterDraft, setWaterDraft] = useState('');
 
+  /**
+   * The figure on the right of a row, as the board draws it.
+   *
+   * Three rows have a count of their own to show against the goal; the rest
+   * are a tick, and a tick is "1/1" or "0/1". None of the three may print a
+   * zero it was not told: a watch that has not answered, a night no device
+   * measured and a glass count still loading are all a dash with the reason
+   * under the name, which is the same rule `fig` and the hero it replaced
+   * followed.
+   */
+  function rowFigure(id: string, done: boolean): RowFigure {
+    if (id === 'water') {
+      if (!waterCounted || h.waterGoal == null) return { text: fig(null), note: hydration.text };
+      return { text: `${num(h.water)}/${num(h.waterGoal)}`, note: null };
+    }
+    if (id === 'steps') {
+      if (c.stepGoal == null) return { text: fig(null), note: null };
+      if (wearableKnown && !wearableConnected) {
+        return { text: fig(null), note: 'Connect a watch under Me to count these here. Tick it yourself if you got there.' };
+      }
+      if (!isWhole(wear.todayStatus)) {
+        return {
+          text: fig(null),
+          note: wear.todayStatus === 'loading' || !wearableKnown
+            ? 'Reading today’s steps from your device…'
+            : 'Your device could not be read just now, so today’s count is not shown. That is not a count of nought.',
+        };
+      }
+      // numbers-ok: stepsDevice is the device's name, not a count.
+      if (wear.today.steps == null) return { text: fig(null), note: `Your ${stepsDevice} has no step count for today yet.` };
+      return { text: `${num(wear.today.steps)}/${num(c.stepGoal)}`, note: `Today, from your ${stepsDevice}` };
+    }
+    if (id === 'sleep') {
+      if (c.sleepGoalHours == null) return { text: fig(null), note: null };
+      const goal = plain(c.sleepGoalHours, 1);
+      if (lastNight?.outcome === 'measured' && lastNight.minutesAsleep != null) {
+        // One decimal, the way the goal box spells it — "7.5/8", with the
+        // reader's own decimal separator. `formatSleepHours` writes "7h 12m",
+        // which does not sit over a slash.
+        const src = lastNight.source;
+        return {
+          text: `${plain(lastNight.minutesAsleep / 60, 1)}/${goal}`,
+          note: src
+            ? `Last night, from your ${src.sourceName}${src.basis === 'in-bed' ? ' — time in bed' : ''}${lastNight.kept ? ', as read earlier' : ''}`
+            : 'Last night, from your device',
+        };
+      }
+      if (typedNight) return { text: `${plain(typedNight.hours, 1)}/${goal}`, note: 'Last night, as you logged it on Recovery' };
+      if (deviceSleep.status === 'loading' || wellness.status === 'loading') {
+        return { text: fig(null), note: 'Reading last night…' };
+      }
+      if (lastNight?.outcome === 'unknown') {
+        return { text: fig(null), note: 'Your devices could not be read for last night, so it is unknown — that is not the same as no sleep.' };
+      }
+      if (deviceProviderIds.length === 0) {
+        return { text: fig(null), note: 'No device records your sleep. Log last night on Recovery and it shows here.' };
+      }
+      return { text: fig(null), note: 'No device recorded last night. Log it on Recovery if you know it.' };
+    }
+    return { text: doneKnown ? (done ? '1/1' : '0/1') : fig(null), note: null };
+  }
+
+  // The card's trailing mark: the board's round green check. It is drawn
+  // filled only when EVERYTHING on the list is ticked and the read behind the
+  // list is whole; otherwise the day's count stands in its place, and a day
+  // that could not be read shows the dash rather than a hollow circle that
+  // would read as "nothing done".
+  const allDone = doneKnown && h.habits.length > 0 && h.doneCount === h.habits.length;
+  const headCount = doneKnown && h.habits.length > 0 ? `${h.doneCount}/${h.habits.length}` : fig(null);
+  const headSpoken = allDone
+    ? 'All of today’s list done'
+    : doneKnown
+      ? (pct == null ? 'Nothing on today’s list yet' : `${h.doneCount} of ${h.habits.length} done`)
+      : (unknown ? 'We could not read today’s list or what you have ticked off it' : h.status === 'loading' ? 'Reading today’s list…' : 'Not all of today’s list could be read');
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
@@ -133,28 +317,221 @@ export default function Habits() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        {/* ── header ─────────────────────────────────────────────────────── */}
+        {/* ── header ─────────────────────────────────────────────────────
+            The board centres the title between the back chevron and an
+            empty trailing slot; the spacer is the chevron's own width so the
+            title sits on the screen's centre line and not on the row's. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Small wins, every day</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Daily Habits</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Daily Habits</Text>
+          <View style={{ width: 38 }} />
         </View>
 
-        {/* ── the hero: today, in one number ──────────────────────────────── */}
-        <Hero
-          label="Today's Progress"
-          figure={doneKnown ? fig(pct) : fig(null)}
-          unit={!doneKnown || pct == null ? undefined : '%'}
-          arc={!doneKnown || pct == null ? undefined : pct / 100}
-          arcLabel="of today's habits done"
-          note={!doneKnown
-            ? (unknown ? 'We could not read today’s list or what you have ticked off it' : h.status === 'loading' ? 'Reading today’s list…' : 'Not all of today’s list could be read')
-            : pct == null
-            ? 'Nothing on today’s list yet'
-            : `${h.doneCount} of ${h.habits.length} done`}
-        />
+        {/* ── the card: today's list, one row per habit ──────────────────── */}
+        <Section>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md }}>
+            <Text style={{ ...ty.head, color: t.ink, flexShrink: 1 }}>Daily Habits</Text>
+            <View accessible accessibilityLabel={headSpoken}
+              style={{ minWidth: 28, height: 28, borderRadius: radius.pill, paddingHorizontal: allDone ? 0 : sp.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: allDone ? t.brand : t.surface2 }}>
+              {allDone
+                ? <Icon name="check" size={15} color={t.brandInk} />
+                : <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink2 }}>{headCount}</Text>}
+            </View>
+          </View>
+
+          {/* Which copy of the plan named today's session, and how old it is.
+              Non-null only while the cache is what is being served —
+              `mayServeCached` in src/ui/assignedPrograms.tsx sees to that — so
+              this needs no gate of its own. Same sentence and same treatment as
+              app/(client)/week.tsx and app/(client)/workouts.tsx. */}
+          {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{cachedNote}</Flag> : null}
+
+          {/* Ticks the server has not taken. The client did the thing and the
+              tick is safe on this phone — what has not happened is the row in
+              `habit_logs`, which is what src/lib/adherence.ts counts to tell
+              their coach how often they keep a habit. Saying "saved" without
+              saying "not sent" would let somebody read a green screen as a
+              figure their coach can see. */}
+          {unsentNote(h.unsent, 'tick') ? (
+            <View style={{ marginTop: sp.md }}>
+              <Notice tone={t.warn} kicker="Checklist" title="Not sent yet"
+                note={`${unsentNote(h.unsent, 'tick')} Until then your coach's records for today are short of them.`} />
+            </View>
+          ) : null}
+
+          {/* A refused read leaves rows off the list. Naming that is the whole
+              point of `status` — an unticked (or absent) habit under 'error'
+              means unknown, and the coach's dashboard reads the same rows. */}
+          {/* 'partial' is the same harm by a different route and had no arm
+              anywhere on this screen: `useHabits` sets it when the ticks or the
+              coach items exceed the row cap, so rows are genuinely missing from
+              the list below and an empty circle is genuinely unknown. */}
+          {unknown ? (
+            <View style={{ marginTop: sp.md }}>
+              <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
+                note="We couldn’t read your targets or your ticks just now, so anything below may be short a line — and an empty circle here doesn’t mean you skipped it." />
+            </View>
+          ) : h.status === 'partial' ? (
+            <View style={{ marginTop: sp.md }}>
+              <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
+                note="There is more on your record than we can read at once, so a line may be missing below and an empty circle here doesn’t mean you skipped it." />
+            </View>
+          ) : null}
+
+          {/* Why the runs beside each line are missing, or qualified.
+              Separate from the notice above, and that is the whole point of the
+              split in src/ui/habits.tsx: one is about TODAY's list and the
+              other is about the quarter behind it. They fail independently and
+              a member reading "some of today's list is missing" because their
+              record is long would be reading a false sentence.
+              'partial' is said rather than hidden, and it is not counted: each
+              run below carries its own floor and prints "or more". */}
+          {historyUnread ? (
+            <View style={{ marginTop: sp.md }}>
+              <Notice tone={t.warn} kicker="Your runs" title="We couldn’t read your history"
+                note="The runs beside each line need your record from the last few weeks, and we could not fetch it just now. Nothing has been lost — we simply cannot count them from here." />
+            </View>
+          ) : historyPartial ? (
+            <View style={{ marginTop: sp.md }}>
+              <Notice tone={t.warn} kicker="Your runs" title="Your record is longer than we can read at once"
+                note={`We read back ${h.historyDays} days and there is more on your record than fits in one go. A run that reaches the bottom of what we read is shown as "or more" — it has not been cut short, we just cannot see where it started.`} />
+            </View>
+          ) : null}
+
+          {/* `!unknown` let 'partial' through to a sentence that says the list
+              is genuinely empty, which is exactly the claim a truncated read
+              cannot support. The notice above now covers 'partial' and says so;
+              this stays silent there rather than contradicting it. */}
+          {h.habits.length === 0 && h.status === 'ready' && h.gaps.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
+              Nothing on today’s list. Rest days and un-set targets both look like this — set a goal or ask your coach for one.
+            </Text>
+          ) : null}
+
+          <View style={{ marginTop: sp.sm }}>
+            {h.habits.map((hb, hi) => {
+              // The run for THIS line, or null. Three different nulls meet here
+              // and none of them is a zero:
+              //   · the history was not read     → `runsRead` false;
+              //   · it was read and holds no row for this habit — a line they
+              //     have never ticked, or one whose ticks are all older than the
+              //     window — → `streakFor` null;
+              //   · it was read and this habit has no CURRENT run → `days: 0`,
+              //     which is the one case with something to say.
+              const run = runsRead ? streakFor(runs!, hb.id) : null;
+              const runFig = run ? habitStreakFigure(run) : null;
+              // A run of nought is not printed as "0 days". There is no run, and
+              // a zero beside a habit reads as a score.
+              const runText = runFig && run && run.days > 0 ? `${runFig.figure} ${runFig.unit}` : null;
+              // The sentence under the line. Two cases earn one, and no others —
+              // a note under every row is a note nobody reads:
+              //   · the figure cannot stand on its own (silence in the run, or a
+              //     run that reaches the bottom of what we read);
+              //   · there is NO current run but the record knows when the habit
+              //     was last kept. That is the half of their own history this
+              //     screen could never show, and it is the half worth saying:
+              //     "no run going just now, last ticked on the 2nd" rather than a
+              //     blank, which reads as nothing ever happened.
+              const caveat = run ? habitStreakCaveat(run) : null;
+              const ended = !!run && run.days === 0 && run.lastTicked !== null;
+              const runNote = run && (caveat || ended) ? habitStreakNote(run) : null;
+              const figure = rowFigure(hb.id, hb.done);
+              // The run moved under the name: the board spends the row's
+              // trailing slot on the figure. It is still said, and still only
+              // when there is one — a blank is honest where the history was not
+              // read, and a "0" or a "—" both read as a figure about them.
+              const runLine = runText ? `${runText} running` : null;
+              const icon = ROW_ICON[hb.id];
+              // The label on a Pressable REPLACES its children for a screen
+              // reader, so anything drawn inside it that is not in here is silent.
+              // The figure is the new thing on this row and it would have been
+              // the one part a screen-reader user never heard.
+              const a11y = [
+                hb.label,
+                figure.text === fig(null) ? 'not counted' : figure.text,
+                figure.note,
+                hb.source === 'coach' ? 'Set by your coach' : null,
+                runText ? `Ticked ${runText} running` : null,
+                runNote,
+              ].filter(Boolean).join('. ');
+              return (
+              <View key={hb.id}>
+                {hi > 0 ? <Rule /> : null}
+                <Pressable
+                  onPress={() => h.toggleHabit(hb.id)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: hb.done }}
+                  // The attribution is a second line on the row, and a label on
+                  // a Pressable replaces it. "Your coach asked for this" is the
+                  // reason the line exists.
+                  accessibilityLabel={a11y}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
+                >
+                  {/* The board's round icon plate. A ticked row fills it in the
+                      accent and swaps the glyph for the check — the green check
+                      state page 10 draws on its Meditate row — so done and not
+                      done differ in fill, in glyph and in the figure's ink, and
+                      none of the three is colour alone. */}
+                  <View style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: hb.done ? t.brand : t.surface2 }}>
+                    {hb.done
+                      ? <Icon name="check" size={17} color={t.brandInk} />
+                      : icon
+                        ? <Icon name={icon} size={17} color={t.brand} />
+                        : <Text style={{ ...ty.body, color: t.ink2 }}>{hb.icon}</Text>}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: hb.done ? t.ink : t.ink2 }}>{hb.label}</Text>
+                    {/* Only the coach-set rows are attributed. "From your targets"
+                        under a line that already reads "Hit 152 g protein" is
+                        noise; "your coach asked for this" is not. */}
+                    {hb.source === 'coach' ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Set by your coach</Text>
+                    ) : null}
+                    {/* Where the figure came from, or why there is none. */}
+                    {figure.note ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{figure.note}</Text>
+                    ) : null}
+                    {runLine ? (
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{runLine}</Text>
+                    ) : null}
+                    {/* Why the figure beside it is not a plain number. Only drawn
+                        when there IS something to say — a clean run needs no
+                        apology, and a sentence under every line would train the
+                        member to stop reading them. */}
+                    {runNote ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{runNote}</Text>
+                    ) : null}
+                  </View>
+                  {/* The figure, as the board draws it: count over goal, in the
+                      accent once the row is ticked. Wraps rather than truncates
+                      — "8,483/10,000" at the largest text size is two lines and
+                      still a figure. */}
+                  <Text style={{ ...value(15), color: hb.done ? t.brand : t.ink, textAlign: END_ALIGN, flexShrink: 1 }}>{figure.text}</Text>
+                </Pressable>
+              </View>
+              );
+            })}
+
+            {/* A target the app does not have is not a row. Where the client can
+                go and supply it, the list says so instead of quietly shrinking. */}
+            {h.gaps.map((g) => (
+              <View key={g.id}>
+                {h.habits.length > 0 ? <Rule /> : null}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                  <View style={{ width: 36, height: 36, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, borderStyle: 'dashed' }} />
+                  <Text style={{ flex: 1, ...ty.label, color: t.ink3 }}>{g.note}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* The list is built from this person's own plan and targets, which is
+              the question TF-31 asked outright. Saying so costs one line and
+              stops the next tester having to ask. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            Built from your plan, your targets and anything your coach adds.
+          </Text>
+        </Section>
 
 
         {/* ── water ──────────────────────────────────────────────────────── */}
@@ -238,169 +615,6 @@ export default function Habits() {
               Counted on this phone. We couldn’t check it against your account just now, so if you have logged water on another device today this may not be the whole picture.
             </Text>
           ) : null}
-        </Section>
-
-
-        {/* ── checklist ──────────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Checklist" note={doneKnown && h.habits.length ? `${h.doneCount} done` : undefined} />
-
-          {/* Which copy of the plan named today's session, and how old it is.
-              Non-null only while the cache is what is being served —
-              `mayServeCached` in src/ui/assignedPrograms.tsx sees to that — so
-              this needs no gate of its own. Same sentence and same treatment as
-              app/(client)/week.tsx and app/(client)/workouts.tsx. */}
-          {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{cachedNote}</Flag> : null}
-
-          {/* The list is built from this person's own plan and targets, which is
-              the question TF-31 asked outright. Saying so costs one line and
-              stops the next tester having to ask. */}
-          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-            Built from your plan, your targets and anything your coach adds.
-          </Text>
-
-          {/* Ticks the server has not taken. The client did the thing and the
-              tick is safe on this phone — what has not happened is the row in
-              `habit_logs`, which is what src/lib/adherence.ts counts to tell
-              their coach how often they keep a habit. Saying "saved" without
-              saying "not sent" would let somebody read a green screen as a
-              figure their coach can see. */}
-          {unsentNote(h.unsent, 'tick') ? (
-            <Notice tone={t.warn} kicker="Checklist" title="Not sent yet"
-              note={`${unsentNote(h.unsent, 'tick')} Until then your coach's records for today are short of them.`} />
-          ) : null}
-
-          {/* A refused read leaves rows off the list. Naming that is the whole
-              point of `status` — an unticked (or absent) habit under 'error'
-              means unknown, and the coach's dashboard reads the same rows. */}
-          {/* 'partial' is the same harm by a different route and had no arm
-              anywhere on this screen: `useHabits` sets it when the ticks or the
-              coach items exceed the row cap, so rows are genuinely missing from
-              the list below and an empty circle is genuinely unknown. */}
-          {unknown ? (
-            <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
-              note="We couldn’t read your targets or your ticks just now, so anything below may be short a line — and an empty circle here doesn’t mean you skipped it." />
-          ) : h.status === 'partial' ? (
-            <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
-              note="There is more on your record than we can read at once, so a line may be missing below and an empty circle here doesn’t mean you skipped it." />
-          ) : null}
-
-          {/* Why the runs beside each line are missing, or qualified.
-              Separate from the notice above, and that is the whole point of the
-              split in src/ui/habits.tsx: one is about TODAY's list and the
-              other is about the quarter behind it. They fail independently and
-              a member reading "some of today's list is missing" because their
-              record is long would be reading a false sentence.
-              'partial' is said rather than hidden, and it is not counted: each
-              run below carries its own floor and prints "or more". */}
-          {historyUnread ? (
-            <Notice tone={t.warn} kicker="Your runs" title="We couldn’t read your history"
-              note="The runs beside each line need your record from the last few weeks, and we could not fetch it just now. Nothing has been lost — we simply cannot count them from here." />
-          ) : historyPartial ? (
-            <Notice tone={t.warn} kicker="Your runs" title="Your record is longer than we can read at once"
-              note={`We read back ${h.historyDays} days and there is more on your record than fits in one go. A run that reaches the bottom of what we read is shown as "or more" — it has not been cut short, we just cannot see where it started.`} />
-          ) : null}
-
-          {/* A target the app does not have is not a row. Where the client can
-              go and supply it, the list says so instead of quietly shrinking. */}
-          {h.gaps.map((g) => (
-            <View key={g.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
-              <View style={{ width: 24, height: 24, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, borderStyle: 'dashed' }} />
-              <Text style={{ flex: 1, ...ty.label, color: t.ink3 }}>{g.note}</Text>
-            </View>
-          ))}
-
-          {/* `!unknown` let 'partial' through to a sentence that says the list
-              is genuinely empty, which is exactly the claim a truncated read
-              cannot support. The notice above now covers 'partial' and says so;
-              this stays silent there rather than contradicting it. */}
-          {h.habits.length === 0 && h.status === 'ready' && h.gaps.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
-              Nothing on today’s list. Rest days and un-set targets both look like this — set a goal or ask your coach for one.
-            </Text>
-          ) : null}
-
-          {h.habits.map((hb, hi) => {
-            // The run for THIS line, or null. Three different nulls meet here
-            // and none of them is a zero:
-            //   · the history was not read     → `runsRead` false;
-            //   · it was read and holds no row for this habit — a line they
-            //     have never ticked, or one whose ticks are all older than the
-            //     window — → `streakFor` null;
-            //   · it was read and this habit has no CURRENT run → `days: 0`,
-            //     which is the one case with something to say.
-            const run = runsRead ? streakFor(runs!, hb.id) : null;
-            const runFig = run ? habitStreakFigure(run) : null;
-            // A run of nought is not printed as "0 days". There is no run, and
-            // a zero beside a habit reads as a score.
-            const runText = runFig && run && run.days > 0 ? `${runFig.figure} ${runFig.unit}` : null;
-            // The sentence under the line. Two cases earn one, and no others —
-            // a note under every row is a note nobody reads:
-            //   · the figure cannot stand on its own (silence in the run, or a
-            //     run that reaches the bottom of what we read);
-            //   · there is NO current run but the record knows when the habit
-            //     was last kept. That is the half of their own history this
-            //     screen could never show, and it is the half worth saying:
-            //     "no run going just now, last ticked on the 2nd" rather than a
-            //     blank, which reads as nothing ever happened.
-            const caveat = run ? habitStreakCaveat(run) : null;
-            const ended = !!run && run.days === 0 && run.lastTicked !== null;
-            const runNote = run && (caveat || ended) ? habitStreakNote(run) : null;
-            // The label on a Pressable REPLACES its children for a screen
-            // reader, so anything drawn inside it that is not in here is silent.
-            // The run is the new thing on this row and it would have been the
-            // one part a screen-reader user never heard.
-            const a11y = [
-              hb.label,
-              hb.source === 'coach' ? 'Set by your coach' : null,
-              runText ? `Ticked ${runText} running` : null,
-              runNote,
-            ].filter(Boolean).join('. ');
-            return (
-            <View key={hb.id}>
-              {hi > 0 || h.gaps.length ? <Rule /> : null}
-              <Pressable
-                onPress={() => h.toggleHabit(hb.id)}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: hb.done }}
-                // The attribution is a second line on the row, and a label on
-                // a Pressable replaces it. "Your coach asked for this" is the
-                // reason the line exists.
-                accessibilityLabel={a11y}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
-              >
-                <View style={{ width: 24, height: 24, borderRadius: radius.pill, borderWidth: hb.done ? 0 : hairline, borderColor: t.ring, backgroundColor: hb.done ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                  {hb.done ? <Icon name="check" size={14} color={t.brandInk} /> : null}
-                </View>
-                <Text style={{ ...ty.body, color: t.ink2 }}>{hb.icon}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: hb.done ? t.ink : t.ink2 }}>{hb.label}</Text>
-                  {/* Only the coach-set rows are attributed. "From your targets"
-                      under a line that already reads "Hit 152 g protein" is
-                      noise; "your coach asked for this" is not. */}
-                  {hb.source === 'coach' ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Set by your coach</Text>
-                  ) : null}
-                  {/* Why the figure beside it is not a plain number. Only drawn
-                      when there IS something to say — a clean run needs no
-                      apology, and a sentence under every line would train the
-                      member to stop reading them. */}
-                  {runNote ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{runNote}</Text>
-                  ) : null}
-                </View>
-                {/* The run. Right-aligned and quiet: it is the second thing on
-                    the row, not the first, and the tick is what the member came
-                    to do. Nothing is drawn when the history was not read —
-                    `runsRead` false — because a blank is honest and a "0" or a
-                    "—" both read as a figure about them. */}
-                {runText ? (
-                  <Text style={{ ...ty.caption, ...numeric, color: hb.done ? t.ink2 : t.ink3 }}>{runText}</Text>
-                ) : null}
-              </Pressable>
-            </View>
-            );
-          })}
         </Section>
 
 

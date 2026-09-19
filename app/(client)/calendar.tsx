@@ -8,6 +8,18 @@
 // competing tiles, hairline-separated sections instead of stacked bordered
 // boxes, and the one card spent on the coach you're booking with.
 //
+// ── Against the board (client page 11, "Calendar") ──────────────────────────
+//
+// The board opens on the month: chevrons either side of the month name, the
+// seven-column grid with today and the booked day in green, and the selected
+// day's agenda directly under it as rows of "dot · 9:00 AM · Full Body
+// Strength · chevron". So the first viewport here is the grid and the day. The
+// hero count, the open-slot figure, Ask for a Time, Add to Calendar and the
+// standing-appointment row all moved UNDER the day panel — nothing was
+// removed, and every figure kept its gate. The agenda rows are the board's
+// shape with this screen's own content: a session with your coach, an open
+// hour with Book on it, a taken hour with its waitlist, a workout you logged.
+//
 // ── TF-20: the calendar can be written to as well as read ──────────────────
 //
 // Everything above is retrospective — slots a coach opened, workouts already
@@ -68,7 +80,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Card, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, useLateCancelCharges, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
 // Moving costs nothing and cancelling can cost a credit and a fee, so the
@@ -931,149 +943,24 @@ export default function Calendar() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.push('/(client)/dashboard')} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Personal training</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Book Sessions</Text>
-          </View>
-        </View>
-
-        {/* ── the hero: what you have booked ──────────────────────────────── */}
-        <Hero
-          label="Booked with Your Coach"
-          figure={sessionsCountable ? fig(mine.length) : fig(null)}
-          unit={sessionsCountable && mine.length === 1 ? 'session' : 'sessions'}
-          note={!sessionsKnown
-            ? 'Your sessions could not be read, so this is a dash rather than a count. Nothing has been cancelled — pull down to refresh.'
-            : sessionsStatus === 'loading'
-              ? 'Reading your sessions…'
-              : !sessionsCountable
-                ? 'Only part of your calendar loaded, so it cannot be counted. The days below show what did come back.'
-                : open.length > 0
-                  ? `Still to come. ${open.length} open slot${open.length === 1 ? '' : 's'} — tap a day to book`
-                  : 'Still to come. No open slots yet — your coach adds them here'}
+        {/* ── header ─────────────────────────────────────────────────────
+            Compact, the way the board opens page 11: the month row under it
+            is the real heading of this screen. The count of what is booked,
+            the open slots and the standing appointments used to sit above
+            the grid and now sit under the day's agenda, so the first
+            viewport is the month and the day, as the board draws it. */}
+        <ScreenHeader
+          eyebrow="Personal Training"
+          title="Calendar"
+          leading={<Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.push('/(client)/dashboard')} />}
         />
-
-
-        {/* ── availability ───────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Availability" />
-          {/* A dash rather than a zero when the read failed or was cut short.
-              "Open Slots 0" is a statement about the coach's diary, and under
-              'error' this screen has not seen it. */}
-          <KpiRow items={[
-            { label: 'Open Slots', value: sessionsCountable ? fig(open.length) : fig(null) },
-            ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack Credits', value: fig(packLeft) }] : []),
-          ]} />
-          {!sessionsKnown ? (
-            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-              Your sessions could not be read, so no open slot or booking of yours is shown here or on the grid below. This is a connection problem, not an empty calendar.
-            </Flag>
-          ) : null}
-          {/* The policy is what the Cancel button on this screen will hold the
-              member to, so a policy that could not be read is worth saying
-              before they get as far as tapping it. Deliberately not softened
-              into "no fee": that is the sentence this whole feature exists to
-              stop being printed by accident. */}
-          {policyStatus === 'error' ? (
-            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-              We couldn’t read your coach’s cancellation policy, so we can’t tell you whether cancelling would cost you anything. Cancelling still works — check with your coach what their notice period and fee are.
-            </Flag>
-          ) : null}
-          {/* ── the hour the coach never opened ──────────────────────────
-              Everything above this line is the coach's published slots, and
-              until now that was the whole of what a client could do here: if
-              the hour they wanted was not on the grid, there was nothing to
-              tap. The product owner's report was exactly that — "not able to
-              book a session or send a request for a booking".
-
-              Offered whatever the read said, and deliberately so. The one
-              member who most needs this is the one looking at "No open slots
-              yet", and that sentence is drawn from a count that may not have
-              come back at all; hiding the way out behind `open.length === 0`
-              would put it behind a figure this screen sometimes cannot read.
-              The note beside it changes with what is known, the button does
-              not.
-
-              It is NOT a second way to book. `book(s)` above is the only path
-              that takes a slot, draws a credit and confirms anything; this asks
-              a question that holds nothing — see src/lib/sessionRequests.ts. */}
-          <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
-            <Ghost label="Ask for a Time" icon="calendar" onPress={() => router.push('/(client)/request-session')} />
-          </View>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            {sessionsCountable && open.length > 0
-              ? 'None of these suit? Ask your coach for a different time. Asking doesn’t book anything.'
-              : 'Ask your coach for a time that isn’t here yet. Asking doesn’t book anything — they have to say yes.'}
-          </Text>
-
-          {mine.length > 0 ? (
-            <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
-              <Ghost label="Add to Calendar" icon="calendar"
-                onPress={async () => {
-                  // These two strings leave the app and stay in the client's
-                  // real calendar for as long as the events do, where nothing
-                  // can explain them and nothing will correct them. So an
-                  // unreadable name becomes a generic but true title rather
-                  // than a dash somebody finds under next Tuesday.
-                  const title = coachName ? `Training with ${coachName}` : 'Personal training';
-                  const calName = coachName ? `${BRAND.label} — ${coachName}` : `${BRAND.label} — Personal training`;
-                  // `mine`, which is bounded to what is still to come. It was
-                  // the whole history: last March's sessions went permanently
-                  // into the member's own diary.
-                  const evts = mine.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title }));
-                  await shareIcs(buildIcs(evts, calName), 'repple-sessions.ics', 'Add sessions to your calendar');
-                }} />
-            </View>
-          ) : null}
-        </Section>
-
-
-        {/* ── the hour that repeats ───────────────────────────────────────
-            A standing appointment is why some of the sessions on the grid
-            below are there, and until this row existed nothing in the client
-            app said so: the member saw the same Tuesday appear week after week
-            from an arrangement they could not see, could not name and could
-            not leave. The only exit they had was to cancel each occurrence one
-            at a time, which is also the most expensive one — each of those is
-            an ordinary cancellation and each inside the notice window records
-            its own fee.
-
-            The row is drawn whatever the read did. Hidden on 'error' it would
-            be hidden from exactly the member whose arrangement could not be
-            confirmed, which is the one who most needs the way in. */}
-        {standingStatus !== 'ready' || standingCount > 0 ? (
-          <>
-            <Section>
-              <SectionHead title="Standing Appointments" />
-              <ListRow icon="clock" title="Your Weekly Slots"
-                note={standingStatus === 'error'
-                  ? 'Could not be read — this is not a statement that you have none'
-                  : standingStatus === 'loading'
-                    ? 'Checking'
-                    : standingStatus === 'partial'
-                      ? 'Part of the list loaded — open to see it'
-                      : standingCount === 1
-                        ? 'One hour booked for you every week'
-                        : `${standingCount} hours booked for you every week`}
-                onPress={() => router.push('/(client)/standing')} />
-            </Section>
-            <Rule />
-          </>
-        ) : null}
 
         {/* ── month ──────────────────────────────────────────────────────── */}
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.lg }}>
-            <Pressable onPress={() => shiftMonth(-1)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Previous month" style={{ padding: 4 }}>
-              <Icon name={BACK_ICON} size={18} color={t.ink2} />
-            </Pressable>
+            <Ghost icon={BACK_ICON} a11yLabel="Previous month" onPress={() => shiftMonth(-1)} />
             <Text style={{ ...ty.head, color: t.ink }}>{monthNamesLong()[viewMonth]} {viewYear}</Text>
-            <Pressable onPress={() => shiftMonth(1)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Next month" style={{ padding: 4 }}>
-              <Icon name={FORWARD_ICON} size={18} color={t.ink2} />
-            </Pressable>
+            <Ghost icon={FORWARD_ICON} a11yLabel="Next month" onPress={() => shiftMonth(1)} />
           </View>
           <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>
             {/* `weekday: 'narrow'` rather than the first character of the
@@ -1110,13 +997,14 @@ export default function Calendar() {
                   // language: "14 Aug" and "Aug 14" are both right and only
                   // one of them is right for any given reader.
                   fmtAxisDay(viewYear, viewMonth, d),
+                  isToday ? 'today' : null,
                   dayPlan ? `planned ${DAY_TYPE_LABEL[dayPlan.type].toLowerCase()}` : null,
                   hasMine ? 'your session' : null,
                   hasOpen ? 'open slot' : null,
                   ...dayKinds.map((kind) => `${KIND_LABEL[kind]} logged`),
                 ].filter(Boolean).join(', ');
                 return (
-                  <Pressable key={i} onPress={() => setSelKey(k)} accessibilityRole="button" accessibilityLabel={a11y} style={{ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
+                  <Pressable key={i} onPress={() => setSelKey(k)} accessibilityRole="button" accessibilityState={{ selected: isSel }} accessibilityLabel={a11y} style={{ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
                     {/* A hollow ring, above the date rather than below it. The
                         logged marks are filled dots underneath, so a plan and a
                         record differ in shape, in position and in palette all at
@@ -1127,16 +1015,28 @@ export default function Calendar() {
                     {dayPlan ? (
                       <View style={{ position: 'absolute', top: 3, end: 5, width: 8, height: 8, borderRadius: 4, borderWidth: hairline * 3, borderColor: PLAN_RING, backgroundColor: 'transparent' }} />
                     ) : null}
-                    <View style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? t.brand : 'transparent', borderWidth: isToday && !isSel ? hairline : 0, borderColor: t.brand }}>
-                      <Text style={{ ...value(14), color: isSel ? t.brandInk : isToday ? t.ink : t.ink2 }}>{d}</Text>
+                    {/* A circle, as the board and the coach's grid draw it.
+                        The board marks a booked day in green: here the day
+                        with your session is a green RING round the date and
+                        the selected day is the green FILL, so the two read
+                        apart when they coincide; today is accent ink and
+                        weight, no border pretending to be a state. All three
+                        are spoken in the label above, none is colour alone. */}
+                    <View style={{ width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? t.brand : 'transparent', borderWidth: hasMine && !isSel ? hairline * 2 : 0, borderColor: t.brand }}>
+                      <Text style={{
+                        ...ty.body, ...numeric,
+                        fontWeight: isSel || isToday || hasMine ? '600' : '400',
+                        color: isSel ? t.brandInk : isToday || hasMine ? t.brand : t.ink2,
+                      }}>{d}</Text>
                     </View>
                     {/* The two session marks first, then one per kind logged.
                         Dropped from 5pt to 4pt with a 2pt gap because a day can
                         now carry seven of them: 7x4 + 6x2 = 40pt, inside the
                         ~47pt cell a 7-column grid leaves on the narrowest phone,
                         so they never wrap into the row beneath. */}
+                    {/* The session mark moved up into the ring round the date;
+                        the open-slot dot and one per kind logged stay here. */}
                     <View style={{ flexDirection: 'row', gap: 2, height: 6, marginTop: 2 }}>
-                      {hasMine && <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: t.brand }} />}
                       {hasOpen && <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: t.ink3 }} />}
                       {dayKinds.map((kind) => (
                         <View key={kind} style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: KIND_DOT[kind] }} />
@@ -1159,7 +1059,7 @@ export default function Calendar() {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.md, justifyContent: 'center' }}>
             {[
               { dot: PLAN_RING, label: 'Planned, Not Logged', hollow: true },
-              { dot: t.brand, label: 'Your Session', hollow: false },
+              { dot: t.brand, label: 'Your Session', hollow: true },
               { dot: t.ink3, label: 'Open Slot', hollow: false },
               ...WORKOUT_KINDS.map((kind) => ({ dot: KIND_DOT[kind], label: KIND_LABEL[kind], hollow: false })),
             ].map((it) => (
@@ -1392,16 +1292,27 @@ export default function Calendar() {
             return (
               <View key={s.id}>
                 {si > 0 ? <Rule /> : null}
+                {/* The board's agenda row: a coloured dot, the time, the
+                    title, and something at the trailing edge. The dot is the
+                    same mark the grid uses (accent for your session, neutral
+                    for an open hour), the title says whose hour it is, and the
+                    length moved down to the caption with the status. */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                  <View style={{ width: 3, height: 34, borderRadius: 2, backgroundColor: isMine ? t.brand : t.surface3 }} />
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isMine ? t.brand : t.surface3 }} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
+                    {/* The coach's name only where one came back for the
+                        coach's own id — see the TF-32 note at the top of this
+                        file — and "your coach" otherwise, which is true either
+                        way. Never a dash in the middle of a title. */}
+                    <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>
+                      {timeLabel(s.startsAt)} · {isMine ? (coachName ? `Session with ${coachName}` : 'Session with Your Coach') : 'Open Slot'}
+                    </Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {/* "Available" is a claim about a slot somebody can take.
                           An hour that has already been is not available and
                           never was going to be — it is an hour the coach had
                           open and nobody booked. */}
-                      {v ? PAST_STATE_NOTE[v.state]
+                      {s.durationMin} min · {v ? PAST_STATE_NOTE[v.state]
                         : isMine ? 'Confirmed with your coach'
                         : gone ? 'Nobody booked this hour'
                         : (s.released ? 'Just opened up' : 'Available')}
@@ -1467,9 +1378,10 @@ export default function Calendar() {
                   <View key={k.sessionId}>
                     {ki > 0 ? <Rule /> : null}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                      <View style={{ width: 3, height: 34, borderRadius: 2, backgroundColor: mine ? t.warn : t.surface3 }} />
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mine ? t.warn : t.surface3 }} />
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink2 }}>{timeLabel(k.startsAt)} · {k.durationMin} min</Text>
+                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink2 }}>{timeLabel(k.startsAt)} · {mine ? 'On the Waitlist' : 'Taken'}</Text>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{k.durationMin} min</Text>
                         {/* The sentence is the same one `waitlistLine` writes
                             everywhere else, and it never promises the slot to
                             anybody who is not actually at the front. */}
@@ -1501,16 +1413,21 @@ export default function Calendar() {
                 return (
                   <View key={e.id ?? `${e.t}-${e.exercise}-${ei}`}>
                     {ei > 0 ? <Rule /> : null}
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
-                      <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                        <Icon name={KIND_ICON[kind]} size={17} color={KIND_DOT[kind]} />
-                      </View>
+                    {/* The same row shape as the sessions above it — the
+                        kind's dot, the time, the movement, a chevron — so the
+                        day reads as one agenda and not as two lists. The row
+                        opens Activity, where the entry can be edited; the
+                        kind is still named in words beside the detail. */}
+                    <Pressable onPress={() => router.push('/(client)/activity')} accessibilityRole="button"
+                      accessibilityLabel={`${timeLabel(e.t)}, logged ${movement(e.exercise)}, ${KIND_LABEL[kind]}. Opens Activity`}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: KIND_DOT[kind] }} />
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Logged {movement(e.exercise)}</Text>
+                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(e.t)} · Logged {movement(e.exercise)}</Text>
                         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{KIND_LABEL[kind]} · {logDetail(e, wu)}</Text>
                       </View>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.t)}</Text>
-                    </View>
+                      <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+                    </Pressable>
                   </View>
                 );
               })}
@@ -1521,6 +1438,133 @@ export default function Calendar() {
           ) : null}
         </Section>
 
+
+        {/* ── what you have booked, and what is open ───────────────────────
+            Under the day's agenda rather than a hero over the grid, as the
+            board draws it. Everything in here is what used to stand above
+            the month: the count, the open slots, the way to ask for an hour
+            that is not on the grid, and the export. */}
+        <Section>
+          <SectionHead title="Your Sessions" />
+          {/* A dash rather than a zero when the read failed or was cut short.
+              "Open Slots 0" is a statement about the coach's diary, and under
+              'error' this screen has not seen it. */}
+          {/* The hero this screen used to open with — "Booked with Your
+              Coach · 3 sessions" — is the first column now, under the grid
+              rather than over it, as the board draws page 11. Same figure,
+              same bound (`mine` is what is still to come), same gate. */}
+          <KpiRow items={[
+            { label: 'Booked', value: sessionsCountable ? fig(mine.length) : fig(null), unit: sessionsCountable ? (mine.length === 1 ? 'session' : 'sessions') : undefined },
+            { label: 'Open Slots', value: sessionsCountable ? fig(open.length) : fig(null) },
+            ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack Credits', value: fig(packLeft) }] : []),
+          ]} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {!sessionsKnown
+              ? 'Your sessions could not be read, so these are dashes rather than counts. Nothing has been cancelled — pull down to refresh.'
+              : sessionsStatus === 'loading'
+                ? 'Reading your sessions…'
+                : !sessionsCountable
+                  ? 'Only part of your calendar loaded, so it cannot be counted. The days above show what did come back.'
+                  : open.length > 0
+                    ? `Still to come. ${open.length} open slot${open.length === 1 ? '' : 's'} — tap a day to book`
+                    : 'Still to come. No open slots yet — your coach adds them here'}
+          </Text>
+          {!sessionsKnown ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+              Your sessions could not be read, so no open slot or booking of yours is shown here or on the grid below. This is a connection problem, not an empty calendar.
+            </Flag>
+          ) : null}
+          {/* The policy is what the Cancel button on this screen will hold the
+              member to, so a policy that could not be read is worth saying
+              before they get as far as tapping it. Deliberately not softened
+              into "no fee": that is the sentence this whole feature exists to
+              stop being printed by accident. */}
+          {policyStatus === 'error' ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+              We couldn’t read your coach’s cancellation policy, so we can’t tell you whether cancelling would cost you anything. Cancelling still works — check with your coach what their notice period and fee are.
+            </Flag>
+          ) : null}
+          {/* ── the hour the coach never opened ──────────────────────────
+              Everything above this line is the coach's published slots, and
+              until now that was the whole of what a client could do here: if
+              the hour they wanted was not on the grid, there was nothing to
+              tap. The product owner's report was exactly that — "not able to
+              book a session or send a request for a booking".
+
+              Offered whatever the read said, and deliberately so. The one
+              member who most needs this is the one looking at "No open slots
+              yet", and that sentence is drawn from a count that may not have
+              come back at all; hiding the way out behind `open.length === 0`
+              would put it behind a figure this screen sometimes cannot read.
+              The note beside it changes with what is known, the button does
+              not.
+
+              It is NOT a second way to book. `book(s)` above is the only path
+              that takes a slot, draws a credit and confirms anything; this asks
+              a question that holds nothing — see src/lib/sessionRequests.ts. */}
+          <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+            <Ghost label="Ask for a Time" icon="calendar" onPress={() => router.push('/(client)/request-session')} />
+          </View>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {sessionsCountable && open.length > 0
+              ? 'None of these suit? Ask your coach for a different time. Asking doesn’t book anything.'
+              : 'Ask your coach for a time that isn’t here yet. Asking doesn’t book anything — they have to say yes.'}
+          </Text>
+
+          {mine.length > 0 ? (
+            <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+              <Ghost label="Add to Calendar" icon="calendar"
+                onPress={async () => {
+                  // These two strings leave the app and stay in the client's
+                  // real calendar for as long as the events do, where nothing
+                  // can explain them and nothing will correct them. So an
+                  // unreadable name becomes a generic but true title rather
+                  // than a dash somebody finds under next Tuesday.
+                  const title = coachName ? `Training with ${coachName}` : 'Personal training';
+                  const calName = coachName ? `${BRAND.label} — ${coachName}` : `${BRAND.label} — Personal training`;
+                  // `mine`, which is bounded to what is still to come. It was
+                  // the whole history: last March's sessions went permanently
+                  // into the member's own diary.
+                  const evts = mine.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title }));
+                  await shareIcs(buildIcs(evts, calName), 'repple-sessions.ics', 'Add sessions to your calendar');
+                }} />
+            </View>
+          ) : null}
+        </Section>
+
+
+        {/* ── the hour that repeats ───────────────────────────────────────
+            A standing appointment is why some of the sessions on the grid
+            below are there, and until this row existed nothing in the client
+            app said so: the member saw the same Tuesday appear week after week
+            from an arrangement they could not see, could not name and could
+            not leave. The only exit they had was to cancel each occurrence one
+            at a time, which is also the most expensive one — each of those is
+            an ordinary cancellation and each inside the notice window records
+            its own fee.
+
+            The row is drawn whatever the read did. Hidden on 'error' it would
+            be hidden from exactly the member whose arrangement could not be
+            confirmed, which is the one who most needs the way in. */}
+        {standingStatus !== 'ready' || standingCount > 0 ? (
+          <>
+            <Section>
+              <SectionHead title="Standing Appointments" />
+              <ListRow icon="clock" title="Your Weekly Slots"
+                note={standingStatus === 'error'
+                  ? 'Could not be read — this is not a statement that you have none'
+                  : standingStatus === 'loading'
+                    ? 'Checking'
+                    : standingStatus === 'partial'
+                      ? 'Part of the list loaded — open to see it'
+                      : standingCount === 1
+                        ? 'One hour booked for you every week'
+                        : `${standingCount} hours booked for you every week`}
+                onPress={() => router.push('/(client)/standing')} />
+            </Section>
+            <Rule />
+          </>
+        ) : null}
 
         {/* ── what is already marked ──────────────────────────────────────
             The grid can show a ring but not what it is, and one selected day
