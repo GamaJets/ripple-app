@@ -42,7 +42,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -53,7 +53,7 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, type ChecklistRow } from '../../src/lib/firstRun';
 import { ONBOARD_KEY } from './onboarding';
 import { GUIDE_SEEN_KEY } from '../guide';
-import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * The mark against one checklist row — a filled tick, a hairline ring, or a
@@ -163,18 +163,12 @@ export default function GettingStarted() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Getting started</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>
-              {/* Counted, not fractioned, when part of the list is unreadable.
-                  "4 of 6" over two failed reads states a denominator we cannot
-                  stand behind. */}
-              {unknown > 0 ? `${done} done` : `${done} of ${rows.length} done`}
-            </Text>
-          </View>
-        </View>
+        {/* Counted, not fractioned, when part of the list is unreadable.
+            "4 of 6" over two failed reads states a denominator we cannot
+            stand behind. The count is the subtitle now, under the page's
+            name, where the board puts the one quiet line a pushed page has. */}
+        <PageHead title="Getting Started" subtitle={unknown > 0 ? `${done} done` : `${done} of ${rows.length} done`} />
+        <View style={{ height: sp.lg }} />
 
         {next ? (
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>

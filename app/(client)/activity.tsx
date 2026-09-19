@@ -20,7 +20,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -44,7 +44,7 @@ import { useNow } from '../../src/ui/today';
 // What a finished session may be called, and what a week of this feed came to.
 // Written for this screen and imported by nothing else.
 import { catchUp, catchUpLine, sessionFeedRows, type FeedKind } from '../../src/lib/activityFeed';
-import { BACK_ICON, FORWARD_ICON, turn } from '../../src/ui/direction';
+import { FORWARD_ICON, turn } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 
@@ -344,13 +344,7 @@ export default function Activity() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Everything across your training</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Activity</Text>
-          </View>
-        </View>
+        <PageHead title="Activity" subtitle="Everything across your training" />
 
         <Section>
           {/* The count is the size of what this screen managed to assemble, not

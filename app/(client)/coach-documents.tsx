@@ -44,7 +44,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 // Who is signed in, with the failure kept rather than collapsed into "nobody".
@@ -62,7 +62,6 @@ import {
   COACH_DOC_ACCEPT_RULE, COACH_DOC_ACCESS_ENDS_NOTE, COACH_DOC_NOT_REPPLE, docLine, outstanding,
   outstandingCount, shapeDocs, sizeLabel, type CoachDoc, type RawCoachDoc,
 } from '../../src/lib/coachDocs';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const BUCKET = 'coach-docs';
 /** Long enough to read a waiver, short enough that a leaked link is stale. */
@@ -278,13 +277,7 @@ export default function ClientCoachDocumentsScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>From your coach</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Paperwork</Text>
-          </View>
-        </View>
+        <PageHead title="Paperwork" subtitle="From your coach" />
 
         {!USE_SUPABASE ? (
           <Section>

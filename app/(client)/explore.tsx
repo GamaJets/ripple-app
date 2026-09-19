@@ -16,9 +16,8 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useClientData } from '../../src/ui/clientData';
 import { CLIENT_FEATURES, AREA_LABEL, searchFeatures, type FeatureArea } from '../../src/lib/features';
-import { Rule, Section, SectionHead, ListRow, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const ORDER: FeatureArea[] = ['train', 'meals', 'progress', 'me'];
 
@@ -69,13 +68,7 @@ export default function Explore() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Everything, in two taps</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Explore</Text>
-          </View>
-        </View>
+        <PageHead title="Explore" subtitle="Everything, in two taps" />
 
         {/* ── the field is the screen ────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg }}>

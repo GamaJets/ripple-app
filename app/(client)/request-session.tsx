@@ -51,7 +51,7 @@ import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, Card } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, Card, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
@@ -79,7 +79,6 @@ import {
 // March, and on an account that has changed coach, silent about which of the two
 // people said it.
 import { answeredByLine, answererOf } from '../../src/lib/requestAnswerer';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** How far ahead the day strip offers. Four weeks is as far as anybody plans a
  *  gym session; the horizon that actually governs is REQUEST_HORIZON_DAYS and
@@ -343,19 +342,12 @@ export default function RequestSessionScreen() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            {/* "With your coach" is a claim, and for a member with no coach
-                linked it is a false one this screen can prove is false before
-                it makes it. `coachLinked` is `boolean | null` and only the
-                explicit false is acted on — see the gate below. */}
-            <Text style={{ ...ty.micro, color: t.ink3 }}>
-              {coachName ? `With ${coachName}` : noCoach ? 'Nobody to ask yet' : 'With your coach'}
-            </Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Ask for a Time</Text>
-          </View>
-        </View>
+        {/* "With your coach" is a claim, and for a member with no coach
+            linked it is a false one this screen can prove is false before
+            it makes it. `coachLinked` is `boolean | null` and only the
+            explicit false is acted on — see the gate below. */}
+        <PageHead title="Ask for a Time"
+          subtitle={coachName ? `With ${coachName}` : noCoach ? 'Nobody to ask yet' : 'With your coach'} />
 
         {!USE_SUPABASE ? (
           <Section>

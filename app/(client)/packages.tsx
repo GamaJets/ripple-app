@@ -28,7 +28,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Meter, Ghost, Cta, Flag, ListRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Meter, Ghost, Cta, Flag, ListRow, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/theme/scale';
 import { normaliseCode, checkoutCodeBlocker, type PromoTarget } from '../../src/lib/packagePromo';
 import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, openPurchasePortal, portalPurchase, myPtPasses, type Purchase, type TrainerPackage, type PtPassRow } from '../../src/lib/connect';
@@ -45,12 +45,11 @@ import { withDeadline } from '../../src/lib/readDeadline';
 import { expiryLine } from '../../src/lib/packExpiry';
 import { useAuth } from '../../src/ui/auth';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
-import { fmtFullDay } from '../../src/lib/format';
+import { fmtFullDay, num } from '../../src/lib/format';
 import {
   fetchMySubscriptions, myCoachId, subscribeToPackage, cancelSubscription, resumeSubscription,
   openSubscriptionPortal, pkgMoney, pkgPriceLine, statusLabel, isLive, type ClientSubscription,
 } from '../../src/lib/subscriptions';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
 export default function ClientPackages() {
@@ -484,14 +483,8 @@ export default function ClientPackages() {
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Connect</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Memberships &amp; Packs</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What you've bought from your coach and what's left.</Text>
-          </View>
-        </View>
+        <PageHead title="Memberships & Packs" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>What you've bought from your coach and what's left.</Text>
 
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading what you have bought…" /> : (
           <>
@@ -521,19 +514,36 @@ export default function ClientPackages() {
               /* No second route to the ledger beside it: the "Session Credits"
                  row below already goes there, for every member, and two rows to
                  one screen a few inches apart reads as two different places. */
-              <Hero label="Sessions Remaining" figure={fig(book.left)} note={creditsHeroNote(book) ?? ''} />
-            ) : balance.lines.length > 0 && remaining != null ? (
-              <Hero label="Sessions Remaining" figure={fig(remaining)}
-                note={balance.live > 0
-                  ? `Across ${balance.live} active pack${balance.live === 1 ? '' : 's'}${balance.exhausted ? ` · ${balance.exhausted} used up` : ''}${balance.stranded ? ` · ${balance.stranded} ran out of time` : ''}`
-                  // "Used up" is a claim that they had the sessions, and it is
-                  // false of a pack that ran out of time with credits on it.
-                  // The two are the same zero and opposite sentences about
-                  // somebody's money — see src/lib/packExpiry.ts.
-                  : balance.stranded
-                    ? `${balance.stranded} session${balance.stranded === 1 ? '' : 's'} you paid for ran out of time before ${balance.stranded === 1 ? 'it was' : 'they were'} used`
-                    : `Every pack you have bought is used up`} />
-            ) : null}
+              /* The board's figure card in place of the retired Hero: the
+                 section's name, the figure at hero size, the note under it,
+                 spoken as one sentence. */
+              <Section>
+                <SectionHead title="Sessions Remaining" />
+                <View accessible accessibilityLabel={`Sessions remaining, ${num(book.left)}, ${creditsHeroNote(book) ?? ''}`}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(book.left)}</Text>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{creditsHeroNote(book) ?? ''}</Text>
+                </View>
+              </Section>
+            ) : balance.lines.length > 0 && remaining != null ? (() => {
+              const note = balance.live > 0
+                ? `Across ${balance.live} active pack${balance.live === 1 ? '' : 's'}${balance.exhausted ? ` · ${balance.exhausted} used up` : ''}${balance.stranded ? ` · ${balance.stranded} ran out of time` : ''}`
+                // "Used up" is a claim that they had the sessions, and it is
+                // false of a pack that ran out of time with credits on it.
+                // The two are the same zero and opposite sentences about
+                // somebody's money — see src/lib/packExpiry.ts.
+                : balance.stranded
+                  ? `${balance.stranded} session${balance.stranded === 1 ? '' : 's'} you paid for ran out of time before ${balance.stranded === 1 ? 'it was' : 'they were'} used`
+                  : `Every pack you have bought is used up`;
+              return (
+                <Section>
+                  <SectionHead title="Sessions Remaining" />
+                  <View accessible accessibilityLabel={`Sessions remaining, ${num(remaining)}, ${note}`}>
+                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(remaining)}</Text>
+                    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+                  </View>
+                </Section>
+              );
+            })() : null}
 
             {/* Their next booking is not covered by anything they have paid
                 for. Said plainly rather than left to be inferred from a meter

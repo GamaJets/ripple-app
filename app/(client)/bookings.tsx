@@ -29,7 +29,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PageHead } from '../../src/ui/kit';
 // What pays for each of these, read once for the whole list. See
 // supabase/parts/370 and src/lib/sessionCredits.ts: the choice of entitlement
 // is made in one place, so this screen and the ledger cannot describe the same
@@ -75,7 +75,6 @@ import { buildIcs, shareIcs, type IcsEvent } from '../../src/lib/exportShare';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
-import { BACK_ICON } from '../../src/ui/direction';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -730,27 +729,22 @@ export default function Bookings() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>My Bookings</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your upcoming classes and personal-training sessions, all in one place.</Text>
-          </View>
-        </View>
+        <PageHead title="My Bookings" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Your upcoming classes and personal-training sessions, all in one place.</Text>
 
 
         {/* ── book something ─────────────────────────────────────────────── */}
+        {/* One full-width primary, as the board gives every screen, and the
+            quiet ways under it. The two used to share a line, which made the
+            class button half a button and the PT button its equal. */}
         <Section>
-          <View style={{ flexDirection: 'row', gap: sp.md }}>
-            <View style={{ flex: 1 }}><Cta label="Book a Class" wide onPress={() => router.push('/(client)/classes')} /></View>
+          <Cta label="Book a Class" wide onPress={() => router.push('/(client)/classes')} />
+          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
             <View style={{ flex: 1 }}><Ghost label="Book PT" onPress={() => router.push('/(client)/calendar')} /></View>
+            {items.length > 0 ? (
+              <View style={{ flex: 1 }}><Ghost icon="calendar" label="Add to Calendar" onPress={addToCalendar} /></View>
+            ) : null}
           </View>
-          {items.length > 0 ? (
-            <View style={{ marginTop: sp.md }}>
-              <Ghost icon="calendar" label="Add to Calendar" onPress={addToCalendar} />
-            </View>
-          ) : null}
         </Section>
 
 

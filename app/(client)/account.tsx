@@ -45,7 +45,7 @@ import { View, Text, TextInput, ScrollView, Alert, Pressable } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Flag, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
@@ -54,7 +54,7 @@ import { reportError } from '../../src/lib/reportError';
 import {
   MIN_PASSWORD, changeEmail, changePassword, emailProblem, endOtherSessions, passwordProblem, pendingEmail,
 } from '../../src/lib/accountSecurity';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
 /** Have we read the account's own state, and what did it say. `'failed'` is
@@ -235,14 +235,8 @@ export default function Account() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Settings</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Account & Sign-in</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <PageHead title="Account & Sign-in" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
           The password you sign in with, and the address a reset would go to
         </Text>
 

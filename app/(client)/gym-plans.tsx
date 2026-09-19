@@ -56,7 +56,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Cta, Flag, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { worstStatus } from '../../src/ui/loadStatus';
@@ -76,7 +76,6 @@ import {
   gymCanSell, offerFor, passNote, offerMoney, priceIsQuotable, orderNote, orderIsLive, dayLabel,
   type GymAccountFacts, type GymPlan, type GymPassOffer, type GymOrder,
 } from '../../src/lib/memberBuy';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** How a plan's price reads, with its own interval beside it. The interval is a
  *  word about the PLAN, not a promise that anything recurs: nothing bought here
@@ -235,14 +234,8 @@ export default function GymPlans() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Plans &amp; Passes</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What your gym sells, and what you are on now.</Text>
-          </View>
-        </View>
+        <PageHead title="Plans & Passes" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>What your gym sells, and what you are on now.</Text>
 
         {/* ── can the gym take a card at all ──────────────────────────────
             First, because every button below depends on it, and because

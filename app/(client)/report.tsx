@@ -3,7 +3,7 @@
 // existing reactive stores. Read-only; reached from the profile hub.
 //
 // Re-skinned onto the kit (`src/ui/kit`) + scale (`src/theme/scale`): the grid
-// of eight bordered metric tiles became one <Hero> (the week's sessions) plus
+// of eight bordered metric tiles became one figure card (the week’s sessions) plus
 // hairline-divided <KpiRow>s, and the milestone banner became a <Notice>.
 //
 // Honesty fix: the Body block used to print `weightKg` / `bodyFatPct` /
@@ -25,8 +25,8 @@ import { startOfWeek } from '../../src/lib/weekStart';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, PageHead, fig } from '../../src/ui/kit';
+import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, lengthIn, lengthLabel, lengthDeltaIn, weightDeltaIn } from '../../src/lib/units';
@@ -53,7 +53,6 @@ import { isWhole } from '../../src/ui/loadStatus';
 // The day this screen judges against, kept live across midnight. See the
 // note at `useNow()` below.
 import { useNow } from '../../src/ui/today';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function WeeklyReport() {
   const t = useTheme();
@@ -596,13 +595,7 @@ export default function WeeklyReport() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{c.name ? `${c.name.split(' ')[0]} · ${range}` : range}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Weekly Report</Text>
-          </View>
-        </View>
+        <PageHead title="Weekly Report" subtitle={c.name ? `${c.name.split(' ')[0]} · ${range}` : range} />
 
         {milestone ? (
           <View style={{ marginTop: sp.lg }}>
@@ -621,13 +614,30 @@ export default function WeeklyReport() {
             A session count is not available to fix it with; see
             `WeekStats.days` in src/lib/streaks.ts. The note underneath carries
             the exercise count instead, which is a fact. */}
-        <Hero label="Trained This Week" figure={trainingWhole ? fig(wk.days) : fig(null)}
-          unit={trainingWhole ? (wk.days === 1 ? 'day' : 'days') : undefined}
-          note={trainingWhole
+        {(() => {
+          const figure = trainingWhole ? fig(wk.days) : fig(null);
+          const unit = trainingWhole ? (wk.days === 1 ? 'day' : 'days') : undefined;
+          const note = trainingWhole
             ? `${wk.workouts} exercise${wk.workouts === 1 ? '' : 's'} logged${streak > 0 ? ` · ${streak}-day streak` : ''}`
             : logStatus === 'loading' ? 'Reading your training log…'
             : logStatus === 'partial' ? 'More logged than this screen can read in one go, so a week counted from it would be short.'
-            : 'We couldn’t read your training log. This is not a week with nothing in it.'} />
+            : 'We couldn’t read your training log. This is not a week with nothing in it.';
+          return (
+            /* The board's figure card in place of the retired Hero: the
+               section's name, the figure at hero size with its unit beside
+               it, the note under. Spoken as one sentence. */
+            <Section>
+              <SectionHead title="Trained This Week" />
+              <View accessible accessibilityLabel={`Trained this week, ${[figure, unit].filter(Boolean).join(' ')}, ${note}`}>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+                  {unit ? <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, flexShrink: 0 }}>{unit}</Text> : null}
+                </View>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
 
 
         <Section>

@@ -42,11 +42,10 @@ import { useSettings } from '../../src/ui/settings';
 // THOUSANDS separator.
 import { plain, weightDeltaIn } from '../../src/lib/units';
  import { deltaLabel, deltaSign, deltaMoved } from '../../src/lib/deltaLabel';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Notice, fig, PageHead } from '../../src/ui/kit';
 import { num } from '../../src/lib/format';
 import { isWhole } from '../../src/ui/loadStatus';
-import { sp, layout, type as ty } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
+import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 
 export default function Social() {
  const t = useTheme();
@@ -120,21 +119,29 @@ export default function Social() {
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>Your story, your call</Text>
- <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share</Text>
- </View>
- </View>
+ <PageHead title="Share" subtitle="Your story, your call" />
 
  {measured ? (
- <Hero
- label={!deltaMoved(wtMove) ? 'Weight Unchanged' : wayWord(wtMove) === 'down' ? 'Weight Down' : 'Weight Up'}
- figure={plain(Math.abs(wtMove), 1)}
- unit={wu}
- note={`Body fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}%` : 'unchanged'} across ${num(cd.scans.length)} scans`}
- />
+ (() => {
+ const label = !deltaMoved(wtMove) ? 'Weight Unchanged' : wayWord(wtMove) === 'down' ? 'Weight Down' : 'Weight Up';
+ const figure = plain(Math.abs(wtMove), 1);
+ const note = `Body fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}%` : 'unchanged'} across ${num(cd.scans.length)} scans`;
+ return (
+ /* The board's figure card in place of the retired Hero: the section's
+ name, the figure at hero size with its unit beside it, the note under.
+ Spoken as one sentence, as the Hero spoke it. */
+ <Section>
+ <SectionHead title={label} />
+ <View accessible accessibilityLabel={`${label}, ${figure} ${wu}, ${note}`}>
+ <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+ <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+ <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, flexShrink: 0 }}>{wu}</Text>
+ </View>
+ <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+ </View>
+ </Section>
+ );
+ })()
  ) : (
  !scansWhole && cd.scansStatus !== 'loading' ? (
  <View style={{ marginTop: sp.lg }}>

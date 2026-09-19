@@ -31,7 +31,7 @@ import {
   holdsPlace, seatControl, seatNote, waitlistNote, placesFree, isFull,
 } from '../../src/lib/classSeat';
 import { classCancelBody, fetchClassCancelPolicy } from '../../src/lib/classCancel';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { Fetched } from '../../src/ui/fetched';
 import { useReadStamp } from '../../src/ui/readStamp';
@@ -43,7 +43,6 @@ import { useSettings } from '../../src/ui/settings';
 import { scheduleLocal } from '../../src/ui/pushNotifications';
 import type { GymClass } from '../../src/lib/classesMock';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
-import { BACK_ICON } from '../../src/ui/direction';
 
 // The weekday name and the date order were this file's own. `DOW` was a
 // hardcoded English array and the fallback read `${d.getDate()}/${d.getMonth() + 1}`,
@@ -234,14 +233,8 @@ export default function Classes() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick your location and book a spot. Full classes have a waitlist.</Text>
-          </View>
-        </View>
+        <PageHead title="Classes" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Pick your location and book a spot. Full classes have a waitlist.</Text>
 
         {/* The other half of the same subject, and the half the member has never
             had: this screen is what is COMING, and app/(client)/attendance.tsx

@@ -27,15 +27,13 @@
 // preference and the three above it are legibility.
 import { View, Text, Pressable, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme, useThemeControls } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, fontScale } from '../../src/theme/scale';
 import { metaByKey, paletteForScheme, type Theme } from '../../src/theme/tokens';
 import { fontScaleNote } from '../../src/lib/typeScale';
 import { switchLabel } from '../../src/lib/a11y';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * A real switch, announced as one. Copied in shape from the Toggle on
@@ -90,7 +88,6 @@ function SettingRow({
 
 export default function Appearance() {
   const t = useTheme();
-  const router = useRouter();
   const { palette, setPalette, palettes, follow, setFollow, contrast, setContrast, scheme, shownPalette } = useThemeControls();
 
   // What Match System would show right now. Read even when the follow is off,
@@ -99,17 +96,66 @@ export default function Appearance() {
   const wouldShow = metaByKey(paletteForScheme(palette, scheme));
   const sizeNote = fontScaleNote(fontScale);
 
+  // ── Light / Dark / System, as the board's three radio rows ──────────────
+  //
+  // Board page 20 draws Appearance as three rows under one heading, and the
+  // coach app (app/(trainer)/settings.tsx) already has them over the very same
+  // store. These are a VIEW onto the Match System follow and the chosen
+  // palette, not a second setting: "System" is the follow; "Light" and "Dark"
+  // turn the follow off and move the chosen palette to its counterpart of
+  // that scheme (`paletteForScheme`), which is exactly what the follow would
+  // have resolved to. A member on Mono Noir who taps Light lands on Swiss
+  // Ivory, its declared counterpart — never a different family. The palette
+  // list further down still picks the family.
+  const appearance: 'light' | 'dark' | 'system' = follow ? 'system' : metaByKey(palette).light ? 'light' : 'dark';
+  const chooseAppearance = (k: 'light' | 'dark' | 'system') => {
+    if (k === 'system') { setFollow(true); return; }
+    setFollow(false);
+    setPalette(paletteForScheme(palette, k));
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Appearance</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>How this app looks, and how much of it your phone decides. Everything here applies instantly.</Text>
+        <PageHead title="Appearance" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>How this app looks, and how much of it your phone decides. Everything here applies instantly.</Text>
+
+
+        {/* ── Light / Dark / System (board page 20) ─────────────────────
+            The Match System switch this section opened with is the "System"
+            row now — one control over the one store, see `chooseAppearance`
+            above. The sentence under the rows says what the phone is doing
+            right now, because a row called System that does not say which
+            way the phone went is a switch nobody can check. */}
+        <Section>
+          <SectionHead title="Appearance" />
+          {([
+            { key: 'light', label: 'Light', icon: 'sun' },
+            { key: 'dark', label: 'Dark', icon: 'moon' },
+            { key: 'system', label: 'System', icon: 'settings' },
+          ] as const).map((row, i) => {
+            const on = appearance === row.key;
+            return (
+              <Pressable key={row.key} onPress={() => chooseAppearance(row.key)}
+                accessibilityRole="radio" accessibilityState={{ selected: on }}
+                accessibilityLabel={`${row.label} appearance`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={row.icon} size={17} color={on ? t.brand : t.ink3} />
+                </View>
+                <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: t.ink, flex: 1 }}>{row.label}</Text>
+                {on ? <Icon name="check" size={19} color={t.brand} /> : null}
+              </Pressable>
+            );
+          })}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {appearance === 'system'
+              ? (scheme
+                ? `Your phone is in ${scheme} mode, so this shows ${wouldShow.name}.`
+                : 'Your phone has not said whether it is in light or dark mode, so nothing changes until it does.')
+              : `${metaByKey(palette).name}, in both of your phone's modes.`}
+          </Text>
+        </Section>
 
 
         <Section>
@@ -117,15 +163,6 @@ export default function Appearance() {
 
           <SettingRow
             t={t} first
-            title="Match System"
-            note={scheme
-              ? `Your phone is in ${scheme} mode, so this shows ${wouldShow.name}.`
-              : 'Your phone has not said whether it is in light or dark mode, so nothing changes until it does.'}
-            right={<Toggle t={t} on={follow} onPress={() => setFollow(!follow)} label="Match system" />}
-          />
-
-          <SettingRow
-            t={t}
             title="Higher Contrast"
             note="Quiet text, the captions and units and section titles, is drawn in the strongest ink this palette has instead of its faintest."
             right={<Toggle t={t} on={contrast} onPress={() => setContrast(!contrast)} label="Higher contrast" />}

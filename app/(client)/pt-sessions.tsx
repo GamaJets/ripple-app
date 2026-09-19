@@ -52,7 +52,7 @@ import { View, Text, ScrollView, TextInput, Alert, Modal, Pressable } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Hero, Flag, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Flag, PartialRead, fig, PageHead } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import {
@@ -104,7 +104,6 @@ import { useAuth } from '../../src/ui/auth';
 import { num } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import type { Theme } from '../../src/theme/tokens';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * The date and time beside Approve and Dispute.
@@ -399,14 +398,8 @@ export default function PtSessions() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Training</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Sessions your trainer has delivered. Approving confirms it with them, and any comment you add goes with it.</Text>
-          </View>
-        </View>
+        <PageHead title="Personal Training" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Sessions your trainer has delivered. Approving confirms it with them, and any comment you add goes with it.</Text>
 
         {/* ── what is left, and where it comes from ───────────────────────
             Loading, unread, empty and a real figure are four states and four
@@ -425,7 +418,17 @@ export default function PtSessions() {
                 PT pass are two different businesses' money and the member is
                 owed the name of the one about to be spent. */}
             {left != null && heroNote ? (
-              <Hero label="Sessions Remaining" figure={fig(left)} note={heroNote} />
+              /* The board's figure card — the section's name, the figure at
+                 hero size, the note under it — in place of the retired Hero.
+                 One spoken sentence for the three, as the Hero grouped them:
+                 three stops over one fact is what that grouping avoided. */
+              <Section>
+                <SectionHead title="Sessions Remaining" />
+                <View accessible accessibilityLabel={`Sessions remaining, ${num(left)}, ${heroNote}`}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(left)}</Text>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{heroNote}</Text>
+                </View>
+              </Section>
             ) : null}
             {/* Four sentences where this screen had two, and it picked between
                 those two on whether `client_purchases` was empty — which is how
@@ -451,9 +454,10 @@ export default function PtSessions() {
             they live on the ledger. It reads a gym-sold PT pass and a
             coach-sold pack the same way, so a member assigned a coach by their
             gym gets the same answer as one who buys direct. */}
-        <ListRow icon="calendar" title="Session Credits"
-          note="Which sessions used a credit, and what your bookings are due to draw"
-          onPress={() => router.push('/(client)/session-credits')} />
+        <Section>
+          <ListRow icon="calendar" title="Session Credits"
+            note="Which sessions used a credit, and what your bookings are due to draw"
+            onPress={() => router.push('/(client)/session-credits')} />
 
         {/* The second way into asking, because this is the screen somebody is
             on when they realise there is no session to be seen. The Book screen
@@ -461,9 +465,10 @@ export default function PtSessions() {
             note says what it is not, in the row itself, because a row headed
             "Ask for a Time" sitting under a list of credits is otherwise read
             as another way to spend one. */}
-        <ListRow icon="calendar" title="Ask for a Time"
-          note="Ask your coach for an hour they haven’t opened. It asks — it doesn’t book"
-          onPress={() => router.push('/(client)/request-session')} />
+          <ListRow icon="clock" title="Ask for a Time"
+            note="Ask your coach for an hour they haven’t opened. It asks — it doesn’t book"
+            onPress={() => router.push('/(client)/request-session')} />
+        </Section>
 
 
         {/* ── awaiting approval: the only actionable thing here ───────────── */}

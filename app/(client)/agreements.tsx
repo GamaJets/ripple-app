@@ -42,7 +42,7 @@ import { View, Text, ScrollView, Alert, Pressable, TextInput } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
 import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
@@ -66,7 +66,6 @@ import {
   NO_REVOCATION_TABLE,
   SIGNING_RULE, NOT_REPPLE, type MemberAgreement, type RevocationRead,
 } from '../../src/lib/gymSigning';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
 export default function ClientGymAgreementsScreen() {
@@ -336,13 +335,7 @@ export default function ClientGymAgreementsScreen() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>From your gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Paperwork</Text>
-          </View>
-        </View>
+        <PageHead title="Paperwork" subtitle="From your gym" />
 
         {!USE_SUPABASE ? (
           <Section>

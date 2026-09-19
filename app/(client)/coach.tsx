@@ -29,7 +29,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Notice, Flag, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Notice, Flag, Cta, Ghost, PageHead } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 // 44pt, from the one place that holds the number. See the send button below.
@@ -62,7 +62,6 @@ import { shownStreak } from '../../src/lib/streaks';
 import { isWhole } from '../../src/ui/loadStatus';
 import { liftLabel } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const SUGGESTIONS = ['What should I eat post-workout?', "I'm sore today — should I still train?", 'Am I on track for my goal?', 'Give me a quick high-protein snack'];
 
@@ -444,27 +443,25 @@ export default function Coach() {
           and it was the wrong constant. See `src/ui/keyboardLift.ts`. */}
       <View style={{ flex: 1, paddingBottom: lift }}>
 
-        {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
-          <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
-            <Icon name={BACK_ICON} size={20} color={t.ink2} />
-          </Pressable>
-          <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="sparkle" size={17} color={t.brandInk} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.head, color: t.ink }}>AI Coach</Text>
-            {/* The subtitle is a claim about what the model has, so it has to
-                answer to the consent as well as to the reads. "Knows your plan
-                & numbers" above a coach that was never sent a single one of
-                those numbers is the same false promise the `knowsAll` gate was
-                added to remove, arriving by the other route. */}
-            <Text style={{ ...ty.caption, color: t.ink3 }}>
-              {consent === 'no' ? 'Working without your numbers'
-                : knowsAll ? 'Knows your plan & numbers'
-                  : 'Working from what loaded'}
-            </Text>
-          </View>
+        {/* ── header ─────────────────────────────────────────────────────
+            The board's pushed-page head. The subtitle is a claim about what
+            the model has, so it has to answer to the consent as well as to the
+            reads. "Knows your plan & numbers" above a coach that was never
+            sent a single one of those numbers is the same false promise the
+            `knowsAll` gate was added to remove, arriving by the other route.
+            The sparkle plate that marked this as the AI's screen is the
+            trailing control now, where the board keeps a page's one mark. */}
+        <View style={{ paddingHorizontal: G, paddingBottom: sp.md }}>
+          <PageHead title="AI Coach"
+            subtitle={consent === 'no' ? 'Working without your numbers'
+              : knowsAll ? 'Knows your plan & numbers'
+                : 'Working from what loaded'}
+            trailing={
+              <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}
+                accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <Icon name="sparkle" size={17} color={t.brandInk} />
+              </View>
+            } />
         </View>
 
         {/* ── which copy of the plan the coach above is speaking from ──────

@@ -51,7 +51,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag, PageHead } from '../../src/ui/kit';
 import { capLimit, capped } from '../../src/lib/rowCap';
 // The reader's locale, resolved once with a fallback — never a literal tag.
 // See scripts/check-locale.mjs for the 2,860 kcal day that read as 2.86.
@@ -142,7 +142,7 @@ import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type
 // and a broken circle in a directory reads as a coach who has not bothered.
 import { avatarSource } from '../../src/lib/avatarImage';
 import { useToday, useNow } from '../../src/ui/today';
-import { BACK_ICON, END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
+import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 
@@ -1062,14 +1062,8 @@ export default function FindTrainer() {
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Connect</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Find a Trainer</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Enter your coach's code, or browse everyone coaching on {BRAND.label}.</Text>
-          </View>
-        </View>
+        <PageHead title="Find a Trainer" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Enter your coach's code, or browse everyone coaching on {BRAND.label}.</Text>
 
         {/* ── your coach, and the way out ─────────────────────────────────
             Above the invitations and the directory because it is the fact the

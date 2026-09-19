@@ -20,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, Cta, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
@@ -34,7 +34,7 @@ import { useBrand } from '../../src/ui/brand';
 import { shownStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
 import { charsPerLine, wrapLines } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
-import { BACK_ICON, FORWARD_CHAR } from '../../src/ui/direction';
+import { FORWARD_CHAR } from '../../src/ui/direction';
 
 /**
  * The card as an EXPORTABLE GRAPHIC, drawn in SVG so `toDataURL` can turn it
@@ -345,13 +345,7 @@ export default function Cards() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Screenshot & share your wins</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Milestone Cards</Text>
-          </View>
-        </View>
+        <PageHead title="Milestone Cards" subtitle="Screenshot & share your wins" />
 
         <Section>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: layout.section }}>

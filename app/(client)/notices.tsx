@@ -39,13 +39,12 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Notice, PartialRead, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useCallback } from 'react';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { inboxAge } from '../../src/lib/notifyInbox';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Notices() {
   const t = useTheme();
@@ -66,14 +65,8 @@ export default function Notices() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym and your coach</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Notices</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <PageHead title="Notices" subtitle="Your gym and your coach" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
           Everything posted to you, newest first. Notices stay here after the day they were sent.
         </Text>
 

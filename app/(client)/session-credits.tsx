@@ -37,10 +37,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Hero, Card, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
-import { sp, layout, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Card, Ghost, Flag, Notice, PageHead, fig } from '../../src/ui/kit';
+import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { appLocale } from '../../src/lib/locale';
-import { fmtFullDay } from '../../src/lib/format';
+import { fmtFullDay, num } from '../../src/lib/format';
 import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
 import { bookableCredits, creditsHeroNote, routeReason,
   buildLedger, expectedDraws, clientLedgerLine, shortfallLine,
@@ -308,7 +308,7 @@ export default function SessionCredits() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: sp.xxl * 2 }} refreshControl={pull}>
-        <Text style={{ ...ty.title, color: t.ink }}>Session Credits</Text>
+        <PageHead title="Session Credits" />
         {/* Under the title rather than under the figure: it is a statement
             about everything below it, and a member deciding whether to book is
             owed it before they read the number rather than after. */}
@@ -326,7 +326,13 @@ export default function SessionCredits() {
              also use. It called every entitlement a "pack", including a gym
              PT pass — a pass is not a pack and the gym did not sell them one —
              and the wording now names the business whose credit it is. */
-          <Hero label="Sessions Remaining" figure={fig(left)} note={creditsHeroNote(book, expected) ?? ''} />
+          <Section>
+            <SectionHead title="Sessions Remaining" />
+            <View accessible accessibilityLabel={`Sessions remaining, ${num(left)}, ${creditsHeroNote(book, expected) ?? ''}`}>
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(left)}</Text>
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{creditsHeroNote(book, expected) ?? ''}</Text>
+            </View>
+          </Section>
         ) : null}
 
         {balanceUnread ? (

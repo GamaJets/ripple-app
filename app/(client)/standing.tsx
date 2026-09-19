@@ -52,7 +52,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { isWhole } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
@@ -82,7 +82,6 @@ import { useThreadPeerName } from '../../src/ui/messaging';
 import type { TrainingSession } from '../../src/lib/types';
 import type { CancellationPolicy } from '../../src/lib/booking';
 import { fmtRelativeDay, fmtTime, fmtClock, weekdayName, weekdayNameShort } from '../../src/lib/format';
-import { BACK_ICON } from '../../src/ui/direction';
 // Asking for one. The member cannot CREATE a standing appointment — see the
 // header of src/lib/standingAsk.ts and the 42501 in `create_session_series` —
 // so the half of the feature that was missing is the request, and it goes down
@@ -660,16 +659,8 @@ export default function StandingAppointments() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Standing Appointments</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
-              The same hour every week, booked for you without either of you asking again.
-            </Text>
-          </View>
-        </View>
+        <PageHead title="Standing Appointments" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>The same hour every week, booked for you without either of you asking again.</Text>
 
 
         {/* ── your arrangements ──────────────────────────────────────────── */}

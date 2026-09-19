@@ -50,9 +50,8 @@ import {
 } from '../../src/lib/referralCredit';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useReadDeadline } from '../../src/ui/readDeadline';
-import { Rule, Section, SectionHead, Card, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric, value } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Referral() {
   const t = useTheme();
@@ -208,13 +207,7 @@ export default function Referral() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Training is easier with company</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Invite Friends</Text>
-          </View>
-        </View>
+        <PageHead title="Invite Friends" subtitle="Training is easier with company" />
 
         {/* ── the one card: the thing you act on ─────────────────────────── */}
         <Section>

@@ -45,7 +45,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Ghost, Flag, Notice, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Flag, Notice, PartialRead, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -68,7 +68,6 @@ import {
 import { shareText } from '../../src/lib/exportShare';
 import { appLocale } from '../../src/lib/locale';
 import { localDate } from '../../src/lib/localDate';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** A bare 'YYYY-MM-DD' as a member reads it. Built locally — an invoice is
  *  dated a calendar day, and `new Date('2026-09-01')` is the 31st of August
@@ -166,14 +165,8 @@ export default function Invoices() {
         showsVerticalScrollIndicator={false}
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Membership</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Invoices</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>What your gym has billed you for</Text>
+        <PageHead title="Invoices" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>What your gym has billed you for</Text>
 
 
         {status === 'error' ? (

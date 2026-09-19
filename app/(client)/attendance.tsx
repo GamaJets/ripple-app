@@ -31,7 +31,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, Flag, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 // `numUpTo`, because `perWeek` is a ONE-DECIMAL mean — `Math.round(x * 10) / 10`
 // in src/lib/attendance.ts — and a bare `${perWeek}` writes a full stop in every
@@ -43,7 +43,6 @@ import { appLocale } from '../../src/lib/locale';
 import { dateParts } from '../../src/lib/localDate';
 import { useMyAttendance, RHYTHM_WEEKS } from '../../src/ui/attendance';
 import { dwellMinutes, rhythmWeekLabel, type AttendanceEvent, type ClassOutcome } from '../../src/lib/attendance';
-import { BACK_ICON } from '../../src/ui/direction';
 // `my_class_history()` — supabase/parts/136, written for this screen and until
 // now called by nothing. See src/lib/classHistory.ts for what it lets this
 // screen stop guessing about.
@@ -302,14 +301,8 @@ export default function Attendance() {
         showsVerticalScrollIndicator={false}
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Attendance</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <PageHead title="Attendance" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
           Your classes and every time your gym recorded you coming through the door.
         </Text>
 

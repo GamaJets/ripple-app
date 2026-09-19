@@ -41,7 +41,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 // 44pt. Every answer on this form is a tap target and they sit in rows — see
 // the note on `Pill`.
@@ -62,7 +62,6 @@ import {
   emptyIntake, intakeProgress, readinessDisclosed,
   type Intake, type TrainingPlace, type TrainingYears, type WorkKind, type YesNo,
 } from '../../src/lib/intake';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7];
 const MINS = [30, 45, 60, 75, 90];
@@ -301,14 +300,8 @@ export default function IntakeScreen() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 60 }}
         showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Before you start</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Intake</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <PageHead title="Your Intake" subtitle="Before you start" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
           What your coach needs before your first session. Your answers are yours — only you can
           change them, and your coach cannot edit a word of it.
         </Text>

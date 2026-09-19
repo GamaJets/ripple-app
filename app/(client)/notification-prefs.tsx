@@ -72,7 +72,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Ghost, Field, Cta, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Field, Cta, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useNotifyPrefs, type PrefWrite } from '../../src/ui/notifyPrefs';
 import {
@@ -88,7 +88,6 @@ import {
 import { useChannelPrefs, setChannel } from '../../src/ui/coachNotify';
 import { channelState, channelsNote, CHANNEL_UNKNOWN_LABEL } from '../../src/lib/coachNotify';
 import { pushAvailable } from '../../src/ui/pushNotifications';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useQuietHours, saveQuietHours } from '../../src/ui/quietHours';
 import {
   SUGGESTED_QUIET, deviceZone, hourLabel, quietAvailability, zoneMovedNote,
@@ -459,13 +458,7 @@ export default function NotificationPrefs() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What reaches you, and when</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Notifications</Text>
-          </View>
-        </View>
+        <PageHead title="Notifications" subtitle="What reaches you, and when" />
 
         {/* Said before any switch, because a switch on a build that cannot
             schedule anything is a control with no effect, and the member has

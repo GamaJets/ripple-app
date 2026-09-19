@@ -59,7 +59,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { fmtFullDay } from '../../src/lib/format';
@@ -93,7 +93,6 @@ import {
   openInAppBrowser, IN_APP_BROWSER_UNAVAILABLE_NOTE,
 } from '../../src/ui/nativeModules';
 import { injuryDocKind, injuryDocRoute, OPENS_IN_APP_NOTE } from '../../src/lib/injuryDocView';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
   { id: 'mild', label: 'Mild' }, { id: 'moderate', label: 'Moderate' }, { id: 'severe', label: 'Severe' },
@@ -466,14 +465,8 @@ export default function InjuryDoc() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Read a Document</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
+        <PageHead title="Read a Document" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg, textAlign: 'center' }}>
           Photograph a physio report, a scan result or a doctor's note. We suggest what to disclose; you decide what goes in.
         </Text>
 

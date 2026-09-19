@@ -43,9 +43,8 @@ import { playlistLine, playlistSavedLine, playlistTracksNote, playlistTrackLine 
 import { reportError } from '../../src/lib/reportError';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 
 // ── Apple Music is not a connectable service, and no longer pretends to be ──
 //
@@ -439,13 +438,7 @@ export default function Music() {
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>Your session soundtrack</Text>
- <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Music</Text>
- </View>
- </View>
+ <PageHead title="Music" subtitle="Your session soundtrack" />
 
  <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
  Play your own playlists, or build one for the session — picked for the work, not for the mood.

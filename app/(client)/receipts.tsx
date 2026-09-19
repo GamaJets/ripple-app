@@ -53,7 +53,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Flag, Notice, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Flag, Notice, PartialRead, fig, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -74,7 +74,6 @@ import {
 import { num } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import { localDate } from '../../src/lib/localDate';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** A timestamptz as the day it happened, in the reader's own zone. A payment
  *  carries an instant, not a calendar date, so this one is parsed normally. */
@@ -273,14 +272,8 @@ export default function Receipts() {
         showsVerticalScrollIndicator={false}
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Membership</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Payments</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Everything recorded as paid by you, wherever it was taken</Text>
+        <PageHead title="Payments" />
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Everything recorded as paid by you, wherever it was taken</Text>
 
 
         {status === 'error' ? (

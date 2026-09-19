@@ -19,12 +19,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, PageHead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import type { LoadStatus } from '../../src/ui/loadStatus';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * The ceiling `my_promo_redemptions()` takes, mirrored so a read that came back
@@ -160,13 +159,7 @@ export default function Offers() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Membership</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Offers</Text>
-          </View>
-        </View>
+        <PageHead title="Offers" />
 
         <Section style={{ marginTop: sp.lg }}>
           <SectionHead title="Redeem a Code" />

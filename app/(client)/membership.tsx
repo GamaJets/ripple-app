@@ -42,7 +42,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, ActionCard, ListRow, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ActionCard, ListRow, Ghost, PageHead, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { IconName } from '../../src/ui/Icon';
 import type { LoadStatus } from '../../src/ui/loadStatus';
@@ -80,7 +80,7 @@ import {
 import { useToday } from '../../src/ui/today';
 import { localDate } from '../../src/lib/localDate';
 import { appLocale } from '../../src/lib/locale';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 
 /** A bare ISO date as a member reads it. Local, because a date column means a
  *  calendar day in the reader's own life — see src/lib/localDate.ts. */
@@ -380,31 +380,28 @@ export default function Membership() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Membership</Text>
-            <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>
-              {memberNoKnown ? `${c.name || 'Member'} · ${memberNo}` : (c.name || 'Member')}
-            </Text>
-            {memberNoKnown ? (
-              /* The number widened, so it changed. Somebody who gave reception
-                 the old one and says nothing would be refused at the door with
-                 no idea why. */
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_NO_CHANGED_NOTE}</Text>
-            ) : (
-              /* No number, and the reason for it. Loading and failed are two
-                 different sentences: one of them will end on its own. */
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {c.profileStatus === 'loading'
-                  ? 'Your member number is built from your account, so it appears here once that has been read.'
-                  : 'Your member number is built from your account, and that could not be read just now — so it is left out rather than shown as a number that is not yours. Pull down to try again.'}
-              </Text>
-            )}
-          </View>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-        </View>
+        {/* ── header ─────────────────────────────────────────────────────
+            The board's pushed-page head: back at the leading edge, the title
+            centred, and the one quiet line under it — here the member's name
+            and number, which is what reception asks for. The gym's name that
+            used to sit above the title is already on every tab and the
+            barcode card, so it is not repeated here. */}
+        <PageHead title="Membership"
+          subtitle={memberNoKnown ? `${c.name || 'Member'} · ${memberNo}` : (c.name || 'Member')} />
+        {memberNoKnown ? (
+          /* The number widened, so it changed. Somebody who gave reception
+             the old one and says nothing would be refused at the door with
+             no idea why. */
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>{MEMBER_NO_CHANGED_NOTE}</Text>
+        ) : (
+          /* No number, and the reason for it. Loading and failed are two
+             different sentences: one of them will end on its own. */
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
+            {c.profileStatus === 'loading'
+              ? 'Your member number is built from your account, so it appears here once that has been read.'
+              : 'Your member number is built from your account, and that could not be read just now — so it is left out rather than shown as a number that is not yours. Pull down to try again.'}
+          </Text>
+        )}
 
 
         {/* ── your membership ─────────────────────────────────────────────
@@ -615,10 +612,9 @@ export default function Membership() {
             Three sentences in the note, not two: "we couldn't read it" is wrong
             while it is still being read, and a member who sees that on every
             launch stops believing it for the time it is true. */}
-        <Hero
-          label="Sessions Logged This Month"
-          figure={logKnown ? fig(visits) : fig(null)}
-          note={logStatus === 'loading' ? 'Reading your training log…'
+        {(() => {
+          const figure = logKnown ? fig(visits) : fig(null);
+          const note = logStatus === 'loading' ? 'Reading your training log…'
             // Three arms, as on Home, and for the reason the comment above that
             // hero gives: "we couldn’t read it" is not true of all three ways
             // this can fail to be a number. Under 'partial' NOTHING failed —
@@ -631,8 +627,20 @@ export default function Membership() {
             // is a sentence that is simply false.
             : logStatus === 'partial' ? 'You have more training logged than we can read in one go, so this month is left blank rather than counted over part of it. Nothing failed and nothing is missing from your log.'
             : !logKnown ? 'We couldn’t read your training log — this is not a month with nothing in it.'
-            : visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month'}
-        />
+            : visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month';
+          return (
+            /* The board's figure card in place of the retired Hero: the
+               section's name, the figure at hero size, the note under it,
+               spoken as one sentence. */
+            <Section>
+              <SectionHead title="Sessions Logged This Month" />
+              <View accessible accessibilityLabel={`Sessions logged this month, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
 
 
         {/* ── the one card: the thing you open this screen to do ──────────── */}

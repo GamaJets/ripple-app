@@ -51,7 +51,7 @@ import { View, Text, ScrollView, Image, TextInput, Pressable, Alert, Modal } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ListRow, Ghost, Cta, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Ghost, Cta, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
 // 44pt, and the one place the number lives. See the rating row below.
 import { MIN_TARGET } from '../../src/lib/a11y';
@@ -126,7 +126,6 @@ import {
   CLIENT_END_CONFIRM_TITLE, clientEndConfirmBody, clientEndOutcomeLine,
   type EndReason,
 } from '../../src/lib/endCoaching';
-import { BACK_ICON } from '../../src/ui/direction';
 
 interface CoachProfile {
   id: string;
@@ -496,13 +495,7 @@ export default function MyCoach() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Coach</Text>
-          </View>
-        </View>
+        <PageHead title="Your Coach" />
 
         {status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xl }}>Loading.</Text>
@@ -530,7 +523,11 @@ export default function MyCoach() {
           </View>
         ) : (
           <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+            {/* ── the record's head, the board's way ──────────────────────
+                Centred, as the coach's own view of a client is (app/(trainer)/
+                client.tsx) and as Me is: the photo, the name under it, and the
+                one quiet line — what they trade as, or their tagline. */}
+            <View style={{ alignItems: 'center', marginTop: sp.md }}>
               {/* The coach's colour, where they have one and it applies. Drawn
                   as a ring rather than as a fill: the photo inside it is the
                   content, and a coloured plate behind a face is decoration
@@ -539,75 +536,30 @@ export default function MyCoach() {
                   carry a readable label, whoever wrote it and by whatever
                   route — so nothing downstream needs to check it again. */}
               <View style={{
-                width: 62, height: 62, borderRadius: 31, backgroundColor: t.surface2,
+                width: 64, height: 64, borderRadius: 32, backgroundColor: t.surface2,
                 alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                 borderWidth: applied.color ? 2 : 0, borderColor: applied.color ?? undefined,
               }}>
                 {coach.avatar
-                  ? <Image source={{ uri: coach.avatar }} style={{ width: 62, height: 62 }} />
+                  ? <Image source={{ uri: coach.avatar }} style={{ width: 64, height: 64 }} />
                   : <Text style={{ ...ty.head, color: t.ink3 }}>{monogram(coach.name)}</Text>}
               </View>
-              <View style={{ flex: 1 }}>
-                {/* A name that could not be read renders as a dash. It is never
-                    replaced with "Your coach", which would look like a name and
-                    is not one. */}
-                <Text style={{ ...ty.head, color: t.ink }}>{coach.name ?? '—'}</Text>
-                {/* What they trade as, where that is not their own name. Only
-                    when the coach's brand is the one in effect: a gym member's
-                    app is the gym's, and printing the coach's business name in
-                    it anyway would be the override this screen just declined to
-                    make. */}
-                {applied.source === 'coach' && applied.name && applied.name !== coach.name ? (
-                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{applied.name}</Text>
-                ) : null}
-                {coach.tagline ? (
-                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{coach.tagline}</Text>
-                ) : null}
-              </View>
+              {/* A name that could not be read renders as a dash. It is never
+                  replaced with "Your coach", which would look like a name and
+                  is not one. */}
+              <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>{coach.name ?? '—'}</Text>
+              {/* What they trade as, where that is not their own name. Only
+                  when the coach's brand is the one in effect: a gym member's
+                  app is the gym's, and printing the coach's business name in
+                  it anyway would be the override this screen just declined to
+                  make. */}
+              {applied.source === 'coach' && applied.name && applied.name !== coach.name ? (
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: 3, textAlign: 'center' }}>{applied.name}</Text>
+              ) : null}
+              {coach.tagline ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, textAlign: 'center' }}>{coach.tagline}</Text>
+              ) : null}
             </View>
-
-            {/* One sentence, and only when there is something to say: either a
-                gym is overriding branding this coach has set, or these really
-                are the coach's colours and the client should be able to tell
-                them from the app's. Null the rest of the time — a screen that
-                explains an absence nobody noticed is noise. */}
-            {brandNote ? (
-              <Flag tone={applied.color ?? t.ink3} style={{ marginTop: sp.lg }}>{brandNote}</Flag>
-            ) : null}
-
-            {/* A paragraph of somebody's own words, set a point looser than body's
-                21. `grown` keeps that choice and still tracks the reader: pinned, a
-                bio is the longest run of text on this screen and so the first thing
-                to overlap itself. */}
-            {coach.bio ? (
-              <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, lineHeight: grown(22) }}>{coach.bio}</Text>
-            ) : null}
-
-            {coach.specialties.length ? (
-              <View style={{ marginTop: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>SPECIALISES IN</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {coach.specialties.map((s) => (
-                    <View key={s} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>{s}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-
-            {coach.offers.length ? (
-              <View style={{ marginTop: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>OFFERS</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {coach.offers.map((o) => (
-                    <View key={o} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>{o}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
 
             {/* ── the one thing this screen is opened to do ───────────────
                 Reaching the person it is about. It was reachable only from a
@@ -617,7 +569,6 @@ export default function MyCoach() {
                 the first screen. The row is still there and still says the same
                 words; this is the same destination at the top, where somebody
                 who tapped "Your Coach" in order to talk to them will find it.
-
                 Unconditional, like the standing-appointment row below and for
                 the same reason: the thread exists whether or not anything has
                 been said in it, and a control hidden on a failed read hides the
@@ -625,6 +576,113 @@ export default function MyCoach() {
             <View style={{ marginTop: sp.lg }}>
               <Cta label="Message Coach" wide onPress={() => go('/(client)/messages')} />
             </View>
+
+            {/* ── everything else you do with them ─────────────────────────
+                Directly under the primary action, as the board's record pages
+                put their rows: the head, the one button, then the index. The
+                bio and the chips follow, because a member who opened this
+                screen to book or ask has found what they came for by now. */}
+            <Section>
+              <SectionHead title="Reach Them" />
+              {/* "Message" on its own said what the row WAS rather than what
+                  tapping it does, on a screen where three other rows also reach
+                  this person. Reported by the product owner as wanting a
+                  "Message Coach" control on the coach screen, and the same
+                  words are on the button above so the two are recognisably one
+                  thing rather than two. It goes to the real thread —
+                  app/(client)/messages.tsx, keyed by `messages.client_id` with
+                  the coach named through `my_coach()` — and not to a second
+                  messaging surface. */}
+              <ListRow icon="message" title="Message Coach" note="Your thread with them" onPress={() => go('/(client)/messages')} />
+              <ListRow icon="calendar" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
+              {/* ── and the hour they have NOT opened ──────────────────────
+                  The row above books from what the coach has published, and
+                  the product owner's own report is about the half that leaves
+                  out: "i can't see my coach Dayne's availability and am not
+                  able to book a session or send a request for a booking."
+                  app/(client)/request-session.tsx is the answer to it and has
+                  been reachable from the calendar, the PT sessions screen and
+                  the standing-appointment screen — every screen about a DIARY,
+                  and not the one screen about the PERSON. So a member who
+                  opened "Your Coach" in order to ask their coach for Tuesday at
+                  seven found Message, Book, Packs, Standing and Documents, and
+                  the one control that does what they came to do was on none of
+                  them.
+
+                  Directly under Book a Session because the two are one
+                  decision: a member looks for an open time first and asks for
+                  one only when there is none. The note is what keeps them
+                  apart — asking is not booking, which is the rule that whole
+                  screen exists to hold. */}
+              <ListRow icon="clock" title="Ask for a Time" note="A time they haven’t opened — it asks, it doesn’t book" onPress={() => go('/(client)/request-session')} />
+              <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
+              {/* A standing appointment is an agreement between these two
+                  people, which is what makes this the screen it belongs on —
+                  and part 135 is explicit that EITHER party may end one. The
+                  row is unconditional rather than shown only to members who
+                  have one: the read that would decide it can fail, and a row
+                  hidden on a failed read hides the way out from the member
+                  whose arrangement could not be confirmed. */}
+              <ListRow icon="clock" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
+              {/* On the screen about this coach, because that is the only place
+                  the answer to "whose waiver is this?" is already on the page.
+                  The same row is in the Me hub for the member who is looking
+                  for a form rather than for their coach. */}
+              <ListRow icon="pencil" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
+            </Section>
+
+
+            {/* ── who they are ────────────────────────────────────────────── */}
+            <Section>
+              <SectionHead title="About Them" />
+              {/* One sentence, and only when there is something to say: either a
+                gym is overriding branding this coach has set, or these really
+                are the coach's colours and the client should be able to tell
+                them from the app's. Null the rest of the time — a screen that
+                explains an absence nobody noticed is noise. */}
+              {brandNote ? (
+                <Flag tone={applied.color ?? t.ink3} style={{ marginBottom: sp.md }}>{brandNote}</Flag>
+              ) : null}
+
+              {/* A paragraph of somebody's own words, set a point looser than body's
+                21. `grown` keeps that choice and still tracks the reader: pinned, a
+                bio is the longest run of text on this screen and so the first thing
+                to overlap itself. */}
+              {coach.bio ? (
+                <Text style={{ ...ty.body, color: t.ink2, lineHeight: grown(22) }}>{coach.bio}</Text>
+              ) : null}
+              {/* Nothing to say about themselves yet: said, so the card is
+                  not an empty box under a heading. Not a claim about them. */}
+              {!coach.bio && !coach.specialties.length && !coach.offers.length && !brandNote ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{coach.name ?? 'Your coach'} hasn’t written a profile in {BRAND.label} yet.</Text>
+              ) : null}
+
+              {coach.specialties.length ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Specialises In</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                    {coach.specialties.map((s) => (
+                      <View key={s} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>{s}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
+              {coach.offers.length ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Offers</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                    {coach.offers.map((o) => (
+                      <View key={o} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>{o}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+            </Section>
 
             <Rule />
 
@@ -820,55 +878,6 @@ export default function MyCoach() {
             </Section>
 
             <Rule />
-
-            <Section>
-              <SectionHead title="Reach Them" />
-              {/* "Message" on its own said what the row WAS rather than what
-                  tapping it does, on a screen where three other rows also reach
-                  this person. Reported by the product owner as wanting a
-                  "Message Coach" control on the coach screen, and the same
-                  words are on the button above so the two are recognisably one
-                  thing rather than two. It goes to the real thread —
-                  app/(client)/messages.tsx, keyed by `messages.client_id` with
-                  the coach named through `my_coach()` — and not to a second
-                  messaging surface. */}
-              <ListRow icon="message" title="Message Coach" note="Your thread with them" onPress={() => go('/(client)/messages')} />
-              <ListRow icon="calendar" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
-              {/* ── and the hour they have NOT opened ──────────────────────
-                  The row above books from what the coach has published, and
-                  the product owner's own report is about the half that leaves
-                  out: "i can't see my coach Dayne's availability and am not
-                  able to book a session or send a request for a booking."
-                  app/(client)/request-session.tsx is the answer to it and has
-                  been reachable from the calendar, the PT sessions screen and
-                  the standing-appointment screen — every screen about a DIARY,
-                  and not the one screen about the PERSON. So a member who
-                  opened "Your Coach" in order to ask their coach for Tuesday at
-                  seven found Message, Book, Packs, Standing and Documents, and
-                  the one control that does what they came to do was on none of
-                  them.
-
-                  Directly under Book a Session because the two are one
-                  decision: a member looks for an open time first and asks for
-                  one only when there is none. The note is what keeps them
-                  apart — asking is not booking, which is the rule that whole
-                  screen exists to hold. */}
-              <ListRow icon="clock" title="Ask for a Time" note="A time they haven’t opened — it asks, it doesn’t book" onPress={() => go('/(client)/request-session')} />
-              <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
-              {/* A standing appointment is an agreement between these two
-                  people, which is what makes this the screen it belongs on —
-                  and part 135 is explicit that EITHER party may end one. The
-                  row is unconditional rather than shown only to members who
-                  have one: the read that would decide it can fail, and a row
-                  hidden on a failed read hides the way out from the member
-                  whose arrangement could not be confirmed. */}
-              <ListRow icon="clock" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
-              {/* On the screen about this coach, because that is the only place
-                  the answer to "whose waiver is this?" is already on the page.
-                  The same row is in the Me hub for the member who is looking
-                  for a form rather than for their coach. */}
-              <ListRow icon="pencil" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
-            </Section>
 
             {/* ── the way out ────────────────────────────────────────────
                 The only `endCoaching` call in the client app was on
