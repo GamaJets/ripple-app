@@ -860,6 +860,9 @@
     "src/lib/clientRecord.ts",
     "src/lib/rosterNextSession.test.ts",
     "src/lib/costTrend.ts",
-    "src/lib/costTrend.test.ts"
+    "src/lib/costTrend.test.ts",
+    "src/lib/recipeWire.ts",
+    "src/lib/recipes.ts",
+    "src/lib/recipes.test.ts"
   ]
 }

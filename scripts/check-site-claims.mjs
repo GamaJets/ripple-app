@@ -434,6 +434,14 @@ const HOST_OWNERS = new Map([
   // depends on the model an operator names in a secret.
   ['api.cheaperinference.com', 'Cheaper Inference'],
   ['api.ocr.space', 'OCR.space'],
+  // The recipe library behind the Meals list (supabase/functions/recipes). What
+  // it receives carries no identity — a diet, excluded allergens, a meal type, a
+  // calorie band and the words typed into a search box, sent from Repple's
+  // server on Repple's key. It is listed as a processor anyway rather than in
+  // NOT_PROCESSORS: "avoids dairy and gluten" is about somebody's health even
+  // with no name on it, and the member's phone loads each photograph from
+  // Spoonacular's image host directly, which does see an IP address.
+  ['api.spoonacular.com', 'Spoonacular'],
   ['exp.host', 'Expo'],
   ['api.prod.whoop.com', 'WHOOP'],
   ['developer.whoop.com', 'WHOOP'],
