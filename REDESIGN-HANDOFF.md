@@ -183,6 +183,22 @@ Applied and committed (`5230bcb`):
 
 Gates (caps, contrast, a11y, rtl, text, whole, dead-exports, reads, prose) and `npm test` clean.
 
+## 4f. Meals against board pages 7 and 18 (19 Sep, later)
+
+"Meals tab looks nothing like the nutrition board." Commit `4863002`, `app/(client)/nutrition.tsx`:
+
+- The ring is the figure now — 156pt, centred, eaten inside it over "of N kcal", what is left under it,
+  the three macros against target, then **Log Meal** (page 7). Withholding unchanged: no ring arc, dash
+  inside, "Calories not counted" until the day's food log is a whole read.
+- The day's meals moved up to sit directly under that card, and are listed **one slot at a time**:
+  Breakfast / Lunch / Dinner segments (snacks appear as a segment on a 4- or 5-meal day; the segments come
+  from the plan, so a rebuilt plan never points at a slot it lost), a "Search foods…" row that opens the food
+  log's search, and rows with a 48pt round thumbnail (the dish's own glyph — no photography is invented),
+  name, first three ingredients, `kcal · P · C · F`, allergen mark, chevron (page 18). "This week" is the
+  list head's note; Meals per day sits under the list.
+- Everything else on the screen (Why This Target, day type, Log What You Ate, diet, quick tiles, snacks,
+  grocery) follows below in its old order. `ScreenHelp` moved under the card.
+
 ## 5. What to do next
 
 **Port the implemented screens from `repple-redesign`, file by file, re-applying audit fixes on
