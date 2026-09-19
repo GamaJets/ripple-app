@@ -68,8 +68,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Meter } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Meter, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+// The board's targets are four small rings. Drawn the way the client's Meals
+// tab draws its one big ring, so the two apps share a shape.
+import Svg, { Circle } from 'react-native-svg';
+import { Icon } from '../../src/ui/Icon';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -92,7 +96,7 @@ import {
 } from '../../src/lib/mealPlan';
 import type { Diet, Goal } from '../../src/lib/types';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
-import { BACK_ICON, FORWARD_ARROW } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ARROW, FORWARD_ICON } from '../../src/ui/direction';
 
 const CLIENT_COLS = 'diet, meals_per_day, avoid, goal, activity, manual_weight_kg, manual_body_fat_pct';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
@@ -140,8 +144,14 @@ export default function ClientNutrition() {
   // even for one frame.
   const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
   const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  // Plan or Targets, the board's two segments that show something in place.
+  // Recipes is the third word on the bar and is an action, not a state: it
+  // opens the catalogue sheet, as it does on the client's own Meals tab.
+  const [view, setView] = useState<'plan' | 'targets'>('plan');
   const moved = subjectChange(seenParam, clientId);
-  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
+  // The segment is a way of looking at one client's plan, so it opens on
+  // Plan again for the next one — this screen never unmounts.
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); setView('plan'); }
 
   // Null is "we do not know", never "there is none". The profile carries its
   // own status because it is the one that decides whether a plan may be
@@ -467,25 +477,94 @@ export default function ClientNutrition() {
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
     backgroundColor: on ? t.brand : t.surface2,
   });
+  /** One segment of the board's bar: an ink fill under the chosen word, the
+   *  ground colour for the word itself. The same pill the client's Meals tab
+   *  draws its slot bar with, so coach and client read one control. */
+  const seg = (on: boolean) => ({
+    flex: 1, minHeight: 40, borderRadius: radius.pill,
+    alignItems: 'center' as const, justifyContent: 'center' as const,
+    backgroundColor: on ? t.ink : 'transparent',
+  });
   const G = layout.gutter;
   const todayIdx = planDayIndex(todayISO);
+
+  /** Whether the coach's four deltas move anything at all. */
+  const adjusted = !!(adjust && (adjust.kcalDelta || adjust.proteinDelta || adjust.carbDelta || adjust.fatDelta));
+
+  /**
+   * The board's four rings, in its order. Each carries the target inside it
+   * and an arc for how much of that target the day the coach has composed
+   * supplies — the same ratio the Meters under Targets draw as bars. A dash
+   * and no arc while there is no `built`: the notices above the rings say
+   * which read is missing, and a ring drawn around a figure this screen does
+   * not have would be the placeholder body the header refuses.
+   */
+  const rings: { label: string; figure: string; arc: number | null; spoken: string }[] = built
+    ? [
+      { label: 'Calories', figure: num(built.target.kcal), arc: built.tot.K / (built.target.kcal || 1),
+        spoken: `Calories, target ${num(built.target.kcal)} kcal a day. The day you have composed comes to ${num(Math.round(built.tot.K))}` },
+      { label: 'Protein', figure: `${num(built.target.protein)} g`, arc: built.tot.P / (built.target.protein || 1),
+        spoken: `Protein, target ${num(built.target.protein)} grams. The day you have composed comes to ${num(Math.round(built.tot.P))}` },
+      { label: 'Carbs', figure: `${num(built.target.carbs)} g`, arc: built.tot.C / (built.target.carbs || 1),
+        spoken: `Carbs, target ${num(built.target.carbs)} grams. The day you have composed comes to ${num(Math.round(built.tot.C))}` },
+      { label: 'Fat', figure: `${num(built.target.fat)} g`, arc: built.tot.F / (built.target.fat || 1),
+        spoken: `Fat, target ${num(built.target.fat)} grams. The day you have composed comes to ${num(Math.round(built.tot.F))}` },
+    ]
+    : ['Calories', 'Protein', 'Carbs', 'Fat'].map((label) => ({
+      label, figure: fig(null), arc: null, spoken: `${label} target not known yet`,
+    }));
+
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the plan once somebody is, because the
+   * board opens this screen on a client's targets and not on a list of names.
+   * The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there is nobody to write a plan for" />
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => { setPicked(c.id === picked ? null : c.id); setView('plan'); }}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
+  /**
+   * Opens the catalogue sheet on one slot of the day being edited. The meal
+   * rows open it on their own slot; the Recipes segment opens it on the first,
+   * which is what the client's own Recipes segment does.
+   */
+  const choose = (pos: number, slot: Slot) => { setQuery(''); setPick({ pos, slot }); };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* ── the board's head: back, and the title on the centre line ────
+            A spacer the width of the back control keeps the title centred on
+            the screen rather than on what is left of the row. The client's
+            name sits under it because this is one person's plan and the
+            picker that names them is now below the fold. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Nutrition</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', flex: 1, paddingHorizontal: sp.sm }}>
+            Nutrition Plan
+          </Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Their targets, and a week of meals you write. Every figure below is worked out from their
-          own body and your adjustment by the same code their phone runs, so this is their screen
-          rather than a picture of it.
-        </Text>
+        {client ? (
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{client.name}</Text>
+        ) : null}
 
         {!USE_SUPABASE ? (
           <Section>
@@ -501,22 +580,31 @@ export default function ClientNutrition() {
               </Section>
             ) : null}
 
-            <Section>
-              <SectionHead title="Client" />
-              {r.roster.length === 0 && isWhole(r.status) ? (
-                <EmptyRoster lacks="there is nobody to write a plan for" />
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {r.roster.map((c) => (
-                    <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                      accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                      accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                      <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </Section>
+            {!picked ? picker : null}
+
+            {/* ── Plan / Targets / Recipes, as the board draws them ────────
+                Plan is the rings and the day's meals; Targets is where the
+                figures come from and what the composed day does to them;
+                Recipes opens the catalogue sheet on the first slot, the way
+                the client's own Meals tab does, and is off until there is a
+                day to open. Same three words over the same things on both
+                apps. */}
+            {picked ? (
+              <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
+                <Pressable accessibilityRole="tab" accessibilityState={{ selected: view === 'plan' }} accessibilityLabel="Plan"
+                  onPress={() => setView('plan')} style={seg(view === 'plan')}>
+                  <Text style={{ ...ty.label, fontWeight: view === 'plan' ? '600' : '500', color: view === 'plan' ? t.bg : t.ink2 }}>Plan</Text>
+                </Pressable>
+                <Pressable accessibilityRole="tab" accessibilityState={{ selected: view === 'targets' }} accessibilityLabel="Targets"
+                  onPress={() => setView('targets')} style={seg(view === 'targets')}>
+                  <Text style={{ ...ty.label, fontWeight: view === 'targets' ? '600' : '500', color: view === 'targets' ? t.bg : t.ink2 }}>Targets</Text>
+                </Pressable>
+                <Pressable accessibilityRole="tab" accessibilityState={{ selected: false, disabled: !built }} accessibilityLabel="Recipes"
+                  disabled={!built} onPress={() => { if (built?.plan[0]) choose(0, built.plan[0].slot); }} style={seg(false)}>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: built ? t.ink2 : t.ink3 }}>Recipes</Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             {picked && !askable ? (
               /* ── the third answer ──────────────────────────────────────────
@@ -541,7 +629,6 @@ export default function ClientNutrition() {
                  The same distinction `wellnessPanel`'s `not-asked` kind keeps
                  apart from `unreadable` in src/lib/coachWellness.ts. */
               <View>
-                <Rule />
                 <Section>
                   <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
                     note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to carry a diet, an allergen list or a calorie target — and nowhere for a plan you write here to be delivered to. Nothing of theirs was asked for and nothing was refused. Invite them from your client list and this screen works properly from the day they accept.`} />
@@ -549,56 +636,19 @@ export default function ClientNutrition() {
               </View>
             ) : picked ? (
               <View>
-                <Rule />
-
-                {/* ── what they will not eat ──────────────────────────────
-                    First, above everything, and for the same reason the
-                    programme builder puts injuries above the exercises: a plan
-                    that ignores a disclosed allergen is worse than no plan.
-                    It is also the filter every meal below is drawn through. */}
+                {/* ── what could not be read, before anything that depends on it
+                    Each of these is a different fact about the reads behind
+                    the rings, said above them whichever segment is open,
+                    because a dash in a ring is only honest if the sentence
+                    saying why is on the same screen. In the ordinary case
+                    none of them fires and the rings sit directly under the
+                    bar, as the board draws them. */}
                 {profileStatus === 'loading' ? (
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their diet and allergens…</Text></Section>
                 ) : profileStatus === 'error' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their profile could not be read"
                       note={`What ${who} avoids is unknown rather than nothing, so no meal can be picked for them from here.`} />
-                  </Section>
-                ) : profile ? (
-                  <Section>
-                    <SectionHead
-                      title="What They Avoid"
-                      note={profile.avoid.length ? `${profile.avoid.length} recorded` : 'none recorded'}
-                    />
-                    {profile.avoid.length ? (
-                      <>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xs }}>
-                          {profile.avoid.map((a) => (
-                            <View key={a} style={{ paddingHorizontal: sp.md, paddingVertical: sp.xs, borderRadius: radius.pill, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.warn }}>
-                              {/* The chip's warn border is the mark and clears 3:1;
-                                  warn as micro ink did not clear 4.5:1 on the three
-                                  light palettes, which made the allergen name the
-                                  hardest word in the chip to read. */}
-                              <Text style={{ ...ty.micro, color: t.ink }}>{ALLERGEN_LABEL.get(a) ?? a}</Text>
-                            </View>
-                          ))}
-                        </View>
-                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
-                          Every meal offered below is drawn from a catalogue with these already taken
-                          out. They are what they told their own app, not a medical record.
-                        </Text>
-                      </>
-                    ) : (
-                      <Text style={{ ...ty.body, color: t.ink2 }}>
-                        {who} has recorded nothing they avoid. The read came back and it was empty,
-                        so this is about them rather than about the connection — worth asking anyway
-                        before you write a week around it.
-                      </Text>
-                    )}
-                    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-                      Diet: {profile.diet ? DIET_LABEL[profile.diet] : 'not set'} ·{' '}
-                      {profile.mealsPerDay ? `${profile.mealsPerDay} meals a day` : 'meals a day not set'} ·{' '}
-                      Goal: {profile.goal ? GOAL_LABEL[profile.goal] : 'not set'}
-                    </Text>
                   </Section>
                 ) : null}
 
@@ -647,127 +697,218 @@ export default function ClientNutrition() {
                   </Section>
                 ) : null}
 
-                {/* ── the week ───────────────────────────────────────────── */}
-                {input && draft && built ? (
+                {view === 'plan' ? (
                   <>
-                    <Rule />
+                    {/* ── Daily Targets: the board's four rings, two by two ──
+                        Drawn under every status once a client is chosen, so
+                        the first viewport is the board's whether or not the
+                        reads have landed. The figures inside are `built.target`
+                        — `macrosFor` off the client's own body and goal, moved
+                        by this coach's deltas — or a dash. */}
                     <Section>
-                      <SectionHead
-                        title="Their Targets"
-                        note={adjust && (adjust.kcalDelta || adjust.proteinDelta || adjust.carbDelta || adjust.fatDelta) ? 'your adjustment applied' : 'unadjusted'}
-                      />
-                      <Text style={{ ...ty.body, ...numeric, color: t.ink }}>
-                        {num(built.target.kcal)} kcal · {num(built.target.protein)} g protein ·{' '}
-                        {num(built.target.carbs)} g carbs · {num(built.target.fat)} g fat
-                      </Text>
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
-                        Worked out from their weight, body fat, activity level and goal, then moved by
-                        the adjustment you set. Change the adjustment on their client page; this
-                        screen writes the meals.
-                      </Text>
-                    </Section>
-
-                    <Rule />
-                    <Section>
-                      <SectionHead title="The Week" note={PLAN_WEEKDAYS[dayIdx]} />
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                        {PLAN_WEEKDAYS.map((d, i) => (
-                          <Pressable key={d} onPress={() => setDayIdx(i)} accessibilityRole="button"
-                            accessibilityState={{ selected: dayIdx === i }} accessibilityLabel={d}
-                            style={chip(dayIdx === i)}>
-                            <Text style={{ ...ty.micro, color: dayIdx === i ? t.brandInk : t.ink2 }}>
-                              {d}{todayIdx === i ? ' ·' : ''}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                      {todayIdx != null ? (
-                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
-                          Today is {PLAN_WEEKDAYS[todayIdx]}, marked with a dot. Their Meals tab shows
-                          whichever day it actually is.
-                        </Text>
-                      ) : null}
-                    </Section>
-
-                    {built.plan.map((m, i) => (
-                      <View key={`${dayIdx}-${i}`}>
-                        <Rule />
-                        <Section>
-                          <SectionHead title={m.slot} note={`${m.servings}× serving`} />
-                          <Text style={{ ...ty.body, color: t.ink }}>{m.ico} {m.n}</Text>
-                          <Text style={{ ...ty.label, ...numeric, color: t.ink2, marginTop: sp.xs }}>
-                            {num(m.K)} kcal · {num(m.P)} P · {num(m.C)} C · {num(m.F)} F
-                          </Text>
-                          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                            <Ghost label="Swap" icon="swap" onPress={() => {
-                              if (!profile?.diet) return;
-                              setDraft(setPlanMeal(draft, dayIdx, i, swapIndex(profile.diet, m.slot, m.idx, profile.avoid)));
-                            }} />
-                            <Ghost label="Choose" icon="search" onPress={() => { setQuery(''); setPick({ pos: i, slot: m.slot }); }} />
-                          </View>
-                        </Section>
-                      </View>
-                    ))}
-
-                    <Rule />
-                    <Section>
-                      <SectionHead title="What Their App Will Do With This" />
-                      <Text style={{ ...ty.body, color: t.ink2 }}>
-                        {planServingNote(built.plan[0]?.servings ?? 1, planDayBaseKcal(draft, dayIdx), built.target.kcal)}
-                      </Text>
-                      <View style={{ marginTop: sp.md }}>
-                        <Meter label="Protein" val={built.tot.P} target={built.target.protein} />
-                        <Meter label="Carbs" val={built.tot.C} target={built.target.carbs} />
-                        <Meter label="Fat" val={built.tot.F} target={built.target.fat} />
-                      </View>
-                    </Section>
-
-                    <Rule />
-                    <Section>
-                      <SectionHead title="Fill the Week" note="from this day" />
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                        {PLAN_WEEKDAYS.map((d, i) => i === dayIdx ? null : (
-                          <Pressable key={d} onPress={() => setDraft(copyPlanDay(draft, dayIdx, i))}
-                            accessibilityRole="button" accessibilityLabel={`Copy ${PLAN_WEEKDAYS[dayIdx]} to ${d}`}
-                            style={chip(false)}>
-                            <Text style={{ ...ty.micro, color: t.ink2 }}>{FORWARD_ARROW} {d}</Text>
-                          </Pressable>
-                        ))}
+                      <SectionHead title="Daily Targets" note={built ? (adjusted ? 'your adjustment applied' : 'unadjusted') : undefined} />
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                        {rings.map((ring) => <TargetRing key={ring.label} {...ring} />)}
                       </View>
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
-                        Copies {PLAN_WEEKDAYS[dayIdx]}&rsquo;s meals onto another day. Nothing is sent
-                        until you send it.
+                        {built
+                          ? 'Worked out from their weight, body fat, activity level and goal, then moved by the adjustment you set. The green is how much of each the day below supplies.'
+                          : 'A dash is a target this screen cannot work out yet; the notes above say which read is missing.'}
                       </Text>
                     </Section>
 
-                    <Rule />
-                    <Section>
-                      {!guard.allowed && guard.reason ? (
-                        <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{guard.reason}</Flag>
-                      ) : null}
-                      <View style={{ opacity: guard.allowed && !sending ? 1 : 0.4 }}
-                        pointerEvents={guard.allowed && !sending ? 'auto' : 'none'}>
-                        <Cta wide label={sending ? 'Sending…' : (guard.label ?? `Send ${PLAN_DAYS} Days to ${client?.name ?? 'Client'}`)} onPress={send} />
-                      </View>
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
-                        Sending replaces the week they are following. They can still swap any meal on
-                        their own phone — their swap wins over yours for that slot, and yours comes
-                        back when they clear it. What they log stays theirs; nothing here writes to
-                        their food diary.
-                      </Text>
-                    </Section>
+                    {/* ── Meal Plan: the day's slots, one row each ──────────
+                        The rows are the client's own builder's output for the
+                        day being edited — what their phone draws — with the
+                        week strip above them, because a plan is a week and
+                        the board's rows are one day of it. Tapping a row opens
+                        the catalogue sheet on that slot; Swap lives in the
+                        sheet's head. */}
+                    {input && draft && built ? (
+                      <Section>
+                        <SectionHead title="Meal Plan" note={`${PLAN_WEEKDAYS[dayIdx]} · ${built.plan.length} ${built.plan.length === 1 ? 'meal' : 'meals'}`} />
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                          {PLAN_WEEKDAYS.map((d, i) => (
+                            <Pressable key={d} onPress={() => setDayIdx(i)} accessibilityRole="button"
+                              accessibilityState={{ selected: dayIdx === i }} accessibilityLabel={d}
+                              style={chip(dayIdx === i)}>
+                              <Text style={{ ...ty.micro, color: dayIdx === i ? t.brandInk : t.ink2 }}>
+                                {d}{todayIdx === i ? ' ·' : ''}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                          {todayIdx != null ? `Today is ${PLAN_WEEKDAYS[todayIdx]}, marked with a dot. ` : ''}
+                          {/* The allergens are the index space (see the header),
+                              so the line every row is drawn under names them. */}
+                          Chosen from their {profile?.diet ? DIET_LABEL[profile.diet].toLowerCase() : ''} catalogue
+                          {profile?.avoid.length ? ` without ${profile.avoid.map((a) => (ALLERGEN_LABEL.get(a) ?? a).toLowerCase()).join(', ')}` : ''}.
+                          Tap a meal to choose another.
+                        </Text>
+                        {built.plan.map((m, i) => (
+                          <View key={`${dayIdx}-${i}`}>
+                            <Rule />
+                            <Pressable onPress={() => choose(i, m.slot)} accessibilityRole="button"
+                              // Assembled for the ear: a label on a Pressable
+                              // REPLACES its children, and the macros are why a
+                              // coach opens the row.
+                              accessibilityLabel={`${m.slot}: ${m.n}. ${num(m.K)} kcal, ${num(m.P)} protein, ${num(m.C)} carbs, ${num(m.F)} fat at ${m.servings} servings. Choose a different meal`}
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
+                              {/* The dish's own glyph in a circle where the board
+                                  puts a photograph. There is no photography of a
+                                  generated meal, and none is invented. */}
+                              <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                                <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
+                              </View>
+                              <View style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{m.slot}</Text>
+                                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{m.n}</Text>
+                                <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+                                  {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} · {m.servings}× serving
+                                </Text>
+                              </View>
+                              <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+                            </Pressable>
+                          </View>
+                        ))}
+                      </Section>
+                    ) : null}
+
+                    {input && draft && built ? (
+                      <>
+                        <Section>
+                          <SectionHead title="Fill the Week" note="from this day" />
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                            {PLAN_WEEKDAYS.map((d, i) => i === dayIdx ? null : (
+                              <Pressable key={d} onPress={() => setDraft(copyPlanDay(draft, dayIdx, i))}
+                                accessibilityRole="button" accessibilityLabel={`Copy ${PLAN_WEEKDAYS[dayIdx]} to ${d}`}
+                                style={chip(false)}>
+                                <Text style={{ ...ty.micro, color: t.ink2 }}>{FORWARD_ARROW} {d}</Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                          <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                            Copies {PLAN_WEEKDAYS[dayIdx]}&rsquo;s meals onto another day. Nothing is sent
+                            until you send it.
+                          </Text>
+                        </Section>
+
+                        <Section>
+                          {!guard.allowed && guard.reason ? (
+                            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{guard.reason}</Flag>
+                          ) : null}
+                          <View style={{ opacity: guard.allowed && !sending ? 1 : 0.4 }}
+                            pointerEvents={guard.allowed && !sending ? 'auto' : 'none'}>
+                            <Cta wide label={sending ? 'Sending…' : (guard.label ?? `Send ${PLAN_DAYS} Days to ${client?.name ?? 'Client'}`)} onPress={send} />
+                          </View>
+                          <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
+                            Sending replaces the week they are following. They can still swap any meal on
+                            their own phone — their swap wins over yours for that slot, and yours comes
+                            back when they clear it. What they log stays theirs; nothing here writes to
+                            their food diary.
+                          </Text>
+                        </Section>
+                      </>
+                    ) : null}
                   </>
-                ) : null}
+                ) : (
+                  <>
+                    {/* ── Targets: where the four figures come from ───────── */}
+                    {input && draft && built ? (
+                      <>
+                        <Section>
+                          <SectionHead
+                            title="Their Targets"
+                            note={adjusted ? 'your adjustment applied' : 'unadjusted'}
+                          />
+                          <Text style={{ ...ty.body, ...numeric, color: t.ink }}>
+                            {num(built.target.kcal)} kcal · {num(built.target.protein)} g protein ·{' '}
+                            {num(built.target.carbs)} g carbs · {num(built.target.fat)} g fat
+                          </Text>
+                          <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                            Worked out from their weight, body fat, activity level and goal, then moved by
+                            the adjustment you set. Change the adjustment on their client page; this
+                            screen writes the meals.
+                          </Text>
+                        </Section>
+
+                        <Section>
+                          <SectionHead title="What Their App Will Do With This" note={PLAN_WEEKDAYS[dayIdx]} />
+                          <Text style={{ ...ty.body, color: t.ink2 }}>
+                            {planServingNote(built.plan[0]?.servings ?? 1, planDayBaseKcal(draft, dayIdx), built.target.kcal)}
+                          </Text>
+                          <View style={{ marginTop: sp.md }}>
+                            <Meter label="Protein" val={built.tot.P} target={built.target.protein} />
+                            <Meter label="Carbs" val={built.tot.C} target={built.target.carbs} />
+                            <Meter label="Fat" val={built.tot.F} target={built.target.fat} />
+                          </View>
+                        </Section>
+                      </>
+                    ) : null}
+
+                    {/* ── what they will not eat ──────────────────────────────
+                        This sat first, above everything, for the same reason
+                        the programme builder puts injuries above the exercises:
+                        a plan that ignores a disclosed allergen is worse than no
+                        plan. The board opens on the rings instead, so the full
+                        list lives here under Targets and the Plan segment names
+                        the same allergens in the line every meal row is drawn
+                        under — the filter is still on the screen the meals are
+                        on. It is also the filter every meal is drawn through. */}
+                    {profile ? (
+                      <Section>
+                        <SectionHead
+                          title="What They Avoid"
+                          note={profile.avoid.length ? `${profile.avoid.length} recorded` : 'none recorded'}
+                        />
+                        {profile.avoid.length ? (
+                          <>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xs }}>
+                              {profile.avoid.map((a) => (
+                                <View key={a} style={{ paddingHorizontal: sp.md, paddingVertical: sp.xs, borderRadius: radius.pill, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.warn }}>
+                                  {/* The chip's warn border is the mark and clears 3:1;
+                                      warn as micro ink did not clear 4.5:1 on the three
+                                      light palettes, which made the allergen name the
+                                      hardest word in the chip to read. */}
+                                  <Text style={{ ...ty.micro, color: t.ink }}>{ALLERGEN_LABEL.get(a) ?? a}</Text>
+                                </View>
+                              ))}
+                            </View>
+                            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                              Every meal offered on this screen is drawn from a catalogue with these already
+                              taken out. They are what they told their own app, not a medical record.
+                            </Text>
+                          </>
+                        ) : (
+                          <Text style={{ ...ty.body, color: t.ink2 }}>
+                            {who} has recorded nothing they avoid. The read came back and it was empty,
+                            so this is about them rather than about the connection — worth asking anyway
+                            before you write a week around it.
+                          </Text>
+                        )}
+                        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+                          Diet: {profile.diet ? DIET_LABEL[profile.diet] : 'not set'} ·{' '}
+                          {profile.mealsPerDay ? `${profile.mealsPerDay} meals a day` : 'meals a day not set'} ·{' '}
+                          Goal: {profile.goal ? GOAL_LABEL[profile.goal] : 'not set'}
+                        </Text>
+                      </Section>
+                    ) : null}
+                  </>
+                )}
               </View>
             ) : null}
+
+            {picked ? picker : null}
           </>
         )}
 
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          Calories and macros here are worked back from this client&rsquo;s own measurements and the
-          goal they set, moved by the adjustment you chose. They are a coaching decision, not a
-          clinical one: this app does not assess anybody&rsquo;s health and nothing on this screen
-          says a figure is safe for them.
+          Their targets, and a week of meals you write. Every figure on this screen is worked out
+          from their own body and your adjustment by the same code their phone runs, so this is
+          their screen rather than a picture of it. Calories and macros are a coaching decision,
+          not a clinical one: this app does not assess anybody&rsquo;s health and nothing here says
+          a figure is safe for them.
         </Text>
       </ScrollView>
 
@@ -786,41 +927,66 @@ export default function ClientNutrition() {
                   {profile?.avoid.length ? ` · without ${profile.avoid.map((a) => (ALLERGEN_LABEL.get(a) ?? a).toLowerCase()).join(', ')}` : ''}
                 </Text>
               </View>
+              {/* Swap moved in here from the meal row, which the board draws
+                  with a chevron and nothing else. It steps the slot to the next
+                  dish in the client's filtered catalogue and closes the sheet
+                  so the new row is what the coach is looking at. */}
+              <Ghost label="Swap" icon="swap" onPress={() => {
+                const cur = pick && built ? built.plan[pick.pos] : null;
+                if (!draft || !pick || !cur || !profile?.diet) return;
+                setDraft(setPlanMeal(draft, dayIdx, pick.pos, swapIndex(profile.diet, cur.slot, cur.idx, profile.avoid)));
+                setPick(null);
+              }} />
               <Ghost label="Close" onPress={() => setPick(null)} />
             </View>
             {/* keyboard-ok: this box sits at the top of a sheet capped at 85% of the
                 screen, directly under its header, with the results list scrolling
                 beneath it. The keyboard rises into the list, not over the field —
                 which is the point of a search box on a sheet this tall. */}
-            <TextInput
-              value={query} onChangeText={setQuery} placeholder="Search this slot" placeholderTextColor={t.ink3}
-              autoCorrect={false} accessibilityLabel="Search meals"
-              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginTop: sp.lg }}
-            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2, marginTop: sp.lg }}>
+              <Icon name="search" size={17} color={t.ink3} />
+              <TextInput
+                value={query} onChangeText={setQuery} placeholder="Search this slot" placeholderTextColor={t.ink3}
+                autoCorrect={false} accessibilityLabel="Search meals" returnKeyType="search" clearButtonMode="while-editing"
+                style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }}
+              />
+            </View>
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
               {pick && profile?.diet
                 ? `${num(catalogSize(profile.diet, pick.slot, profile.avoid))} meals in this slot for them. The first ${num(results.length)} matching are listed.`
                 : ''}
             </Text>
             <ScrollView style={{ marginTop: sp.md }} showsVerticalScrollIndicator={false}>
-              {results.map((g) => (
+              {results.map((g) => {
+                /** Whether this is the dish already in the slot — said in words
+                 *  on the row, the way the client's list marks its plan. */
+                const inPlan = !!(pick && built && built.plan[pick.pos]?.idx === g.idx);
+                return (
                 <Pressable key={`${g.slot}-${g.idx}`} accessibilityRole="button"
                   // The macros are the whole reason a coach picks one of these
                   // over another, and the label was replacing them.
-                  accessibilityLabel={`${g.n}. ${num(g.k)} kcal, ${num(g.p)} protein, ${num(g.c)} carbs, ${num(g.f)} fat per serving, before their day is scaled to target`}
+                  accessibilityLabel={`${g.n}${inPlan ? ', in the plan' : ''}. ${num(g.k)} kcal, ${num(g.p)} protein, ${num(g.c)} carbs, ${num(g.f)} fat per serving, before their day is scaled to target`}
                   onPress={() => {
                     if (!draft || !pick) return;
                     setDraft(setPlanMeal(draft, dayIdx, pick.pos, g.idx));
                     setPick(null);
                   }}
-                  style={{ paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                  <Text style={{ ...ty.body, color: t.ink }}>{g.ico} {g.n}</Text>
-                  <Text style={{ ...ty.micro, ...numeric, color: t.ink3, marginTop: sp.xs }}>
-                    {num(g.k)} kcal · {num(g.p)} P · {num(g.c)} C · {num(g.f)} F — per serving, before
-                    their day is scaled to target
-                  </Text>
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{g.ico}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{g.n}</Text>
+                    {inPlan ? <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand, marginTop: 2 }}>In the plan</Text> : null}
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+                      {num(g.k)} kcal · P{num(g.p)} · C{num(g.c)} · F{num(g.f)} — per serving, before
+                      their day is scaled to target
+                    </Text>
+                  </View>
+                  <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                 </Pressable>
-              ))}
+                );
+              })}
               {!results.length ? (
                 <Text style={{ ...ty.body, color: t.ink3, paddingVertical: sp.lg }}>
                   Nothing in this slot matches that. Clear the search to see what is available for
@@ -832,5 +998,43 @@ export default function ClientNutrition() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/**
+ * One of the board's four small rings: the target inside it, what it is a
+ * target for under that, and an arc for how much of that target the day the
+ * coach has composed supplies.
+ *
+ * The arc is the composed day against the target — the ratio the Meters under
+ * Targets draw as bars — and NOT how far the client has eaten today. What they
+ * logged is theirs and this screen does not read it (see the header). No arc
+ * at all, and a dash inside, when there is no target: a ring drawn around a
+ * figure this screen does not have is a figure invented to fill a slot, which
+ * is the defect the client's own Meals tab was fixed for.
+ *
+ * Half the card wide so four of them fall two by two, as the board draws them.
+ */
+function TargetRing({ label, figure, arc, spoken }: { label: string; figure: string; arc: number | null; spoken: string }) {
+  const t = useTheme();
+  const S = 96, R = 40, W = 8, C = 2 * Math.PI * R;
+  return (
+    <View accessible accessibilityLabel={spoken} style={{ width: '50%', alignItems: 'center', paddingVertical: sp.md }}>
+      <View style={{ width: S, height: S, alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} style={{ position: 'absolute' }}
+          accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <Circle cx={S / 2} cy={S / 2} r={R} fill="none" stroke={t.surface3} strokeWidth={W} />
+          {arc != null ? (
+            <Circle cx={S / 2} cy={S / 2} r={R} fill="none" stroke={t.brand} strokeWidth={W} strokeLinecap="round"
+              strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, arc)))}
+              transform={`rotate(-90 ${S / 2} ${S / 2})`} />
+          ) : null}
+        </Svg>
+        {/* Shrunk to fit inside the ring rather than wrapped: a target broken
+            across two lines inside a 96pt circle is a figure read wrong. */}
+        <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(18), color: t.ink, maxWidth: S - 2 * W - 10, textAlign: 'center' }}>{figure}</Text>
+        <Text numberOfLines={1} style={{ ...ty.caption, color: t.ink3, marginTop: 1, maxWidth: S - 2 * W - 10 }}>{label}</Text>
+      </View>
+    </View>
   );
 }

@@ -112,6 +112,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, Flag, Spark, fig } from '../../src/ui/kit';
+import { Icon } from '../../src/ui/Icon';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
@@ -138,12 +139,18 @@ import {
   notSharedLine, unreadableLine, notAskedLine, nothingLoggedLine, truncatedLine,
 } from '../../src/lib/coachWellness';
 import { deltaLabel } from '../../src/lib/deltaLabel';
+// The window the trend is cut to and the day a row is dated with, off the
+// same helpers clientBody.ts itself reads dates through.
+import { daysBetweenIso, dayHeading } from '../../src/lib/coachWeek';
+// The words behind the chip on each row, so a row read aloud says how the
+// reading was taken as well as what it said.
+import { readSource, sourceChip } from '../../src/lib/scanProvenance';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import {
   readBodyHistory, bodyBoard, seriesOf, movementOf, readingLine, seriesAgeLine,
-  isSeriesStale, metricUnit, metricValue, readManual, manualLine, manualFigures,
+  isSeriesStale, metricUnit, metricValue, metricDelta, readManual, manualLine, manualFigures,
   BODY_METRICS, DIRECTION_CAVEAT,
-  type BodyHistory, type BodyScanRow, type ManualRow, type ManualEntry, type MetricSeries,
+  type BodyHistory, type BodyScanRow, type ManualRow, type ManualEntry, type MetricSeries, type BodyMetricKey,
 } from '../../src/lib/clientBody';
 // The thirteen composition metrics, the four headings they are grouped under,
 // and the improving / watch / balance reading — the same functions
@@ -244,6 +251,14 @@ export default function ClientBody() {
   // it is cleared whenever the subject changes, because this screen never
   // unmounts and an open row would otherwise carry over onto the next client.
   const [compOpen, setCompOpen] = useState<string | null>(null);
+  // Which of the three series the top of the screen draws, and how far back
+  // the line and the rows reach. The board's Progress opens on one metric
+  // with a range under it; both are ways of looking rather than facts about
+  // the client, so they are local — and unlike `compOpen` they are kept
+  // across subjects, because a coach reading two clients' weight in a row
+  // wants weight both times.
+  const [metric, setMetric] = useState<BodyMetricKey>('weight');
+  const [range, setRange] = useState<'1M' | '3M' | '6M' | '1Y'>('1Y');
   const moved = subjectChange(seenParam, clientId);
   if (moved) { setSeenParam(clientId); setPicked(moved.subject); setCompOpen(null); }
 
@@ -506,73 +521,176 @@ export default function ClientBody() {
     backgroundColor: on ? t.brand : t.surface2,
   });
 
+  /** One segment of the board's bar: an ink fill under the chosen word, the
+   *  ground colour for the word itself — the same pill the client's Meals tab
+   *  draws its slot bar with, so coach and client read one control. */
+  const seg = (on: boolean) => ({
+    flex: 1, minHeight: 40, borderRadius: radius.pill,
+    alignItems: 'center' as const, justifyContent: 'center' as const,
+    backgroundColor: on ? t.ink : 'transparent',
+  });
+
+  /** The mark in the circle at the start of each row: the instrument the
+   *  metric is read off, not a judgement about the reading. */
+  const ROW_ICON: Record<BodyMetricKey, 'scale' | 'target' | 'dumbbell'> = { weight: 'scale', bodyfat: 'target', muscle: 'dumbbell' };
+
   /**
-   * One metric: what it says now, how it has moved, and when it was measured.
+   * The chosen metric, the board's way: the latest figure large, its movement
+   * since the reading before it, the line over the chosen range, the range
+   * chips, then every reading in that range as a dated row.
    *
    * The change gets a sign and no colour. Weight falling is what one client is
    * training for and the thing another one is trying to stop, and skeletal
    * muscle falling alongside it means something different again — the record
-   * does not say which, so this screen does not paint it in. The only tone on
-   * the row is on the AGE, and that is a fact about the record rather than about
-   * the body: a reading from four months ago is out of date whatever it says.
+   * does not say which, so this screen does not paint it in. The board's green
+   * "−2.4 kg" is exactly that judgement, and DIRECTION_CAVEAT under the rows
+   * says why it is withheld. The only tone on the block is on the AGE, and
+   * that is a fact about the record rather than about the body: a reading from
+   * four months ago is out of date whatever it says.
+   *
+   * The movement under the figure is against the reading BEFORE it — the
+   * board's "−2.4 kg" is one step — and names the day it is measured from.
+   * The movement across everything that came back is `readingLine`, under the
+   * chart, where the span is what is being looked at.
    */
-  const metricSection = (s: MetricSeries, i: number) => {
+  const heroSection = (s: MetricSeries, scans: number) => {
     const unit = metricUnit(s.key, wu);
     const stale = isSeriesStale(s, todayISO);
     const readings = s.readings;
-    // Converted for display one point at a time; the CHANGE beside them is
-    // converted as a span inside `readingLine`, never off these two ends.
-    const vals = readings.map((p) => metricValue(p.v, s.key, wu));
-    const mv = movementOf(s);
     const latest = readings[readings.length - 1] ?? null;
-    const min = vals.length ? Math.min(...vals) : null;
-    const max = vals.length ? Math.max(...vals) : null;
+    const prior = readings.length >= 2 ? readings[readings.length - 2] : null;
+    // The window, in days back from the day of the read. `todayISO` is fixed
+    // at the moment of the read, so a screen left open over midnight cannot
+    // quietly move the window under the coach's eyes. A reading whose date
+    // this build cannot parse is left out of the window rather than dated to
+    // the epoch; it is still one of `readings`, and still counted.
+    const days = range === '1M' ? 31 : range === '3M' ? 93 : range === '6M' ? 186 : 366;
+    const rangeWord = range === '1M' ? 'month' : range === '3M' ? '3 months' : range === '6M' ? '6 months' : 'year';
+    // Each reading with the one before it, so a row's change is against the
+    // reading it actually followed — which for the earliest row in the window
+    // is a reading OUTSIDE the window, not "no earlier reading".
+    const inRange = readings
+      .map((p, i) => ({ p, prior: readings[i - 1] ?? null }))
+      .filter(({ p }) => { const age = daysBetweenIso(p.atISO, todayISO); return age != null && age <= days; });
+    // Converted for display one point at a time; every CHANGE is converted as
+    // a span through `metricDelta`, never off two rounded ends.
+    const vals = inRange.map(({ p }) => metricValue(p.v, s.key, wu));
+    const mv = movementOf(s);
+    const figure = latest ? plain(metricValue(latest.v, s.key, wu)) : null;
+    const moved = latest && prior
+      ? deltaLabel(metricDelta(latest.v - prior.v, s.key, wu), { since: dayHeading(prior.atISO), unit })
+      : readingLine(s, wu);
+    const age = seriesAgeLine(s, todayISO);
     return (
-      <View key={s.key}>
-        {i > 0 ? <Rule /> : null}
+      <>
+        <Section>
+          {/* One stop for the ear: label, figure, movement, age. Four Texts
+              were four stops that read as four unrelated facts. */}
+          <View accessible accessibilityLabel={`${s.label}, ${figure == null ? 'no reading' : `${figure} ${unit}`}. ${moved} ${age}`}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>{s.label}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: sp.sm }}>
+              {/* A dash, never a zero. A metric nobody has measured has no
+                  figure, and "0 kg" is a specific and false claim about a body. */}
+              <Text style={{ ...value(32), color: t.ink }}>{fig(figure)}</Text>
+              {latest ? (
+                <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{unit}</Text>
+              ) : null}
+            </View>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{moved}</Text>
+            {/* seriesAgeLine already says how old the reading is. warn as micro
+                ink is 3.87–4.08:1 on the light palettes, so it goes in the dot. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: sp.xs }}>
+              {stale ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+              <Text style={{ ...ty.micro, color: stale ? t.ink2 : t.ink3, flex: 1 }}>{age}</Text>
+            </View>
+          </View>
+
+          {/* A line needs two points. One reading is drawn as the reading it
+              is — a figure and a date — rather than as a trend through a single
+              point, which is the thing this screen was asked to stop doing.
+              `labels` is what puts a DATE on the readout when the coach touches
+              the line. */}
+          {vals.length > 1 ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Spark data={vals} labels={inRange.map(({ p }) => p.atISO)} unit={` ${unit}`} />
+              {/* The whole span that came back, not the window: `readingLine`
+                  words it "since ⟨date⟩" rather than "since their first scan"
+                  because under a truncated read the oldest scans are the ones
+                  that did not arrive. */}
+              {mv ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{readingLine(s, wu)}</Text>
+              ) : null}
+            </View>
+          ) : readings.length > 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+              {readings.length === 1
+                ? 'One reading is drawn as the reading it is — a figure and a date — rather than as a trend through a single point.'
+                : inRange.length === 0
+                  ? `Nothing in the last ${rangeWord}. Widen the range to see the trend.`
+                  : `One reading in the last ${rangeWord} — widen the range to see the trend.`}
+            </Text>
+          ) : null}
+
+          <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
+            {(['1M', '3M', '6M', '1Y'] as const).map((r) => {
+              const on = range === r;
+              return (
+                <Pressable key={r} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                  accessibilityLabel={r === '1M' ? 'Last month' : r === '3M' ? 'Last 3 months' : r === '6M' ? 'Last 6 months' : 'Last year'}
+                  onPress={() => setRange(r)} style={seg(on)}>
+                  <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{r}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Section>
+
+        {/* ── every reading in the window, newest first ──────────────────
+            The board's dated list. Each row is one scan's figure for this
+            metric, the day it was taken, its change against the reading
+            before it, and the chip saying how it was taken — the mark that
+            tells a coach looking at an outlier which instrument they are
+            looking at. */}
         <Section>
           <SectionHead
             title={s.label}
-            note={readings.length === 1 ? '1 reading' : `${readings.length} readings`}
+            note={`${scans === 1 ? '1 scan' : `${scans} scans`} · ${inRange.length} in the last ${rangeWord}`}
           />
-          <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-            {/* A dash, never a zero. A metric nobody has measured has no
-                figure, and "0 kg" is a specific and false claim about a body. */}
-            <Text style={{ ...value(26), color: t.ink }}>
-              {fig(latest ? plain(metricValue(latest.v, s.key, wu)) : null)}
+          {inRange.length === 0 ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              {readings.length ? `No ${s.label.toLowerCase()} reading in the last ${rangeWord}. Widen the range to see earlier ones.` : readingLine(s, wu)}
             </Text>
-            {latest ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginStart: 3 }}>{unit}</Text>
-            ) : null}
-          </View>
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{readingLine(s, wu)}</Text>
-          {/* seriesAgeLine already says how old the reading is. warn as micro
-              ink is 3.87–4.08:1 on the light palettes, so it goes in the dot. */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: sp.xs }}>
-            {stale ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-            <Text style={{ ...ty.micro, color: stale ? t.ink2 : t.ink3, flex: 1 }}>{seriesAgeLine(s, todayISO)}</Text>
-          </View>
-          {/* A line needs two points. One reading is drawn as the reading it is
-              — a figure and a date — rather than as a trend through a single
-              point, which is the thing this screen was asked to stop doing. */}
-          {mv ? (
-            <View style={{ marginTop: sp.md }}>
-              <Spark data={vals} labels={readings.map((p) => p.atISO)} unit={` ${unit}`} />
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-                  {plain(vals[0])} {unit}
-                </Text>
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-                  range {plain(min as number)}–{plain(max as number)} {unit}
-                </Text>
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-                  {plain(vals[vals.length - 1])} {unit}
-                </Text>
+          ) : inRange.slice().reverse().map(({ p, prior: before }, i) => {
+            const v = plain(metricValue(p.v, s.key, wu));
+            // Under 'partial' the row with nothing before it is the earliest
+            // that ARRIVED; calling it the first would be a claim the read
+            // cannot support.
+            const d = before
+              ? deltaLabel(metricDelta(p.v - before.v, s.key, wu), { since: null, unit })
+              : isWhole(scanStatus) ? 'First reading' : 'Earliest that arrived';
+            const how = sourceChip(readSource(p.source));
+            return (
+              <View key={`${p.atISO}-${i}`} accessible
+                accessibilityLabel={`${v} ${unit}, ${dayHeading(p.atISO)}. ${d}. ${how}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                {/* A circle, as the board draws every row's icon. */}
+                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={ROW_ICON[s.key]} size={17} color={t.ink2} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{v} {unit}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dayHeading(p.atISO)}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{d}</Text>
+                  <SourceChip source={p.source} />
+                </View>
               </View>
-            </View>
-          ) : null}
+            );
+          })}
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{DIRECTION_CAVEAT}</Text>
         </Section>
-      </View>
+      </>
     );
   };
 
@@ -691,23 +809,50 @@ export default function ClientBody() {
 
   const G = layout.gutter;
 
+  /**
+   * The client picker. Above everything while nobody is chosen, because there
+   * is nothing else to draw; under the record once somebody is, because the
+   * board opens this screen on a client's figure and not on a list of names.
+   * The screen is reachable without a param, so the picker cannot go.
+   */
+  const picker = (
+    <Section>
+      <SectionHead title={picked ? 'Switch Client' : 'Client'} />
+      {r.roster.length === 0 && isWhole(r.status) ? (
+        <EmptyRoster lacks="there are no scans to look at" />
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+          {r.roster.map((c) => (
+            <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
+              accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
+              accessibilityLabel={c.name} style={chip(picked === c.id)}>
+              <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </Section>
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* ── the board's head: back, and the title on the centre line ────
+            A spacer the width of the back control keeps the title centred on
+            the screen rather than on what is left of the row. The client's
+            name sits under it because this is one person's record and the
+            picker that names them is now below the fold. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Body Composition</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', flex: 1, paddingHorizontal: sp.sm }}>
+            Progress
+          </Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Every InBody scan a client has recorded — the three series with the date of each
-          reading, the full composition breakdown off the sheet, and their tape measurements. You
-          can read these; you can&rsquo;t change them — a scan is theirs to take and theirs to
-          enter.
-        </Text>
+        {fullName ? (
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{fullName}</Text>
+        ) : null}
 
         {!USE_SUPABASE ? (
           <Section>
@@ -723,22 +868,35 @@ export default function ClientBody() {
               </Section>
             ) : null}
 
-            <Section>
-              <SectionHead title="Client" />
-              {r.roster.length === 0 && isWhole(r.status) ? (
-                <EmptyRoster lacks="there are no scans to look at" />
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                  {r.roster.map((c) => (
-                    <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}
-                      accessibilityRole="button" accessibilityState={{ selected: picked === c.id }}
-                      accessibilityLabel={c.name} style={chip(picked === c.id)}>
-                      <Text style={{ ...ty.micro, color: picked === c.id ? t.brandInk : t.ink2 }}>{c.name}</Text>
+            {!picked ? picker : null}
+
+            {/* ── Weight / Body Fat / Muscle / Photos, as the board draws them
+                The first three are the series this screen reads; Photos is
+                the pictures this client has sent, which are their own screen
+                under their own grant (see client-photos.tsx) and are opened
+                there rather than drawn here. */}
+            {picked ? (
+              <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
+                {BODY_METRICS.map((m) => {
+                  const on = metric === m.key;
+                  return (
+                    <Pressable key={m.key} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={m.label}
+                      onPress={() => setMetric(m.key)} style={seg(on)}>
+                      {/* "Skeletal Muscle" is the series' name and does not fit
+                          a quarter of the bar; the hero under it says it in full. */}
+                      <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2, textAlign: 'center' }}>
+                        {m.key === 'muscle' ? 'Muscle' : m.label}
+                      </Text>
                     </Pressable>
-                  ))}
-                </View>
-              )}
-            </Section>
+                  );
+                })}
+                <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Photos"
+                  onPress={() => router.push({ pathname: '/(trainer)/client-photos', params: { clientId: picked, name: fullName } } as any)}
+                  style={seg(false)}>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2, textAlign: 'center' }}>Photos</Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             {picked && !askable ? (
               /* ── the third answer ──────────────────────────────────────────
@@ -771,24 +929,6 @@ export default function ClientBody() {
               </View>
             ) : picked ? (
               <View>
-                <Rule />
-
-                {/* How often this person is actually being scanned, above the
-                    readings themselves — because the cadence decides what the
-                    latest figure is worth. A single scan in March is not a
-                    trend, and a gap since January is the fact that starts the
-                    conversation rather than the number at the top of it.
-
-                    Drawn under every status: the panel distinguishes a failed
-                    read, a truncated one and genuinely-too-few itself, and a
-                    coach seeing nothing here would read it as "scanned often
-                    enough", which is the one thing it must never imply. */}
-                <ScanCadencePanel
-                  days={(scanRows ?? []).map((r) => r.day)}
-                  status={scanRows === null ? 'error' : scanStatus}
-                  today={todayISO}
-                  subject={{ they: voice.they, have: voice.have }} />
-
                 {/* The states, kept apart. Each is a different fact about this
                     person and each starts a different conversation. */}
                 {scanStatus === 'loading' ? (
@@ -815,14 +955,7 @@ export default function ClientBody() {
                   </Section>
                 ) : (
                   <>
-                    <Section>
-                      <SectionHead
-                        title={client?.name ?? 'Their Scans'}
-                        note={board.history.scans === 1 ? '1 scan' : `${board.history.scans} scans`}
-                      />
-                      <Text style={{ ...ty.label, color: t.ink3 }}>{DIRECTION_CAVEAT}</Text>
-                    </Section>
-                    {BODY_METRICS.map((m, i) => metricSection(seriesOf(board.history, m.key), i))}
+                    {heroSection(seriesOf(board.history, metric), board.history.scans)}
 
                     {/* ── the rest of the sheet ─────────────────────────────
                         Three columns is not a body composition. Everything
@@ -938,6 +1071,26 @@ export default function ClientBody() {
                     </Section>
                   </>
                 )}
+
+                {/* How often this person is actually being scanned. It sat
+                    above the readings — because the cadence decides what the
+                    latest figure is worth: a single scan in March is not a
+                    trend, and a gap since January is the fact that starts the
+                    conversation rather than the number at the top of it. The
+                    board opens on the figure and its line, so the cadence now
+                    sits directly under them and ahead of the rest of the
+                    sheet; the age line under the figure carries the same
+                    warning into the first viewport.
+
+                    Drawn under every status: the panel distinguishes a failed
+                    read, a truncated one and genuinely-too-few itself, and a
+                    coach seeing nothing here would read it as "scanned often
+                    enough", which is the one thing it must never imply. */}
+                <ScanCadencePanel
+                  days={(scanRows ?? []).map((r) => r.day)}
+                  status={scanRows === null ? 'error' : scanStatus}
+                  today={todayISO}
+                  subject={{ they: voice.they, have: voice.have }} />
 
                 {/* Two things the sections above cannot say for themselves. */}
                 {scanStatus === 'partial' ? (
@@ -1231,11 +1384,18 @@ export default function ClientBody() {
                 </Section>
               </View>
             ) : null}
+
+            {picked ? picker : null}
           </>
         )}
 
-
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          Every InBody scan a client has recorded — the three series with the date of each
+          reading, the full composition breakdown off the sheet, and their tape measurements. You
+          can read these; you can&rsquo;t change them — a scan is theirs to take and theirs to
+          enter.
+        </Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
           Body fat is a percentage and reads the same in every unit system. Weight and skeletal
           muscle are stored in kilograms, tape measurements in centimetres, and both are shown in
           the units you set on your own Settings screen; every change is converted once, as a span,
