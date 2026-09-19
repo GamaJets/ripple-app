@@ -121,6 +121,23 @@ five stylesheets; `check:deltas` KNOWN for scans.tsx lowered to 2).
 features the board implies (Community, Rewards, Assessments, Marketplace — each costed separately), and
 only after explicit approval the three interactive iOS builds at 1.3.0.
 
+## 4c. The look itself (19 Sep, late evening)
+
+The user said three times that the graphics did not match the board. The layouts did; the LOOK did not,
+and the look is kit-level:
+
+- `src/theme/tokens.ts`: **`repple` (light) and `repple-dark`, now the DEFAULT** — white ground, neutral greys,
+  near-black ink, one green (#15803d light / #22c55e dark). Green-700 because the Cta label is white and the
+  a11y walk holds it to 4.5:1. `Section` is a bordered white card; hand-built cards got the same hairline.
+- **One accent for all three apps** — `coverage.test.ts` now asserts the accents are EQUAL; icon plates are
+  three green steps; the three icon SVGs recoloured and rasterised (`qlmanage`) into assets/ and web/play/;
+  website `--client/--coach/--studio` moved to greens per scheme (measured).
+- `ty.micro` is a **bold 13pt title-case label** (was 11pt tracked uppercase — the one habit the board has none
+  of); `head` is 700; row icons are circles; tab labels pinned to 11pt so six coach tabs fit.
+- Train opens the board's way: Current/Past above the card, name over the picture on a scrim, Start under it.
+
+Screenshots at HEAD: https://claude.ai/artifact/RCjxmm2weVTsAtQsz8Epvk
+
 ## 5. What to do next
 
 **Port the implemented screens from `repple-redesign`, file by file, re-applying audit fixes on
