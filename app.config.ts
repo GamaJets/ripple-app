@@ -52,12 +52,33 @@ type Variant = 'client' | 'trainer' | 'owner';
  * this list is applied to one variant and not written into app.json.
  */
 const OWNER_UNUSED_PLIST: readonly string[] = [
-  'NSHealthShareUsageDescription',
-  'NSHealthUpdateUsageDescription',
-  'NSCameraUsageDescription',
   'NSMicrophoneUsageDescription',
   'NSPhotoLibraryUsageDescription',
 ];
+
+/**
+ * VERIFIED BY A BUILD, 19 Sep 2026 — and the answer was no.
+ *
+ * Studio build 16 went to App Store Connect with the camera and both health
+ * keys stripped, and Apple refused the binary: ITMS-90683, three times, one
+ * per key. The check is on what the BINARY references, not on what the app
+ * asks for — expo-camera and the HealthKit pod are autolinked into all three
+ * apps whatever the config plugins are told, so the symbols are there and the
+ * purpose strings must be too.
+ *
+ * So the owner app carries the three keys Apple named, with sentences that are
+ * true of THIS app rather than the client's: it never opens the camera and
+ * never asks for health data, and says so. The microphone and photo-library
+ * keys were not named and stay out.
+ */
+const OWNER_REQUIRED_PLIST: Readonly<Record<string, string>> = {
+  NSCameraUsageDescription:
+    'Repple Studio does not use the camera. This text is required because the app shares a camera component with the Repple member and coach apps.',
+  NSHealthShareUsageDescription:
+    'Repple Studio does not read Apple Health. This text is required because the app shares a health component with the Repple member and coach apps.',
+  NSHealthUpdateUsageDescription:
+    'Repple Studio does not write to Apple Health. This text is required because the app shares a health component with the Repple member and coach apps.',
+};
 
 /**
  * Android permissions the OWNER app declares and never uses.
@@ -92,10 +113,10 @@ function ownerPlugins(plugins: NonNullable<ExpoConfig['plugins']>): NonNullable<
     const name = Array.isArray(entry) ? entry[0] : entry;
     if (name === '@kingstinct/react-native-healthkit') return [];
     if (name === 'expo-camera') {
-      return [off('expo-camera', { cameraPermission: false, microphonePermission: false, recordAudioAndroidPermission: false })];
+      return [off('expo-camera', { cameraPermission: OWNER_REQUIRED_PLIST.NSCameraUsageDescription, microphonePermission: false, recordAudioAndroidPermission: false })];
     }
     if (name === 'expo-image-picker') {
-      return [off('expo-image-picker', { photosPermission: false, cameraPermission: false, microphonePermission: false })];
+      return [off('expo-image-picker', { photosPermission: false, cameraPermission: OWNER_REQUIRED_PLIST.NSCameraUsageDescription, microphonePermission: false })];
     }
     return [entry];
   });
@@ -192,10 +213,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ios: {
             ...(config.ios ?? {}),
             bundleIdentifier: id.bundle,
-            infoPlist: Object.fromEntries(
-              Object.entries((config.ios?.infoPlist ?? {}) as Record<string, unknown>)
-                .filter(([k]) => !OWNER_UNUSED_PLIST.includes(k)),
-            ),
+            infoPlist: {
+              ...Object.fromEntries(
+                Object.entries((config.ios?.infoPlist ?? {}) as Record<string, unknown>)
+                  .filter(([k]) => !OWNER_UNUSED_PLIST.includes(k)),
+              ),
+              ...OWNER_REQUIRED_PLIST,
+            },
           },
           // The strings above come back unless the PLUGINS stop writing them.
           // Removing a key from `infoPlist` is not enough: expo-camera,
