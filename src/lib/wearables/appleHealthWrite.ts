@@ -565,7 +565,10 @@ function nativeHk(): any {
  *  `NativeModules.AppleHealthKit` was the test and is undefined on every build
  *  now — see the shim — so it said "no HealthKit" on an iPhone that has it. */
 function healthKitHere(): boolean {
-  try { return !!require('./appleHealthShim').healthKitPresent(); } catch { return false; }
+  // Same order as `nativePresent` in appleHealth.ts, for the same reason: a
+  // shim that will not load is remembered by `healthModule('health')` rather
+  // than re-thrown on every call.
+  try { if (!require('./appleHealth').healthKitPresent()) return false; return !!require('./appleHealthShim').healthKitPresent(); } catch { return false; }
 }
 
 /** Why writing is impossible in this binary, or null if it is possible. */

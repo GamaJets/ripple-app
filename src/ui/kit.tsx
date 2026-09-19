@@ -132,13 +132,16 @@ export function Section({ children, style }: { children: ReactNode; style?: Styl
  * copies of that is twelve places for it to drift.
  */
 export function ScreenHeader({
-  eyebrow, title, subtitle, leading, actions,
+  eyebrow, title, subtitle, leading, actions, greeting,
 }: {
   eyebrow?: string;
   title: string;
   subtitle?: string;
   leading?: ReactNode;
   actions?: ReactNode;
+  /** The eyebrow as a spoken line — "Good morning," in body ink over the
+   *  name — the way the board opens Home, rather than as a small label. */
+  greeting?: boolean;
 }) {
   const t = useTheme();
   const stacked = fontScale >= 1.35;
@@ -153,8 +156,8 @@ export function ScreenHeader({
       <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
         {leading ? <View style={{ paddingTop: eyebrow ? 0 : 1 }}>{leading}</View> : null}
         <View style={{ flex: 1, minWidth: 0 }}>
-          {eyebrow ? <Text style={{ ...ty.micro, color: t.ink3 }}>{eyebrow}</Text> : null}
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginTop: eyebrow ? 5 : 0 }}>
+          {eyebrow ? <Text style={greeting ? { ...ty.body, color: t.ink2 } : { ...ty.micro, color: t.ink3 }}>{eyebrow}</Text> : null}
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginTop: eyebrow ? (greeting ? 2 : 5) : 0 }}>
             {title}
           </Text>
           {subtitle ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{subtitle}</Text> : null}

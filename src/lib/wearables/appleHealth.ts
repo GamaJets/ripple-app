@@ -57,7 +57,16 @@ function hk(): any {
  *  is Apple's own answer to the same question. */
 function nativePresent(): boolean {
   if (Platform.OS !== 'ios') return false;
-  try { return !!require('./appleHealthShim').healthKitPresent() && !!hk(); } catch { return false; }
+  // Through `hk()` FIRST, which remembers a shim that would not load. The
+  // shim imports the HealthKit library at module scope, and on a build made
+  // without its native half that import throws — and Metro re-evaluates a
+  // module whose evaluation threw on every `require`, so this used to throw,
+  // and log, on every render of every screen that asked whether a watch was
+  // available. Seen on the 9 Sep simulator build, which has no NitroModules
+  // in its binary at all: the same build on a phone is a watch that says
+  // connected and never sends anything.
+  if (!hk()) return false;
+  try { return !!require('./appleHealthShim').healthKitPresent(); } catch { return false; }
 }
 
 function isoStartOfToday(): string {

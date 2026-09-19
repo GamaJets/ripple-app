@@ -628,10 +628,12 @@ export default function Home() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <ScreenHeader
-          eyebrow={d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}
-          // A client who has not finished onboarding has no name yet — don't
-          // render "Good morning," with a dangling comma and nothing after it.
-          title={firstName ? `${hi}, ${firstName}` : hi}
+          greeting
+          // "Good morning," over the name, as the board opens Home. A client
+          // who has not finished onboarding has no name yet: then the greeting
+          // is the title and the date stands in for the name's line.
+          eyebrow={firstName ? `${hi},` : d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}
+          title={firstName || hi}
           actions={<>
             <Ghost icon="search" label={undefined} onPress={() => router.push('/(client)/explore')} />
             {/* The bell opens the inbox now. It routed to '/(client)/messages'
@@ -659,15 +661,6 @@ export default function Home() {
             </Pressable>
           </>}
         />
-
-        {/* One line over three reads, and it is the age of the OLDEST of them:
-            the week's training days come off the training log, the next
-            booking off the diary, and readiness off the profile, so a single
-            stamp is a claim about all three and has to be true of the worst.
-            See src/lib/freshness.ts. The Refresh does what pulling down does. */}
-        <Fetched at={oldestFetch(logRead.at, sessionsRead.at, bodyRead.at)}
-          onRefresh={() => { reloadLog(); void refreshSessions(); c.reload(); }}
-          busy={logRead.busy || sessionsRead.busy || bodyRead.busy} />
 
         {/* ── the week's goal, and the one thing to do about it ────────────
             The approved board opens Home on a single card: this week's goal as
@@ -728,12 +721,6 @@ export default function Home() {
             <Cta label={today.cta} wide tone={today.tone} onPress={() => router.push(trainIntent(today.route) as any)} />
           </View>
         </View>
-
-        {/* ── what you are looking at ─────────────────────────────────────
-            One row, shut, and gone for good once it is read. See
-            src/ui/ScreenHelp.tsx: the tour explained these tabs before the
-            reader had seen one, which is why nobody remembered it. */}
-        <ScreenHelp screen="home" />
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
@@ -924,6 +911,22 @@ export default function Home() {
             </Text>
           ) : null}
         </Section>
+
+        {/* Below the first viewport now — the board has nothing between the
+            greeting and the goal card — but still one line over three reads, and it is the age of the OLDEST of them:
+            the week's training days come off the training log, the next
+            booking off the diary, and readiness off the profile, so a single
+            stamp is a claim about all three and has to be true of the worst.
+            See src/lib/freshness.ts. The Refresh does what pulling down does. */}
+        <Fetched at={oldestFetch(logRead.at, sessionsRead.at, bodyRead.at)}
+          onRefresh={() => { reloadLog(); void refreshSessions(); c.reload(); }}
+          busy={logRead.busy || sessionsRead.busy || bodyRead.busy} />
+
+        {/* ── what you are looking at ─────────────────────────────────────
+            One row, shut, and gone for good once it is read. See
+            src/ui/ScreenHelp.tsx: the tour explained these tabs before the
+            reader had seen one, which is why nobody remembered it. */}
+        <ScreenHelp screen="home" />
 
         {/* ── daily snapshot ──────────────────────────────────────────────
             A daily briefing, not four miniature dashboards. The body figures,

@@ -49,6 +49,10 @@ import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '.
 import { monthNamesShort, fmtFullDay } from '../../src/lib/format';
 import { localDate } from '../../src/lib/localDate';
 import { FORWARD_ICON, turn } from '../../src/ui/direction';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { isWhole } from '../../src/ui/loadStatus';
+import { activeDays, longestStreak } from '../../src/lib/streaks';
+import { badgeFigures, earnedKeys, BADGE_COUNT } from '../../src/lib/badges';
 
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat Loss' },
@@ -593,6 +597,10 @@ export default function Profile() {
   // because nothing in the app read that setting. Each part is dropped rather
   // than dashed: a line reading "34 yrs · — · —" is noise, and the fallback
   // sentence below already says what to do about it.
+  // The training log behind the three figures on the card. `status`, not the
+  // rows: under 'error' and 'partial' the rows are not the member's history.
+  const { log, status: logStatus } = useWorkoutLog();
+  const logWhole = isWhole(logStatus);
   const statsLine = [age != null ? age + ' yrs' : null, heightLabel(cd.heightCm, lu), weightLabel(cd.weightKg, wu)]
     .filter(Boolean).join(' · ') || 'Add your height and weight';
   const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
@@ -685,10 +693,16 @@ export default function Profile() {
           {/* Three figures the rest of this screen is built from. A dash
               where nothing has been measured — never a placeholder body. */}
           <View style={{ marginTop: sp.lg, paddingTop: sp.lg, borderTopWidth: hairline, borderTopColor: t.ring }}>
+            {/* The board's three: workouts, badges, best streak — all counted
+                off the training log, and only under a WHOLE read of it. A log
+                read at the row cap is a prefix of somebody's history, and a
+                count over a prefix stated as a total is the invented figure
+                this app refuses everywhere else; every tile is a dash until
+                the read is whole. Weight and body fat are on Progress. */}
             <KpiRow items={[
-              { label: 'Weight', value: fig(shownWeight), unit: shownWeight != null ? wu : undefined },
-              { label: 'Body Fat', value: fig(cd.bodyFatPct), unit: cd.bodyFatPct != null ? '%' : undefined },
-              { label: 'Daily Target', value: macros ? macros.kcal.toLocaleString() : fig(null), unit: macros ? 'kcal' : undefined },
+              { label: 'Workouts', value: logWhole ? fig(activeDays(log).length) : fig(null), unit: logWhole ? 'days' : undefined },
+              { label: 'Badges', value: logWhole ? fig(earnedKeys(badgeFigures(log, cd.weightSeries)).length) : fig(null), unit: logWhole ? `of ${BADGE_COUNT}` : undefined },
+              { label: 'Best Streak', value: logWhole ? fig(longestStreak(log)) : fig(null), unit: logWhole ? 'days' : undefined },
             ]} />
           </View>
         </Card>
