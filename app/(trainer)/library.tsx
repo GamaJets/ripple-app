@@ -52,7 +52,7 @@
 // no fuzzy fallback. Here a near-miss would tell a coach they have filmed a
 // movement they have not — so the slug set below is tested with Set.has and
 // never with a scan for containment.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -60,7 +60,7 @@ import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Ghost, PartialRead, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
@@ -71,25 +71,14 @@ import { useAuth } from '../../src/ui/auth';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { clipOwner } from '../../src/lib/clipOwner';
 import { catalogueValue as cap, num } from '../../src/lib/format';
-// ── the question that gets BETTER as a coach gets busier ───────────────────
+// ── "who on the book is stalled on this one" is on the movement's screen ───
 //
-// One client's history of one movement has been readable since
-// src/lib/exerciseHistory.ts landed, and app/(trainer)/exercise.tsx draws it.
-// "Who is stalled on bench across my roster" was answerable only by opening
-// forty screens, so nobody did — which meant the one coaching insight that
-// scales with the size of a book was the one the app withheld from a busy
-// coach. The two blockers were the flat row cap and an `exercise` column that
-// is free text; both are answered in supabase/parts/178, which aggregates in
-// the database so the answer is one row per client and can never be truncated.
-import { useRoster } from '../../src/ui/roster';
-import { useSettings } from '../../src/ui/settings';
-import { readRosterExercise } from '../../src/ui/rosterExercise';
-import {
-  LEVEL_NOTE, LEVEL_TITLE, ROSTER_WINDOW_DAYS, rankRosterExercise, rosterExerciseLine,
-  type RosterExerciseClient, type RosterExerciseRow, type StalledLevel,
-} from '../../src/lib/rosterExercise';
-import { liftIn } from '../../src/lib/units';
-import { deltaLabel } from '../../src/lib/deltaLabel';
+// It was asked from a control under every row here, and a button under every
+// row is the one thing the board's list has none of: the board's row is a
+// picture, a name and a chevron. The question is about ONE movement, so it now
+// lives on that movement's own page — app/(trainer)/exercise.tsx, "Across Your
+// Roster" — reached by the row's tap, with the same read behind it.
+//
 // ── programming for the floor the client is actually standing on ───────────
 //
 // A coach writing a week for somebody in a hotel gym, or in a garage with a
@@ -109,7 +98,7 @@ import {
 } from '../../src/lib/equipmentFacet';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { isStarterId } from '../../src/lib/templateLibrary';
-import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole } from '../../src/ui/loadStatus';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 
@@ -151,6 +140,11 @@ function Chips({ options, value, onChange, a11y }: {
   a11y: (v: string) => string;
 }) {
   const t = useTheme();
+  // The selected chip is drawn the way board page 6 draws "All": ink text over
+  // a short brand underline, no fill, beside quiet pills for the rest. Not the
+  // brand-filled chip other screens use — this page's board is explicit and
+  // the user reads it beside the live screen. The state is still spoken, so
+  // the underline is never the only channel.
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.xs }}>
       {options.map((o) => {
@@ -159,8 +153,9 @@ function Chips({ options, value, onChange, a11y }: {
           <Pressable key={o} onPress={() => onChange(o)} accessibilityRole="button"
             accessibilityLabel={a11y(o)}
             accessibilityState={{ selected: on }}
-            style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{o}</Text>
+            style={{ paddingHorizontal: sp.md, paddingTop: sp.sm, paddingBottom: on ? 0 : sp.sm, borderRadius: radius.pill, backgroundColor: on ? 'transparent' : t.surface2, alignItems: 'center' }}>
+            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.ink : t.ink2 }}>{o}</Text>
+            {on ? <View style={{ alignSelf: 'stretch', height: 2, borderRadius: 1, backgroundColor: t.brand, marginTop: 4, marginBottom: sp.sm - 2 }} /> : null}
           </Pressable>
         );
       })}
@@ -203,68 +198,14 @@ export default function TrainerLibrary() {
   // older phone, and nobody reads past the first screenful.
   const [shown, setShown] = useState(PAGE);
 
-  /* ── one movement, across the whole book ────────────────────────────────
-     Asked on demand rather than for every row of the catalogue: this is one
-     aggregate per movement, and running it for four hundred exercises the
-     moment the screen opens would be four hundred round trips in service of a
-     question the coach has not asked. So the row carries a control and the
-     answer opens under it.
-
-     `rosterStatus` and the aggregate's own status are held separately and
-     BOTH gate every figure — a coach told "3 of 40 are stalled" off a roster
-     that came back short is acting on a denominator that is not their book. */
-  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
-  // Three reads: the movement catalogue, the clips attached to it, and the
-  // roster the per-client grant lines are written from. The clip column is a
-  // statement ABOUT a catalogue row, so refreshing one without the other
-  // could say "no clip of yours" against a row read at a different moment.
+  // Two reads: the movement catalogue and the clips attached to it. The clip
+  // column is a statement ABOUT a catalogue row, so refreshing one without the
+  // other could say "no clip of yours" against a row read at a different
+  // moment.
   const pull = usePullToRefresh(useCallback(
-    () => Promise.all([reload(), reloadVideos(), refreshRoster()]),
-    [reload, reloadVideos, refreshRoster],
+    () => Promise.all([reload(), reloadVideos()]),
+    [reload, reloadVideos],
   ));
-  const coachUnit = useSettings().weightUnit;
-  const [askedFor, setAskedFor] = useState<string | null>(null);
-  const [rosterRows, setRosterRows] = useState<RosterExerciseRow[] | null>(null);
-  const [rosterAsk, setRosterAsk] = useState<LoadStatus>('ready');
-  // The movement whose answer is allowed to reach the screen. Tapping through
-  // several movements starts a read per tap and they do not come back in order,
-  // so without this a slow answer for the squat lands under the heading for the
-  // bench press — one movement's roster attributed to another. The same guard
-  // client-training.tsx and client-body.tsx use.
-  const wantedMovement = useRef<string | null>(null);
-
-  const askRoster = async (name: string) => {
-    if (askedFor === name) { setAskedFor(null); return; }
-    setAskedFor(name);
-    wantedMovement.current = name;
-    setRosterRows(null); setRosterAsk('loading');
-    const res = await readRosterExercise(name);
-    if (wantedMovement.current !== name) return;
-    setRosterRows(res.rows); setRosterAsk(res.status);
-  };
-
-  /** Every client on the BOOK, judged — not every client the aggregate had
-   *  something to say about. Somebody who has never touched the movement
-   *  produces no row at all and is the most interesting person on this list;
-   *  building it from the answer would silently only answer for the people who
-   *  already do the exercise. */
-  const rosterJudged: RosterExerciseClient[] = useMemo(
-    () => (rosterRows == null ? [] : rankRosterExercise(roster.map((c) => c.id), rosterRows)),
-    [rosterRows, roster],
-  );
-  const clientName = (id: string) => roster.find((c) => c.id === id)?.name ?? 'One client';
-
-  /** The bands, in the order `rankRosterExercise` already put them in, so the
-   *  headings follow the list rather than imposing a second order on it. */
-  const rosterBands = useMemo(() => {
-    const out: { level: StalledLevel; rows: RosterExerciseClient[] }[] = [];
-    for (const c of rosterJudged) {
-      const last = out[out.length - 1];
-      if (last && last.level === c.level) last.rows.push(c);
-      else out.push({ level: c.level, rows: [c] });
-    }
-    return out;
-  }, [rosterJudged]);
 
   const groups = useMemo(() => muscleGroups(rows), [rows]);
   // Derived from the WHOLE catalogue, not from the rows the search and the
@@ -496,70 +437,46 @@ export default function TrainerLibrary() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* ── the head, the board's way (coach page 6) ─────────────────────
+            Back at the leading edge and the title centred between it and a
+            spacer the width of the button — centred on the row alone it sits
+            visibly off-centre beside a 38pt circle. The eyebrow that sat over
+            the title, and the catalogue figure that sat under it, are on the
+            card at the foot of the screen now: the board opens on the search
+            and the rows, not on a sentence about them. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Everything you can put in a programme</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
-          </View>
+          <Text accessibilityRole="header" numberOfLines={1}
+            style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center', paddingHorizontal: sp.sm }}>
+            Exercise Library
+          </Text>
+          <View style={{ width: 38 }} />
         </View>
 
-        <Hero
-          label="Movements You Can Programme"
-          figure={countable ? num(rows.length) : '—'}
-          note={
-            status === 'loading' ? 'Reading the catalogue…'
-              : status === 'error' ? 'The catalogue could not be read, so this is unknown — not zero.'
-                : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
-                  : rows.length === 0 ? 'The catalogue came back empty.'
-                    : 'Every one of them can go into a programme, and your clients see the same list.'
-          }
-        />
-
-
-        <Section>
-          <SectionHead title="What You Have Filmed" />
-          {/* "Nothing to Show" was wrong, not just blunt. It counted movements
-              with no coach clip — and nearly every one of them carries a demonstration
-              animation the client can already watch, so there is something to
-              show for nearly all of them. Renamed to what it actually counts. */}
-          <KpiRow items={[
-            { label: 'Your Clips', value: clipCountable ? num(filmed) : '—' },
-            { label: 'Academy Clips', value: clipCountable ? num(academyFilmed) : '—' },
-            { label: 'Not Filmed', value: clipCountable ? num(rows.length - covered) : '—' },
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {clipCountable
-              ? 'These count movements a coaching clip reaches, not whether a movement can be demonstrated — nearly every exercise here already shows your client how it is done. Not Filmed means nothing your clients can watch has been recorded for it; record yours on the Videos screen and yours is what they see.'
-              : 'These stay blank until both the catalogue and your clip library have been read in full, rather than reporting a figure computed from part of them.'}
-          </Text>
-          {/* The correction to the line above, and only when there is something
-              to correct. A clip that never reached the server counts in none of
-              the three figures — it is not yours as far as a client is
-              concerned, it is certainly not the Academy's, and calling the
-              movement Not Filmed is the screen agreeing with a coach who
-              believes they have already done it. */}
-          {clipCountable && strandedOnPhone > 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              {strandedOnPhone === 1
-                ? '1 of those counted as Not Filmed does have a clip of yours — saved on this phone only, because it never reached the server, so no client can watch it. Add it again from Videos.'
-                : `${num(strandedOnPhone)} of those counted as Not Filmed do have clips of yours — saved on this phone only, because they never reached the server, so no client can watch them. Add them again from Videos.`}
-            </Text>
-          ) : null}
-        </Section>
-
-
         {/* ── finding one ────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
-          <Icon name="search" size={16} color={t.ink3} />
+        {/* The board's search row, the pill Meals draws over its catalogue. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, marginTop: sp.lg, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+          <Icon name="search" size={17} color={t.ink3} />
           <TextInput value={q} onChangeText={setQ} placeholder="Search exercises…" placeholderTextColor={t.ink3}
-            accessibilityLabel="Search exercises"
-            style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+            accessibilityLabel="Search exercises" returnKeyType="search" autoCorrect={false}
+            style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }} />
           {q ? (
             <Pressable onPress={() => setQ('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
               <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
             </Pressable>
           ) : null}
+        </View>
+
+        {/* ── the board's filter row ───────────────────────────────────────
+            Directly under the search, as page 6 draws it. The board's sample
+            chips read Strength · Cardio · Mobility; the catalogue files a
+            movement by MUSCLE GROUP, and that is what these say — a chip
+            named for a category the rows do not carry would select nothing.
+            Muscle group is also the axis a coach builds a split on (see the
+            header), so it is the row that comes first. */}
+        <View style={{ marginTop: sp.md }}>
+          <Chips options={groups} value={group} onChange={setGroup}
+            a11y={(g) => (g === ALL ? 'Show every muscle group' : `Show ${g} only`)} />
         </View>
 
         {/* ── the coach's own working set ──────────────────────────────────
@@ -601,10 +518,6 @@ export default function TrainerLibrary() {
             not from a list you keep up to date — the three starters Repple ships with are not counted.
           </Text>
         ) : null}
-
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle group</Text>
-        <Chips options={groups} value={group} onChange={setGroup}
-          a11y={(g) => (g === ALL ? 'Show every muscle group' : `Show ${g} only`)} />
 
         {/* Only once there are kits to offer. On an unread catalogue this row
             is [All] alone — a filter with one option, which is not a filter and
@@ -707,7 +620,18 @@ export default function TrainerLibrary() {
                           accessibilityRole="button"
                           accessibilityLabel={[r.display.text, via ? `matched ${via}` : null, r.group ? cap(r.group) : null, kitLabel(r), note].filter(Boolean).join('. ')}
                           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                          <ExerciseThumb uri={thumbFor(r)} t={t} size={44} />
+                          {/* Round, as the board draws every row's picture.
+                              `ExerciseThumb` draws its own rounded square (it
+                              is shared with the builder's picker and the
+                              owner's library), so it is clipped to a circle
+                              here rather than given a shape those screens did
+                              not ask for. The still is the catalogue's own —
+                              608 of 615 rows have one — and the dumbbell it
+                              falls back to is the same one every list in the
+                              app uses for a movement without a picture. */}
+                          <View style={{ width: 48, height: 48, borderRadius: 24, overflow: 'hidden' }}>
+                            <ExerciseThumb uri={thumbFor(r)} t={t} size={48} />
+                          </View>
                           <View style={{ flex: 1 }}>
                             {/* `r.name` stays the identity — it is what this
                                 row navigates by and what a programme stores.
@@ -755,88 +679,6 @@ export default function TrainerLibrary() {
                           <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                         </Pressable>
 
-                        {/* ── who on the book is stalled on this one ────────
-                            Asked per movement, on a tap, because it is one
-                            aggregate per movement and running it for every row
-                            of the catalogue at open would be four hundred round
-                            trips for a question nobody asked. */}
-                        <View style={{ flexDirection: 'row', marginBottom: sp.md }}>
-                          <Ghost
-                            label={askedFor === r.name ? 'Hide Your Roster' : 'Across Your Roster'}
-                            a11yLabel={`Show every client on your book against ${r.display.text}`}
-                            onPress={() => { void askRoster(r.name); }} />
-                        </View>
-
-                        {askedFor === r.name ? (
-                          <View style={{ marginBottom: sp.lg }}>
-                            <Text style={{ ...ty.caption, color: t.ink3 }}>
-                              {/* The sentence names the movement, so it names
-                                  it the way this row does — `r.name` is still
-                                  what the ask is keyed on above. */}
-                              {rosterExerciseLine(rosterAsk, rosterStatus, rosterJudged, r.display.text)}
-                            </Text>
-                            {/* The judgement is named and so is its evidence.
-                                "Stalled" means one thing — logged in both halves
-                                of the window and no heavier in the second — and
-                                a coach who disagrees can point at the row rather
-                                than at a verdict. */}
-                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                              Compared over {ROSTER_WINDOW_DAYS} days, split in half: the heaviest set logged
-                              in the recent half against the heaviest in the earlier one. It is a claim about the
-                              record and nothing else — reps added at the same weight are progress and do not show here.
-                            </Text>
-                            {rosterAsk === 'error' ? (
-                              <View style={{ marginTop: sp.md }}>
-                                <Flag tone={t.warn}>
-                                  Nothing below is a statement about your clients. Hand-added clients have no account for
-                                  workouts to belong to, and they read the same way from here.
-                                </Flag>
-                              </View>
-                            ) : null}
-                            {rosterAsk === 'ready' ? rosterBands.map((band) => (
-                              <View key={band.level} style={{ marginTop: sp.md }}>
-                                <Text style={{ ...ty.micro, color: t.ink3 }}>{LEVEL_TITLE[band.level]}</Text>
-                                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                                  {`${band.rows.length === 1 ? 'This client ' : 'These clients '}${LEVEL_NOTE[band.level]}.`}
-                                </Text>
-                                {band.rows.map((c) => {
-                                  // Printed in the COACH's unit, which is the
-                                  // one this app is certain of on this device.
-                                  // Unlike the client-training screen — a
-                                  // transcript of one person's session, printed
-                                  // in theirs — this is a list of forty people
-                                  // and forty units would be unreadable.
-                                  const top = c.topKg == null ? null : liftIn(c.topKg, coachUnit);
-                                  // Through `deltaLabel`, never a sign written
-                                  // here: scripts/check-deltas.mjs exists
-                                  // because twenty-five screens each wrote
-                                  // their own and a change of nothing took
-                                  // whichever arm its author reached for first.
-                                  // `since: null` because the window is stated
-                                  // once above the whole list rather than
-                                  // repeated on forty rows.
-                                  const d = c.changePct == null ? null
-                                    : deltaLabel(c.changePct, { since: null, unit: '%', noChange: 'no change' });
-                                  return (
-                                    <View key={c.clientId} style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm, marginTop: 4 }}>
-                                      <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{clientName(c.clientId)}</Text>
-                                      <Text style={{ ...ty.caption, color: t.ink3 }}>
-                                        {top == null ? 'no load recorded' : `${num(top)} ${coachUnit}`}
-                                      </Text>
-                                      {d ? <Text style={{ ...ty.caption, color: t.ink3 }}>{d}</Text> : null}
-                                    </View>
-                                  );
-                                })}
-                              </View>
-                            )) : null}
-                            {rosterAsk === 'ready' && rosterJudged.some((c) => c.e1rmKg != null) ? (
-                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                                Any one-rep max behind these figures is an ESTIMATE off logged sets. Nobody in this app
-                                has tested one, and the same arithmetic is what a client's own progression screen uses.
-                              </Text>
-                            ) : null}
-                          </View>
-                        ) : null}
                       </View>
                     );
                   })}
@@ -854,6 +696,53 @@ export default function TrainerLibrary() {
           )}
         </Section>
 
+
+
+        {/* ── what you have filmed, under the list ─────────────────────────
+            These were the first viewport — a hero figure and three KPIs above
+            the search. Board page 6 opens on the search and the rows, so the
+            figures sit under them now. Nothing about what they count, or when
+            they decline to, has changed. The catalogue's own size is the head's
+            note, and only under a whole read: under 'partial' those rows are a
+            prefix of the catalogue, so a count would be a subtotal printed as
+            a total. */}
+        <Section>
+          <SectionHead title="What You Have Filmed" note={countable ? `${num(rows.length)} movements` : undefined} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+            {status === 'loading' ? 'Reading the catalogue…'
+              : status === 'error' ? 'The catalogue could not be read, so how many movements there are is unknown — not zero.'
+                : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
+                  : rows.length === 0 ? 'The catalogue came back empty.'
+                    : 'Every one of them can go into a programme, and your clients see the same list.'}
+          </Text>
+          {/* "Nothing to Show" was wrong, not just blunt. It counted movements
+              with no coach clip — and nearly every one of them carries a demonstration
+              animation the client can already watch, so there is something to
+              show for nearly all of them. Renamed to what it actually counts. */}
+          <KpiRow items={[
+            { label: 'Your Clips', value: clipCountable ? num(filmed) : '—' },
+            { label: 'Academy Clips', value: clipCountable ? num(academyFilmed) : '—' },
+            { label: 'Not Filmed', value: clipCountable ? num(rows.length - covered) : '—' },
+          ]} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {clipCountable
+              ? 'These count movements a coaching clip reaches, not whether a movement can be demonstrated — nearly every exercise here already shows your client how it is done. Not Filmed means nothing your clients can watch has been recorded for it; record yours on the Videos screen and yours is what they see.'
+              : 'These stay blank until both the catalogue and your clip library have been read in full, rather than reporting a figure computed from part of them.'}
+          </Text>
+          {/* The correction to the line above, and only when there is something
+              to correct. A clip that never reached the server counts in none of
+              the three figures — it is not yours as far as a client is
+              concerned, it is certainly not the Academy's, and calling the
+              movement Not Filmed is the screen agreeing with a coach who
+              believes they have already done it. */}
+          {clipCountable && strandedOnPhone > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {strandedOnPhone === 1
+                ? '1 of those counted as Not Filmed does have a clip of yours — saved on this phone only, because it never reached the server, so no client can watch it. Add it again from Videos.'
+                : `${num(strandedOnPhone)} of those counted as Not Filmed do have clips of yours — saved on this phone only, because they never reached the server, so no client can watch them. Add them again from Videos.`}
+            </Text>
+          ) : null}
+        </Section>
       </ScrollView>
     </SafeAreaView>
   );

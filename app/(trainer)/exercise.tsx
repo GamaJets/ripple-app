@@ -10,7 +10,8 @@
 //
 // Deliberately the same screen as app/(client)/exercise.tsx: same illustration
 // renderer (src/ui/ExerciseDemo), same precedence, same chips, same "Muscles
-// worked" and "How to do it", same words for a movement we have no picture of.
+// worked" and the same steps (titled Instructions here, as board page 5 titles
+// them), same words for a movement we have no picture of.
 // The whole value of this screen is that it is a preview, and a preview built
 // from a second visual language is a preview of a page that does not exist.
 //
@@ -26,13 +27,17 @@
 //
 // And the closing action. A client with no demonstration is told to ask their
 // coach; the coach is the person who can fix it, so they are sent to Videos.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+//
+// And "Across Your Roster", which a client has no equivalent of. It used to be
+// a control under every row of the coach's library; board page 6 draws that
+// list as picture, name and chevron, so the question moved to the page that is
+// about one movement. Same read (supabase/parts/178), same gates.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
@@ -49,8 +54,8 @@ import { videoForExercise } from '../../src/lib/exerciseId';
 // getting, and one spent an evening filming a lift a colleague at the same gym
 // had already covered. Both facts were in `videos` the whole time.
 import { clipSources, clipSourceLine } from '../../src/lib/clipSources';
-import { isWhole } from '../../src/ui/loadStatus';
-import { catalogueValue as cap } from '../../src/lib/format';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { catalogueValue as cap, num } from '../../src/lib/format';
 import { FRAMES_ARE_UNHOSTED, demoCaption } from '../../src/lib/exerciseMedia';
 import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 import { supabase } from '../../src/lib/supabase';
@@ -58,6 +63,25 @@ import { useAuth } from '../../src/ui/auth';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
 import { BACK_ICON } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+// ── the question that gets BETTER as a coach gets busier ───────────────────
+//
+// One client's history of one movement has been readable since
+// src/lib/exerciseHistory.ts landed, and the coach's client-training screen
+// draws it. "Who is stalled on bench across my roster" was answerable only by
+// opening forty screens, so nobody did — which meant the one coaching insight
+// that scales with the size of a book was the one the app withheld from a busy
+// coach. The two blockers were the flat row cap and an `exercise` column that
+// is free text; both are answered in supabase/parts/178, which aggregates in
+// the database so the answer is one row per client and can never be truncated.
+import { useRoster } from '../../src/ui/roster';
+import { useSettings } from '../../src/ui/settings';
+import { readRosterExercise } from '../../src/ui/rosterExercise';
+import {
+  LEVEL_NOTE, LEVEL_TITLE, ROSTER_WINDOW_DAYS, rankRosterExercise, rosterExerciseLine,
+  type RosterExerciseClient, type RosterExerciseRow, type StalledLevel,
+} from '../../src/lib/rosterExercise';
+import { liftIn } from '../../src/lib/units';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 
 
 export default function TrainerExercise() {
@@ -98,15 +122,69 @@ export default function TrainerExercise() {
   const { frames, animUrl, animCacheKey } = useExerciseMedia(detail);
   const caption = demoCaption(detail?.source, frames.length);
 
-  // Two reads: the catalogue row this movement is drawn from, and the clips
-  // the coach or their gym has attached to it. Both together, because this
-  // screen is a preview of what the client sees and the clip is chosen
-  // against the movement — refreshing one alone could show a coach a clip
-  // matched to the row they had before.
+  /* ── one movement, across the whole book ────────────────────────────────
+     Asked on demand rather than the moment the screen opens: it is one
+     aggregate over the whole roster, and a coach who opened this page to
+     check what a Zottman curl looks like has not asked it. So the section
+     carries a control and the answer opens under it.
+
+     `rosterStatus` and the aggregate's own status are held separately and
+     BOTH gate every figure — a coach told "3 of 40 are stalled" off a roster
+     that came back short is acting on a denominator that is not their book. */
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  // Three reads: the catalogue row this movement is drawn from, the clips the
+  // coach or their gym has attached to it, and the roster the per-client
+  // lines below are written from. Together, because this screen is a preview
+  // of what the client sees and the clip is chosen against the movement —
+  // refreshing one alone could show a coach a clip matched to the row they
+  // had before.
   const pull = usePullToRefresh(useCallback(
-    () => Promise.all([reloadDetail(), reloadVideos()]),
-    [reloadDetail, reloadVideos],
+    () => Promise.all([reloadDetail(), reloadVideos(), refreshRoster()]),
+    [reloadDetail, reloadVideos, refreshRoster],
   ));
+  const coachUnit = useSettings().weightUnit;
+  const [askedRoster, setAskedRoster] = useState(false);
+  const [rosterRows, setRosterRows] = useState<RosterExerciseRow[] | null>(null);
+  const [rosterAsk, setRosterAsk] = useState<LoadStatus>('ready');
+  // The movement whose answer is allowed to reach the screen. This page is
+  // opened by name, and a second push with a different name while a read is
+  // in flight would land the squat's roster under the bench press's heading —
+  // one movement's roster attributed to another. The same guard
+  // client-training.tsx and client-body.tsx use.
+  const wantedMovement = useRef<string | null>(null);
+
+  const askRoster = async () => {
+    if (askedRoster) { setAskedRoster(false); return; }
+    setAskedRoster(true);
+    wantedMovement.current = name;
+    setRosterRows(null); setRosterAsk('loading');
+    const res = await readRosterExercise(name);
+    if (wantedMovement.current !== name) return;
+    setRosterRows(res.rows); setRosterAsk(res.status);
+  };
+
+  /** Every client on the BOOK, judged — not every client the aggregate had
+   *  something to say about. Somebody who has never touched the movement
+   *  produces no row at all and is the most interesting person on this list;
+   *  building it from the answer would silently only answer for the people who
+   *  already do the exercise. */
+  const rosterJudged: RosterExerciseClient[] = useMemo(
+    () => (rosterRows == null ? [] : rankRosterExercise(roster.map((c) => c.id), rosterRows)),
+    [rosterRows, roster],
+  );
+  const clientName = (id: string) => roster.find((c) => c.id === id)?.name ?? 'One client';
+
+  /** The bands, in the order `rankRosterExercise` already put them in, so the
+   *  headings follow the list rather than imposing a second order on it. */
+  const rosterBands = useMemo(() => {
+    const out: { level: StalledLevel; rows: RosterExerciseClient[] }[] = [];
+    for (const c of rosterJudged) {
+      const last = out[out.length - 1];
+      if (last && last.level === c.level) last.rows.push(c);
+      else out.push({ level: c.level, rows: [c] });
+    }
+    return out;
+  }, [rosterJudged]);
 
   // Everything held for this movement, and which of it is on screen. Built from
   // the SAME values the branches below render — `animUrl` and `frames` after
@@ -128,24 +206,39 @@ export default function TrainerExercise() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
-            <Icon name={BACK_ICON} size={20} color={t.ink} />
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What your client sees</Text>
-            {/* What the client sees, in the language they see it in — this
-                screen's whole claim is that it shows their view, and it was
-                showing the English name to a German coach whose German client
-                reads the translated one. `display.note` says when the
-                catalogue has no translation, so an English name is never
-                passed off as a German one. The identity is still `name`. */}
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
-          </View>
+        {/* ── the head, the board's way (client page 5) ────────────────────
+            Back at the leading edge and "Exercise Demo" centred between it
+            and a spacer the width of the button; under that the movement's
+            name at the leading edge with one line about it. The board's line
+            is a prescription — "3 sets × 10 reps" — which this page has none
+            of: it is opened from the library, not from a day, so the line is
+            what the catalogue records about the movement instead, and nothing
+            where it records nothing. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
+          <Text accessibilityRole="header" numberOfLines={1}
+            style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center', paddingHorizontal: sp.sm }}>
+            Exercise Demo
+          </Text>
+          <View style={{ width: 38 }} />
         </View>
-        {display?.note ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>
-        ) : null}
+        <View style={{ marginTop: sp.lg, marginBottom: sp.lg }}>
+          {/* What the client sees, in the language they see it in — this
+              screen's whole claim is that it shows their view, and it was
+              showing the English name to a German coach whose German client
+              reads the translated one. `display.note` says when the
+              catalogue has no translation, so an English name is never
+              passed off as a German one. The identity is still `name`. */}
+          <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
+          {detail && (detail.group || detail.equipment) ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+              {[detail.group ? cap(detail.group) : null, detail.equipment ? cap(detail.equipment) : null].filter(Boolean).join(' · ')}
+            </Text>
+          ) : null}
+          {display?.note ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{display.note}</Text>
+          ) : null}
+        </View>
 
         {/* ── the demonstration ─────────────────────────────────────────── */}
         {status === 'loading' ? (
@@ -225,6 +318,11 @@ export default function TrainerExercise() {
             a picture on screen with nothing saying which of four it is. Every
             claim in the caption that depends on having read the whole clip
             library is gated where it is built, on `isWhole(vidStatus)`. */}
+        {/* "What your client sees" was the eyebrow over the title. It is the
+            caption under the picture now — the picture is the thing the
+            sentence is about — and shares the line with the source note when
+            there is one. Under 'error' no picture was drawn, so it is not
+            said. */}
         {/*
           * whole-ok: `status` here is useExerciseDetail's, and that provider
           * fetches ONE ROW by name. There is no page to truncate, so 'partial'
@@ -232,8 +330,10 @@ export default function TrainerExercise() {
           * pageable, this caption would still have to appear under exactly the
           * conditions the picture it describes appears under.
           */}
-        {status !== 'loading' && status !== 'error' && sourceNote ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{sourceNote}</Text>
+        {status !== 'loading' && status !== 'error' ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {sourceNote ? `What your client sees. ${sourceNote}` : 'What your client sees.'}
+          </Text>
         ) : null}
 
         {FRAMES_ARE_UNHOSTED && frames.length ? (
@@ -244,6 +344,44 @@ export default function TrainerExercise() {
 
         {detail ? (
           <>
+            {/* ── Instructions, directly under the picture ─────────────────
+                Board page 5 puts the steps straight after the demonstration,
+                under that word. They sat fourth, after the description, the
+                chips and the muscles, which is the order a catalogue lists
+                things in and not the order somebody about to coach a lift
+                reads them in. Same steps, same count, same sentence for a row
+                that has none. */}
+            {detail.instructions.length ? (
+              <>
+                <Rule />
+                <Section>
+                  <SectionHead title="Instructions" note={`${detail.instructions.length} steps`} />
+                  {detail.instructions.map((step, n) => (
+                    <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
+                      <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
+                      <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
+                    </View>
+                  ))}
+                </Section>
+              </>
+            ) : status === 'ready' ? (
+              <>
+                <Rule />
+                <Section>
+                  <SectionHead title="Instructions" />
+                  {/* Some rows carry no instructions because nobody has
+                      confirmed which catalogue movement they are. Saying so is
+                      the point — an empty section would read as an app that
+                      forgot to render, not as a gap we know about. Gated on the
+                      read having finished, so a row still arriving is never
+                      described as having no steps. */}
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    No written steps for this one yet — your client sees no instructions, so put the cue in the program note.
+                  </Text>
+                </Section>
+              </>
+            ) : null}
+
             {/* ── what it is ───────────────────────────────────────────── */}
             {/* The field the RepDB catalogue was adopted for: it says what a
                 movement IS, where `instructions` say how to perform it, and a
@@ -305,35 +443,6 @@ export default function TrainerExercise() {
               </>
             ) : null}
 
-            {detail.instructions.length ? (
-              <>
-                <Rule />
-                <Section>
-                  <SectionHead title="How to Do It" note={`${detail.instructions.length} steps`} />
-                  {detail.instructions.map((step, n) => (
-                    <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-                      <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
-                      <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
-                    </View>
-                  ))}
-                </Section>
-              </>
-            ) : status === 'ready' ? (
-              <>
-                <Rule />
-                <Section>
-                  {/* Some rows carry no instructions because nobody has
-                      confirmed which catalogue movement they are. Saying so is
-                      the point — an empty section would read as an app that
-                      forgot to render, not as a gap we know about. Gated on the
-                      read having finished, so a row still arriving is never
-                      described as having no steps. */}
-                  <Text style={{ ...ty.label, color: t.ink3 }}>
-                    No written steps for this one yet — your client sees no instructions, so put the cue in the program note.
-                  </Text>
-                </Section>
-              </>
-            ) : null}
           </>
         ) : null}
 
@@ -389,6 +498,100 @@ export default function TrainerExercise() {
                     ))}
                   </View>
                 </>
+              ) : null}
+            </Section>
+          </>
+        ) : null}
+
+        {/* ── who on the book is stalled on this one ──────────────────────
+            Asked on a tap, because it is one aggregate over the whole roster
+            and a coach who came to look at the picture has not asked it. Only
+            once the catalogue read has landed: the question is about a named
+            movement, and a name the catalogue could not find is one the
+            aggregate matches by free text — still a fair question, so `detail`
+            is not required, only that the screen has stopped loading. */}
+        {status !== 'loading' ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Across Your Roster" />
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                Every client on your book against this movement — who is progressing, who has stalled, and who has never logged it.
+              </Text>
+              <View style={{ flexDirection: 'row' }}>
+                <Ghost
+                  label={askedRoster ? 'Hide Your Roster' : 'Show Your Roster'}
+                  a11yLabel={`Show every client on your book against ${display?.name.text || detail?.name || name}`}
+                  onPress={() => { void askRoster(); }} />
+              </View>
+
+              {askedRoster ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    {/* The sentence names the movement, so it names it the way
+                        this page does — `name` is still what the ask is keyed
+                        on above. */}
+                    {rosterExerciseLine(rosterAsk, rosterStatus, rosterJudged, display?.name.text || detail?.name || name)}
+                  </Text>
+                  {/* The judgement is named and so is its evidence. "Stalled"
+                      means one thing — logged in both halves of the window and
+                      no heavier in the second — and a coach who disagrees can
+                      point at the row rather than at a verdict. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                    Compared over {ROSTER_WINDOW_DAYS} days, split in half: the heaviest set logged
+                    in the recent half against the heaviest in the earlier one. It is a claim about the
+                    record and nothing else — reps added at the same weight are progress and do not show here.
+                  </Text>
+                  {rosterAsk === 'error' ? (
+                    <View style={{ marginTop: sp.md }}>
+                      <Flag tone={t.warn}>
+                        Nothing below is a statement about your clients. Hand-added clients have no account for
+                        workouts to belong to, and they read the same way from here.
+                      </Flag>
+                    </View>
+                  ) : null}
+                  {rosterAsk === 'ready' ? rosterBands.map((band) => (
+                    <View key={band.level} style={{ marginTop: sp.md }}>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>{LEVEL_TITLE[band.level]}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                        {`${band.rows.length === 1 ? 'This client ' : 'These clients '}${LEVEL_NOTE[band.level]}.`}
+                      </Text>
+                      {band.rows.map((c) => {
+                        // Printed in the COACH's unit, which is the one this
+                        // app is certain of on this device. Unlike the
+                        // client-training screen — a transcript of one
+                        // person's session, printed in theirs — this is a
+                        // list of forty people and forty units would be
+                        // unreadable.
+                        const top = c.topKg == null ? null : liftIn(c.topKg, coachUnit);
+                        // Through `deltaLabel`, never a sign written here:
+                        // scripts/check-deltas.mjs exists because twenty-five
+                        // screens each wrote their own and a change of nothing
+                        // took whichever arm its author reached for first.
+                        // `since: null` because the window is stated once
+                        // above the whole list rather than repeated on forty
+                        // rows.
+                        const d = c.changePct == null ? null
+                          : deltaLabel(c.changePct, { since: null, unit: '%', noChange: 'no change' });
+                        return (
+                          <View key={c.clientId} style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm, marginTop: 4 }}>
+                            <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{clientName(c.clientId)}</Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              {top == null ? 'no load recorded' : `${num(top)} ${coachUnit}`}
+                            </Text>
+                            {d ? <Text style={{ ...ty.caption, color: t.ink3 }}>{d}</Text> : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )) : null}
+                  {rosterAsk === 'ready' && rosterJudged.some((c) => c.e1rmKg != null) ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      Any one-rep max behind these figures is an ESTIMATE off logged sets. Nobody in this app
+                      has tested one, and the same arithmetic is what a client's own progression screen uses.
+                    </Text>
+                  ) : null}
+                </View>
               ) : null}
             </Section>
           </>

@@ -591,12 +591,17 @@ export default function CoachDocumentsScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* Centred between the button and a spacer of its width, the way the
+            board heads every page reached from a row (coach page 15 lists
+            this one as Forms & PDFs; the rows on Profile call it Your
+            Documents, and the title says what it holds). */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your paperwork</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Documents</Text>
-          </View>
+          <Text accessibilityRole="header" numberOfLines={1}
+            style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center', paddingHorizontal: sp.sm }}>
+            Documents
+          </Text>
+          <View style={{ width: 38 }} />
         </View>
 
         {!USE_SUPABASE ? (

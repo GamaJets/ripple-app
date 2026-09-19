@@ -361,14 +361,19 @@ export default function Templates() {
             top of it. Without `a11yLabel` it was also announced as "button"
             and there is no other way back from here. See the same correction
             in src/ui/FeedbackScreen.tsx. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+        {/* Centred between the button and a spacer of its width, the way the
+            board heads every page reached from a row (coach page 15 lists
+            this one as Program Templates). The eyebrow went; the line under
+            the title says what the screen is for. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your library</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Templates</Text>
-          </View>
+          <Text accessibilityRole="header" numberOfLines={1}
+            style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center', paddingHorizontal: sp.sm }}>
+            Program Templates
+          </Text>
+          <View style={{ width: 38 }} />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
           Build once, assign to many. Save any program from the builder.
         </Text>
 
