@@ -1,6 +1,6 @@
 # Repple redesign — session handoff
 
-**Written:** 19 Sep 2026 · **Branch:** `redesign` · **HEAD:** `473e737` · **Tree:** clean, `tsc` 0
+**Written:** 19 Sep 2026 · **Branch:** `redesign` · **HEAD:** see `git log` (was `473e737` at first writing; the second session is recorded in §4b) · **Tree:** clean, `tsc` 0
 **For:** a fresh session with no prior context.
 
 ---
@@ -88,6 +88,38 @@ Profile, everything else `href: null`. Three audit fixes re-applied that the red
 stylesheets) plus `docs/claude-handoff/`.
 
 ---
+
+## 4b. What the second session did (19 Sep, evening)
+
+Ported, file by file, re-applying audit fixes on every collision — never a wholesale checkout:
+
+- **Kit:** `ScreenHeader`; `SectionHead` stacks at large text; **`Section` is now a card** (the single
+  largest visible gap to the board), 324 between-section `<Rule />`s removed, gutter/section 16, title 22,
+  `Card` carries a hairline so a card inside a section stays a box, `QuickRow` tiles are white cards.
+- **Client:** Home (goal card + tiles, snapshot), Train (programme card off the RepDB demo, Current/Past,
+  mode pills), Progress (metric tabs, range chart, grouped grids), Meals (calorie card, Plan/Targets/Recipes),
+  Me (card header, stats, rows), Classes, the welcome door.
+- **Coach:** Clients (strip, Today, Needs Attention, compact roster), Client Detail, Builder (strip, day pills,
+  `ProgramBuilderFlow`, persistent assign bar), Schedule (`ScheduleOperations` with the audit's withdrawn
+  Google row), Analytics, Messages, Profile, Classes, Sessions.
+- **Website:** homepage = redesign markup + audit head; other pages link their redesign stylesheet;
+  `stamp-css` hashes every sheet.
+- **Apple Health:** connect() fails when iOS never presented the sheet (`getRequestStatusForAuthorization`);
+  the restore loop no longer marks a failing request connected. Unverified on a phone — the simulator has no
+  Health data. If a device still says connected with nothing arriving, check the HealthKit capability on the
+  client App ID in EAS.
+- **Accent:** the board's one-green was applied and **reverted** — `coverage.test.ts` forbids two apps
+  sharing an accent and requires each accent to match its icon's hue. Going green needs three new icons and
+  the logo SVG. **User's decision.**
+
+Screenshots of the result, beside the board: https://claude.ai/artifact/RCjxmm2weVTsAtQsz8Epvk
+
+Validation at HEAD: `tsc` 0 · `npm test` green · every source gate green (`check:css-stamp` now covers all
+five stylesheets; `check:deltas` KNOWN for scans.tsx lowered to 2).
+
+**Next:** the user's verdict on the screenshots and the accent; then Studio/Owner (no board), the new
+features the board implies (Community, Rewards, Assessments, Marketplace — each costed separately), and
+only after explicit approval the three interactive iOS builds at 1.3.0.
 
 ## 5. What to do next
 
