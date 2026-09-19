@@ -200,12 +200,15 @@ export default function TrainerBilling() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your Repple plan</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Billing</Text>
-          </View>
+        {/* The board's head — back at the leading edge, the title centred,
+            the way app/(trainer)/money.tsx opens. The eyebrow that stood here
+            ("Your Repple plan") was a line of prose above the title; what it said is
+            still said by the first card below. The trailing spacer is the
+            back control's own width so the title centres on the screen. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Billing</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Your Repple plan, payment method and invoices.

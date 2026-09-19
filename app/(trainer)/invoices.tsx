@@ -751,12 +751,15 @@ export default function Invoices() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* The board's head — back at the leading edge, the title centred,
+            the way app/(trainer)/money.tsx opens. The eyebrow that stood here
+            ("Your own paperwork") was a line of prose above the title; what it said is
+            still said by the first card below. The trailing spacer is the
+            back control's own width so the title centres on the screen. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your own paperwork</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Invoices</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Invoices</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
 
         <View style={{ marginTop: sp.lg }}>
