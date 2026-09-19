@@ -28,10 +28,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="styles.css?v=d7eb8a0cfa">
+<link rel="stylesheet" href="auth-support.css?v=94e5807ece">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
-<body>
+<body class="flow-page auth-page">
 
 <!-- No skip link here, and that is deliberate rather than an omission. Every
      other page has a sticky header carrying six links and a menu button before
@@ -72,21 +73,19 @@
   and a page that appears to hang is worse than one with a button on it.
 -->
 
-<main id="main" tabindex="-1">
-  <div class="wrap page" style="max-width:620px">
-    <p class="eyebrow">Repple</p>
-    <h1 class="display">You're back from Stripe</h1>
-    <p class="lede">
-      Open the Repple Coach app to carry on. It will show whether Stripe has
-      everything it needs — sometimes they ask for one more document, and the
-      app is where that appears.
-    </p>
+<main id="main" tabindex="-1" class="wrap page auth-card flow-panel">
+  <p class="eyebrow">Repple</p>
+  <h1 class="display">You're back from Stripe</h1>
+  <p class="lede">
+    Open the Repple Coach app to carry on. It will show whether Stripe has
+    everything it needs — sometimes they ask for one more document, and the
+    app is where that appears.
+  </p>
 
-    <p class="btn-row">
-      <a class="btn primary" id="open" href="repplecoach://connect/return">Open the app</a>
-      <a class="btn" href="/download">Get the app</a>
-    </p>
-  </div>
+  <p class="btn-row">
+    <a class="btn primary" id="open" href="repplecoach://connect/return">Open the app</a>
+    <a class="btn" href="/download">Get the app</a>
+  </p>
 </main>
 
 <script>

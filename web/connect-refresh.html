@@ -28,10 +28,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="styles.css?v=d7eb8a0cfa">
+<link rel="stylesheet" href="auth-support.css?v=94e5807ece">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
-<body>
+<body class="flow-page auth-page">
 
 <!-- No skip link here, and that is deliberate rather than an omission. Every
      other page has a sticky header carrying six links and a menu button before
@@ -72,22 +73,20 @@
   party. The app already holds the session and already has the button.
 -->
 
-<main id="main" tabindex="-1">
-  <div class="wrap page" style="max-width:620px">
-    <p class="eyebrow">Repple</p>
-    <h1 class="display">That link has expired</h1>
-    <p class="lede">
-      Stripe's setup links only last a few minutes and can be used once. Nothing
-      is wrong with your account and nothing you entered has been lost — open
-      the Repple Coach app and tap <strong>Set Up Payouts</strong> again, and
-      Stripe will pick up where you left off.
-    </p>
+<main id="main" tabindex="-1" class="wrap page auth-card flow-panel">
+  <p class="eyebrow">Repple</p>
+  <h1 class="display">That link has expired</h1>
+  <p class="lede">
+    Stripe's setup links only last a few minutes and can be used once. Nothing
+    is wrong with your account and nothing you entered has been lost — open
+    the Repple Coach app and tap <strong>Set Up Payouts</strong> again, and
+    Stripe will pick up where you left off.
+  </p>
 
-    <p class="btn-row">
-      <a class="btn primary" id="open" href="repplecoach://connect/refresh">Open the app</a>
-      <a class="btn" href="/download">Get the app</a>
-    </p>
-  </div>
+  <p class="btn-row">
+    <a class="btn primary" id="open" href="repplecoach://connect/refresh">Open the app</a>
+    <a class="btn" href="/download">Get the app</a>
+  </p>
 </main>
 
 <script>

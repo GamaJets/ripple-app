@@ -97,8 +97,9 @@ addEventListener('DOMContentLoaded', function () {
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
+      <a href="/how-it-works">How it works</a>
       <a href="/support">Support</a>
-      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the apps</a>
       </div>
       <a class="cta" href="/signup">Create account</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
@@ -371,13 +372,56 @@ addEventListener('DOMContentLoaded', function () {
 
 <footer class="site">
   <div class="wrap">
-    <span>© 2026 Repple</span>
-    <span>
-      <a href="/support">Support</a> ·
-      <a href="/privacy">Privacy</a> ·
-      <a href="/delete-account">Delete account</a> ·
-      <a href="/terms">Terms</a>
-    </span>
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <span class="mark">
+            <svg width="26" height="18" viewBox="0 0 54 38" aria-hidden="true"><path d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z" fill="currentColor"/><path d="m33 4 18 0-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z" fill="#22c55e"/></svg>
+          </span>
+          Repple<span class="vh"> home</span>
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          One connected fitness platform for members, coaches and gyms.
+        </p>
+      </div>
+      <div>
+        <h2 class="fh">Product</h2>
+        <ul role="list">
+          <li><a href="/client">For members</a></li>
+          <li><a href="/trainer">For coaches</a></li>
+          <li><a href="/studio">For gyms</a></li>
+          <li><a href="/download">Download</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Company</h2>
+        <ul role="list">
+          <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/support">Support</a></li>
+          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Legal</h2>
+        <ul role="list">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/security">Security</a></li>
+          <li><a href="/delete-account">Delete account</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <!-- Optional under the RepDB licence, which requires no attribution at all.
+           Included because the exercise catalogue, the demo animations and the
+           muscle artwork are theirs, every movement in this product resolves to
+           one of their ids, and they asked. rel="noopener" because it is an
+           outbound link in a footer, not because they are untrusted. -->
+      <span class="credit">Exercise data &amp; visuals by <a href="https://repdb.co" rel="noopener">RepDB</a></span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
   </div>
 </footer>
 
