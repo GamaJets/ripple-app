@@ -51,15 +51,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { trialCard } from '../../src/lib/trialGate';
 import { useTrialReading } from '../../src/ui/trialReading';
-import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 import { weightDeltaIn, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
-import { goalToEnum } from '../../src/lib/rosterMerge';
 import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
 import { sp, layout, radius, hairline, elevation, grown, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -143,7 +142,7 @@ import { minorMoney } from '../../src/lib/coachMoney';
 // The day every expiry and every overdue judgement below is made against, kept
 // current for as long as this tab is mounted — which, for a tab, is the life of
 // the app. See the note on `invoiceAgeing`.
-import { useToday } from '../../src/ui/today';
+import { useToday, useNow } from '../../src/ui/today';
 import { FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
@@ -255,15 +254,6 @@ function Flag({ t, tone, text }: { t: Theme; tone: string; text: string }) {
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
       <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: tone }} />
       <Text style={{ ...ty.caption, color: t.ink2 }}>{text}</Text>
-    </View>
-  );
-}
-
-/** A 3px meter — the same mark the kit's <Meter/> draws, without its read-out. */
-function Bar({ t, pct, good }: { t: Theme; pct: number; good: boolean }) {
-  return (
-    <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden' }}>
-      <View style={{ height: 3, borderRadius: 2, width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: t.brand, opacity: good ? 1 : 0.5 }} />
     </View>
   );
 }
@@ -1148,6 +1138,19 @@ export default function TrainerClients() {
   }, [coachId, authLoading, readNonce]);
 
   const unmarked = mySessions === null ? null : awaitingOutcome(mySessions).length;
+  /* ── today's diary, off the same read ────────────────────────────────
+   *
+   * The approved board opens the coach's home on the day ahead: who is
+   * booked, when, for how long. Those rows are already in `mySessions` — the
+   * window reaches `BOOKED_AHEAD_DAYS` forward — so this costs no read.
+   *
+   * Null, not `[]`, while the read has not landed or failed: "No sessions
+   * booked today" is a statement about the coach's day and only a read that
+   * answered may make it. `today` is the screen's one day key (`useToday`),
+   * so the list re-settles at midnight rather than freezing at launch. */
+  const todaySessions = mySessions === null ? null : mySessions
+    .filter((s) => s.status === 'booked' && localDayKey(Date.parse(s.startsAt)) === today)
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
 
   /* ── when this coach next sees each of them ────────────────────────────
    *
@@ -1574,6 +1577,18 @@ export default function TrainerClients() {
     // used to be `?? 999`, which sorted exactly those clients to the bottom.
     return (a.adherence ?? -1) - (b.adherence ?? -1);
   });
+  /* ── the book's adherence, as one figure ─────────────────────────────
+   *
+   * The mean of every client who has submitted a check-in, and ONLY under a
+   * whole roster read: an average over a fragment of the book would be a
+   * figure about clients whose rows never came back. Clients with no
+   * check-in contribute nothing rather than a zero — a member who has never
+   * submitted one is not at 0%, and averaging them in would say the book is
+   * doing worse than anybody on it. Null draws as a dash. */
+  const adherenceValues = roster.flatMap((c) => (c.adherence == null ? [] : [c.adherence]));
+  const bookAdherence = isWhole(rosterStatus) && adherenceValues.length
+    ? Math.round(adherenceValues.reduce((sum, n) => sum + n, 0) / adherenceValues.length)
+    : null;
   // AI-draft a personalised check-in the coach reviews before sending.
   // ── the client's name used to go to a model, and now does not ──────────
   //
@@ -2046,6 +2061,11 @@ export default function TrainerClients() {
   useRefreshOnFocus(reloadEverything);
 
   const studio = (coachName || 'Your Studio').replace('Coach ', '');
+  // The greeting turns on the HOUR, and `useNow` re-settles at midnight, on
+  // foreground and on focus — the three moments it changes on a tab that is
+  // never unmounted. A bare `new Date()` here would be frozen at launch.
+  const now = useNow();
+  const hi = now.getHours() < 12 ? 'Good Morning' : now.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
   const G = layout.gutter;
 
   return (
@@ -2053,12 +2073,11 @@ export default function TrainerClients() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize' }} numberOfLines={1}>{studio}</Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
+        <ScreenHeader
+          eyebrow={hi}
+          title={studio}
+          leading={<Initials t={t} name={studio} size={40} />}
+          actions={<>
             {/* Every SCREEN in the coach app, and it is the only way into
                 Explore that does not disappear once Getting Started is done —
                 so it stays pointed there. It reads as "search" to a screen
@@ -2072,8 +2091,87 @@ export default function TrainerClients() {
                 cannot receive one. The row on Me is the way in for somebody
                 looking for it; this is the way in for somebody glancing. */}
             <NotificationBell group="trainer" />
-          </View>
+          </>}
+        />
+
+        {/* ── three glanceable truths ───────────────────────────────────────
+            The board's coach home opens on a count of clients, the day's
+            sessions and the book's adherence — not a display-size vanity
+            figure. Each stays honest the way the Hero this replaces was:
+            the count and the average are withheld until the roster read is
+            whole, and the day's sessions until the diary answered. The
+            sentence under the strip says which read is short, and why; a
+            dash on its own would only say "something". */}
+        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+          <KpiRow
+            onPress={(k) => { if (k.route) router.push(k.route as never); }}
+            items={[
+              { label: 'Active Clients', value: fig(rosterCount), route: '/(trainer)/analytics' },
+              { label: 'Sessions Today', value: todaySessions === null ? fig(null) : fig(todaySessions.length), route: '/(trainer)/calendar' },
+              { label: 'Adherence', value: bookAdherence == null ? fig(null) : String(bookAdherence), unit: bookAdherence == null ? undefined : '%', route: '/(trainer)/analytics' },
+            ]}
+          />
+          {rosterStatus === 'error' || rosterStatus === 'partial' || rosterStatus === 'loading' || sessionsUnread ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {rosterStatus === 'error'
+                ? 'Your roster could not be read, so the client count and adherence are not zero — the clients listed below are the ones that did come back.'
+                : rosterStatus === 'partial'
+                  ? 'Only part of your roster came back, so it cannot be counted or averaged — a subtotal here would read as your whole book.'
+                  : rosterStatus === 'loading'
+                    ? 'Reading your roster…'
+                    : 'Your diary could not be read, so today’s count is not none.'}
+            </Text>
+          ) : null}
         </View>
+
+        {/* ── today ─────────────────────────────────────────────────────────
+            The day ahead, in booking order, and the one add control the
+            board puts beside it. Rows open the client's record when the
+            booking names one and the diary otherwise; a walk-in slot with no
+            client on it has no record to open. */}
+        <Section style={{ paddingBottom: 0 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Today</Text>
+            <Pressable onPress={() => router.push('/(trainer)/calendar')} accessibilityRole="button"
+              accessibilityLabel="Add a session in Schedule" hitSlop={hitSlopFor(38)}
+              style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="plus" size={18} color={t.brandInk} />
+            </Pressable>
+          </View>
+          {sessionsUnread ? (
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Today’s schedule could not be read — this is not an empty day. Open Schedule to try again.</Text>
+          ) : todaySessions === null ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Reading today’s schedule…</Text>
+            </View>
+          ) : todaySessions.length === 0 ? (
+            <ListRow icon="calendar" title="No Sessions Booked Today"
+              note="Open Schedule to add one or set availability."
+              onPress={() => router.push('/(trainer)/calendar')} />
+          ) : (
+            todaySessions.map((session, index) => {
+              const name = session.clientName || 'Client name unavailable';
+              return (
+                <Pressable key={session.id}
+                  onPress={() => session.clientId
+                    ? router.push({ pathname: '/(trainer)/client', params: { clientId: session.clientId, name: session.clientName || undefined } })
+                    : router.push('/(trainer)/calendar')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${fmtTime(session.startsAt)}, ${name}, ${session.durationMin} minutes`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: index ? hairline : 0, borderTopColor: t.ring }}>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 58 }}>{fmtTime(session.startsAt)}</Text>
+                  <Initials t={t} name={name} size={34} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{name}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{session.durationMin} min session</Text>
+                  </View>
+                  <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+                </Pressable>
+              );
+            })
+          )}
+        </Section>
 
         {/* Clients who found this coach in the public directory and asked to
             be coached. Renders nothing at all when there are none.
@@ -2176,6 +2274,33 @@ export default function TrainerClients() {
             </View>
           ) : null}
 
+        </View>
+
+        {/* ── needs attention ───────────────────────────────────────────────
+            The operating question for this tab, asked before setup, billing
+            and the month's figures: who needs the coach now? It was a Notice
+            inside the interrupts block with a "Draft" button per row; the
+            board gives it a section of its own. Every row is backed by the
+            same drift, unread-message and adherence facts the roster below
+            uses, and a partial or failed read stays visibly partial or failed
+            so this queue can never masquerade as the whole book. */}
+        <Rule />
+        <Section>
+          <SectionHead
+            title="Needs Attention"
+            note={isWhole(rosterStatus) && drift ? `${needsAttention.length} now` : undefined}
+          />
+
+          {rosterStatus === 'error' ? (
+            <Notice tone={t.crit} kicker="Roster unavailable"
+              title="Could not build your attention queue"
+              note="The clients that did return are still listed below, but this is not an all-clear and the queue cannot be ranked safely." />
+          ) : rosterStatus === 'partial' ? (
+            <View style={{ marginBottom: sp.md }}>
+              <PartialRead what="clients" shown={roster.length} />
+            </View>
+          ) : null}
+
           {/* Why this list is shorter than it should be, or null when it is not.
               Shown whether or not there is anybody in it: an empty list of
               suggested check-ins over a read that could not prove anybody's
@@ -2188,45 +2313,53 @@ export default function TrainerClients() {
             </View>
           ) : null}
 
-          {needsAttention.length > 0 ? (
-            <Notice tone={t.warn} kicker="Suggested check-ins"
-              title={`${needsAttention.length} client${needsAttention.length > 1 ? 's' : ''} could use a nudge`}
-              note="Draft one with AI, review it, then send.">
-              <View style={{ marginTop: sp.sm }}>
-                {needsAttention.slice(0, 4).map((c) => (
-                  <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                    <Initials t={t} name={c.name} size={34} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                      <View style={{ marginTop: 3 }}><Flag t={t} tone={t.warn} text={attnReason(c) || ''} /></View>
+          {!drift && !driftErr && roster.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>
+                Reading recent check-ins, workouts, sessions and visits before ranking the queue.
+              </Text>
+            </View>
+          ) : driftErr ? (
+            <Flag t={t} tone={t.warn} text="Recent activity could not be read. The roster below remains usable, but it is not ranked by who needs you." />
+          ) : needsAttention.length > 0 ? (
+            <View>
+              {needsAttention.slice(0, 4).map((c, index) => (
+                <Pressable key={c.id} onPress={() => setSel(c)}
+                  accessibilityRole="button" accessibilityLabel={`Open ${c.name}`}
+                  style={{
+                    paddingTop: index ? sp.md : 0,
+                    marginTop: index ? sp.md : 0,
+                    borderTopWidth: index ? hairline : 0,
+                    borderTopColor: t.ring,
+                    flexDirection: 'row', alignItems: 'center', gap: sp.md,
+                  }}>
+                  <Initials t={t} name={c.name} size={38} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{c.name}</Text>
+                    <View style={{ marginTop: 3 }}>
+                      <Flag t={t} tone={t.warn} text={attnReason(c) || 'Needs a review'} />
                     </View>
-                    <Cta label="Draft" onPress={() => draftNudge(c)} />
                   </View>
-                ))}
-              </View>
-            </Notice>
+                  {/* Drafts a check-in with AI for the coach to review, then
+                      send — the same flow the old "Draft" button opened. */}
+                  <Ghost label="Nudge" a11yLabel={`Draft a check-in for ${c.name}`} onPress={() => draftNudge(c)} />
+                </Pressable>
+              ))}
+              {needsAttention.length > 4 ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {needsAttention.length - 4} more {needsAttention.length - 4 === 1 ? 'client is' : 'clients are'} flagged in the roster below.
+                </Text>
+              ) : null}
+            </View>
+          ) : rosterStatus === 'ready' && roster.length === 0 ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>Add or invite your first client to start a coaching queue.</Text>
+          ) : rosterStatus === 'ready' && drift ? (
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              {active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
+            </Text>
           ) : null}
-        </View>
-
-        {/* ── the hero: one number leads the screen ───────────────────────── */}
-        <Hero
-          label="Active Clients"
-          figure={fig(rosterCount)}
-          // 'partial' gets its own sentence rather than falling through to the
-          // drift summary. It used to print the short count with no hint that
-          // it was short, and the drift note underneath it ("2 drifting") was
-          // computed over the same fragment — two figures about a book neither
-          // of them had seen the whole of.
-          note={rosterStatus === 'error'
-            ? 'Your roster could not be read, so this is not a count of zero. The clients listed below are the ones that did come back.'
-            : rosterStatus === 'partial'
-              ? 'Only part of your roster came back, so it cannot be counted — a subtotal here would read as your whole book.'
-              : rosterStatus === 'loading'
-                ? 'Reading your roster…'
-                : active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
-          tone={toContact == null ? t.ink3 : toContact > 0 ? t.warn : t.brand}
-          onPress={() => router.push('/(trainer)/analytics')}
-        />
+        </Section>
 
         <Rule />
 
@@ -2642,66 +2775,60 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{bandNote(d!.status, DEFAULT_WINDOWS)}</Text>
                 </View>
               ) : null}
-            <Pressable onPress={() => setSel(c)}
-              style={{ paddingVertical: sp.lg, borderTopWidth: idx === 0 || opensBand ? 0 : hairline, borderTopColor: t.ring }}>
+            {/* ── one row per client, the board's way ────────────────────
+                Avatar, name, ONE line of status, the adherence figure, a
+                chevron. This row used to carry a weight delta, a next-session
+                line, a rate line, a flags row, a reason line, a tags row and
+                a 3px adherence bar — eight things, most of which are the lead
+                figure of the client's own record one tap away. What stays is
+                what a coach scanning a list of forty needs to pick the next
+                one to open: the drift verdict where there is one, the goal
+                and last-active where there is not, and adherence as a number
+                rather than a bar (the bar was colour alone — see the kit's
+                second rule). Unread, injury and below-target keep a mark,
+                because each is a reason to open the row today. */}
+            <Pressable onPress={() => setSel(c)} accessibilityRole="button" accessibilityLabel={`Open ${c.name}`}
+              style={{ paddingVertical: sp.md, borderTopWidth: idx === 0 || opensBand ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                <Initials t={t} name={c.name} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {COACHED_MODE_SHORT[c.mode]} · {c.lastActive}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    {/* No scan, no delta. "0 kg" said this client had held
-                        their weight exactly, which is a measurement nobody
-                        took — the same invented zero the rest of this screen
-                        renders as a dash. */}
-                    {/* `<= 0` painted the accent dot for every client whose
-                        weight had come down — including the ones the coach
-                        recorded as building muscle, and including a delta of
-                        exactly zero, which is not a direction at all. The goal
-                        on the row decides it, and where the goal is unknown or
-                        has no opinion the mark stays neutral. */}
-                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: movementIsProgress(c.weightDelta, goalToEnum(c.goal), 'weight') ? t.brand : t.ink3 }} />
-                    <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: t.ink }}>
-                      {deltaLabel(weightDeltaIn(c.weightDelta, coachUnit), { since: null, unit: coachUnit, noChange: 'No change', noBaseline: '—' })}
-                    </Text>
-                  </View>
-                  {/* Days a week, against what this person's own weeks used to
-                      look like. An em-dash where there is no baseline — never
-                      a rate invented out of an empty window.
-
-                      The fallback used to be `Next: ${c.next}`, and
-                      `RosterClient.next` is the literal string '—' in all three
-                      places src/ui/roster.tsx builds a client: it is computed
-                      nowhere and never has been. So every roster row without a
-                      drift reading carried a field called "Next" with a dash
-                      after it — a value the app looked as though it had tried
-                      and failed to read. Nothing is drawn there instead; why a
-                      client has no reading is already said once, above the
-                      list, by the drift notices this screen carries.
-
-                      There IS a Next now, and it is read rather than declared —
-                      see `nextBooked`. It sits above the rate because it is the
-                      one line on this row about the future: everything else
-                      here describes what has already happened. Absent, never
-                      dashed, when the diary did not answer or the fortnight is
-                      empty; the difference between those two is said once under
-                      the list rather than thirty times inside it. */}
+                <Initials t={t} name={c.name} size={36} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{c.name}</Text>
+                  {/* The drift verdict and its reason where there is one —
+                      "Holding their pattern" is said once, by the band heading,
+                      not on every row under it. Where the read has not covered
+                      this client yet the line says so rather than implying a
+                      clean sheet; where there is no drift read at all the row
+                      falls back to what it always said. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
+                    {showDrift
+                      ? `${DRIFT_LABEL[d!.status]} · ${d!.reason}`
+                      : drift && !d
+                        ? `${c.goal} · ${c.lastActive} · no drift reading yet`
+                        : `${c.goal} · ${COACHED_MODE_SHORT[c.mode]} · ${c.lastActive}`}
+                  </Text>
+                  {/* There IS a Next now, and it is read rather than declared —
+                      see `nextBooked`. The one line on this row about the
+                      future. Absent, never dashed, when the diary did not
+                      answer or the fortnight is empty; the difference between
+                      those two is said once under the list. */}
                   {nextLine ? (
-                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{nextLine}</Text>
-                  ) : null}
-                  {d ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, ...numeric }}>
-                      {`${fig(d.recentPerWeek)} / wk · was ${fig(d.baselinePerWeek)}`}
-                    </Text>
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }} numberOfLines={1}>{nextLine}</Text>
                   ) : null}
                 </View>
+                <View style={{ alignItems: 'flex-end', minWidth: 52 }}>
+                  {/* A number, never a bar: the bar's only channel was
+                      colour, and "no check-ins yet" is a dash rather than a
+                      zero — a client with no submitted check-in is not at 0%. */}
+                  <Text style={{ ...ty.label, fontWeight: '600', ...numeric, color: t.ink }}>
+                    {c.adherence != null ? `${c.adherence}%` : fig(null)}
+                  </Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>adherence</Text>
+                </View>
+                <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
               </View>
 
-              {((c.unread != null && c.unread > 0) || showDrift || (!d && lowAdherence(c)) || (c.injuries && c.injuries.length)) ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginStart: 38 + sp.md }}>
-                  {showDrift ? <Flag t={t} tone={driftTone(t, d!)} text={DRIFT_LABEL[d!.status]} /> : null}
+              {((c.unread != null && c.unread > 0) || (!d && lowAdherence(c)) || (c.injuries && c.injuries.length)) ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginStart: 36 + sp.md }}>
                   {/* Only where a figure they submitted says so. This was
                       `atRiskClient(c)`, true of every hand-added client for
                       ever — so a coach with twenty cash clients opened their
@@ -2714,16 +2841,8 @@ export default function TrainerClients() {
                 </View>
               ) : null}
 
-              {showDrift ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginStart: 38 + sp.md }}>{d!.reason}</Text>
-              ) : null}
-
-              {drift && !d ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginStart: 38 + sp.md }}>Not read yet — no drift assessment for this client.</Text>
-              ) : null}
-
               {tagsFor(c.id).length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: sp.sm, marginStart: 38 + sp.md }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: sp.sm, marginStart: 36 + sp.md }}>
                   {tagsFor(c.id).map((tg) => (
                     <View key={tg} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 2 }}>
                       <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{tg}</Text>
@@ -2731,14 +2850,6 @@ export default function TrainerClients() {
                   ))}
                 </View>
               ) : null}
-
-              <View style={{ marginTop: sp.md }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>Plan Adherence</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{c.adherence != null ? c.adherence + '%' : 'no check-ins yet'}</Text>
-                </View>
-                {c.adherence != null ? <Bar t={t} pct={c.adherence} good={c.adherence >= 85} /> : null}
-              </View>
             </Pressable>
             </View>
             );

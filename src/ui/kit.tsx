@@ -98,6 +98,60 @@ export function Section({ children, style }: { children: ReactNode; style?: Styl
 }
 
 /**
+ * A consistent screen opening: context first, then the page title, with only
+ * genuinely global actions beside it. At larger text sizes the actions move
+ * below the title instead of squeezing or truncating the reader's name.
+ *
+ * One component rather than the same twelve lines on every tab, because the
+ * approved board opens every screen the same way — a quiet eyebrow, a title,
+ * and at most two round controls at the trailing edge — and twelve hand
+ * copies of that is twelve places for it to drift.
+ */
+export function ScreenHeader({
+  eyebrow, title, subtitle, leading, actions,
+}: {
+  eyebrow?: string;
+  title: string;
+  subtitle?: string;
+  leading?: ReactNode;
+  actions?: ReactNode;
+}) {
+  const t = useTheme();
+  const stacked = fontScale >= 1.35;
+  return (
+    <View style={{
+      flexDirection: stacked ? 'column' : 'row',
+      alignItems: stacked ? 'stretch' : 'flex-start',
+      justifyContent: 'space-between',
+      gap: sp.md,
+      paddingTop: sp.md,
+    }}>
+      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
+        {leading ? <View style={{ paddingTop: eyebrow ? 0 : 1 }}>{leading}</View> : null}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {eyebrow ? <Text style={{ ...ty.micro, color: t.ink3 }}>{eyebrow}</Text> : null}
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginTop: eyebrow ? 5 : 0 }}>
+            {title}
+          </Text>
+          {subtitle ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{subtitle}</Text> : null}
+        </View>
+      </View>
+      {actions ? (
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          alignSelf: stacked ? 'flex-end' : 'auto',
+          gap: sp.sm,
+          marginTop: stacked ? 0 : 2,
+        }}>
+          {actions}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
  * A section's header: a quiet uppercase title at the leading edge, and an
  * optional tappable trailing note (a summary figure, "All activity ›").
  *
@@ -108,6 +162,10 @@ export function Section({ children, style }: { children: ReactNode; style?: Styl
  */
 export function SectionHead({ title, note, onPress }: { title: string; note?: string; onPress?: () => void }) {
   const t = useTheme();
+  // At the largest accessibility sizes even proportional shrinking leaves a
+  // sentence-length note as a column of three-letter lines beside the title.
+  // Past that point the two stack, title over note, and each gets the width.
+  const stacked = fontScale >= 1.5;
   return (
     // `gap` and the two `flexShrink`s are not tidying. Without them this row
     // had no way to be too wide: `space-between` puts nothing between the two
@@ -129,7 +187,13 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
     // which is not better. Yoga shrinks proportionally to size, so the short
     // uppercase title keeps most of its width and the long sentence gives up
     // most of the slack, which is the right trade in every case here.
-    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, marginBottom: sp.lg }}>
+    <View style={{
+      flexDirection: stacked ? 'column' : 'row',
+      justifyContent: 'space-between',
+      alignItems: stacked ? 'flex-start' : 'baseline',
+      gap: stacked ? sp.sm : sp.md,
+      marginBottom: sp.lg,
+    }}>
       <Text style={{ ...ty.micro, color: t.ink3, flexShrink: 1 }}>{title}</Text>
       {note ? (
         // The chevron is drawn as a character, so it is also SPOKEN as one —
@@ -1026,29 +1090,6 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
           A break in the line is a period with no reading — not a reading of zero.
         </Text>
       ) : null}
-    </View>
-  );
-}
-
-/** Seven day-cells; filled ones are days trained. */
-export function WeekDots({ done }: { done: number }) {
-  const t = useTheme();
-  // Seven 3px bars, and the only difference between a day trained and a day not
-  // is which of two colours the bar is. Nothing else on screen says the number,
-  // so to a screen reader this component was silent and to anyone who cannot
-  // separate the accent from surface3 it was seven identical dashes.
-  const n = Math.max(0, Math.min(7, Math.round(done)));
-  return (
-    <View
-      accessible
-      accessibilityRole="progressbar"
-      accessibilityLabel={n === 1 ? '1 of 7 days trained this week' : `${n} of 7 days trained this week`}
-      accessibilityValue={{ min: 0, max: 7, now: n }}
-      style={{ flexDirection: 'row', gap: 5, marginTop: sp.md }}
-    >
-      {Array.from({ length: 7 }).map((_, i) => (
-        <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i < done ? t.brand : t.surface3 }} />
-      ))}
     </View>
   );
 }

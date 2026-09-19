@@ -20,28 +20,25 @@ import { offlineBanner } from '../../src/lib/reachability';
 import { useOutbox } from '../../src/ui/outbox';
 import { OUTBOX_KINDS, lapsedNote, outboxNote } from '../../src/lib/outbox';
 import { BRAND } from '../../src/lib/brands';
-import { weekIndexOf, startOfWeek } from '../../src/lib/weekStart';
+import { weekIndexOf } from '../../src/lib/weekStart';
 import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, ListRow, Cta, Ghost, QuickRow, Meter, Spark, WeekDots, Notice, Card, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Cta, Ghost, QuickRow, Notice, Card, Flag, fig } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { num, fmtTime } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import { macrosFor, applyCoachAdjust, caloriesLeft, caloriesNote, dayBurn } from '../../src/lib/nutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
-import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
-import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaLabel';
 // `agoLabel` — "today" / "yesterday" / "18 days ago", the same wording the
 // body figures are dated with, so a coach's note and a weigh-in are aged in one
 // vocabulary.
-import { agoLabel, shortDayLabel, todayISO } from '../../src/lib/bodyFigures';
-import { hitSlopFor } from '../../src/lib/a11y';
+import { agoLabel, todayISO } from '../../src/lib/bodyFigures';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 // Which week of the block today belongs to. See src/lib/clientBlock.ts.
@@ -59,14 +56,6 @@ import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
 import { shownStreak, thisWeekStats, streakRisk, freezeBudget } from '../../src/lib/streaks';
-// When each record was SET, which is the only thing that can answer "new PRs
-// this week". `personalRecords` answers a different question — the best ever
-// per lift — and its length was being printed under a heading about a week.
-import { prTimeline } from '../../src/lib/longView';
-// The week's tonnage is a floor, not a total, whenever a bodyweight set in it
-// had no weigh-in to price it against. Same note history.tsx, trends.tsx,
-// report.tsx and the session summary already print.
-import { tonnageNote } from '../../src/lib/bodyweightSets';
 import { severeSummary } from '../../src/lib/injuries';
 import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
@@ -77,10 +66,10 @@ import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { GUIDE_SEEN_KEY } from '../guide';
 import { isWhole } from '../../src/ui/loadStatus';
 import {
-  showBody, showFuel, showWeek,
+  showFuel, showWeek,
   checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, showChecklist,
 } from '../../src/lib/firstRun';
-import { FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 // The month and weekday names used to be two hardcoded English arrays here,
 // rendered as `{DAYS[d.getDay()]} {d.getDate()} {MONTHS[d.getMonth()]}` on the
@@ -92,9 +81,6 @@ import { FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 export default function Home() {
   const t = useTheme();
-  // The unit this client reads weight in. Storage stays metric; this is only
-  // ever applied on the way to the screen (TF-37).
-  const wu = useSettings().weightUnit;
   const router = useRouter();
   const c = useClientData();
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
@@ -131,7 +117,7 @@ export default function Home() {
   // the rest live in app/(client)/notices.tsx, which is what stops a notice
   // being readable for one day and then nowhere.
   const { latest: ann, latestGym: gymAnn, reload: reloadAnnouncements } = useAnnouncements();
-  const { water, waterGoal, addWater, removeWater, reload: reloadHabits } = useHabits();
+  const { water, waterGoal, reload: reloadHabits } = useHabits();
   // Readiness, its inputs and its caveats, from the one shared derivation.
   //
   // This screen used to assemble it here out of five providers, and so did
@@ -433,29 +419,6 @@ export default function Home() {
   // `useNow()` rather than `Date.now()`, because the answer changes at the
   // Sunday midnight this screen sits open across.
   const wk = thisWeekStats(log, nowMs, c.weightSeries);
-  /**
-   * Records actually SET since the week opened.
-   *
-   * This tile is captioned "New PRs" inside a block headed "This Week", and it
-   * was `personalRecords(log, …).length` — the best-ever set on every lift the
-   * member has a load for, all-time, with no date in it at all. So a member
-   * with a year behind them and a rest week read "New PRs 12" every Sunday,
-   * and the figure never moved when they actually set one.
-   *
-   * `prTimeline` is the module that knows WHEN each record happened; it is
-   * already what app/(client)/history.tsx draws its Milestones from, so the two
-   * screens cannot come to disagree about what a record is.
-   *
-   * Anchored on `startOfWeek(nowMs)`, the same Sunday `thisWeekStats` counts
-   * from, so this tile and the two beside it describe one window.
-   */
-  const weekOpenedMs = startOfWeek(nowMs).getTime();
-  const newPrs = prTimeline(log, c.weightSeries)
-    .filter((m) => Date.parse(m.at) >= weekOpenedMs).length;
-  /** Said whenever the week's tonnage is short — a bodyweight set nobody has a
-   *  weigh-in for is real training with no load to put on it, and "Lifted
-   *  4,200 kg" printed over it looks exactly as measured as a whole total. */
-  const weekVolNote = tonnageNote({ kg: wk.volumeKg, unknownSets: wk.unpricedSets });
   const goalDays = planDays.length || 4;
 
   // ── Getting Started, while it has anything to say ────────────────────────
@@ -616,66 +579,6 @@ export default function Home() {
     ? { headline: 'Fuel Up', tip: caloriesNote(dayCal) + '.', cta: 'Log a Meal', route: '/(client)/nutrition', tone: t.brand }
     : { headline: 'On Track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View Plan', route: '/(client)/nutrition', tone: t.brand };
 
-  const ws = c.weightSeries.map((x) => x.v);
-  // Whether the scan history behind `ws` is all of it. `c.status` — which this
-  // screen already reads for `facts.bodyStatus` — is the profile AND the scans
-  // taken together and is not this question; `scansStatus` is, and the weight
-  // trend heading below counted the series without asking it. Every other
-  // screen that prints a scan count asks it first: my-progress.tsx, records.tsx,
-  // social.tsx, cards.tsx and achievements.tsx all gate on `isWhole`.
-  const scansWhole = isWhole(c.scansStatus);
-  // The same series in the unit this client reads in, converted point by point
-  // because each point is a value rather than a change. The filter is only
-  // there to satisfy the null contract of `weightIn` — a series entry is always
-  // a number, and a null one would have no place on a trend line anyway.
-  const wsShown = ws.map((v) => weightIn(v, wu)).filter((v): v is number => v != null);
-  const scSort = [...c.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
-  const scPrev = scSort.length > 1 ? scSort[scSort.length - 2] : null;
-  const scLast = scSort[scSort.length - 1];
-  const bfD = scPrev && scLast ? +(scLast.bodyFatPct - scPrev.bodyFatPct).toFixed(1) : 0;
-  // null unless BOTH scans reported muscle. Read as `?? 0` this used to turn a
-  // scan that measured no muscle into a whole body's worth of change overnight.
-  const muD = scPrev?.skeletalMuscleKg != null && scLast?.skeletalMuscleKg != null
-    ? +(scLast.skeletalMuscleKg - scPrev.skeletalMuscleKg).toFixed(1) : null;
-  const wDelta = ws.length > 1 ? +(ws[ws.length - 1] - ws[0]).toFixed(1) : 0;
-  // The two body changes in the client's unit. They are converted here and the
-  // sign is taken from the converted figure, so that a change too small to show
-  // at this grain — 0.2 kg is under half a pound — is reported as no change
-  // rather than printed as "−0 lb", the fabricated zero this screen already
-  // refuses to show elsewhere. That judgement, and the sign that follows from
-  // it, now live in deltaLabel: `good` reads the converted figure too, because
-  // a change that rounds away in the reader's own unit is not a direction of
-  // travel the app should be marking either way.
-  // wDelta comes off the weight series and is always finite, so the null
-  // branch of weightDeltaIn cannot be reached here.
-  const wDeltaShown = weightDeltaIn(wDelta, wu) ?? 0;
-  /**
-   * Weight, on the SAME question its two neighbours answer.
-   *
-   * The tile used to draw `wDeltaShown`, which is `ws[last] − ws[0]` — the
-   * change across every scan on record — while Body Fat and Muscle beside it
-   * drew the change since the PREVIOUS scan. Three tiles in one row, two
-   * different questions, and nothing to tell them apart but two dates a reader
-   * has no reason to compare: a member who scanned this morning read "+2 lb
-   * since Feb 4" next to "−0.2% since Aug 25" and reasonably took the row for
-   * one comparison.
-   *
-   * Null until there are two scans, which is the honest answer to "what has
-   * changed" for somebody who has been measured once. The all-time figure is
-   * not lost: it is what the WEIGHT section below still shows, over the chart
-   * that makes a span of months mean something.
-   */
-  const wScanD = scPrev && scLast ? +(scLast.weightKg - scPrev.weightKg).toFixed(1) : null;
-  const wScanDShown = weightDeltaIn(wScanD, wu);
-  const muDShown = weightDeltaIn(muD, wu);
-  // The day each of those changes is measured FROM. Two different baselines
-  // used to sit side by side in the Body row with neither of them named —
-  // weight ran from the first check-in on record and body fat from the previous
-  // scan — and at caption size they read as one interval. "+2 kg" against what,
-  // and since when, is not a question to leave with the person it is about.
-  const wSince = ws.length > 1 ? shortDayLabel(c.weightSeries[0].t) : null;
-  const scanSince = scPrev ? shortDayLabel(scPrev.takenAt) : null;
-
   // ── the hour of grace, and the row that vanished without it ───────────
   //
   // `Date.parse(sx.startsAt) > now` drops a session from Home the instant its
@@ -715,7 +618,6 @@ export default function Home() {
   const hi = d.getHours() < 12 ? 'Good Morning' : d.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
 
   const firstName = (c.name || '').trim().split(' ')[0] || '';
-  const kcalNote = macros ? `${num(consumed.kcal)} of ${num(macros.kcal)} kcal` : `${num(consumed.kcal)} kcal eaten — add your weight for a target`;
   const G = layout.gutter;
 
   return (
@@ -723,16 +625,12 @@ export default function Home() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}</Text>
-            {/* A client who has not finished onboarding has no name yet — don't
-                render "Good morning," with a dangling comma and nothing after it. */}
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={1}>
-              {firstName ? `${hi}, ${firstName}` : hi}
-            </Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
+        <ScreenHeader
+          eyebrow={d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}
+          // A client who has not finished onboarding has no name yet — don't
+          // render "Good morning," with a dangling comma and nothing after it.
+          title={firstName ? `${hi}, ${firstName}` : hi}
+          actions={<>
             <Ghost icon="search" label={undefined} onPress={() => router.push('/(client)/explore')} />
             {/* The bell opens the inbox now. It routed to '/(client)/messages'
                 for as long as it has existed, because `notifications` had a
@@ -743,17 +641,77 @@ export default function Home() {
                 screen, so nothing is lost by dropping it: the mark on the bell
                 now counts unread notifications, which is what a bell claims. */}
             <NotificationBell group="client" />
-          </View>
-        </View>
+          </>}
+        />
 
         {/* One line over three reads, and it is the age of the OLDEST of them:
-            "This Week" comes off the training log, the next booking off the
-            diary, and the body figures off the profile, so a single stamp is a
-            claim about all three and has to be true of the worst. See
-            src/lib/freshness.ts. The Refresh does what pulling down does. */}
+            the week's training days come off the training log, the next
+            booking off the diary, and readiness off the profile, so a single
+            stamp is a claim about all three and has to be true of the worst.
+            See src/lib/freshness.ts. The Refresh does what pulling down does. */}
         <Fetched at={oldestFetch(logRead.at, sessionsRead.at, bodyRead.at)}
           onRefresh={() => { reloadLog(); void refreshSessions(); c.reload(); }}
           busy={logRead.busy || sessionsRead.busy || bodyRead.busy} />
+
+        {/* ── the week's goal, and the one thing to do about it ────────────
+            The approved board opens Home on a single card: this week's goal as
+            a ring, the count beside it, and the day's primary action under
+            both. It replaces the readiness hero, the action card's own ring
+            and the This Week tiles that used to say the same number three
+            times down the screen.
+
+            Counted in DAYS against a goal counted in days — see the note on
+            `wk` above, and the one that was on the action card's ring: a
+            member who trained once and logged seven movements is one day in,
+            not seven. Withheld, ring and all, when the log is not whole: an
+            empty ring over "0 of 4" is a claim about the member's week that a
+            failed or capped read cannot make, and the two Notices further down
+            say which of the two it was. */}
+        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Weekly Goal</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>
+                {logKnown ? `${wk.days} of ${goalDays} training days` : 'This week could not be counted'}
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                {!logKnown
+                  ? 'Your log could not be read in full, so nothing here is guessed.'
+                  // A goal is a floor, not a quota — past it the count is
+                  // still the member's own, and "6 of 3" reads as a fault.
+                  : wk.days > goalDays ? `Past your goal by ${wk.days - goalDays} · keep it up`
+                  : wk.days === goalDays ? 'Goal met · keep the momentum going'
+                  : `${goalDays - wk.days} ${goalDays - wk.days === 1 ? 'day' : 'days'} left this week`}
+              </Text>
+            </View>
+            {/* The ring is decoration over the figure inside it, so the
+                control is a button that says the figure and where it goes —
+                not a progressbar, which a reader cannot tap. */}
+            <Pressable onPress={() => router.push('/(client)/week')} accessibilityRole="button"
+              accessibilityLabel={logKnown
+                ? `${wk.days} of ${goalDays} training days this week. Open This Week`
+                : 'This week could not be counted. Open This Week'}
+              hitSlop={8}
+              style={{ width: 62, height: 62, alignItems: 'center', justifyContent: 'center' }}>
+              <Svg width={62} height={62} viewBox="0 0 62 62" style={{ position: 'absolute' }}
+                accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <Circle cx="31" cy="31" r="26" fill="none" stroke={t.surface3} strokeWidth={5} />
+                {logKnown ? (
+                  <Circle cx="31" cy="31" r="26" fill="none" stroke={t.brand} strokeWidth={5} strokeLinecap="round"
+                    strokeDasharray={2 * Math.PI * 26}
+                    strokeDashoffset={2 * Math.PI * 26 * (1 - Math.min(1, wk.days / Math.max(1, goalDays)))}
+                    transform="rotate(-90 31 31)" />
+                ) : null}
+              </Svg>
+              <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>
+                {logKnown ? `${wk.days}/${goalDays}` : fig(null)}
+              </Text>
+            </Pressable>
+          </View>
+          <View style={{ marginTop: sp.lg }}>
+            <Cta label={today.cta} wide tone={today.tone} onPress={() => router.push(trainIntent(today.route) as any)} />
+          </View>
+        </View>
 
         {/* ── what you are looking at ─────────────────────────────────────
             One row, shut, and gone for good once it is read. See
@@ -801,9 +759,9 @@ export default function Home() {
           {sevInj ? (
             <Notice tone={t.crit} kicker="From your coach" title="Your plan is adjusted for your injury"
               note={`I've eased off ${sevInj.groups.join(' & ').toLowerCase()} while your ${sevInj.areas.join(' & ').toLowerCase()} ${sevInj.areas.length > 1 ? 'are' : 'is'} severe — risky moves are swapped or paused. Let's train safely around it.`}>
-              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-                <View style={{ flex: 2 }}><Cta label="Get a Safe Plan" wide onPress={() => router.push('/(client)/coach?ask=injury')} /></View>
-                <View style={{ flex: 1 }}><Ghost label="Update" onPress={() => router.push('/(client)/injuries')} /></View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
+                <View style={{ flexGrow: 2, flexBasis: 180 }}><Cta label="Get a Safe Plan" wide onPress={() => router.push('/(client)/coach?ask=injury')} /></View>
+                <View style={{ flexGrow: 1, flexBasis: 110 }}><Ghost label="Update" onPress={() => router.push('/(client)/injuries')} /></View>
               </View>
             </Notice>
           ) : null}
@@ -815,9 +773,9 @@ export default function Home() {
               note={protectedTonight
                 ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight is covered, but training keeps it growing.`
                 : 'Log one session today to keep it alive.'}>
-              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-                <View style={{ flex: 1 }}><Cta label="Start Now" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} /></View>
-                {pushAvailable() ? <View style={{ flex: 1 }}><Ghost label="Remind Me Tonight" onPress={remindTonight} /></View> : null}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
+                <View style={{ flexGrow: 1, flexBasis: 140 }}><Cta label="Start Now" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} /></View>
+                {pushAvailable() ? <View style={{ flexGrow: 1, flexBasis: 180 }}><Ghost label="Remind Me Tonight" onPress={remindTonight} /></View> : null}
               </View>
             </Notice>
           ) : null}
@@ -832,9 +790,9 @@ export default function Home() {
             <Notice tone={t.brand} kicker="Coaching invitation"
               title={`${myInvites[0].coachName || 'A Coach'} invited you`}
               note={`${COACHED_MODE_SHORT[myInvites[0].mode]} coaching. ${COACHING_MODE_NOTE[myInvites[0].mode]} Accept to connect.`}>
-              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-                <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineCoachInvite(myInvites[0].id)} /></View>
-                <View style={{ flex: 2 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
+                <View style={{ flexGrow: 1, flexBasis: 120 }}><Ghost label="Decline" onPress={() => declineCoachInvite(myInvites[0].id)} /></View>
+                <View style={{ flexGrow: 2, flexBasis: 180 }}>
                   <Cta label="Accept" wide onPress={async () => {
                     const iv = myInvites[0];
                     // Only switch coaching mode once the server actually made
@@ -849,64 +807,6 @@ export default function Home() {
             </Notice>
           ) : null}
         </View>
-
-        {/* ── the hero: one number leads the screen ───────────────────────── */}
-        <Hero
-          label="Readiness"
-          figure={readiness != null ? String(readiness.score) : '—'}
-          unit={readiness != null ? '/100' : undefined}
-          note={readiness != null
-            // What the number is made of, said out loud, EVERY time — not only
-            // when a signal is missing. An 83 built from sleep and training
-            // alone and an 83 built from all three are different claims, and
-            // the member cannot tell them apart from the number; but nor can
-            // they tell a full-confidence 83 apart from either, if the only
-            // score that explains itself is the incomplete one. The row-by-row
-            // account is on Recovery, which is where this hero already taps to.
-            // The direction goes FIRST, and only in the 'scored' state. A score
-            // with no direction is half an answer — 62 says nothing on its own —
-            // but the other three states are deliberately not drawn here. Two of
-            // them ('unread', 'not-comparable') already reach the reader as Flags
-            // through breakdown.caveats below, and drawing them twice would make
-            // the hero shout about yesterday. The third ('no-record') is silent
-            // on purpose: a member with no score yesterday is owed nothing, and
-            // "no direction to show" under today's number reads as a fault.
-            //
-            // Never render direction.delta as a number here. It is null in every
-            // state but 'scored', and a null rendered beside a score is the
-            // invented zero this codebase refuses — `detail` is the figure.
-            ? `${direction?.state === 'scored'
-                ? direction.detail.charAt(0).toUpperCase() + direction.detail.slice(1) + '. '
-                : ''}${readiness.tip} ${readinessMadeOf(readiness)}.`
-            // Six different reasons there is no score, and they ask the reader
-            // for six different things. "Log a night of sleep" to somebody
-            // whose watch is connected and syncing is the complaint this fixed
-            // — it asks them to type what the device already knows — and the
-            // same sentence to somebody whose LOG merely failed to load is a
-            // statement about their week made out of our failed read. Which
-            // one it is, is decided in src/lib/readinessBreakdown.ts and
-            // tested there.
-            : breakdown.absence ?? undefined}
-          arc={readiness != null ? readiness.score / 100 : undefined}
-          arcLabel="readiness"
-          tone={readiness != null ? readinessColor : undefined}
-          onPress={() => router.push('/(client)/recovery')}
-        />
-
-        {/* What the score could not see, before the reader acts on it.
-
-            A source that did not answer can only ever have FLATTERED this
-            number: every signal readiness scores counts against the member —
-            sleep short of eight hours, water short of the goal, sessions in the
-            last two days — so a night a dead WHOOP token hid is a night that
-            could only have pulled the figure down. The score still stands,
-            because the nights that were recorded are real, but it is a shorter
-            set than it looks and this is where that is said. Recovery has been
-            saying it about the same devices all along, one tap away, while this
-            screen printed the number bare. */}
-        {breakdown.caveats.map((c) => (
-          <Flag key={c} tone={t.warn} style={{ marginBottom: sp.md }}>{c}</Flag>
-        ))}
 
         <Rule />
 
@@ -961,37 +861,21 @@ export default function Home() {
           {/* The header follows the card. When the adaptive call is "fuel up" or
               "recover", naming today's muscle group here made the header and the
               card underneath talk about two different things. */}
-          <SectionHead
-            title={today.route.includes('workouts') ? `Today · ${workout.focus}` : 'Today'}
-            // "6 of 3 this week" is arithmetically true and reads as a bug.
-            // A goal is a floor, not a quota, and a client who trained twice as
-            // often as they meant to should not be shown a fraction that looks
-            // like a rendering fault. Past the goal it says so instead; the
-            // count itself is never hidden, because the number they earned is
-            // the point.
-            // `wk.days`, not `wk.workouts`. `goalDays` is `planDays.length` —
-            // the number of TRAINING DAYS the programme runs in a week, the
-            // same figure app/(client)/week.tsx prints as "3 training days a
-            // week". `wk.workouts` is log ENTRIES, and this app writes one per
-            // exercise, so a member who trained once on Monday and logged
-            // seven movements read "7 this week · goal was 4" over a filled
-            // ring and a WeekDots strip three lines down showing one day. The
-            // ring is a week's plan against a week's training and both sides
-            // of it are now counted in days.
-            note={!logKnown ? undefined
-              : wk.days > goalDays ? `${wk.days} this week · goal was ${goalDays}`
-                : wk.days === goalDays ? `${wk.days} of ${goalDays} this week · goal met`
-                  : `${wk.days} of ${goalDays} this week`}
-          />
-          <ActionCard
-            ring={logKnown && goalDays ? wk.days / goalDays : 0}
-            ringLabel={logKnown ? String(streak) : fig(null)}
-            // The number is a day streak and the ring is this week's training
-            // days — neither is about the meal this card is asking you to log.
-            ringNote={logKnown ? (streak === 1 ? 'day streak' : 'day streak') : 'streak'}
+          {/* No week count on this line any more: the goal card at the top
+              says it, in days against a goal counted in days (`wk.days`, never
+              `wk.workouts`, which is one log entry per EXERCISE), and a second
+              copy three inches under the first is the clutter this redesign
+              exists to remove. */}
+          <SectionHead title={today.route.includes('workouts') ? `Today · ${workout.focus}` : 'Today'} />
+          {/* One row, not a second card: the ring and the button it used to
+              carry are on the goal card at the top of the screen now, and a
+              card here would be the same action offered twice. The row keeps
+              the adaptive headline — Ready to Train, Recover Today, Fuel Up —
+              and the sentence under it, which is what changes day to day. */}
+          <ListRow
+            icon={today.route.includes('nutrition') ? 'meals' : today.route.includes('recovery') ? 'heart' : 'train'}
             title={today.headline}
             note={today.tip}
-            cta={today.cta}
             tone={today.tone}
             onPress={() => router.push(trainIntent(today.route) as any)}
           />
@@ -1026,177 +910,103 @@ export default function Home() {
           ) : null}
         </Section>
 
-        {/* ── body ─────────────────────────────────────────────────────────
-            Withheld while nothing has been measured AND the read settled —
-            three dashes under three labels on the first screen of a new app is
-            what "too complicated" looks like. Progress is a tab and the quick
-            actions still point at it, so nothing becomes unreachable. */}
-        {showBody(facts) ? (<>
+        {/* ── daily snapshot ──────────────────────────────────────────────
+            A daily briefing, not four miniature dashboards. The body figures,
+            the weight chart, the macro meters, the water controls and the
+            week's tonnage each had a section here, and every one of them is
+            the lead figure of another tab — Progress, Meals, Habits, This
+            Week — where it is drawn with the room it needs. What stays is one
+            readiness row and one KPI row, each figure tappable to the screen
+            that owns it, so nothing became unreachable and nothing here
+            competes with the card at the top.
+
+            The first-run rules still apply. `showWeek` and `showFuel` (see
+            src/lib/firstRun.ts) withhold a tile that would be a dash on a
+            brand-new account — and only on a SETTLED read, because a dash
+            under a failed read is the honest answer and hiding it would tell
+            somebody who has trained for a year that they never have. */}
         <Rule />
         <Section>
-          <SectionHead title="Body" note="Scans" onPress={() => router.push('/(client)/scans')} />
-          <KpiRow
-            onPress={() => router.push('/(client)/scans')}
-            items={[
-              // `good` was `wDelta <= 0` on every one of these: the app decided
-              // that down is better whoever is reading it. A member whose goal
-              // is Build Muscle was shown the accent dot — the app's "well
-              // done" — for losing the weight they are training to put on, and
-              // an unchanged reading got it too. `movementIsProgress` asks
-              // their own goal, and returns undefined where the goal does not
-              // settle it, which draws a neutral mark rather than a verdict.
-              { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, route: '/(client)/scans', good: movementIsProgress(wScanDShown, c.goal, 'weight'), delta: deltaMoved(wScanDShown) ? deltaLabel(wScanDShown, { since: scanSince, unit: wu }) : undefined },
-              // Body fat is a proportion of the body, not an amount of it, and
-              // stays a percentage under every unit preference. Nothing on this
-              // line converts.
-              { label: 'Body Fat', value: fig(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: movementIsProgress(bfD, c.goal, 'bodyFat'), delta: deltaMoved(bfD) ? deltaLabel(bfD, { since: scanSince, unit: '%' }) : undefined },
-              { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: wu, route: '/(client)/scans', good: movementIsProgress(muDShown, c.goal, 'muscle'), delta: deltaMoved(muDShown) ? deltaLabel(muDShown, { since: scanSince, unit: wu }) : undefined },
-            ]}
-          />
-        </Section>
-        </>) : null}
-
-        {/* ── weight trend ───────────────────────────────────────────────── */}
-        {ws.length > 1 ? (<>
-          <Rule />
-          <Section>
-            {/* The count is dropped when the scan read is not whole, and only
-                the count. `cd.scansStatus` answers 'partial' when the scan read
-                came back at PostgREST's ceiling (src/ui/clientData.tsx reads
-                `taken_at desc` at `capLimit()`), and "1,000 check-ins" is then
-                a count over an unknown fraction of somebody's own history,
-                rendered as fact — the one thing src/ui/loadStatus.ts says a
-                screen may never do with a 'partial' set. The delta beside it
-                survives because it names the day it is measured from and is
-                therefore a true statement about a real interval, whatever else
-                is missing; the count names no interval and cannot be read as
-                anything but a total. The line under the chart says what is
-                missing rather than leaving the heading quietly shorter. */}
-            <SectionHead title={scansWhole ? `Weight · ${ws.length} check-ins` : 'Weight'}
-              // Named from the day the series starts. A bare "1.2 kg" over a
-              // heading counting check-ins is a figure with no interval on it.
-              note={deltaLabel(wDeltaShown, { since: wSince, unit: wu })}
-              onPress={() => router.push('/(client)/scans')} />
-            <Spark data={wsShown} labels={c.weightSeries.map((x) => x.t)} unit={` ${wu}`} />
-            {!scansWhole ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {c.scansStatus === 'loading'
-                  ? 'Still reading your check-ins, so they aren’t counted here yet.'
-                  : c.scansStatus === 'partial'
-                    ? 'You have more check-ins on record than we can read at once, so this is the most recent part of them and they aren’t counted here. Nothing has been lost.'
-                    : 'Your check-ins couldn’t all be read, so they aren’t counted here. This is not a shorter history — it is one we couldn’t open in full.'}
-              </Text>
-            ) : null}
-          </Section>
-        </>) : null}
-
-        {/* ── fuel ─────────────────────────────────────────────────────────
-            `macros` is null for want of a weight, and this section then drew a
-            heading, a note explaining its own emptiness, and no meters. The
-            ask belongs on the body step of setup and on the Meals tab, not as
-            a section that exists to say why it has nothing in it. */}
-        {showFuel(facts) && macros ? (<>
-        <Rule />
-        <Section>
-          <SectionHead title="Fuel Today" note={kcalNote} onPress={() => router.push('/(client)/nutrition')} />
-          <Meter label="Protein" val={consumed.p} target={macros.protein} />
-          <Meter label="Carbs" val={consumed.cbs} target={macros.carbs} dim />
-          <Meter label="Fat" val={consumed.f} target={macros.fat} dim />
-        </Section>
-        </>) : null}
-
-        <Rule />
-
-        {/* ── water ──────────────────────────────────────────────────────── */}
-        <Section>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Water</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 5 }}>
-                <Text style={{ ...value(22), color: t.ink }}>{water}</Text>
-                {/* "of 8 glasses" was a platform constant read as this client's
-                    own target. With no goal set there is no denominator to
-                    print — not "of null glasses", and not a fallback eight —
-                    so the count stands on its own and the line below offers
-                    the screen that sets one. */}
-                <Text style={{ ...ty.caption, color: t.ink3, marginStart: 3 }}>
-                  {waterGoal != null ? `of ${waterGoal} glasses` : water === 1 ? 'glass today' : 'glasses today'}
-                </Text>
-              </View>
-              {waterGoal == null ? (
-                <Pressable onPress={() => router.push('/(client)/habits')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Set a daily water goal">
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>Set a daily goal {FORWARD_CHAR}</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-              {/* 36pt drawn, 44pt to the finger. These two are the smallest
-                  controls on the home screen and the ones most likely to be
-                  hit one-handed with a wet hand mid-session, which is the case
-                  MIN_TARGET in src/lib/a11y.ts is written for. `hitSlopFor`
-                  leaves the drawing alone — growing the circles would push the
-                  whole water row apart — and moves only the boundary the finger
-                  has to find. The two sit `sp.sm` (8pt) apart and the slop is
-                  4pt a side, so the regions meet in the middle of the gap and
-                  never overlap: every point still belongs to exactly one of
-                  them, which on a minus beside a plus is the property that
-                  matters. */}
-              <Pressable accessibilityLabel="Remove a glass of water" accessibilityRole="button" onPress={removeWater}
-                hitSlop={hitSlopFor(36)}
-                style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="minus" size={16} color={t.ink2} />
-              </Pressable>
-              <Pressable accessibilityLabel="Add a glass of water" accessibilityRole="button" onPress={addWater}
-                hitSlop={hitSlopFor(36)}
-                style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="plus" size={16} color={t.brandInk} />
-              </Pressable>
-            </View>
-          </View>
-        </Section>
-
-        {/* ── this week ────────────────────────────────────────────────────
-            Gated on the log ever holding anything, not on THIS week: somebody
-            who trains Monday and Tuesday and opens the app on a Sunday has an
-            empty week and eleven months behind it. Under an unsettled read it
-            stays, dashes and all, beside the warning printed above. */}
-        {showWeek(facts) ? (<>
-        <Rule />
-        <Section>
-          <SectionHead title="This Week" note="All activity" onPress={() => router.push('/(client)/trends')} />
-          <KpiRow items={[
-            // Days, against a goal counted in days — see the note on the ring
-            // above. This read `wk.workouts`, which is one log entry per
-            // EXERCISE, so a single Monday session of seven movements printed
-            // "Sessions 7 /4" directly above a WeekDots strip showing one day
-            // filled. Labelled the way app/(client)/consistency.tsx labels the
-            // same quantity.
-            { label: 'Days Trained', value: logKnown ? fig(wk.days) : fig(null), unit: logKnown ? `/${goalDays}` : undefined },
-            // `(0).toLocaleString()` is the string "0" — a tonnage stated as
-            // measured, with no hint that nothing was measured.
-            // Tonnage is a weight like any other — a client who loads the bar
-            // in pounds should be told what they shifted in pounds. Rounded to
-            // a whole unit either way, because nobody reads a week's volume to
-            // the tenth.
-            { label: 'Lifted', value: logKnown ? Math.round(wu === 'lb' ? kgToLb(wk.volumeKg) : wk.volumeKg).toLocaleString() : fig(null), unit: logKnown ? wu : undefined },
-            // Records set THIS WEEK. The all-time board is a different
-            // question — see `newPrs` above.
+          <SectionHead title="Daily Snapshot" note="Your progress" onPress={() => router.push('/(client)/scans')} />
+          <ListRow
+            icon="heart"
+            title={readiness != null ? `Readiness · ${readiness.score}/100` : 'Readiness'}
+            // What the number is made of, said out loud, EVERY time — not only
+            // when a signal is missing. An 83 built from sleep and training
+            // alone and an 83 built from all three are different claims. The
+            // direction goes FIRST, and only in the 'scored' state: the other
+            // three states reach the reader as Flags below or are silent on
+            // purpose (see src/lib/readinessDirection.ts). Never render
+            // direction.delta as a number here — it is null in every state
+            // but 'scored', and `detail` is the figure.
             //
-            // Two reads, not one. `prTimeline` prices a bodyweight set from
-            // `c.weightSeries`, so a member whose scans read failed loses every
-            // pull-up and dip from the count while their log comes back whole —
-            // the same hole app/(client)/report.tsx names on its own PR figure.
-            { label: 'New PRs', value: logKnown && scansWhole ? fig(newPrs) : fig(null) },
-          ]} />
-          {/* The week's tonnage is a floor whenever a bodyweight set in it had
-              no weigh-in to price it against. Every other screen that prints a
-              tonnage says so; this one printed the figure bare. */}
-          {logKnown && weekVolNote ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{weekVolNote}</Text>
+            // Six different reasons there is no score, and they ask the reader
+            // for six different things; which one it is, is decided in
+            // src/lib/readinessBreakdown.ts and tested there.
+            note={readiness != null
+              ? `${direction?.state === 'scored'
+                  ? direction.detail.charAt(0).toUpperCase() + direction.detail.slice(1) + '. '
+                  : ''}${readiness.tip} ${readinessMadeOf(readiness)}.`
+              : breakdown.absence ?? undefined}
+            tone={readinessColor}
+            onPress={() => router.push('/(client)/recovery')}
+          />
+          {/* What the score could not see, before the reader acts on it. A
+              source that did not answer can only ever have FLATTERED this
+              number — every signal readiness scores counts against the member
+              — so a night a dead WHOOP token hid is a night that could only
+              have pulled the figure down. The score still stands, because the
+              nights that were recorded are real, but it is a shorter set than
+              it looks and this is where that is said. */}
+          {breakdown.caveats.map((cv) => (
+            <Flag key={cv} tone={t.warn} style={{ marginTop: sp.sm }}>{cv}</Flag>
+          ))}
+          {(showWeek(facts) || showFuel(facts)) ? (
+            <View style={{ marginTop: sp.lg }}>
+              <KpiRow
+                onPress={(item) => { if (item.route) router.push(item.route as any); }}
+                items={[
+                  // Days, against a goal counted in days — the same pair the
+                  // card at the top draws, and for the same reason.
+                  ...(showWeek(facts) ? [{
+                    label: 'Training',
+                    value: logKnown ? fig(wk.days) : fig(null),
+                    unit: logKnown ? `/${goalDays} days` : undefined,
+                    delta: !logKnown ? 'log not read in full'
+                      : wk.days >= goalDays ? 'goal met this week'
+                      : `${goalDays - wk.days} more this week`,
+                    good: logKnown && wk.days >= goalDays,
+                    route: '/(client)/trends',
+                  }] : []),
+                  // `dayCal.net`, the one calorie sum the Meals tab and the
+                  // Food Log also read — never a kcalLeft defaulted to zero.
+                  // Non-null exactly when `macros` is, which `showFuel` has
+                  // already checked.
+                  ...(showFuel(facts) && dayCal ? [{
+                    label: 'Fuel',
+                    value: num(Math.abs(dayCal.net)),
+                    unit: 'kcal',
+                    delta: dayCal.net >= 0 ? 'left today' : 'over today’s target',
+                    route: '/(client)/nutrition',
+                  }] : []),
+                  // "of 8 glasses" was a platform constant read as this
+                  // client's own target. With no goal set there is no
+                  // denominator to print — the count stands on its own and
+                  // the tap lands on the screen that sets one, which is also
+                  // where the add and remove controls now live.
+                  {
+                    label: 'Water',
+                    value: fig(water),
+                    unit: water === 1 ? 'glass' : 'glasses',
+                    delta: waterGoal != null ? `of ${waterGoal} a day` : 'set a daily goal',
+                    good: waterGoal != null && water >= waterGoal,
+                    route: '/(client)/habits',
+                  },
+                ]}
+              />
+            </View>
           ) : null}
-          <WeekDots done={logKnown ? wk.days : 0} />
         </Section>
-        </>) : null}
 
         <Rule />
 
