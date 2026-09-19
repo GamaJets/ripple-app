@@ -50,12 +50,13 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, ListRow, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, grown, type as ty, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ListRow, PageHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { deleteRefusedLine } from '../../src/lib/templateLibrary';
+import { templateUsage } from '../../src/lib/templateUsage';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { useSettings } from '../../src/ui/settings';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
@@ -64,6 +65,7 @@ import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
+import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
 // The coach's own standing cue for a movement, written once and carried into
 // every programme. A cue PREFILLS an empty note and NEVER touches a written
 // one — src/lib/coachCues.ts holds that rule and is the only place it is
@@ -133,7 +135,7 @@ import {
 import { useAuth } from '../../src/ui/auth';
 import { notifySuccess } from '../../src/ui/haptics';
 import { WEEK_DAYS, WEEK_DAY_NAMES } from '../../src/lib/weekStart';
-import { ProgramBuilderFlow } from '../../src/ui/coach/ProgramBuilderFlow';
+import { ProgramBuilderFlow, ProgramWorkflowFooter } from '../../src/ui/coach/ProgramBuilderFlow';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { useBackTo } from '../../src/ui/backTo';
 import { backDestination } from '../../src/lib/backTo';
@@ -144,6 +146,9 @@ import { DateSheet } from '../../src/ui/DateSheet';
  *  new day is offered in and the order Cycle Day walks, so the builder and the
  *  client's own week strip read the same way round. */
 const DAYS = WEEK_DAYS;
+/** How many named programmes the shortcut row draws before it hands over to
+ *  the library. A row is a shortcut while it is shorter than the list. */
+const SHORTCUT_CAP = 12;
 /** One week of a block, as this screen edits it. The mirror of `ProgramWeek`
  *  in src/lib/programs.ts over the builder's own `BDay`, which carries a draft
  *  key and a unit the coach typed in that no stored programme needs. */
@@ -375,7 +380,7 @@ export default function Builder() {
   // one BY NAME. "8 of 12 saved" tells a coach something is wrong and nothing
   // about which four or what to do — see src/lib/bulkActions.ts, which is where
   // that arithmetic already lives and is not re-implemented here.
-  const { getProgram, assignProgramTo, clearProgram, clearProgramFrom, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
+  const { programs, getProgram, assignProgramTo, clearProgram, clearProgramFrom, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
   const { templates, saveTemplateTo, removeTemplateFrom, isStarter, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
   /**
    * The coach's OWN saved templates, which is what "3 saved" claims to count.
@@ -388,6 +393,29 @@ export default function Builder() {
    * still there, and it would have said yes either way.
    */
   const savedCount = templates.filter((tpl) => !isStarter(tpl.id)).length;
+  /**
+   * The coach's named programmes, in the order the shortcut row draws them.
+   *
+   * MOST USED first when that can be said — `templateUsage` counts who is
+   * training each one off reads this screen already holds, and refuses to
+   * produce a number under anything but a whole read of `assigned_programs`.
+   * When it refuses, the order is the library's own, which is newest first
+   * (src/lib/templateLibrary.ts), and the row's heading says which of the two
+   * it is: an order with no stated rule reads as random.
+   *
+   * The coach's OWN only. The three built-in starters are in the sheet behind
+   * the Templates row; a shortcut row that led with programmes the coach never
+   * wrote would be the app's library, not theirs.
+   */
+  const usage = useMemo(() => templateUsage(templates, programs, programStatus), [templates, programs, programStatus]);
+  const shortcuts = useMemo(() => {
+    const own = templates.filter((tpl) => !isStarter(tpl.id));
+    if (usage.withheld) return own;
+    const used = (id: string) => (usage.byId[id]?.on.length ?? 0) + (usage.byId[id]?.from.length ?? 0);
+    // Stable: equally used programmes keep the library's newest-first order.
+    return own.map((tpl, i) => ({ tpl, i })).sort((a, b) => used(b.tpl.id) - used(a.tpl.id) || a.i - b.i).map((x) => x.tpl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templates, usage]);
   const router = useRouter();
 
   const params = useLocalSearchParams();
@@ -512,6 +540,13 @@ export default function Builder() {
    * it starts from, straight over the draft it is about to read.
    */
   const [draftLoaded, setDraftLoaded] = useState(false);
+  /** The draft read has ANSWERED — restored, refused, failed or not attempted.
+   *  `draftLoaded` cannot stand in for this: it stays false for ever after a
+   *  failed read, on purpose, so that the autosave never writes over bytes
+   *  nobody saw. What waits on this is the template a coach tapped in the
+   *  library, which must not land before the draft it might replace has had
+   *  the chance to arrive — see `startFromTemplate`. */
+  const [draftSettled, setDraftSettled] = useState(false);
   const [pickerDay, setPickerDay] = useState<number | null>(null);
   const coachEx = useCoachExercises();
   /**
@@ -849,6 +884,35 @@ export default function Builder() {
   };
 
   /**
+   * ── Whether what is in the builder exists anywhere else ───────────────────
+   *
+   * `pristine` is the builder as it stood the last time its contents were
+   * somewhere durable: just loaded from a client's programme or a template,
+   * just saved as a template, just assigned to everybody it was sent to. A
+   * builder that still matches it can be replaced on one tap, because nothing
+   * is lost. One that does not is the coach's unsaved work, and the one-tap
+   * programme shortcuts ask before loading over it.
+   *
+   * A snapshot and not `programSignature`: the signature deliberately ignores
+   * weights and notes, and a coach who loaded a template and spent ten minutes
+   * typing loads into it has work the signature cannot see.
+   *
+   * A restored draft is never pristine — it is by definition work that is
+   * nowhere but this phone — so the restore does not bump the nonce, and the
+   * snapshot it is compared against is the empty builder the screen mounted
+   * with.
+   *
+   * Taken in an effect keyed on a NONCE rather than on the state itself: the
+   * setters in `loadFrom` land together on the next render, which is the first
+   * moment the loaded programme can be read back in the builder's own shape,
+   * and a load that happened to change nothing would never fire an effect
+   * keyed on the values.
+   */
+  const pristine = useRef<string | null>(null);
+  const [savedNonce, setSavedNonce] = useState(0);
+  const markSaved = () => setSavedNonce((n) => n + 1);
+
+  /**
    * Fill the builder from a programme.
    *
    * `loadKg` and `note` are carried across, and were not. Both are written per
@@ -886,11 +950,18 @@ export default function Builder() {
     // programme that may have two weeks in it.
     setWeekIdx(0);
     setSeededFor(from);
-    // Every day is a different day now, so an index that was folded names
+    // Every day is a different day now, so an index that was opened names
     // somebody else's Wednesday. Same reasoning as `removeDay`.
-    setFoldedDays(foldsForNewProgramme());
+    setOpenDays(foldsForNewProgramme());
+    setOpenEx(null);
+    // A programme with a week in it opens AS that week — its day rows, every
+    // one of them shut. With the editor left folded a coach who tapped a
+    // client saw seven circles and three rows and had to find the week; with
+    // every day open they saw forty exercises. The rows are the middle.
+    if (programWeeks(p).some((w) => w.days.length > 0)) setEditorOpen(true);
+    markSaved();
   };
-  const clearBuilder = () => { setTitle(''); setNote(''); setBlockWeeks([{ days: [] }]); setWeekIdx(0); setSeededFor(null); setFoldedDays(foldsForNewProgramme()); };
+  const clearBuilder = () => { setTitle(''); setNote(''); setBlockWeeks([{ days: [] }]); setWeekIdx(0); setSeededFor(null); setOpenDays(foldsForNewProgramme()); setOpenEx(null); markSaved(); };
 
   // Load the client's current program (assigned if any, else their auto plan)
   // whenever the selected client changes — but only once we actually know what
@@ -917,6 +988,42 @@ export default function Builder() {
   // asking the block rather than the week wherever the question is "is there
   // work here", not just where somebody happened to look.
   const hasDraft = blockWeeks.some((w) => w.days.length > 0) || !!title.trim() || !!note.trim();
+  useEffect(() => {
+    pristine.current = JSON.stringify({ title, note, blockWeeks });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedNonce]);
+  /** Work in the builder that is nowhere else. Asked at the moment of a tap
+   *  and not on every render: it serialises the whole block. */
+  const builderDirty = () => hasDraft && JSON.stringify({ title, note, blockWeeks }) !== pristine.current;
+  /**
+   * Load one of the coach's saved programmes into the builder — the one-tap
+   * shortcut, the Start From a Template sheet, and the library's own rows all
+   * land here.
+   *
+   * Asked for as "create shortcuts to named programmes you have created so you
+   * don't have to scroll through". One tap is the point, so it IS one tap
+   * whenever the builder holds nothing that would be lost. When it holds
+   * unsaved work the tap asks first, names what is about to be replaced, and
+   * says where the way to keep it is. It used to replace without asking from
+   * all three doors, on the one screen where the standing fear is losing work.
+   *
+   * `from` nobody: a template is the coach's own, not a client's programme,
+   * which is what makes the notice under Programme tell the truth when a
+   * client is then picked.
+   */
+  const startFromTemplate = (tpl: { name: string; program: Program }) => {
+    const land = () => { loadFrom(tpl.program, null); setTplName(tpl.name); setTplPick(false); };
+    if (!builderDirty()) { land(); return; }
+    Alert.alert(
+      'Replace What Is in the Builder?',
+      `“${tpl.name}” loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first — the button is at the foot of the screen.`,
+      [
+        { text: 'Keep What I Have', style: 'cancel' },
+        { text: 'Replace It', style: 'destructive', onPress: land },
+      ],
+    );
+  };
+
   /**
    * Whether the builder may fill itself from the selected client, and what to
    * say when it may not. The rule, and the twenty minutes of lost work behind
@@ -958,14 +1065,24 @@ export default function Builder() {
   const loadedTplRef = useRef<string | null>(null);
   useEffect(() => {
     const tid = params.templateId as string;
-    if (!tid || loadedTplRef.current === tid) return;
+    // Keyed on the tap as well as the template — see `openInBuilder` in
+    // app/(trainer)/templates.tsx. A link with no `at` (every older caller)
+    // behaves exactly as before: once per template.
+    const ask = tid ? `${tid}:${typeof params.at === 'string' ? params.at : ''}` : '';
+    if (!tid || loadedTplRef.current === ask) return;
+    // Not before the stored draft has answered. This used to load on mount,
+    // ahead of the async draft read — so the restore found a builder "in use",
+    // refused, and the autosave then wrote the template over the coach's
+    // stored draft. The template waits, and then asks like every other door.
+    if (!draftSettled) return;
     const tpl = templates.find((x) => x.id === tid);
     // A template is the coach's own work, not a client's programme, so it is
-    // seeded `from` nobody — which is what makes the notice below tell the
-    // truth when a client is then picked.
-    if (tpl) { loadedTplRef.current = tid; loadFrom(tpl.program, null); setTplName(tpl.name); }
+    // seeded `from` nobody — see `startFromTemplate`. Marked as handled
+    // whatever the coach answers: "Keep What I Have" is an answer, and asking
+    // again on every render is not respecting it.
+    if (tpl) { loadedTplRef.current = ask; startFromTemplate(tpl); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.templateId, templates.length]);
+  }, [params.templateId, params.at, templates.length, draftSettled]);
 
   /* ── the coach's saved cues ───────────────────────────────────────────────
    *
@@ -1100,11 +1217,17 @@ export default function Builder() {
    * `undefined` and never '' when there is no cue — an empty string stored as
    * a note draws an empty bubble under the movement in the client's app.
    */
-  const addExercise = (di: number, name: string, group: string) =>
+  const addExercise = (di: number, name: string, group: string) => {
+    // Minted out here so the new row can be opened by it: a movement arrives
+    // as 3 × 10-12 with no weight, which is a placeholder and not a
+    // prescription, and the next thing a coach does is write the real one.
+    const key = nextKey();
+    setOpenEx(key);
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: [...d.exercises, {
-      key: nextKey(), name, group, sets: 3, reps: '10-12',
+      key, name, group, sets: 3, reps: '10-12',
       note: prefillNote(undefined, cueFo(name)),
     }] } : d)));
+  };
   /**
    * Fill every EMPTY note in this week from the saved cues, and say how many.
    *
@@ -1317,38 +1440,72 @@ export default function Builder() {
 
 
   /**
-   * Days the coach has folded away, by index.
+   * Days the coach has OPENED, by index. Everything else is shut.
    *
    * A five-day programme is fifteen or twenty exercises, each with its own
    * sets, reps and weight row — so reaching Friday means scrolling past all of
-   * Monday to Thursday. Folding is per day rather than an accordion that opens
+   * Monday to Thursday. Opening is per day rather than an accordion that opens
    * one at a time: a coach comparing Push against Pull wants both open, and a
    * screen that closes the thing you were reading because you opened another is
    * its own annoyance.
    *
+   * ── why the map turned over ──────────────────────────────────────────────
+   * This was `foldedDays`, true meaning SHUT, so a missing key meant open and
+   * every programme loaded with every day of it spread down the page. Reported
+   * from a coach's phone against exactly that: "When going onto a clients
+   * programme, all of the exercises are displayed so it can feel cluttered when
+   * you first open it up." The week now opens as its day rows — the day, its
+   * focus, "N exercises · M sets" — and a day is read by opening it. Nothing is
+   * remembered between programmes on purpose: a map keyed by position names a
+   * different Wednesday in every programme, so the only default that cannot
+   * open the wrong day is shut.
+   *
    * Keyed by INDEX, so the map has to be re-keyed by every edit that MOVES a
    * day and thrown away by every edit that replaces the list. Both are in
-   * src/lib/foldedDays.ts and both are called: `removeDay` shifts the folds
+   * src/lib/foldedDays.ts and both are called: `removeDay` shifts the entries
    * past the deletion, and `loadFrom`, `clearBuilder` and the draft restore
-   * start over. This comment used to say the map was reset on removal and
-   * nothing did it — the visible cost was that deleting a day above a folded
-   * one collapsed the wrong day.
+   * start over. That module was written for the folded sense and is used here
+   * unchanged, because what it does is sense-free: it re-keys the TRUE entries
+   * of a sparse index map and drops the rest, and its empty map is "nothing
+   * marked" — which used to be every day open and is now every day shut.
    */
-  const [foldedDays, setFoldedDays] = useState<Record<number, boolean>>({});
+  const [openDays, setOpenDays] = useState<Record<number, boolean>>({});
   // The advanced day/exercise editor opens only when asked for — from the
   // Exercises row or a day circle — as the implementation brief asks. The
   // rows above it carry truthful counts, so a coach can see the block's shape
   // without the four-thousand-line editor under it.
   const [editorOpen, setEditorOpen] = useState(false);
-  const toggleDay = (di: number) => setFoldedDays((p) => ({ ...p, [di]: !p[di] }));
+  const toggleDay = (di: number) => setOpenDays((p) => ({ ...p, [di]: !p[di] }));
+  /**
+   * The ONE exercise whose prescription is open, by key, or null.
+   *
+   * An open day used to draw every movement in it at full height — sets, reps,
+   * weight, effort, tempo, rest, set type, note and cue, six times over — so
+   * editing one exercise meant reading past the editors of all the others. A
+   * row is now the movement, its picture and one line of what is prescribed;
+   * the editor belongs to whichever row the coach opened, and opening another
+   * closes it. One at a time HERE, unlike the days above, because nobody
+   * compares two weight boxes side by side and everybody loses their place in
+   * a day that is four screens tall.
+   *
+   * By key and not by index: the rows reorder, and an index would hand the
+   * open editor to whatever movement was dragged into its slot.
+   */
+  const [openEx, setOpenEx] = useState<string | null>(null);
+  /** Exercises whose less-used fields — effort, share of a max, tempo, set
+   *  type, the saved cue — are showing. Absent means "decide from the data":
+   *  an exercise that already CARRIES one of them opens with them visible, so
+   *  a prescription is never hidden behind a control the coach has to guess
+   *  is there. See `advancedShown`. */
+  const [advOpen, setAdvOpen] = useState<Record<string, boolean>>({});
   /** A day circle tapped while that day is in the week: open the editor at
-   *  it, or — once the editor is up — fold and unfold it, which is what the
-   *  editor's own fold control does. Never a removal: this is the one screen
+   *  it, or — once the editor is up — open and shut it, which is what the
+   *  day row's own control does. Never a removal: this is the one screen
    *  where the standing fear is losing work, and a circle that empties a day
    *  on a single tap is that fear made into a control. Taking a day out stays
    *  where it is confirmed, in the editor. */
   const openDay = (di: number) => {
-    if (!editorOpen) { setEditorOpen(true); if (foldedDays[di]) toggleDay(di); } else toggleDay(di);
+    if (!editorOpen) { setEditorOpen(true); if (!openDays[di]) toggleDay(di); } else toggleDay(di);
   };
 
   /**
@@ -1399,19 +1556,20 @@ export default function Builder() {
     // the same note; it is the same trap here.
     draftArmed.current = false;
     setDraftLoaded(false);
+    setDraftSettled(false);
     // No account and nothing of this account's on the device: hold. A null uid
     // is not a sign-out — auth-js emits a null session when a token refresh
     // fails on a basement wifi and restores the coach on the next tick — and
     // blanking a builder full of unsaved work on that is worse than the bug
     // this effect fixes. Read nothing, write nothing, leave it alone.
-    if (step.do === 'hold') return;
+    if (step.do === 'hold') { setDraftSettled(true); return; }
     // The account is gone and the device already has what is on screen. Take it
     // off the screen: this is a TAB, expo-router keeps tab screens mounted, and
     // an `href: null` screen mounts once and is never torn down — so a
     // screen-local `useState` outlives a sign-out with no storage read involved
     // at all. The STORED bytes stay: they are the departing coach's work under
     // the departing coach's key, unreadable to whoever signs in next.
-    if (step.do === 'forget') { draftFor.current = null; clearBuilder(); return; }
+    if (step.do === 'forget') { draftFor.current = null; clearBuilder(); setDraftSettled(true); return; }
     // A different coach. Wiped before the read lands rather than left for the
     // restore to overwrite, because the restore is allowed to REFUSE — and a
     // refusal that left the previous coach's programme sitting in this coach's
@@ -1427,6 +1585,7 @@ export default function Builder() {
         // stays false, so the autosave never writes over bytes we failed to
         // read. The coach's typing is unaffected on screen; it is simply not
         // kept, and the next launch reads the real bytes again.
+        if (live) setDraftSettled(true);
         return;
       }
       if (!live) return;
@@ -1444,10 +1603,12 @@ export default function Builder() {
         // what looks like their week with the cues gone.
         setBlockWeeks(decided.restore.weeks);
         setWeekIdx(0);
+        // As its day rows, the way a loaded programme opens — see `loadFrom`.
+        if (decided.restore.weeks.some((w) => w.days.length > 0)) setEditorOpen(true);
         // The draft carries the days; it does not carry which of them were
         // folded, so nothing may claim to know. Reset rather than left at
         // whatever the empty builder happened to be holding.
-        setFoldedDays(foldsForNewProgramme());
+        setOpenDays(foldsForNewProgramme());
         // A restored draft is the coach's OWN work, whoever happens to be
         // selected — so it is seeded from nobody, and the builder says so
         // rather than presenting it as somebody's current programme.
@@ -1455,6 +1616,7 @@ export default function Builder() {
       }
       draftArmed.current = true;
       setDraftLoaded(true);
+      setDraftSettled(true);
     })();
     return () => { live = false; };
     // `draftUid` as well as the key it composes to: two different non-accounts
@@ -1514,22 +1676,28 @@ export default function Builder() {
 
   const patchEx = (di: number, key: string, patch: Partial<BEx>) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.map((e) => (e.key === key ? { ...e, ...patch } : e)) } : d)));
-  const addDay = () => setDays((ds) => {
-    const used = new Set(ds.map((d) => d.day));
-    const free = DAYS.find((d) => !used.has(d)) ?? DAYS[0];
-    return [...ds, { day: free, focus: 'Training', exercises: [] }];
-  });
+  const addDay = () => {
+    // Open, for the reason `addDayOn` below gives: days are shut unless the
+    // coach opened them, and the one they have just asked for is the one they
+    // are about to write.
+    setOpenDays((p) => ({ ...p, [days.length]: true }));
+    setDays((ds) => {
+      const used = new Set(ds.map((d) => d.day));
+      const free = DAYS.find((d) => !used.has(d)) ?? DAYS[0];
+      return [...ds, { day: free, focus: 'Training', exercises: [] }];
+    });
+  };
   /** The board's day circle, tapped while that day is NOT in the week: add a
    *  session on exactly that weekday and open the editor at it. `addDay`
    *  above picks the first free weekday for the editor's own Add Training Day
    *  control; this one is told which day the coach pointed at. The new day
-   *  lands at the end of the list, so its fold slot is cleared by index
-   *  before it renders — the map is keyed by position and a stale `true`
-   *  there would open the editor on a day that had shut itself. */
+   *  lands at the end of the list and is marked open by index before it
+   *  renders: the coach pointed at this day in order to write it, and a new
+   *  day arriving shut would read as the tap having done nothing. */
   const addDayOn = (day: string) => {
     const at = days.length;
     setDays((ds) => [...ds, { day, focus: 'Training', exercises: [] }]);
-    setFoldedDays((p) => ({ ...p, [at]: false }));
+    setOpenDays((p) => ({ ...p, [at]: true }));
     setEditorOpen(true);
   };
   const cycleDay = (di: number) => setDays((ds) => ds.map((d, i) => {
@@ -1537,9 +1705,10 @@ export default function Builder() {
     const idx = DAYS.indexOf(d.day);
     return { ...d, day: DAYS[(idx + 1) % 7] };
   }));
-  // The fold map is re-keyed with the list, not left behind. `foldedDays` is
-  // keyed by POSITION, and a `filter` shifts every day after the removed one
-  // down by an index — so deleting Monday while Tuesday was folded left index 1
+  // The open-day map is re-keyed with the list, not left behind. `openDays`
+  // (it was `foldedDays` when this was found, and the fault is the same in
+  // either sense) is keyed by POSITION, and a `filter` shifts every day after
+  // the removed one down by an index — so deleting Monday while Tuesday was folded left index 1
   // marked folded and Wednesday sitting at index 1, collapsed, with Tuesday
   // open. On the one screen in this app where the standing fear is losing work,
   // a day that has shut itself reads as a day whose exercises are gone. The
@@ -1547,7 +1716,7 @@ export default function Builder() {
   // this is the code that does it. See src/lib/foldedDays.ts for the re-key.
   const removeDay = (di: number) => {
     setDays((ds) => ds.filter((_, i) => i !== di));
-    setFoldedDays((p) => foldsAfterRemoval(p, di));
+    setOpenDays((p) => foldsAfterRemoval(p, di));
   };
 
   /** Exercises in the WEEK ON SCREEN. Used only where the sentence is about
@@ -1575,7 +1744,7 @@ export default function Builder() {
       // The fold map is keyed by day POSITION inside the week on screen, and
       // the week on screen is about to be a different one — see
       // src/lib/foldedDays.ts for why a stale map is not a stale list.
-      setFoldedDays(foldsForNewProgramme());
+      setOpenDays(foldsForNewProgramme());
     };
     const warn = weekEditWarning(edit);
     if (!warn) { land(); return; }
@@ -1764,9 +1933,13 @@ export default function Builder() {
   const thumbRows = useMemo(() => {
     const inDays = days.flatMap((d) => d.exercises.map((e) => rowFor(e.name))).filter(Boolean);
     const inPicker = catShownList.slice(0, catShown);
-    return [...inDays, ...inPicker] as { thumbPath: string | null; source?: string | null }[];
+    // The coach's own names too: most of them ARE catalogue movements the
+    // coach has used before, and they were the one list in the picker with no
+    // picture beside any of them.
+    const inOwn = ownShown.map((x) => rowFor(x.name)).filter(Boolean);
+    return [...inDays, ...inOwn, ...inPicker] as { thumbPath: string | null; source?: string | null }[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days, catByName, catShownList, catShown]);
+  }, [days, catByName, catShownList, catShown, ownShown.length, pickTerm]);
   const thumbFor = useCatalogueThumbs(thumbRows);
 
   // A fresh search starts at the top of the catalogue rather than 300 rows into
@@ -1951,7 +2124,7 @@ export default function Builder() {
     setSaveOpen(false); setTplName('');
     // The work is on the server now, so the on-device draft has nothing left
     // to protect. Only on a counted save — see clearDraft.
-    if (saved.ok) clearDraft();
+    if (saved.ok) { clearDraft(); markSaved(); }
     setTplSaveFailed(saved.ok ? null : `“${nm}” is not in your library. ${saved.why ?? 'The server did not say why.'} Nothing has been lost from the builder — try saving it again.`);
     Alert.alert(
       saved.ok ? 'Template saved' : 'Not saved',
@@ -2144,7 +2317,7 @@ export default function Builder() {
     // programme is durable somewhere other than this phone and the draft has
     // nothing left to protect. Kept on any partial outcome, because the draft
     // is then the only copy of what did not land.
-    if (!outstanding.length) clearDraft();
+    if (!outstanding.length) { clearDraft(); markSaved(); }
 
     const parts = [report.body];
     // Named, never silently dropped. A coach who believes four people got a
@@ -2267,6 +2440,32 @@ export default function Builder() {
     );
   };
 
+  /* ── what the footer says ────────────────────────────────────────────────
+     Composed here, off the same values the sections act on, and handed to the
+     footer as sentences. WHO is the recipients when anybody is ticked, because
+     that is who the button writes to; before that it is whoever the builder is
+     looking at, said as exactly that. First names, and a count past three: the
+     bar is one line on a phone. */
+  const [footH, setFootH] = useState(112);
+  const footWho = (() => {
+    const names = pickedIds.map((id) => roster.find((r) => r.id === id)?.name.split(' ')[0]).filter((n): n is string => !!n);
+    if (pickedIds.length) return names.length === pickedIds.length && names.length <= 3 ? `For ${listNames(names)}` : `For ${num(pickedIds.length)} clients`;
+    return client ? `Looking at ${client.name.split(' ')[0]} · nobody ticked to receive it` : 'Your own draft · nobody chosen yet';
+  })();
+  const footWhere = (() => {
+    const week = blockWeeks.length > 1 ? `${weekLabel(blockWeeks[weekIdx], weekIdx + 1)} of ${num(blockWeeks.length)}` : null;
+    const day = days.find((d) => d.exercises.some((x) => x.key === openEx));
+    const ex = day?.exercises.find((x) => x.key === openEx);
+    const editing = day && ex ? `${WEEK_DAY_NAMES[DAYS.indexOf(day.day)] ?? day.day} · ${movement(ex.name)}` : null;
+    return [week, editing].filter(Boolean).join(' · ') || null;
+  })();
+  // A count only once there is something to count: over an empty builder the
+  // button's own label already says what is missing.
+  const footOutstanding = blockExercises === 0 ? null
+    : !injuryGate.allowed && injuryGate.outstanding.length ? 'Injuries to read before this can go'
+    : review.findings.length ? `${num(review.findings.length)} check${s(review.findings.length)} to read`
+    : 'No listed findings';
+
   // One field treatment for the whole screen: surface2 fill, no border.
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const sheet = { backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 };
@@ -2279,27 +2478,77 @@ export default function Builder() {
           the drag both claim the same vertical movement, and the list scrolls
           under the finger while the row tries to follow it — which reads as
           the drag being broken rather than as two gestures competing. */}
-      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 112 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
+      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: footH + sp.lg }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header: the board's compact opening ──────────────────────────
-            A round back control at the leading edge, the title centred, and a
-            round Templates control at the trailing edge — the same three
-            things the kit's ScreenHeader carries, laid out the way board page
-            5 draws them rather than left-aligned under an eyebrow. Built by
-            hand because the kit has no centred form yet and this screen must
-            not fork the kit to get one. The leading slot is reserved at the
-            round Ghost's 38pt even when the back control is absent (this is
-            the Programs tab's own root, with nothing to go back to), so the
-            title is centred on the page and not on whatever is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ width: 38, height: 38 }}>
-            {cameFrom ? <Ghost icon={BACK_ICON} onPress={goBack} a11yLabel="Back" /> : null}
+            The kit's `PageHead` — a round back control at the leading edge,
+            the title centred, a round Templates control at the trailing edge,
+            the way board page 5 draws it. It was built by hand here while the
+            kit had no centred form; it has one now, and this is it. The
+            leading slot is passed `null` rather than left to default when
+            there is nothing to go back to (this is the Programs tab's own
+            root), which draws a blank of the control's width so the title is
+            centred on the page and not on whatever is left of it.
+
+            The line under the title is the review's first requirement — who
+            this is for, said before anything else and again in the footer
+            that stays on screen. */}
+        <PageHead title="Build Program"
+          subtitle={client ? `Building for ${client.name}` : 'Your own draft — nobody chosen yet'}
+          leading={cameFrom ? undefined : null} onBack={goBack}
+          trailing={<Ghost icon="grid" onPress={() => router.push('/(trainer)/templates')} a11yLabel="Templates" />} />
+
+        {/* ── the coach's named programmes, one tap each ───────────────────
+            Reported from a coach's phone: "Is there a way again to create
+            shortcuts to named programmes you have created so you don't have
+            to scroll through." The library was three taps and a scroll away —
+            the Templates section, Start From a Template, then the sheet — for
+            the thing a working coach does most: start from the block they
+            always start from.
+
+            Nothing is drawn for a coach who has saved nothing, so a first
+            session still opens the way the board draws it. Capped, with the
+            whole library as the last chip, because this is a shortcut row and
+            a row of forty is the scroll it was asked to replace. */}
+        {shortcuts.length ? (
+          <View style={{ marginTop: sp.lg }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.sm, marginBottom: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Your Programmes</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{usage.withheld ? 'Newest first' : 'Most used first'}</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg }}>
+              {shortcuts.slice(0, SHORTCUT_CAP).map((tpl) => {
+                const dc = tpl.program.days.length;
+                const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
+                const weeks = programWeeks(tpl.program).length;
+                const on = usage.withheld ? 0 : (usage.byId[tpl.id]?.on.length ?? 0);
+                const shape = `${weeks > 1 ? `${num(weeks)} weeks · ` : ''}${num(dc)} day${s(dc)} · ${num(ec)} exercise${s(ec)}`;
+                return (
+                  <Pressable key={tpl.id} onPress={() => startFromTemplate(tpl)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Load ${tpl.name} into the builder. ${shape}${on ? `. ${num(on)} training it now` : ''}.`}
+                    style={{ minHeight: MIN_TARGET, maxWidth: 220, justifyContent: 'center',
+                             paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+                             borderRadius: radius.md, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring }}>
+                    <Text numberOfLines={2} style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{tpl.name}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {shape}{on ? ` · ${num(on)} training it` : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              {shortcuts.length > SHORTCUT_CAP ? (
+                <Pressable onPress={() => router.push('/(trainer)/templates')}
+                  accessibilityRole="button" accessibilityLabel={`All ${num(shortcuts.length)} of your programmes, in the template library`}
+                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+                           borderRadius: radius.md, backgroundColor: t.surface2 }}>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{`All ${num(shortcuts.length)}`}</Text>
+                </Pressable>
+              ) : null}
+            </ScrollView>
           </View>
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, minWidth: 0, textAlign: 'center' }}>
-            Build Program
-          </Text>
-          <Ghost icon="grid" onPress={() => router.push('/(trainer)/templates')} a11yLabel="Templates" />
-        </View>
+        ) : null}
 
         {/* The programme's name, first — it is the template's name and the
             name every client sees over their week. */}
@@ -2329,7 +2578,7 @@ export default function Builder() {
             const selected = di >= 0;
             const sessions = days.filter((d) => d.day === abbr);
             const exercises = sessions.reduce((a, d) => a + d.exercises.length, 0);
-            const open = selected && editorOpen && !foldedDays[di];
+            const open = selected && editorOpen && !!openDays[di];
             const spoken = selected
               ? `${WEEK_DAY_NAMES[i]}, in the week${sessions.length > 1 ? `, ${num(sessions.length)} sessions` : ''}, ${exercises === 1 ? '1 exercise' : `${num(exercises)} exercises`}`
               : `${WEEK_DAY_NAMES[i]}, not in the week`;
@@ -2353,13 +2602,19 @@ export default function Builder() {
             of two or more, see src/lib/setGroups.ts. */}
         <Section>
           <ListRow icon="dumbbell" title="Exercises"
-            note={blockExercises === 0 ? 'None yet — open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'editor open below' : 'tap to open the editor'}`}
+            note={blockExercises === 0 ? 'None yet — open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'the week is open below, a row a day' : 'tap to show the week, a row a day'}`}
             onPress={() => setEditorOpen((o) => !o)} />
           <ListRow icon="swap" title="Supersets"
             note={(() => { const n = days.reduce((acc, d) => acc + d.exercises.filter((_, i) => isGrouped(d.exercises, i)).length, 0); return n === 0 ? 'None in this week' : `${num(n)} grouped ${n === 1 ? 'exercise' : 'exercises'} this week`; })()}
             onPress={() => setEditorOpen(true)} />
-          <ListRow icon="grid" title="Templates" note="Start from one you saved, or save this week as one"
-            onPress={() => router.push('/(trainer)/templates')} />
+          {/* A START SOURCE, which is what the review asks a template to be on
+              this screen: the row opens the sheet that loads one into the
+              builder. It used to push the library — a second screen with its
+              own assign flow, which is a parallel editor by another name. The
+              library is still one tap away, from the head and from the sheet. */}
+          <ListRow icon="grid" title="Templates"
+            note={tplStatus === 'ready' && savedCount ? `Start from one of your ${num(savedCount)}, or a starter` : 'Start from one you saved, or a starter'}
+            onPress={() => setTplPick(true)} />
         </Section>
 
         {/* ── the block at a glance, under the rows ────────────────────────
@@ -2499,7 +2754,7 @@ export default function Builder() {
         <Section>
           <SectionHead title="Templates" note={tplStatus === 'ready' && savedCount ? `${num(savedCount)} saved` : undefined} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-            Save this week to reuse it with anybody, or start from one you have already built.
+            Start from one you have already built. To keep this week for reuse, Save as Template is beside Assign at the foot of the screen — it goes to your library and reaches nobody.
           </Text>
 
           {/* The starters are the problem, not the consolation. Three of them
@@ -2517,8 +2772,12 @@ export default function Builder() {
             <Notice tone={t.crit} kicker="Template" title="That template was not saved" note={tplSaveFailed} />
           ) : null}
 
-          <Cta wide label="Save as Template" onPress={() => { setTplName(tplName || title); setSaveOpen(true); }} />
-          <View style={{ height: sp.sm }} />
+          {/* Save as Template left this section for the footer. It was a
+              second full-width green button half-way down a page whose one
+              primary action is Assign — two writes drawn as the same kind of
+              thing — and it still scrolled away. In the footer it is always
+              in reach, which is what "it gets lost" was asking for, and it is
+              a different kind of button from the one that reaches a client. */}
           <Ghost label="Start From a Template" icon="grid" onPress={() => setTplPick(true)} />
           <View style={{ height: sp.sm }} />
           {/* The library was reachable from inside the picker sheet above and
@@ -2717,7 +2976,7 @@ export default function Builder() {
                   // `addWeek`, and why every exercise in it gets a fresh key.
                   setBlockWeeks((ws) => [...ws, cloneWeek(ws[ws.length - 1])]);
                   setWeekIdx(blockWeeks.length);
-                  setFoldedDays(foldsForNewProgramme());
+                  setOpenDays(foldsForNewProgramme());
                 }}
                 accessibilityRole="button" accessibilityLabel="Add another week to this block"
                 style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
@@ -2792,7 +3051,7 @@ export default function Builder() {
                       // Clamped, because a week index past the end renders an
                       // empty builder over a programme that is not empty.
                       setWeekIdx((i) => Math.max(0, Math.min(i, blockWeeks.length - 2)));
-                      setFoldedDays(foldsForNewProgramme());
+                      setOpenDays(foldsForNewProgramme());
                     } },
                   ],
                 );
@@ -2824,7 +3083,7 @@ export default function Builder() {
               {blockOverview(blockWeeks).map((row) => (
                 <Pressable
                   key={row.n}
-                  onPress={() => { setWeekIdx(row.n - 1); setFoldedDays(foldsForNewProgramme()); }}
+                  onPress={() => { setWeekIdx(row.n - 1); setOpenDays(foldsForNewProgramme()); }}
                   accessibilityRole="button"
                   accessibilityState={{ selected: row.n - 1 === weekIdx }}
                   accessibilityLabel={`${row.label}. ${row.detail}.${row.sameAsPrevious ? ' The same as the week before it.' : ''} Opens it.`}
@@ -2934,10 +3193,83 @@ export default function Builder() {
 
           {days.map((d, di) => (
             <View key={di} style={{
-              marginTop: di === 0 ? 0 : sp.xl, paddingTop: di === 0 ? 0 : sp.xl,
+              marginTop: di === 0 ? 0 : sp.md, paddingTop: di === 0 ? 0 : sp.md,
               borderTopWidth: di === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              {/* ── the day, as one row ─────────────────────────────────────
+                  What a week looks like when it is opened: the day, what it is
+                  for, and how much is in it — "7 exercises · 21 sets" — with
+                  the exercises behind the row. It used to be the editing
+                  controls themselves (a change-day button, the focus field, a
+                  count pill and a remove ×) over every exercise of the day,
+                  always open, which is the screen a coach photographed as
+                  cluttered. The controls are still here, under the row, for
+                  the day that is open.
+
+                  The SETS figure is `setCount`, the same number
+                  `composeDays` sends, so a day that says 21 sets is a day
+                  whose client will count 21.
+
+                  One Pressable, so the whole row is the target and the pill
+                  at its trailing edge is drawing rather than a second button
+                  inside the first. */}
+              {(() => {
+                const open = !!openDays[di];
+                const dayName = WEEK_DAY_NAMES[DAYS.indexOf(d.day)] ?? d.day;
+                const daySets = d.exercises.reduce((acc, x) => acc + setCount(x), 0);
+                const counts = `${num(d.exercises.length)} exercise${s(d.exercises.length)} · ${num(daySets)} set${s(daySets)}`;
+                const focus = d.focus.trim();
+                const cardio = (d.cardio ?? '').trim();
+                return (
+                  <Pressable onPress={() => toggleDay(di)} accessibilityRole="button"
+                    accessibilityState={{ expanded: open }}
+                    accessibilityLabel={`${dayName}${focus ? `, ${focus}` : ''}. ${counts}${cardio ? ', and conditioning' : ''}.`}
+                    accessibilityHint={open ? 'Shuts this day' : 'Opens this day to read and edit its exercises'}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: MIN_TARGET + sp.sm }}>
+                    <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{d.day}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{dayName}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                        {[focus || null, counts, cardio ? 'conditioning' : null].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
+                                   paddingHorizontal: sp.md, paddingVertical: 7,
+                                   borderRadius: radius.pill, borderWidth: hairline,
+                                   borderColor: t.ring, backgroundColor: t.surface2 }}>
+                      {/* Sized up and given an edge, on the report that "the 5 and
+                          down arrow next to the day should be a little bigger so we
+                          know what to do with it."
+
+                          That is the real complaint under it: two faint grey
+                          characters at caption size read as a LABEL — a count and a
+                          decoration — not as something to press. Bigger type alone
+                          would have made a bigger label. What says "press me" is the
+                          pill: a border, a filled ground, and the word for what
+                          happens, so the control announces itself instead of
+                          relying on somebody guessing that a triangle is a button.
+
+                          The count moved out of the pill and into the line under
+                          the day's name, where it is said in words — "7 exercises ·
+                          21 sets" — because it is the thing worth knowing about a
+                          day that is shut. */}
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{open ? 'Hide' : 'Show'}</Text>
+                      {/* A triangle rather than an Icon: the set has no chevron up
+                          or down, and `app/(client)/workouts.tsx` already uses
+                          exactly these two characters for the same gesture. */}
+                      <Text style={{ ...ty.label, color: t.ink2 }}>{open ? '▴' : '▾'}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })()}
+
+              {/* Naming and moving the day, for the day that is open. These
+                  were the row itself; they are what a coach does to a day
+                  once, and reading the week is what they do every time. */}
+              {!openDays[di] ? null : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                 <Pressable onPress={() => cycleDay(di)} accessibilityRole="button" accessibilityLabel={`Change day, currently ${d.day}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }}>
                   <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{d.day}</Text>
@@ -2946,50 +3278,18 @@ export default function Builder() {
                 <TextInput value={d.focus} onChangeText={(v) => setDayFocus(di, v)} placeholder="Focus (e.g. Push)" placeholderTextColor={t.ink3}
                   accessibilityLabel={`Focus for ${d.day}`}
                   style={[inp, { flex: 1 }]} />
-                {/* Fold. The count travels with it, so a folded day still says
-                    how much is in it — a row that collapses to just "Wed" makes
-                    a coach open it again to find out whether it is the empty
-                    one. */}
-                <Pressable onPress={() => toggleDay(di)} accessibilityRole="button"
-                  accessibilityState={{ expanded: !foldedDays[di] }}
-                  accessibilityLabel={`${foldedDays[di] ? 'Show' : 'Hide'} the ${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'} on ${d.day}`}
-                  hitSlop={10}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
-                           paddingHorizontal: sp.md, paddingVertical: 7,
-                           borderRadius: radius.pill, borderWidth: hairline,
-                           borderColor: t.ring, backgroundColor: t.surface2 }}>
-                  {/* Sized up and given an edge, on the report that "the 5 and
-                      down arrow next to the day should be a little bigger so we
-                      know what to do with it."
-
-                      That is the real complaint under it: two faint grey
-                      characters at caption size read as a LABEL — a count and a
-                      decoration — not as something to press. Bigger type alone
-                      would have made a bigger label. What says "press me" is the
-                      pill: a border, a filled ground, and the word for what
-                      happens, so the control announces itself instead of
-                      relying on somebody guessing that a triangle is a button.
-
-                      The count stays, because it is the thing worth knowing
-                      about a day that is folded shut. */}
-                  <Text style={{ ...ty.label, color: t.ink2, fontWeight: '600' }}>{d.exercises.length}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{foldedDays[di] ? 'Show' : 'Hide'}</Text>
-                  {/* A triangle rather than an Icon: the set has no chevron up
-                      or down, and `app/(client)/workouts.tsx` already uses
-                      exactly these two characters for the same gesture. */}
-                  <Text style={{ ...ty.label, color: t.ink2 }}>{foldedDays[di] ? '▾' : '▴'}</Text>
-                </Pressable>
                 <Pressable onPress={() => removeDay(di)} accessibilityRole="button" accessibilityLabel="Remove day" hitSlop={8}
                   style={{ paddingHorizontal: sp.sm, paddingVertical: sp.sm }}>
                   <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
                 </Pressable>
               </View>
+              )}
 
               {/* The conditioning on this day, which used to travel through
                   this screen invisibly. Under the header rather than in it: it
                   is part of the day's prescription and not part of naming it,
-                  and a folded day does not need to show it. */}
-              {foldedDays[di] ? null : (
+                  and a day that is shut does not need to show it. */}
+              {!openDays[di] ? null : (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>Conditioning</Text>
                   <TextInput value={d.cardio ?? ''} onChangeText={(v) => setDayCardio(di, v)}
@@ -2999,7 +3299,7 @@ export default function Builder() {
                 </View>
               )}
 
-              {foldedDays[di] ? null : (() => {
+              {!openDays[di] ? null : (() => {
                 // Computed ONCE per day rather than per row: the badge for any
                 // exercise depends on its neighbours, so a per-row call would
                 // walk the whole day for every exercise in it.
@@ -3010,6 +3310,30 @@ export default function Builder() {
                 // says whether the coach has opened a per-set table on this
                 // movement; `list` is what to render either way.
                 const rows = { tabled: hasSetRows(e), list: expandSets(e) };
+                const isOpen = openEx === e.key;
+                const catRow = rowFor(e.name);
+                const rowInjury = injuryFlag(e.name, e.group || '', clientInjuries);
+                // The one line a shut row carries. "Vary" is said in words when
+                // the table's sets are not all alike: quoting the first row
+                // would be a prescription nobody wrote for the other three.
+                const allSame = <T,>(xs: T[]) => xs.every((x) => x === xs[0]);
+                const repsList = rows.list.map((r) => r.reps.trim());
+                const loadList = rows.list.map((r) => r.loadKg);
+                const summary = [
+                  `${num(setCount(e))} × ${allSame(repsList) ? (repsList[0] || '8-12') : 'reps vary'}`,
+                  allSame(loadList)
+                    ? liftLabel(loadList[0] ?? null, e.loadUnit ?? defaultUnit)
+                    : 'weight varies',
+                  e.rpe != null ? `RPE ${e.rpe}` : null,
+                  e.pct1rm != null ? `${e.pct1rm}% of 1RM` : null,
+                  e.restSec != null ? `rest ${restClock(e.restSec)}` : null,
+                  e.note && e.note.trim() ? 'note' : null,
+                ].filter(Boolean).join(' · ');
+                // Shown without asking when the exercise already carries one of
+                // them: a field with a value in it is never behind a control
+                // the coach has to guess is there.
+                const advancedShown = advOpen[e.key]
+                  ?? (e.rpe != null || e.pct1rm != null || !!e.tempo || !!badgeFor(e.method));
                 // A run reads as one block: the rule between two exercises in
                 // the same group is dropped, because the line is what says
                 // "these are separate". The group's own tinted rail down the
@@ -3041,17 +3365,44 @@ export default function Builder() {
                   } : null),
                   transform: [{ translateY: isDragging ? dragY : (shift as number) }],
                 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    {/* The whole name and picture open the movement, so a coach
-                        can check what they have written down without hunting
-                        for a control. What opens is the same screen the client
-                        gets, which is the point — and it carries Record a clip
-                        for the movements this coach wants in their own words. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                    {/* The picture opens the movement, so a coach can check
+                        what they have written down without hunting for a
+                        control. What opens is the same screen the client gets,
+                        which is the point — and it carries Record a clip for
+                        the movements this coach wants in their own words. The
+                        NAME used to open it too; the name now opens this
+                        row's own prescription, because that is what a coach
+                        reading a day reaches for, and one target cannot do
+                        both.
+
+                        The still is RepDB's, signed in one batch by
+                        `useCatalogueThumbs`. A movement with none — a coach's
+                        own, or one the catalogue has no artwork for — draws
+                        `ExerciseThumb`'s marked tile and never somebody
+                        else's picture. */}
                     <Pressable onPress={() => previewExercise(e.name)} accessibilityRole="button"
-                      accessibilityLabel={`What ${movement(e.name)} is`}
-                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                      <ExerciseThumb uri={thumbFor(rowFor(e.name) ?? { thumbPath: null })} t={t} />
-                      <View style={{ flex: 1 }}>
+                      accessibilityLabel={`What ${movement(e.name)} is`}>
+                      <ExerciseThumb uri={thumbFor(rowFor(e.name) ?? { thumbPath: null })} t={t} size={44} />
+                    </Pressable>
+                    <Pressable onPress={() => setOpenEx(isOpen ? null : e.key)} accessibilityRole="button"
+                      accessibilityState={{ expanded: isOpen }}
+                      // Everything the row draws, because a label on a Pressable
+                      // REPLACES the lines under it: without the last two a
+                      // coach listening to this day would never hear that a
+                      // movement is half of a superset, or that it loads a knee
+                      // their client disclosed.
+                      accessibilityLabel={[
+                        movement(e.name),
+                        e.group || null,
+                        gb ? `${gb.label}, ${gb.position} of ${gb.size}` : null,
+                        badgeFor(e.method)?.label ?? null,
+                        summary,
+                        rowInjury ? `Loads their ${areaLabel(rowInjury.injury.area).toLowerCase()}, ${rowInjury.injury.severity}` : null,
+                      ].filter(Boolean).join('. ')}
+                      accessibilityHint={isOpen ? 'Shuts its sets, weight and notes' : 'Opens its sets, weight and notes'}
+                      style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: sp.sm, minHeight: MIN_TARGET }}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(e.name)}</Text>
                         {/* The muscle group, and — separately — the set group.
                             Two different meanings of the word "group" that
@@ -3076,6 +3427,12 @@ export default function Builder() {
                             );
                           })()}
                         </View>
+                        {/* What is prescribed, in one line, so a shut row still
+                            says what the client will be asked to do. Built
+                            from `expandSets` — the rows as they will be drawn
+                            for the client — so a table whose sets differ says
+                            that they differ rather than quoting set one. */}
+                        <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{summary}</Text>
                         {/* The gate makes a coach READ what a client cannot do.
                             It did nothing to help them act on it: they could
                             acknowledge a moderate knee, then put squats, lunges
@@ -3098,12 +3455,21 @@ export default function Builder() {
                           );
                         })()}
                       </View>
+                      {/* Where the movement lands on the body, as the library's
+                          rows draw it. Decorative, and absent when the
+                          catalogue names no drawable muscle or the type has
+                          grown enough that the name needs the width more. */}
+                      {catRow && fontScale < 1.35 ? (
+                        <ExerciseMuscles compact primary={catRow.primaryMuscles} secondary={catRow.secondaryMuscles} status="ready" />
+                      ) : null}
+                      <Text style={{ ...ty.label, color: t.ink2 }}>{isOpen ? '▴' : '▾'}</Text>
                     </Pressable>
                     {/* ── The grip: press and hold here, then drag ────────
                         A dedicated handle rather than the whole row, because
-                        the row's name and picture already open the movement
-                        and a long-press that stole that tap would cost a coach
-                        the thing they use most. The grip says what it is by
+                        the row's picture already opens the movement and its
+                        name opens the prescription, and a long-press that
+                        stole either tap would cost a coach the two things they
+                        use most. The grip says what it is by
                         looking like one.
 
                         Raw responder props rather than a PanResponder: these
@@ -3113,7 +3479,12 @@ export default function Builder() {
                       <View
                         accessible
                         accessibilityRole="adjustable"
-                        accessibilityLabel={`Reorder ${movement(e.name)}. Position ${ei + 1} of ${d.exercises.length}. Hold and drag, or use the arrows.`}
+                        accessibilityLabel={`Reorder ${movement(e.name)}. Position ${ei + 1} of ${d.exercises.length}. Hold and drag, or swipe up or down to move it one place.`}
+                        // The arrows that did this by tap now live inside the open row,
+                        // so the grip answers a screen reader's own adjust gesture —
+                        // an `adjustable` that adjusts nothing is a label, not a control.
+                        accessibilityActions={[{ name: 'increment', label: 'Move later' }, { name: 'decrement', label: 'Move earlier' }]}
+                        onAccessibilityAction={(ev) => moveExercise(di, e.key, ev.nativeEvent.actionName === 'increment' ? 1 : -1)}
                         onStartShouldSetResponder={() => true}
                         onMoveShouldSetResponder={() => true}
                         onResponderGrant={(ev) => beginDrag(di, ei, ev.nativeEvent.pageY)}
@@ -3122,66 +3493,14 @@ export default function Builder() {
                         onResponderTerminate={endDrag}
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                         style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                                 marginEnd: 6, backgroundColor: isDragging ? t.brand : t.surface2,
+                                 backgroundColor: isDragging ? t.brand : t.surface2,
                                  borderWidth: hairline, borderColor: t.ring }}>
                         <Text style={{ ...ty.label, color: isDragging ? t.brandInk : t.ink3 }}>≡</Text>
                       </View>
                     ) : null}
 
-                    {/* ── Three controls, one of them destructive ──────────
-                        Reported as "the up and down arrows and the x need to be
-                        bigger and more spaced apart so you don't tap the wrong
-                        icon". They were ~24pt of tappable area sitting a few
-                        points apart, and the neighbour of the down arrow
-                        DELETES the exercise along with its sets, reps, weight,
-                        rest and notes.
-
-                        So the fix is not only size. Each is now a 40pt round
-                        target — above the 44pt-with-hitSlop mark and the size
-                        the rest of this app uses for a real button — and the ×
-                        is pushed away from the pair with a gap wide enough that
-                        a thumb aiming at "down" cannot reach it. It is also
-                        tinted as a destructive control rather than sharing the
-                        arrows' grey, because the one that cannot be undone
-                        should not look like the two that can.
-
-                        Hidden at the ends rather than disabled: a control that
-                        cannot do anything is still something to aim at. */}
-                    {d.exercises.findIndex((x) => x.key === e.key) > 0 ? (
-                      <Pressable onPress={() => moveExercise(di, e.key, -1)} accessibilityRole="button"
-                        accessibilityLabel={`Move ${movement(e.name)} earlier in ${d.day}`} hitSlop={6}
-                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                                 backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.label, color: t.ink2 }}>▲</Text>
-                      </Pressable>
-                    ) : null}
-                    {d.exercises.findIndex((x) => x.key === e.key) < d.exercises.length - 1 ? (
-                      <Pressable onPress={() => moveExercise(di, e.key, 1)} accessibilityRole="button"
-                        accessibilityLabel={`Move ${movement(e.name)} later in ${d.day}`} hitSlop={6}
-                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                                 marginStart: 6, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.label, color: t.ink2 }}>▼</Text>
-                      </Pressable>
-                    ) : null}
-                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button"
-                      accessibilityLabel={`Remove ${movement(e.name)} from ${d.day}`} hitSlop={6}
-                      style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                               marginStart: sp.lg, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.crit }}>
-                      {/* The critical tone is the BORDER, not the glyph. As ink
-                          it measures 3.03–4.05:1 across the ten palettes, under
-                          the 4.5:1 text needs, and check:contrast is right to
-                          refuse it — a status colour is tuned for a mark. The
-                          ring carries the warning, the × stays readable, and
-                          the accessibility label says "Remove" in words, so
-                          colour is never the only channel saying so. */}
-                      {/* grown(24) and not head's own grown(22): the extra two points
-                          sit the × on the centre of its circle. The circle stays
-                          pinned, so at a large text size the glyph spills past it
-                          rather than being cut in half by a 24pt line — a ring is
-                          decoration and the character is the control. */}
-                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: grown(24) }}>×</Text>
-                    </Pressable>
                   </View>
+                  {isOpen ? (<>
                   {/* ── the sets, one at a time or all at once ─────────────
                       An exercise is EITHER a count and one spec — three sets
                       of 8-10 at 42.5, which is what every programme in the
@@ -3403,6 +3722,73 @@ export default function Builder() {
                   </View>
                   </>
                   )}
+                  {/* ── Rest and grouping ─────────────────────────────────
+                      Both answers to "how is this performed" rather than "what
+                      is it". Set type used to sit on the end of this row too,
+                      which is exactly why nobody tapped it: a bare `Normal`
+                      after "sec · default 1:30" reads as a property of the REST
+                      timer. It has its own labelled control below. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+                    {/* The rest between sets, in SECONDS. The client's guided
+                        runner already had a timer — hardcoded to the same
+                        default for every exercise in every programme, which is
+                        right for accessory work and wrong for a heavy triple.
+                        Blank is a real answer and the common one: the client
+                        falls back to the app default and their rest card says
+                        so, rather than presenting a number nobody chose as the
+                        coach's instruction. */}
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Rest</Text>
+                    <TextInput
+                      value={restDraft[e.key] ?? (e.restSec == null ? '' : String(e.restSec))}
+                      onChangeText={(v) => {
+                        setRestDraft((prev) => ({ ...prev, [e.key]: v }));
+                        if (!v.trim()) { patchEx(di, e.key, { restSec: null }); return; }
+                        const r = readRestSeconds(v);
+                        // A number not yet valid ("9" on the way to "90")
+                        // leaves the last good value alone rather than
+                        // clearing it. The refusal is said on blur, not on
+                        // every keystroke.
+                        if (r.ok && r.seconds != null) patchEx(di, e.key, { restSec: r.seconds });
+                      }}
+                      onBlur={() => {
+                        const typed = restDraft[e.key];
+                        setRestDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readRestSeconds(typed);
+                        // Said, not swallowed. A rest that silently stayed at
+                        // its old value while the coach believes they changed
+                        // it is a programme that does not say what they think.
+                        if (!r.ok) Alert.alert('Check that rest', r.reason);
+                      }}
+                      keyboardType="number-pad"
+                      placeholder={String(DEFAULT_REST_SEC)}
+                      placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Rest between sets of ${movement(e.name)}, in seconds`}
+                      style={[inp, { width: 68, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      {e.restSec != null ? `sec · ${restClock(e.restSec)}` : `sec · default ${restClock(DEFAULT_REST_SEC)}`}
+                    </Text>
+
+                    {/* Grouping is an act on a PAIR, so the control lives on
+                        the upper exercise and names the lower one. Hidden
+                        rather than disabled where there is nothing below to
+                        join, and where the two are already in one run. */}
+                    {canJoinNext(d.exercises, ei) ? (
+                      <Pressable onPress={() => groupWithNext(di, ei)} accessibilityRole="button"
+                        accessibilityLabel={`Perform ${movement(e.name)} back to back with ${movement(d.exercises[ei + 1]?.name)}`}
+                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>Group with next</Text>
+                      </Pressable>
+                    ) : null}
+                    {isGrouped(d.exercises, ei) ? (
+                      <Pressable onPress={() => ungroup(di, ei)} accessibilityRole="button"
+                        accessibilityLabel={`Take ${movement(e.name)} out of the ${gb?.label.toLowerCase() ?? 'group'}`}
+                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>Ungroup</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+
                   {/* ── the coach's own words, on this movement ──────────────
                       Asked for as "trainer notes attached in the exercise.
                       then they are saved for future reference". The builder
@@ -3417,6 +3803,36 @@ export default function Builder() {
                       assignment, and carried in the on-device draft — and the
                       client reads it at the machine, attributed to the coach
                       who wrote it. */}
+                  <View style={{ marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 4 }}>Notes for this exercise</Text>
+                    <TextInput
+                      value={e.note ?? ''}
+                      onChangeText={(v) => patchEx(di, e.key, { note: v })}
+                      placeholder="Cue, tempo, setup — they see this at the machine…"
+                      placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Your notes on ${movement(e.name)}`}
+                      multiline
+                      style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
+                  </View>
+                  {/* ── the fields most exercises never use ────────────────
+                      Effort, share of a max, tempo, set type and the saved cue
+                      are real and are what a careful coach reaches for — on
+                      one movement in five. Drawn on every row they were five
+                      more controls between a coach and the next exercise. They
+                      are one tap away, they open on their own for any exercise
+                      that already carries one, and nothing about what they
+                      write has changed. */}
+                  <Pressable onPress={() => setAdvOpen((p) => ({ ...p, [e.key]: !advancedShown }))}
+                    accessibilityRole="button" accessibilityState={{ expanded: advancedShown }}
+                    accessibilityLabel={`${advancedShown ? 'Fewer' : 'More'} options for ${movement(e.name)}: effort, percentage of a one rep max, tempo, set type and your saved cue`}
+                    hitSlop={hitSlopFor(MIN_TARGET)}
+                    style={{ minHeight: MIN_TARGET, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                             paddingHorizontal: sp.lg, marginTop: sp.md,
+                             borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                    <Text style={{ ...ty.caption, color: t.ink }}>{advancedShown ? 'Fewer Options' : 'More Options'}</Text>
+                    <Text style={{ ...ty.label, color: t.ink2 }}>{advancedShown ? '▴' : '▾'}</Text>
+                  </Pressable>
+                  {advancedShown ? (<>
                   {/* ── effort, share of a max, and rep speed ──────────────
                       Three things a coach had nowhere to write and put in the
                       exercise NOTE instead — "@8", "@75%", "3-1-1" — where they
@@ -3520,73 +3936,6 @@ export default function Builder() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{tempoMeaning(e.tempo)}</Text>
                   ) : null}
 
-                  {/* ── Rest and grouping ─────────────────────────────────
-                      Both answers to "how is this performed" rather than "what
-                      is it". Set type used to sit on the end of this row too,
-                      which is exactly why nobody tapped it: a bare `Normal`
-                      after "sec · default 1:30" reads as a property of the REST
-                      timer. It has its own labelled control below. */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
-                    {/* The rest between sets, in SECONDS. The client's guided
-                        runner already had a timer — hardcoded to the same
-                        default for every exercise in every programme, which is
-                        right for accessory work and wrong for a heavy triple.
-                        Blank is a real answer and the common one: the client
-                        falls back to the app default and their rest card says
-                        so, rather than presenting a number nobody chose as the
-                        coach's instruction. */}
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>Rest</Text>
-                    <TextInput
-                      value={restDraft[e.key] ?? (e.restSec == null ? '' : String(e.restSec))}
-                      onChangeText={(v) => {
-                        setRestDraft((prev) => ({ ...prev, [e.key]: v }));
-                        if (!v.trim()) { patchEx(di, e.key, { restSec: null }); return; }
-                        const r = readRestSeconds(v);
-                        // A number not yet valid ("9" on the way to "90")
-                        // leaves the last good value alone rather than
-                        // clearing it. The refusal is said on blur, not on
-                        // every keystroke.
-                        if (r.ok && r.seconds != null) patchEx(di, e.key, { restSec: r.seconds });
-                      }}
-                      onBlur={() => {
-                        const typed = restDraft[e.key];
-                        setRestDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
-                        if (typed == null || !typed.trim()) return;
-                        const r = readRestSeconds(typed);
-                        // Said, not swallowed. A rest that silently stayed at
-                        // its old value while the coach believes they changed
-                        // it is a programme that does not say what they think.
-                        if (!r.ok) Alert.alert('Check that rest', r.reason);
-                      }}
-                      keyboardType="number-pad"
-                      placeholder={String(DEFAULT_REST_SEC)}
-                      placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Rest between sets of ${movement(e.name)}, in seconds`}
-                      style={[inp, { width: 68, paddingVertical: 7, paddingHorizontal: 10 }]} />
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>
-                      {e.restSec != null ? `sec · ${restClock(e.restSec)}` : `sec · default ${restClock(DEFAULT_REST_SEC)}`}
-                    </Text>
-
-                    {/* Grouping is an act on a PAIR, so the control lives on
-                        the upper exercise and names the lower one. Hidden
-                        rather than disabled where there is nothing below to
-                        join, and where the two are already in one run. */}
-                    {canJoinNext(d.exercises, ei) ? (
-                      <Pressable onPress={() => groupWithNext(di, ei)} accessibilityRole="button"
-                        accessibilityLabel={`Perform ${movement(e.name)} back to back with ${movement(d.exercises[ei + 1]?.name)}`}
-                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.caption, color: t.ink2 }}>Group with next</Text>
-                      </Pressable>
-                    ) : null}
-                    {isGrouped(d.exercises, ei) ? (
-                      <Pressable onPress={() => ungroup(di, ei)} accessibilityRole="button"
-                        accessibilityLabel={`Take ${movement(e.name)} out of the ${gb?.label.toLowerCase() ?? 'group'}`}
-                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.caption, color: t.ink2 }}>Ungroup</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-
                   {/* ── Set type ──────────────────────────────────────────
                       `Normal` on its own was a value with no field beside it.
                       It named what this set is without ever saying that it is
@@ -3622,17 +3971,7 @@ export default function Builder() {
                       </View>
                     );
                   })()}
-
-                  <View style={{ marginTop: sp.sm }}>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 4 }}>Notes for this exercise</Text>
-                    <TextInput
-                      value={e.note ?? ''}
-                      onChangeText={(v) => patchEx(di, e.key, { note: v })}
-                      placeholder="Cue, tempo, setup — they see this at the machine…"
-                      placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Your notes on ${movement(e.name)}`}
-                      multiline
-                      style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
+                  <View>
                     {/* ── the coach's saved cue for this movement ────────────
                         The note above is about THIS client on THIS day. The
                         cue below is about the movement, is the same for
@@ -3752,104 +4091,89 @@ export default function Builder() {
                       );
                     })() : null}
                   </View>
+                  </>) : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: sp.lg }}>
+                    {/* ── Three controls, one of them destructive ──────────
+                        Reported as "the up and down arrows and the x need to be
+                        bigger and more spaced apart so you don't tap the wrong
+                        icon". They were ~24pt of tappable area sitting a few
+                        points apart, and the neighbour of the down arrow
+                        DELETES the exercise along with its sets, reps, weight,
+                        rest and notes.
+
+                        So the fix is not only size. Each is now a 40pt round
+                        target — above the 44pt-with-hitSlop mark and the size
+                        the rest of this app uses for a real button — and the ×
+                        is pushed away from the pair with a gap wide enough that
+                        a thumb aiming at "down" cannot reach it. It is also
+                        tinted as a destructive control rather than sharing the
+                        arrows' grey, because the one that cannot be undone
+                        should not look like the two that can.
+
+                        Hidden at the ends rather than disabled: a control that
+                        cannot do anything is still something to aim at.
+
+                        They sat on the row itself, beside the grip, and took
+                        160pt of a 320pt row — which is why a movement's name
+                        wrapped to three lines beside them. They are at the
+                        foot of the OPEN row now: the row a coach is reading
+                        keeps its width for the name, and the destructive one
+                        is no longer under a thumb that is only scrolling. */}
+                    {d.exercises.findIndex((x) => x.key === e.key) > 0 ? (
+                      <Pressable onPress={() => moveExercise(di, e.key, -1)} accessibilityRole="button"
+                        accessibilityLabel={`Move ${movement(e.name)} earlier in ${d.day}`} hitSlop={6}
+                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                                 backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.label, color: t.ink2 }}>▲</Text>
+                      </Pressable>
+                    ) : null}
+                    {d.exercises.findIndex((x) => x.key === e.key) < d.exercises.length - 1 ? (
+                      <Pressable onPress={() => moveExercise(di, e.key, 1)} accessibilityRole="button"
+                        accessibilityLabel={`Move ${movement(e.name)} later in ${d.day}`} hitSlop={6}
+                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                                 marginStart: 6, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.label, color: t.ink2 }}>▼</Text>
+                      </Pressable>
+                    ) : null}
+                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button"
+                      accessibilityLabel={`Remove ${movement(e.name)} from ${d.day}`} hitSlop={6}
+                      style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                               marginStart: sp.lg, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.crit }}>
+                      {/* The critical tone is the BORDER, not the glyph. As ink
+                          it measures 3.03–4.05:1 across the ten palettes, under
+                          the 4.5:1 text needs, and check:contrast is right to
+                          refuse it — a status colour is tuned for a mark. The
+                          ring carries the warning, the × stays readable, and
+                          the accessibility label says "Remove" in words, so
+                          colour is never the only channel saying so. */}
+                      {/* grown(24) and not head's own grown(22): the extra two points
+                          sit the × on the centre of its circle. The circle stays
+                          pinned, so at a large text size the glyph spills past it
+                          rather than being cut in half by a 24pt line — a ring is
+                          decoration and the character is the control. */}
+                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: grown(24) }}>×</Text>
+                    </Pressable>
+                  </View>
+                  </>) : null}
                 </Animated.View>
                 );
               });
               })()}
 
+              {/* Only under a day that is open. Under a shut row it read as a
+                  control about the WEEK, and what it added went somewhere the
+                  coach could not see. */}
+              {openDays[di] ? (
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Add Exercise" icon="plus" onPress={() => { setCustom(''); setPickerDay(di); }} />
               </View>
+              ) : null}
             </View>
           ))}
 
           <View style={{ marginTop: days.length ? sp.xl : 0 }}>
             <Ghost label="Add Training Day" icon="calendar" onPress={addDay} />
           </View>
-        </Section>
-
-
-        {/* ── programme checks ───────────────────────────────────────────
-            Named for what it is. Seven rules, no model, no score and no
-            grade — see the header of src/lib/programReview.ts, and
-            src/lib/finReview.ts for the screen this one was written not to
-            be, back when it was called an AI review. Every line below is a finding that names the exercise, the
-            day or the figure it came from, because a finding a coach cannot
-            point at is an opinion and they stop reading at the first one
-            they disagree with. */}
-        <Section>
-          <SectionHead title="Programme Checks"
-            note={blockExercises && review.findings.length ? `${num(review.findings.length)} to read` : undefined} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: coverage ? sp.xs : sp.lg }}>{checksLine()}</Text>
-          {/* Only on a block, and only because the sentence above used to be
-              true of week one and read as true of twelve. */}
-          {coverage ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{coverage}</Text>
-          ) : null}
-
-          {blockExercises === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing to check yet. The checks read the training days above — every week of them — as you write them.
-            </Text>
-          ) : (
-            <>
-              {review.findings.length ? review.findings.map((f, i) => {
-                // The figures for a volume finding, in the coach's own unit,
-                // and null for every other rule. Computed once and then tested:
-                // it converts and rounds, and calling it in the condition and
-                // again in the body would round one number twice.
-                const figures = volumeLine(f);
-                return (
-                <View key={`${f.id}-${i}`} style={{ marginBottom: sp.md }}>
-                  <Flag tone={f.id === 'injury' ? t.crit : t.warn}>{f.detail}</Flag>
-                  {figures ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: 14, marginTop: 3 }}>{figures}</Text>
-                  ) : null}
-                </View>
-                );
-              }) : (
-                <Text style={{ ...ty.label, color: t.ink2 }}>
-                  Nothing matched. That is not a verdict on the programme — it means none of these rules found
-                  anything, and they are a short list.
-                </Text>
-              )}
-
-              {/* A check that did not run must say so. Silence from one reads
-                  as a pass, and "no injury conflicts" over an injury list that
-                  never loaded is the failure guardInjuries exists to stop. */}
-              {review.skipped.length ? (
-                <View style={{ marginTop: review.findings.length ? sp.lg : sp.md }}>
-                  {review.skipped.map((sk) => (
-                    <Flag key={sk.id} tone={sk.kind === 'unread' ? t.warn : t.ink3} style={{ marginBottom: sp.sm }}>
-                      {sk.why}
-                    </Flag>
-                  ))}
-                </View>
-              ) : null}
-
-              <View style={{ marginTop: sp.lg }}>
-                <Ghost label={checksOpen ? 'Hide What Is Checked' : 'Show What Is Checked'}
-                  onPress={() => setChecksOpen((v) => !v)} />
-              </View>
-
-              {checksOpen ? (
-                <View style={{ marginTop: sp.md }}>
-                  {CHECKS.map((c) => (
-                    <Text key={c.id} style={{ ...ty.caption, color: t.ink2, marginBottom: 3 }}>{`· ${c.label}`}</Text>
-                  ))}
-                  {/* The questions a coach would expect here and will not find.
-                      A list of findings implies a list of questions asked, and
-                      the ones deliberately not asked are part of that. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                    Not checked, because none of them has a settled answer this could hold you to:
-                  </Text>
-                  {NOT_CHECKED.map((n) => (
-                    <Text key={n} style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{`· ${n}`}</Text>
-                  ))}
-                </View>
-              ) : null}
-            </>
-          )}
         </Section>
 
 
@@ -4008,6 +4332,98 @@ export default function Builder() {
         </Section>
 
 
+        {/* ── programme checks ───────────────────────────────────────────
+            Named for what it is. Seven rules, no model, no score and no
+            grade — see the header of src/lib/programReview.ts, and
+            src/lib/finReview.ts for the screen this one was written not to
+            be, back when it was called an AI review. Every line below is a finding that names the exercise, the
+            day or the figure it came from, because a finding a coach cannot
+            point at is an opinion and they stop reading at the first one
+            they disagree with.
+
+            ── where it sits ────────────────────────────────────────────────
+            Directly above the section that assigns, and outside the editor's
+            fold. It was inside it, so a coach who never opened the editor —
+            loaded a template, ticked four people, pressed Assign — was never
+            shown a finding at all. The review's order is checks, then the
+            disclosures, then the write, and that is now the order on the
+            page whatever is folded above it. */}
+        <Section>
+          <SectionHead title="Programme Checks"
+            note={blockExercises && review.findings.length ? `${num(review.findings.length)} to read` : undefined} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: coverage ? sp.xs : sp.lg }}>{checksLine()}</Text>
+          {/* Only on a block, and only because the sentence above used to be
+              true of week one and read as true of twelve. */}
+          {coverage ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{coverage}</Text>
+          ) : null}
+
+          {blockExercises === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Nothing to check yet. The checks read the training days above — every week of them — as you write them.
+            </Text>
+          ) : (
+            <>
+              {review.findings.length ? review.findings.map((f, i) => {
+                // The figures for a volume finding, in the coach's own unit,
+                // and null for every other rule. Computed once and then tested:
+                // it converts and rounds, and calling it in the condition and
+                // again in the body would round one number twice.
+                const figures = volumeLine(f);
+                return (
+                <View key={`${f.id}-${i}`} style={{ marginBottom: sp.md }}>
+                  <Flag tone={f.id === 'injury' ? t.crit : t.warn}>{f.detail}</Flag>
+                  {figures ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: 14, marginTop: 3 }}>{figures}</Text>
+                  ) : null}
+                </View>
+                );
+              }) : (
+                <Text style={{ ...ty.label, color: t.ink2 }}>
+                  Nothing matched. That is not a verdict on the programme — it means none of these rules found
+                  anything, and they are a short list.
+                </Text>
+              )}
+
+              {/* A check that did not run must say so. Silence from one reads
+                  as a pass, and "no injury conflicts" over an injury list that
+                  never loaded is the failure guardInjuries exists to stop. */}
+              {review.skipped.length ? (
+                <View style={{ marginTop: review.findings.length ? sp.lg : sp.md }}>
+                  {review.skipped.map((sk) => (
+                    <Flag key={sk.id} tone={sk.kind === 'unread' ? t.warn : t.ink3} style={{ marginBottom: sp.sm }}>
+                      {sk.why}
+                    </Flag>
+                  ))}
+                </View>
+              ) : null}
+
+              <View style={{ marginTop: sp.lg }}>
+                <Ghost label={checksOpen ? 'Hide What Is Checked' : 'Show What Is Checked'}
+                  onPress={() => setChecksOpen((v) => !v)} />
+              </View>
+
+              {checksOpen ? (
+                <View style={{ marginTop: sp.md }}>
+                  {CHECKS.map((c) => (
+                    <Text key={c.id} style={{ ...ty.caption, color: t.ink2, marginBottom: 3 }}>{`· ${c.label}`}</Text>
+                  ))}
+                  {/* The questions a coach would expect here and will not find.
+                      A list of findings implies a list of questions asked, and
+                      the ones deliberately not asked are part of that. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    Not checked, because none of them has a settled answer this could hold you to:
+                  </Text>
+                  {NOT_CHECKED.map((n) => (
+                    <Text key={n} style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{`· ${n}`}</Text>
+                  ))}
+                </View>
+              ) : null}
+            </>
+          )}
+        </Section>
+
+
         <Section>
           {/* The disclosures themselves, above the button that is being held.
               Telling a coach to read something without showing it to them is
@@ -4155,25 +4571,35 @@ export default function Builder() {
 
       </ScrollView>
 
-      {/* ── the one action, always in reach ──────────────────────────────
-          The board keeps a Save Program button on screen. Here the action is
-          Assign, because that is what this builder does — a template is saved
-          from its own section above — and it carries the same label, the same
-          gate and the same handler as the button at the foot of the page,
-          which keeps its captions saying WHY it is off. The scroll pads for
-          it, so nothing on the page hides underneath. */}
-      <View pointerEvents="box-none"
-        style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: G, paddingTop: sp.sm, paddingBottom: sp.md, backgroundColor: t.bg, borderTopWidth: hairline, borderTopColor: t.ring }}>
-        <View style={{ opacity: canAssign ? 1 : 0.55, ...elevation.e1 }} pointerEvents={canAssign && !assignBusy ? 'auto' : 'none'}>
-          <Cta wide label={assignCtaLabel({
-            busy: assignBusy,
-            picked: pickedIds.length,
-            exercises: blockExercises,
-            planLabel: plan.label,
-            soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
-          })} onPress={assign} />
-        </View>
-      </View>
+      {/* ── the workflow footer, always in reach ─────────────────────────
+          The board keeps a Save Program button on screen. Here there are two
+          writes and the footer names both: Assign, which replaces what a
+          client trains and carries the same label, gate and handler as the
+          button at the foot of the page (which keeps its captions saying WHY
+          it is off), and Save as Template, which goes to the coach's library
+          and reaches nobody. Over them, who this is for, where in it the
+          coach is, and what is still outstanding — the review's acceptance
+          test, answerable without scrolling. The scroll pads by the bar's
+          measured height, so nothing on the page hides underneath at any
+          type size. See src/ui/coach/ProgramBuilderFlow.tsx. */}
+      <ProgramWorkflowFooter
+        who={footWho}
+        where={footWhere}
+        outstanding={footOutstanding}
+        draftNote={draftLoaded && draftKey && hasDraft ? 'Draft kept on this phone' : null}
+        primaryLabel={assignCtaLabel({
+          busy: assignBusy,
+          picked: pickedIds.length,
+          exercises: blockExercises,
+          planLabel: plan.label,
+          soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
+        })}
+        onPrimary={assign}
+        primaryEnabled={canAssign && !assignBusy}
+        secondaryLabel="Save as Template"
+        onSecondary={() => { setTplName(tplName || title); setSaveOpen(true); }}
+        onHeight={setFootH}
+      />
 
       {/* ── the start day, as a month ─────────────────────────────────────
           Dismissing it is a cancel and writes nothing: a picker that committed
@@ -4257,9 +4683,21 @@ export default function Builder() {
               }}>
                 <Pressable onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
                   accessibilityRole="button" accessibilityLabel={`Add ${x.name}`}
-                  style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{x.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{x.group}</Text>
+                  style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                  {/* The still, when this name resolves to a catalogue
+                      movement; the marked tile when it does not — a coach's
+                      own invention has no artwork and is not lent any. */}
+                  <ExerciseThumb uri={thumbFor(rowFor(x.name) ?? { thumbPath: null })} t={t} size={44} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{x.name}</Text>
+                    {x.group ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{x.group}</Text> : null}
+                  </View>
+                  {(() => {
+                    const r = rowFor(x.name);
+                    return r && fontScale < 1.35
+                      ? <ExerciseMuscles compact primary={r.primaryMuscles} secondary={r.secondaryMuscles} status="ready" />
+                      : null;
+                  })()}
                 </Pressable>
                 <Pressable onPress={() => previewExercise(x.name)} hitSlop={8}
                   accessibilityRole="button" accessibilityLabel={`What ${x.name} is`}
@@ -4340,7 +4778,16 @@ export default function Builder() {
                         // printed line's problem with nothing to read.
                         accessibilityRole="button" accessibilityLabel={via ? `Add ${e.display.text}, matched ${via}` : `Add ${e.display.text}`}
                         style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                        <View style={{ flex: 1 }}>
+                        {/* Asked for as "pictures with the exercises on the
+                            coaching app". The signed still was already being
+                            fetched for every row on this page — `thumbRows`
+                            has carried the picker since it was written — and
+                            nothing drew it. Same 44pt tile as the day's rows,
+                            and the same marked tile for a movement with no
+                            artwork, so "no picture" never looks like "still
+                            loading". */}
+                        <ExerciseThumb uri={thumbFor(e)} t={t} size={44} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
                           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.display.text}</Text>
                           {/* Only what the row actually carries. A movement with
                               no muscle group shows no muscle group — never
@@ -4364,6 +4811,9 @@ export default function Builder() {
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Matched “{via}”</Text>
                           ) : null}
                         </View>
+                        {fontScale < 1.35 ? (
+                          <ExerciseMuscles compact primary={e.primaryMuscles} secondary={e.secondaryMuscles} status="ready" />
+                        ) : null}
                       </Pressable>
                       <Pressable onPress={() => previewExercise(e.name)} hitSlop={8}
                         accessibilityRole="button" accessibilityLabel={`What ${e.display.text} is`}
@@ -4423,7 +4873,7 @@ export default function Builder() {
               return (
                 <View key={tpl.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Pressable onPress={() => { loadFrom(tpl.program, null); setTplName(tpl.name); setTplPick(false); }}
+                  <Pressable onPress={() => startFromTemplate(tpl)}
                     accessibilityRole="button" accessibilityLabel={`Start from ${tpl.name}`}
                     style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                     <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>

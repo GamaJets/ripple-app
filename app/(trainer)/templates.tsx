@@ -79,6 +79,7 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
 import { isBlock, weekCount } from '../../src/lib/programBlock';
+import { num } from '../../src/lib/format';
 import { planFanOut, listNames, fanOutSubject, type FanOutMember } from '../../src/lib/groupProgram';
 import {
   overwriteBrief, bulkReport, selectAllOffer,
@@ -345,6 +346,37 @@ export default function Templates() {
     [templates, programs, programStatus],
   );
 
+  /**
+   * The coach's named programmes, in the order the shortcut row draws them —
+   * the same rule, and the same sentence over the row, as the builder's.
+   *
+   * MOST USED first when `usage` could be counted, which is only under a whole
+   * read of who is training what. When it is withheld the order is the
+   * library's own, newest first, and the row says so: an order with no stated
+   * rule reads as random. The coach's OWN only — the starters are in the list
+   * below, and a shortcut row that led with programmes the coach never wrote
+   * would be the app's library and not theirs.
+   */
+  const shortcuts = useMemo(() => {
+    const own = templates.filter((tpl) => !isStarter(tpl.id));
+    if (usage.withheld) return own;
+    const used = (id: string) => (usage.byId[id]?.on.length ?? 0) + (usage.byId[id]?.from.length ?? 0);
+    // Stable: equally used programmes keep the library's newest-first order.
+    return own.map((tpl, i) => ({ tpl, i })).sort((a, b) => used(b.tpl.id) - used(a.tpl.id) || a.i - b.i).map((x) => x.tpl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templates, usage]);
+  /** Into the builder, which is where a template is a start source. The
+   *  builder asks before it loads over unsaved work, and waits for its own
+   *  stored draft to answer first — see `startFromTemplate` there — so this
+   *  side is a plain push and cannot lose anything.
+   *
+   *  `at` makes each tap its own request. The builder is a tab and stays
+   *  mounted, and it loads a `templateId` once per value — so without this a
+   *  coach who opened a programme, worked on somebody else's, and came back to
+   *  open the same programme again was pushed to a builder that did nothing. */
+  const openInBuilder = (tpl: ProgramTemplate) =>
+    router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id, from: 'trainerTemplates', at: String(Date.now()) } });
+
   const dayCount = (tpl: ProgramTemplate) => tpl.program.days.length;
   const exCount = (tpl: ProgramTemplate) => tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
 
@@ -368,6 +400,46 @@ export default function Templates() {
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
           Build once, assign to many. Save any program from the builder.
         </Text>
+
+        {/* ── the coach's named programmes, one tap each ───────────────────
+            Reported from a coach's phone: "Is there a way again to create
+            shortcuts to named programmes you have created so you don't have
+            to scroll through." The list below is every template with its
+            controls, which is the right shape for managing a library and the
+            wrong one for the thing a coach does daily — open the block they
+            always open. One tap loads it into the builder.
+
+            Nothing is drawn for a coach who has saved nothing, and nothing
+            under a failed read: `templates` is then only the starters, the
+            filter leaves an empty row, and the Notice below says why. */}
+        {shortcuts.length ? (
+          <View style={{ marginTop: sp.lg }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.sm, marginBottom: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Your Programmes</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{usage.withheld ? 'Newest first' : 'Most used first'}</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg }}>
+              {shortcuts.map((tpl) => {
+                const on = usage.withheld ? 0 : (usage.byId[tpl.id]?.on.length ?? 0);
+                const weeks = isBlock(tpl.program) ? weekCount(tpl.program) : 1;
+                const shape = `${weeks > 1 ? `${num(weeks)} weeks · ` : ''}${num(dayCount(tpl))} days · ${num(exCount(tpl))} exercises`;
+                return (
+                  <Pressable key={tpl.id} onPress={() => openInBuilder(tpl)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${tpl.name} in the builder. ${shape}${on ? `. ${num(on)} training it now` : ''}.`}
+                    style={{ minHeight: MIN_TARGET, maxWidth: 220, justifyContent: 'center',
+                             paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+                             borderRadius: radius.md, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring }}>
+                    <Text numberOfLines={2} style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{tpl.name}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {shape}{on ? ` · ${num(on)} training it` : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
 
         <Section>
           <Cta label="Build a New Program" wide onPress={() => router.push({ pathname: '/(trainer)/builder', params: { from: 'trainerTemplates' } })} />
@@ -423,9 +495,18 @@ export default function Templates() {
                   ) : null}
                 </View>
               </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
-                <View style={{ flex: 1 }}><Cta label="Assign to Clients" wide onPress={() => openAssign(tpl)} /></View>
-                <Ghost label="Edit" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id, from: 'trainerTemplates' } })} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                {/* Two quiet controls, named for what each one WRITES. Assign
+                    was a full-width green button on every row — twenty
+                    primaries down a page whose one primary is Build a New
+                    Program — and its neighbour said "Edit", which is not what
+                    it does: it loads a COPY into the builder, and nothing
+                    there changes this template unless the coach saves over
+                    its name. The sheet Assign opens carries the one green
+                    button that actually sends. */}
+                <Ghost label="Assign to Clients" a11yLabel={`Assign ${tpl.name} to clients`} onPress={() => openAssign(tpl)} />
+                <Ghost label="Open in Builder" a11yLabel={`Open ${tpl.name} in the builder`} onPress={() => openInBuilder(tpl)} />
+                <View style={{ flex: 1 }} />
                 {/* The row no longer leaves this list before the server has
                     counted it. It used to disappear on the tap and be reported
                     as a failure afterwards, which reads as a successful delete
