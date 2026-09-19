@@ -93,7 +93,12 @@ ok(/not saying anything is not agreeing/.test(fresh.line),
 
 const queried = reviewFor(byCoach, queryFor(idx, 'w1'), 'ready', COACH);
 ok(!queried.actions.query && queried.actions.withdraw, 'a standing query offers withdrawal, not a second query');
-ok(/3 Sep|Sep 3|3 Sept/.test(queried.line), 'a standing query is dated');
+// The day is the READER's day for that instant, which is what the sentence
+// dates — 08:00Z on 3 Sep is still 2 Sep on Midway and already 3 Sep at UTC+14,
+// and the zone suite runs both. So the expectation is built the same way the
+// line is, not typed as a calendar day.
+const queriedDay = new Date('2026-09-03T08:00:00Z').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+ok(queried.line.includes(` on ${queriedDay}`), 'a standing query is dated');
 ok(/Nothing has been deleted/.test(queried.line),
    'and says the coach’s record still stands, because a query is not an erasure');
 ok(queried.actions.amend, 'querying does not take the correction away — they answer different problems');
