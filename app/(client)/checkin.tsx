@@ -3,11 +3,27 @@
 //
 // Re-skinned onto the kit (`src/ui/kit`) + scale (`src/theme/scale`).
 //
+// ── Board page 12 ──────────────────────────────────────────────────────────
+//
+// The approved board draws this as one flat form, not a stack of cards: a
+// centred "Weekly Check-in" over a back chevron, "How Are You Feeling?" with a
+// row of five faces and the chosen one filled, "Energy Level" and "Sleep
+// Quality" as sliders, a "Notes" field, and one full-width "Submit Check-in".
+// That is the order here, and the first viewport holds exactly those. The two
+// questions the board does not draw but the coach has always been sent — plan
+// adherence and this week's weight — sit under the board's four in the same
+// idiom (a slider and a field), because a check-in without them is not the
+// check-in `sendCheckIn` files and src/lib/coachCheckins.ts reads. The
+// history under the button (waiting to send, last check-in, the weeks before)
+// is unchanged and below the fold.
+//
 // Honesty fixes:
 //  · The four ratings arrived pre-selected at energy 4 / sleep 3 / mood 4 /
 //    adherence 4. Tapping Send without touching them filed that invented week
 //    under the client's name, and the coach — and the weekly report — read it
-//    as their answer. They now start unset and Send asks for a score.
+//    as their answer. They now start unset and Send asks for a score. A
+//    slider with nothing set draws NO thumb, for the same reason: a thumb
+//    resting at the left end is a 1 the client never gave.
 //  · The weight field was pre-filled from `cd.weightKg`, which for an account
 //    with no scan and no logged weigh-in is the provider's 70 kg placeholder;
 //    submitting wrote that 70 kg back as a real measurement. It now starts
@@ -25,11 +41,13 @@ import { useState, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Cta, Ghost, Spark, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { useClientData } from '../../src/ui/clientData';
 import { fmtFullDay } from '../../src/lib/format';
 import { useSettings } from '../../src/ui/settings';
@@ -45,7 +63,7 @@ import { checkinTrend, seriesNote, trendLine } from '../../src/lib/checkinTrend'
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isPending } from '../../src/lib/wellnessSync';
 import { unsentNote } from '../../src/lib/offlineQueue';
-import { BACK_ICON } from '../../src/ui/direction';
+import { BACK_ICON, isRTL } from '../../src/ui/direction';
 
 // The range a human weighs, in the kilograms this app stores. Kept in metric
 // because the record is metric; the two bounds are converted for whichever unit
@@ -54,17 +72,143 @@ import { BACK_ICON } from '../../src/ui/direction';
 const MIN_KG = 20;
 const MAX_KG = 400;
 
-function Rating({ t, label, value: val, onChange }: { t: Theme; label: string; value: number; onChange: (v: number) => void }) {
+/**
+ * The five faces, spoken. The coach reads mood as a number out of five — that
+ * is the column and it has not changed — but a screen reader cannot read a
+ * drawn mouth, so each face carries one word. The words are this screen's
+ * names for the five scores and are stored nowhere.
+ */
+const MOOD_WORDS = ['Rough', 'Low', 'Okay', 'Good', 'Great'] as const;
+
+/** The mouth for one score: a frown that flattens at 3 and lifts to a grin. */
+function mouth(n: number): string {
+  switch (n) {
+    case 1: return 'M7.5 16.5 Q12 12 16.5 16.5';
+    case 2: return 'M7.5 16 Q12 14 16.5 16';
+    case 3: return 'M7.5 15.5 L16.5 15.5';
+    case 4: return 'M7.5 14.5 Q12 17.5 16.5 14.5';
+    default: return 'M7.5 14 Q12 19.5 16.5 14';
+  }
+}
+
+/**
+ * The board's mood row: five faces, the chosen one filled in the accent.
+ *
+ * Drawn, not typed. An emoji would render in whatever face the handset's font
+ * gives it and could not take the theme's ink, so the board's filled circle
+ * with a face inside it is two SVG dots and one path per score. The circle
+ * itself is the Pressable's fill, which is what makes the selected one read as
+ * the board's chip — `t.brand` with `t.brandInk` strokes — under every accent
+ * a gym white-labels this to.
+ */
+function Faces({ t, label, value: val, onChange }: { t: Theme; label: string; value: number; onChange: (v: number) => void }) {
   return (
-    <View style={{ marginBottom: sp.lg }}>
-      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, marginBottom: sp.sm }}>{label}</Text>
-      <View style={{ flexDirection: 'row', gap: sp.sm }}>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <Pressable key={n} onPress={() => onChange(n)} accessibilityRole="button" accessibilityLabel={`${label}: ${n} of 5`} accessibilityState={{ selected: val === n }}
-            style={{ flex: 1, aspectRatio: 1, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: val === n ? t.brand : t.surface2 }}>
-            <Text style={{ ...value(20), color: val === n ? t.brandInk : t.ink3 }}>{n}</Text>
-          </Pressable>
-        ))}
+    <View style={{ marginBottom: sp.xl }}>
+      <FieldLabel t={t} label={label} note={val ? MOOD_WORDS[val - 1] : undefined} />
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.md }}>
+        {[1, 2, 3, 4, 5].map((n) => {
+          const on = val === n;
+          const ink = on ? t.brandInk : t.ink2;
+          return (
+            <Pressable key={n} onPress={() => onChange(n)} accessibilityRole="button"
+              accessibilityLabel={`${label}: ${MOOD_WORDS[n - 1]}, ${n} of 5`} accessibilityState={{ selected: on }}
+              style={{ width: 52, height: 52, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+              <Svg width={30} height={30} viewBox="0 0 24 24">
+                <Circle cx="8.5" cy="9.5" r="1.5" fill={ink} />
+                <Circle cx="15.5" cy="9.5" r="1.5" fill={ink} />
+                <Path d={mouth(n)} stroke={ink} strokeWidth={2} strokeLinecap="round" fill="none" />
+              </Svg>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * A label over a control, with the control's current answer at the far end of
+ * the same line — "4/5", the unit, the word for the face — so the answer is
+ * read where the question is.
+ */
+function FieldLabel({ t, label, note }: { t: Theme; label: string; note?: string }) {
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
+      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flexShrink: 1 }}>{label}</Text>
+      {note ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{note}</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * The board's slider, on a five-point scale.
+ *
+ * Built on the raw responder props rather than a slider package: none is in
+ * the binary, and a native dependency cannot ship over the air to the phones
+ * that already have this app (see src/lib/dragReorder.ts for the same
+ * reasoning about reanimated). The scale is 1–5 and discrete, because that is
+ * what `sendCheckIn` files and what the coach's console and the trend under
+ * this form have always read; the thumb snaps to the nearest score, so
+ * nothing between two scores can be sent.
+ *
+ * Unset draws no fill and no thumb. A thumb resting at the left end IS a 1 to
+ * anybody looking at it, and this screen has already been fixed once for
+ * ratings it invented. The first touch anywhere on the track sets a score.
+ *
+ * `accessibilityRole="adjustable"` is the RN role for this shape: the rotor's
+ * up/down and a switch's increment land on `onAccessibilityAction` and step by
+ * one, which is the same thing a drag does through a path that needs no drag.
+ * The touch area is the full width and `MIN_TARGET` tall — the track is 4pt
+ * and nobody can hit 4pt.
+ *
+ * `locationX` is measured from the physical left edge, and under a right-to-
+ * left layout `start` is the right edge, so the fraction is mirrored there —
+ * otherwise a drag to the right would shrink the fill it was growing.
+ */
+function Slider({ t, label, value: val, onChange }: { t: Theme; label: string; value: number; onChange: (v: number) => void }) {
+  const [w, setW] = useState(0);
+  const THUMB = 22;
+  const pick = (x: number) => {
+    if (w <= 0) return;
+    const frac = Math.max(0, Math.min(1, x / w));
+    onChange(1 + Math.round((isRTL ? 1 - frac : frac) * 4));
+  };
+  const step = (by: number) => onChange(val ? Math.max(1, Math.min(5, val + by)) : 1);
+  const pct = val ? ((val - 1) / 4) * 100 : 0;
+  return (
+    <View style={{ marginBottom: sp.xl }}>
+      <FieldLabel t={t} label={label} note={val ? `${val}/5` : 'Not set'} />
+      <View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={label}
+        accessibilityValue={val ? { min: 1, max: 5, now: val } : { text: 'Not set' }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === 'increment') step(1);
+          else if (e.nativeEvent.actionName === 'decrement') step(-1);
+        }}
+        onLayout={(e) => setW(e.nativeEvent.layout.width)}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={(e) => pick(e.nativeEvent.locationX)}
+        onResponderMove={(e) => pick(e.nativeEvent.locationX)}
+        style={{ height: MIN_TARGET, justifyContent: 'center' }}>
+        <View style={{ height: 4, borderRadius: radius.pill, backgroundColor: t.surface3 }} />
+        {val ? (
+          <View>
+            <View style={{ position: 'absolute', start: 0, top: -2, height: 4, width: `${pct}%`, borderRadius: radius.pill, backgroundColor: t.brand }} />
+            {/* The thumb is the board's: near-black on the green, lifted off
+                the track by a ring of the canvas. `start` is a percentage of
+                the track less half the thumb, so score 1 and score 5 sit
+                centred on the two ends rather than hanging past them. */}
+            <View style={{
+              position: 'absolute', top: -THUMB / 2, start: `${pct}%`, marginStart: -THUMB / 2,
+              width: THUMB, height: THUMB, borderRadius: radius.pill,
+              backgroundColor: t.ink, borderWidth: 3, borderColor: t.bg,
+            }} />
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -133,7 +277,7 @@ export default function CheckIn() {
     // be the figure `weightToKg` stores two lines below. One reader, one number.
     const w = readNumber(weight);
     if (w == null || !(w > minShown && w < maxShown)) { Alert.alert('Add your weight', `Enter this week's weight in ${wu} so your coach sees the real number.`); return; }
-    if (!energy || !sleep || !mood || !adherence) { Alert.alert('Rate your week', 'Tap a score for energy, sleep, mood and adherence — we won\'t guess them for you.'); return; }
+    if (!energy || !sleep || !mood || !adherence) { Alert.alert('Rate your week', 'Pick a face, and slide energy, sleep and adherence to a score — we won\'t guess them for you.'); return; }
     // Storage is metric everywhere, so the pounds a client typed become the
     // kilograms the coach's console, the macro calculator and the goal tracker
     // all read. `weightToKg` returns null for an unreadable field, but the
@@ -185,46 +329,52 @@ export default function CheckIn() {
     );
   };
 
+  const field = {
+    ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline,
+    borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginTop: sp.md,
+  } as const;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
+        {/* The board's header: a back chevron and the title centred over the
+            form. A 38pt blank at the far end is what keeps the title centred
+            on the screen rather than on what is left of it. Said "Daily" over
+            a title reading "Weekly Check-in", above a line calling it a weekly
+            pulse — one of the three had to move and it was the kicker: the
+            screen sends one check-in, the coach reads it weekly, and nothing
+            here is daily. The board draws no kicker at all, so none is. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            {/* Said "Daily" over a title reading "Weekly Check-in", above a
-                line calling it a weekly pulse. One of the three had to move and
-                it is the kicker: the screen sends one check-in, the coach reads
-                it weekly, and nothing here is daily. */}
-            <Text style={{ ...ty.micro, color: t.ink3 }}>For your coach</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Weekly Check-in</Text>
+          <Text accessibilityRole="header" style={{ flex: 1, ...ty.title, color: t.ink, textAlign: 'center' }}>Weekly Check-in</Text>
+          <View style={{ width: 38 }} />
+        </View>
+
+        {/* ── the board's four, in the board's order ──────────────────────── */}
+        <View style={{ marginTop: sp.xxl }}>
+          <Faces t={t} label="How Are You Feeling?" value={mood} onChange={setMood} />
+          <Slider t={t} label="Energy Level" value={energy} onChange={setEnergy} />
+          <Slider t={t} label="Sleep Quality" value={sleep} onChange={setSleep} />
+          <View style={{ marginBottom: sp.xl }}>
+            <FieldLabel t={t} label="Notes" />
+            <TextInput value={note} onChangeText={setNote} placeholder="Add a note…" placeholderTextColor={t.ink3} multiline accessibilityLabel="Note for your coach"
+              style={{ ...field, minHeight: 72, textAlignVertical: 'top' }} />
+          </View>
+
+          {/* ── and the two the coach has always been sent ──────────────────
+              Below the board's four and in the same idiom. Adherence is the
+              fourth score the coach's console and the weekly report read;
+              weight is what the macro target and the goal are worked out
+              from. Neither can be dropped to match a picture. */}
+          <Slider t={t} label="Plan Adherence" value={adherence} onChange={setAdherence} />
+          <View style={{ marginBottom: sp.xl }}>
+            <FieldLabel t={t} label="Current Weight" note={wu} />
+            <TextInput value={weight} onChangeText={setTyped} keyboardType="decimal-pad" placeholder={wu} placeholderTextColor={t.ink3}
+              accessibilityLabel={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}
+              style={{ ...field, ...numeric }} />
+            {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text> : null}
           </View>
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>A quick pulse for your coach — takes 30 seconds.</Text>
-
-
-        <Section>
-          <SectionHead title="Current Weight" note={wu} />
-          <TextInput value={weight} onChangeText={setTyped} keyboardType="decimal-pad" placeholder={wu} placeholderTextColor={t.ink3}
-            accessibilityLabel={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}
-            style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
-          {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text> : null}
-        </Section>
-
-
-        <Section>
-          <SectionHead title="How the Week Went" note="1 – 5" />
-          <Rating t={t} label="Energy This Week" value={energy} onChange={setEnergy} />
-          <Rating t={t} label="Sleep Quality" value={sleep} onChange={setSleep} />
-          <Rating t={t} label="Mood" value={mood} onChange={setMood} />
-          <Rating t={t} label="Plan Adherence" value={adherence} onChange={setAdherence} />
-        </Section>
-
-
-        <Section>
-          <SectionHead title="Anything for Your Coach?" />
-          <TextInput value={note} onChangeText={setNote} placeholder="Wins, struggles, questions…" placeholderTextColor={t.ink3} multiline accessibilityLabel="Note for your coach"
-            style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 100, textAlignVertical: 'top' }} />
-        </Section>
 
         {/* Guarded, and the label says why. `submit` awaits two network
             writes before it says anything, and on a gym's wifi that window is
@@ -236,7 +386,7 @@ export default function CheckIn() {
             useState alone would not have stopped it: the handler reads the flag
             out of the closure it was made in, and two taps in one frame both
             see false. See src/lib/submitOnce.ts. */}
-        <Cta label={send.busy ? 'Sending…' : 'Send Check-in'} disabled={send.busy}
+        <Cta label={send.busy ? 'Sending…' : 'Submit Check-in'} disabled={send.busy}
           onPress={() => send.run(submit)} wide />
 
         {/* Waiting to go up. Said here rather than only in the alert that

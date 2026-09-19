@@ -120,7 +120,7 @@ import { refusedBodyNote, refusedForThread } from '../../src/lib/refusedMessages
 import {
   searchThread, threadSearchA11y, threadSearchActive, threadSearchLine,
 } from '../../src/lib/threadSearch';
-import { BACK_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 /** The clip itself. Split into its own component so the player hook receives a
  *  settled URL — a signature arrives asynchronously and a hook cannot wait. */
@@ -562,29 +562,46 @@ export default function Messages() {
   const { ref: barRef, lift } = useKeyboardLift();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
+      {/* ── board page 13's header ─────────────────────────────────────────
+          A back chevron, the coach's face, their name over one small line,
+          and a chevron at the far end that opens their page. The eyebrow
+          that used to sit ABOVE the name ("Your coach") is the line UNDER it
+          now, which is where the board draws a status line — and it is the
+          only truthful thing to put there: no presence is measured and no
+          reply-time is estimated (see the header of this file), so the line
+          says who this is, or, for a name that could not be read, why. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
           <Icon name={BACK_ICON} size={20} color={t.ink2} />
         </Pressable>
-        {/* The face, under the same rule as the name: `peer.avatar` is only
-            ever what came back from the read for the COACH's id, so there is no
-            input on which this is the reader's own photograph — which is what
-            it used to be. With no picture it falls back to their initials, and
-            with no name to take initials from it falls back to the same dash
-            the header shows, in the same muted ink. */}
-        <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-          {peer.avatar
-            ? <Image source={{ uri: peer.avatar }} style={{ width: 38, height: 38 }} accessibilityIgnoresInvertColors />
-            : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? t.brand : t.ink3 }}>{peerMonogram(head)}</Text>}
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Your coach</Text>
-          {/* `capitalize` is applied only to a real name. A dash needs no
-              casing, and the muted ink is what tells you at a glance that the
-              line is a placeholder rather than somebody called "—". */}
-          <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, marginTop: 2, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
-          {head.note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{head.note}</Text> : null}
-        </View>
+        {/* The board's chevron: the name and face open Your Coach, which is
+            the screen that says what this person can see and how else to
+            reach them. One Pressable over both, so the row is one element
+            with one spoken name rather than a face and a name announced
+            twice. */}
+        <Pressable onPress={() => router.push('/(client)/my-coach')} accessibilityRole="button"
+          accessibilityLabel={head.isName ? `${head.text}, your coach. Opens their page` : 'Your coach. Opens their page'}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+          {/* The face, under the same rule as the name: `peer.avatar` is only
+              ever what came back from the read for the COACH's id, so there is no
+              input on which this is the reader's own photograph — which is what
+              it used to be. With no picture it falls back to their initials, and
+              with no name to take initials from it falls back to the same dash
+              the header shows, in the same muted ink. */}
+          <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            {peer.avatar
+              ? <Image source={{ uri: peer.avatar }} style={{ width: 40, height: 40 }} accessibilityIgnoresInvertColors />
+              : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? t.brand : t.ink3 }}>{peerMonogram(head)}</Text>}
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            {/* `capitalize` is applied only to a real name. A dash needs no
+                casing, and the muted ink is what tells you at a glance that the
+                line is a placeholder rather than somebody called "—". */}
+            <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{head.note ?? 'Your coach'}</Text>
+          </View>
+          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+        </Pressable>
         {/* The way out. In the header rather than buried in a menu, because a
             moderation path somebody has to go looking for is one they use after
             it has already gone wrong. The icon carries no status colour — the
@@ -597,13 +614,13 @@ export default function Messages() {
           accessibilityRole="button" hitSlop={8}
           accessibilityState={{ selected: searching }}
           accessibilityLabel={searching ? 'Stop searching this conversation' : 'Search this conversation'}
-          style={{ width: 34, height: 34, borderRadius: radius.md, backgroundColor: searching ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+          style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: searching ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="search" size={16} color={searching ? t.brandInk : t.ink2} />
         </Pressable>
         <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
           accessibilityLabel={blockActionLabel(safety.state, OTHER)}
           accessibilityHint="Block this conversation, or report a message in it"
-          style={{ width: 34, height: 34, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+          style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="lock" size={16} color={t.ink2} />
         </Pressable>
       </View>
@@ -785,7 +802,18 @@ export default function Messages() {
                 {/* A photo needs no caption, and an empty bubble under one is a
                     thing the sender did not say. */}
                 {m.body ? (
-                  <View style={{ backgroundColor: mine ? t.brand : t.surface2, borderRadius: radius.md, paddingHorizontal: sp.md, paddingVertical: sp.sm + 2 }}>
+                  // The board's bubbles: the coach's in the muted surface on
+                  // the near side, the member's in the accent on the far side,
+                  // each with the corner nearest its sender's edge squared off
+                  // so the two sides read as two voices without a name on
+                  // every line. `start`/`end`, not left/right — the sides swap
+                  // under a right-to-left layout and the tails must swap with
+                  // them.
+                  <View style={{
+                    backgroundColor: mine ? t.brand : t.surface2, borderRadius: radius.md,
+                    borderBottomEndRadius: mine ? 4 : radius.md, borderBottomStartRadius: mine ? radius.md : 4,
+                    paddingHorizontal: sp.lg, paddingVertical: sp.md,
+                  }}>
                     <Text style={{ ...ty.body, color: mine ? t.brandInk : t.ink }}>{m.body}</Text>
                   </View>
                 ) : null}
@@ -890,24 +918,35 @@ export default function Messages() {
             </Notice>
           </View>
         ))}
+        {/* ── the board's composer ─────────────────────────────────────────
+            One pill holding the field and the camera at its end, and a round
+            accent button beside it with a glyph rather than the word "Send".
+            The glyph is the forward chevron, mirrored for a right-to-left
+            layout by `FORWARD_ICON`, and the button keeps its spoken name and
+            its busy/disabled state — a spinner replaces the glyph while a send
+            is in flight, which is what "Sending…" used to say. */}
         <View ref={barRef} style={{ flexDirection: 'row', gap: sp.sm, paddingHorizontal: G, paddingVertical: sp.md, backgroundColor: t.bg, alignItems: 'center' }}>
-          <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={8}
-            style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="camera" size={18} color={t.ink2} />
-          </Pressable>
-          <TextInput value={text} onChangeText={setText} editable={canSend}
-            placeholder={canSend ? 'Message your coach…' : 'This conversation is closed'} placeholderTextColor={t.ink3}
-            accessibilityLabel={canSend ? 'Message your coach' : 'This conversation is closed'}
-            style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, opacity: canSend ? 1 : 0.6 }} />
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.pill, paddingStart: sp.lg, paddingEnd: sp.xs, opacity: canSend ? 1 : 0.6 }}>
+            <TextInput value={text} onChangeText={setText} editable={canSend}
+              placeholder={canSend ? 'Type a message…' : 'This conversation is closed'} placeholderTextColor={t.ink3}
+              accessibilityLabel={canSend ? 'Message your coach' : 'This conversation is closed'}
+              style={{ flex: 1, minWidth: 0, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+            <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={4}
+              style={{ width: 40, height: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="camera" size={18} color={t.ink2} />
+            </Pressable>
+          </View>
           {/* Disabled while a send is in flight: tapping twice would put the
               same photo in the bucket twice and the thread twice with it. And
               disabled on a thread this device KNOWS is blocked — not to enforce
               anything (the database does that) but so nobody writes a message,
               taps Send, and reads an alert instead of a bubble. */}
           <Pressable onPress={onSend} disabled={busy || !canSend} accessibilityRole="button" accessibilityLabel="Send message"
-            accessibilityState={{ disabled: busy || !canSend }}
-            style={{ backgroundColor: t.brand, borderRadius: radius.md, paddingHorizontal: sp.lg, justifyContent: 'center', opacity: busy || !canSend ? 0.5 : 1 }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{busy ? 'Sending…' : 'Send'}</Text>
+            accessibilityState={{ disabled: busy || !canSend, busy }}
+            style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center', opacity: busy || !canSend ? 0.5 : 1 }}>
+            {busy
+              ? <ActivityIndicator size="small" color={t.brandInk} />
+              : <Icon name={FORWARD_ICON} size={20} color={t.brandInk} strokeWidth={2.5} />}
           </Pressable>
         </View>
       </View>
