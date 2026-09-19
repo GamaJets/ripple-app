@@ -9,9 +9,10 @@
 // three stacked bordered card stacks became sections separated by a rule.
 //
 // Re-ordered to the approved board (client page 17, "Wearables"): the
-// catalogue of apps comes first, one hairline row each with the app's glyph,
-// its name and a chip — green "Connected" only where THIS build can read the
-// device, grey "Connect" otherwise — and the hero, the import list, the coach
+// catalogue of apps comes first, one hairline row each with the app's brand
+// mark on its own plate (src/ui/wearables/ProviderMark.tsx), its name and a
+// chip — green "Connected" only where THIS build can read the device, grey
+// "Connect" otherwise — and the hero, the import list, the coach
 // switch, the sleep provenance and the Health write-back follow it in their
 // old order. Nothing was removed; the sections are the board's cards now, so
 // the rules that used to separate them are gone with the air they divided.
@@ -31,6 +32,9 @@ import { useTheme } from '../../src/ui/components';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
+// The brand's own mark on the brand's own plate, the way the board draws each
+// row of Connected Apps. See the file for why its colours are literals.
+import { ProviderMark } from '../../src/ui/wearables/ProviderMark';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, readRecent, readNote, type RecentRead } from '../../src/ui/watchImport';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -866,7 +870,7 @@ export default function Devices() {
 
   {/* ── connected apps ──────────────────────────────────────────────────
       First, as board page 17 draws it: one row per app in the catalogue,
-      the app's own glyph in a circle, its name, and a chip at the end that
+      the app's brand mark on its plate, its name, and a chip at the end that
       says where it stands. Everything this screen used to open with — the
       live burn, the import list, the coach switch, the sleep provenance and
       the Health write-back — is still here, under the list, in its old
@@ -925,14 +929,13 @@ export default function Devices() {
       borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
      }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-       {/* The catalogue's own glyph for the app, in the circle every row's
-           icon sits in. The board colours each app's icon its own way; the
-           glyph is the one mark this app already carries for it, so nothing
-           is invented and no status colour is spent on decoration. */}
-       <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}
-        accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Text style={{ ...ty.title }}>{p.meta.icon}</Text>
-       </View>
+       {/* The brand's mark on the brand's plate, as the board colours each
+           app's icon its own way. This was the catalogue's emoji in a grey
+           circle — two watches, a red dot and a ring, which nobody read as
+           Garmin, Fitbit, WHOOP or Oura. The plate is decorative and hides
+           itself from assistive tech; the name beside it does the speaking,
+           and no status colour is spent on decoration. */}
+       <ProviderMark id={p.meta.id} size={40} />
        <View style={{ flex: 1 }}>
         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.meta.name}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>

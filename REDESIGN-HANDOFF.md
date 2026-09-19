@@ -207,6 +207,35 @@ Gates (caps, contrast, a11y, rtl, text, whole, dead-exports, reads, prose) and `
   "Swap This Meal" becomes **Use This Meal** (`choose(pos, idx)` → `override[pos]`) for a row that is not
   the plan's. Still no photography: the thumbnail is `m.ico`.
 
+## 4g. Ten lanes at once (19 Sep, night) — commits `5eda2bf` … `0296e0a`
+
+The user asked for "10 subagents and 10 lanes". Each lane had one pre-cropped board page per screen
+(`scratchpad/board/<app>-NN.png`, cut from the high-res board: coach rows y=62/283, client rows y=553/703,
+125px pitch), the implementation doc, the kit idioms and the no-fabrication rules, and ran tsc + nine
+gates before reporting; the lead ran the full suite, all 41 gates, screenshots and commits. Landed:
+
+| Lane | Board | Files | Notes |
+|---|---|---|---|
+| 1 | Client 4/5/6 | `app/(client)/exercise.tsx` | ready / demo / set views; "Set n of N" only when the opener passes `sets`/`reps` |
+| 11 | Client 4/6 | `app/(client)/workouts.tsx` `SessionRunner` | Train's Start Workout runs THIS, not exercise.tsx; three drawings of one state |
+| 2 | Client 11/10 | `calendar.tsx`, `habits.tsx` | month first, agenda under; habit figures from real stores, dashes with reasons |
+| 3 | Client 12/13 | `checkin.tsx`, `messages.tsx` | faces + sliders + notes + submit; grey/green bubbles, pill composer |
+| 4 | Client 17/18/1 | `devices.tsx`, `settings.tsx`, `app/welcome.tsx` | **Connected only when the provider can be read** — HealthKit-less sim shows Not Readable + Disconnect |
+| 5 | Client 14/7 | `challenges.tsx`, `scans.tsx`, `achievements.tsx` | live "Day n of N"; Progress = bar, figure, delta, chart, chips, dated scans |
+| 6 | Coach 6/15 | `library.tsx`, `exercise.tsx`, `templates.tsx`, `documents.tsx` | search pill, chips, round RepDB stills; Instructions under the picture |
+| 7 | Coach 7/8 | `client-nutrition.tsx`, `client-body.tsx` | four target rings 2×2 (dashes without a body); figure/delta/chart/readings |
+| 8 | Coach 9/12/18 | `chat.tsx`, `client.tsx`, `src/ui/notifications.tsx`, `src/ui/coach/CheckInReview.tsx` | check-in reviewed in the form's shapes + Reply; notifications shared by all three apps |
+| 9 | Coach 14 | `money.tsx` (+ heads on payments/billing/invoices/statement/receipts/costs) | "Total Taken", per-currency, whole-read delta vs prior statement month |
+| 10 | Coach 17/19/20 | `settings.tsx`, `profile.tsx`, `account.tsx`, `credentials.tsx` | Log Out row; Light/Dark/System radios; Clients/Rating/Years strip |
+
+Lead fixes after the lanes: `check:numbers` (habits `stepsDevice` is a name), `check:invented-zero`
+(exercise prefill carried a null load as 0), `check:site-claims` (404's `/#why` anchor no longer exists).
+Suite 564 ok, all gates ok. Deep links work for screenshots: `xcrun simctl openurl booted
+"repple:///(client)/<route>"` and `"repplecoach:///(trainer)/<route>"`.
+
+Kit note from three lanes: a `ScreenHeader centered` variant (back + centred title + 38pt spacer) would
+remove the copies now hand-built on ~12 screens.
+
 ## 5. What to do next
 
 **Port the implemented screens from `repple-redesign`, file by file, re-applying audit fixes on
