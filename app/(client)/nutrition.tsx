@@ -16,7 +16,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { num, numUpTo } from '../../src/lib/format';
 import { fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
@@ -39,6 +39,21 @@ import { groceryTicksKey, readGroceryTicks } from '../../src/lib/groceryTicks';
 // lines below the grocery ticks that were fixed for exactly that. See
 // src/lib/mealSwaps.ts.
 import { LEGACY_MEAL_SWAPS_KEY, mealSwapsKey, readMealSwaps, writeMealSwaps } from '../../src/lib/mealSwaps';
+// Real, photographed recipes beside the generated dishes — see
+// docs/RECIPES-SPOONACULAR.md. Three things about them shape everything this
+// screen does with one: every search SPENDS quota, so nothing is asked until a
+// member asks; nothing Spoonacular returns may be stored except a recipe's id,
+// title and image URL (src/lib/recipePlan.ts keeps exactly that); and a recipe's
+// `idx` is -1, which must never reach `choose`, `swapIndex`, `mealAt` or the
+// `mealOverride` map — those are catalogue-index machinery.
+import {
+  RECIPE_ATTRIBUTION, RECIPE_DISCLAIMER, isRecipeMeal, portionRecipe, recipeAllergens,
+  type RecipeMeal, type PlannedRecipe, type RecipeDetailResult, type RecipeContext,
+} from '../../src/lib/recipes';
+import { recipePlanKey, readRecipePlan, writeRecipePlan, withRecipeAt, withoutRecipeAt, type RecipePlan } from '../../src/lib/recipePlan';
+import { useRecipeSearch, useRecipeDetail } from '../../src/ui/useRecipeSearch';
+import { GuardedImage } from '../../src/ui/GuardedImage';
+import { reportError } from '../../src/lib/reportError';
 import { useWearables } from '../../src/ui/wearables';
 import { caloriesLeft, caloriesNote, dayBurn, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
 import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
@@ -204,6 +219,49 @@ function targetBasis(plan: EnergyPlan, goalLabel: string, wu: WeightUnit): strin
   return `Your date needs ${rateIn(plan.requiredRateKg, wu)} ${wu} a week, and ${why}. This plan is built on ${pace} instead${tail} Move the date or the target under Goals if you want them to meet.`;
 }
 
+// ── real recipes in the list ─────────────────────────────────────────────────
+
+/** Whether two rows are the same dish. A generated dish is its catalogue index;
+ *  a recipe is its `sourceId`, because EVERY recipe's `idx` is -1 — compared by
+ *  `idx` alone, every recipe on screen is every other recipe, and all of them
+ *  are "In your plan" the moment one is. */
+const sameDish = (a: PlannedMeal, b: PlannedMeal): boolean =>
+  isRecipeMeal(a) ? isRecipeMeal(b) && a.sourceId === b.sourceId : !isRecipeMeal(b) && a.idx === b.idx;
+/** The same distinction, as a React key. */
+const dishKey = (m: PlannedMeal): string => (isRecipeMeal(m) ? `r${m.sourceId}` : String(m.idx));
+
+/** A credit or the library's backlink, opened in the browser. A link that will
+ *  not open is reported rather than alerted: nothing the member was doing
+ *  depends on it, and the words it sits under are the credit either way. */
+const openLink = (where: string, url: string) => { Linking.openURL(url).catch((e) => reportError(where, e)); };
+
+/** One planned recipe's read, as the screen holds it. `loading` rides along so
+ *  "Try Again" can say it is trying — the hook keeps the old failure in
+ *  `result` until the new answer lands. */
+interface PlannedRead { result: RecipeDetailResult | null; loading: boolean; refresh: () => void }
+
+/**
+ * Reads ONE planned recipe back from its id, and draws nothing.
+ *
+ * A component because `useRecipeDetail` is a hook and a plan holds a variable
+ * number of recipes: one of these is mounted per planned recipe whose dish is
+ * not already in hand, which is the only shape that keeps the hook count fixed.
+ *
+ * What is stored for a planned recipe is its id, title and image URL (the terms
+ * allow nothing else — src/lib/recipePlan.ts), so its figures, ingredients and
+ * method exist only after this read. Each one costs 1.1 Spoonacular points, so
+ * the screen mounts it only for a recipe the member deliberately planned, and
+ * not at all for one chosen this session, whose dish is still in memory.
+ */
+function PlannedRecipeRead({ sourceId, ctx, onRead }: {
+  sourceId: number; ctx: RecipeContext; onRead: (sourceId: number, read: PlannedRead) => void;
+}) {
+  const d = useRecipeDetail(sourceId, ctx);
+  useEffect(() => { onRead(sourceId, { result: d.result, loading: d.loading, refresh: d.refresh }); },
+    [sourceId, d.result, d.loading, d.refresh, onRead]);
+  return null;
+}
+
 export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
@@ -297,6 +355,31 @@ export default function Nutrition() {
   const [override, setOverride] = useState<Record<number, number>>({});
   const [ovHydrated, setOvHydrated] = useState(false);
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
+  // ── real recipes ───────────────────────────────────────────────────────
+  //
+  // `recipeSearchOpen` is the deliberate act. Every search is about two
+  // Spoonacular points out of a day's fifty shared by every member of every
+  // coach, so mounting this tab asks nothing: the hook below is handed null
+  // until somebody taps "Search Real Recipes", and again after they change
+  // slot, which is a different search they have not asked for yet.
+  const [recipeSearchOpen, setRecipeSearchOpen] = useState(false);
+  // Slot position → the recipe the member planned there. Refs only, under a key
+  // with their account in it: see src/lib/recipePlan.ts for both halves.
+  const [recipePlan, setRecipePlan] = useState<RecipePlan>({});
+  const [rpHydrated, setRpHydrated] = useState(false);
+  // Dishes in hand for planned recipes, by `sourceId`: the one the member just
+  // chose out of a search (so choosing costs no second read), and the reads
+  // `PlannedRecipeRead` reports. React state, and only that — it dies with the
+  // screen, which is what the terms require of everything but the ref.
+  const [recipeLive, setRecipeLive] = useState<Record<number, RecipeMeal>>({});
+  const [recipeReads, setRecipeReads] = useState<Record<number, PlannedRead>>({});
+  const onRecipeRead = useCallback((sourceId: number, read: PlannedRead) => {
+    setRecipeReads((prev) => {
+      const was = prev[sourceId];
+      if (was && was.result === read.result && was.loading === read.loading && was.refresh === read.refresh) return prev;
+      return { ...prev, [sourceId]: read };
+    });
+  }, []);
 
   /** Put a planned meal or a snack idea in today's log. Nothing else counts it
    *  — the plan is a menu, and reading a menu is not eating.
@@ -411,6 +494,27 @@ export default function Nutrition() {
     if (!ovHydrated || !swapsKey) return;
     AsyncStorage.setItem(swapsKey, writeMealSwaps(override)).catch(() => {});
   }, [override, ovHydrated, swapsKey]);
+  // ── and whose planned recipes ──────────────────────────────────────────
+  //
+  // The swaps' shape exactly, for the swaps' reasons: keyed on the account, not
+  // on mount; disarmed BEFORE the read so an account switch whose read fails
+  // cannot write this member's empty map over the other one's; and an
+  // unreadable store is nothing planned on screen with nothing persisted over
+  // it. `writeRecipePlan` writes refs and only refs whatever it is handed.
+  const recipesKey = recipePlanKey(c.id);
+  useEffect(() => {
+    if (!recipesKey) { setRecipePlan({}); setRpHydrated(false); return; }
+    let live = true;
+    setRpHydrated(false);
+    AsyncStorage.getItem(recipesKey)
+      .then((r) => { if (live) { setRecipePlan(readRecipePlan(r)); setRpHydrated(true); } })
+      .catch(() => { if (live) setRecipePlan({}); });
+    return () => { live = false; };
+  }, [recipesKey]);
+  useEffect(() => {
+    if (!rpHydrated || !recipesKey) return;
+    AsyncStorage.setItem(recipesKey, writeRecipePlan(recipePlan)).catch(() => {});
+  }, [recipePlan, rpHydrated, recipesKey]);
   const [view, setView] = useState<'today' | 'week'>('today');
   // The board's meal list is one slot at a time — Breakfast, Lunch, Dinner
   // segments over the rows. null is "the first slot of the plan", so a plan
@@ -739,16 +843,68 @@ export default function Nutrition() {
   const planHasSnacks = plan.some((m) => m.slot === 'Snack');
   const planSlots = useMemo(() => Array.from(new Set(plan.map((m) => m.slot))), [plan]);
   const slotSel: Slot | null = slotPick && planSlots.includes(slotPick) ? slotPick : planSlots[0] ?? null;
-  const slotMeals = plan.filter((m) => m.slot === slotSel);
+  // ── today's plan, with the member's planned recipes in it ──────────────
+  //
+  // `plan` stays what `buildPlan` composed — the week, the grocery list and the
+  // shared document are all built from it and from `input`, and none of them
+  // knows what a recipe is. `todayPlan` is what TODAY'S LIST draws: the same
+  // rows, with a planned recipe standing in at its position once its dish is in
+  // hand, portioned to the calories the generated row there carries
+  // (`portionRecipe` is `buildPlan`'s own arithmetic, so the slot's share of
+  // the day does not move by more than the dish).
+  //
+  // "Once its dish is in hand" is the rule that matters. A ref with no read
+  // behind it has no figures, and a failed read is not an empty slot: until the
+  // read is WHOLE the generated row stays exactly where it was, and the list
+  // says underneath which recipe it is waiting for or could not read.
+  const recipeDish = (sourceId: number): RecipeMeal | null => {
+    const held = recipeLive[sourceId];
+    if (held) return held;
+    const read = recipeReads[sourceId]?.result;
+    return read && read.status === 'ready' ? read.meal : null;
+  };
+  const todayPlan = useMemo((): PlannedMeal[] => plan.map((m) => {
+    const ref = recipePlan[m.pos];
+    const dish = ref ? recipeDish(ref.sourceId) : null;
+    // The slot is the PLAN's, not the one the recipe was searched under: a
+    // change of meals-per-day moves which slot a position is, and a row filed
+    // under a segment the plan no longer has would be a row nobody can find.
+    return dish ? portionRecipe({ ...dish, slot: m.slot }, m.K, m.pos) : m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [plan, recipePlan, recipeLive, recipeReads]);
+  const slotMeals = todayPlan.filter((m) => m.slot === slotSel);
+  // The slot's rows as the ENGINE composed them. Everything that does catalogue
+  // arithmetic below — the stride, `mealAt`, the "not the lead again" filter —
+  // reads this one, because `slotMeals[0]` may now be a recipe and a recipe's
+  // `idx` is -1.
+  const genSlotMeals = plan.filter((m) => m.slot === slotSel);
   /** Pick a named meal for a slot — the swap the board's list offers, by
-      choice rather than by stepping to the next one. */
-  const choose = (pos: number, idx: number) => setOverride({ ...override, [pos]: idx });
+      choice rather than by stepping to the next one.
+
+      Refuses anything that is not a catalogue index. No caller hands it a
+      recipe's -1 — the sheet branches on `isRecipeMeal` before it gets here —
+      and this is the second lock on that door, because what is behind it is
+      `buildPlan` resolving `idx % size` into a dinner nobody chose, persisted. */
+  const choose = (pos: number, idx: number) => {
+    if (!Number.isInteger(idx) || idx < 0) return;
+    setOverride({ ...override, [pos]: idx });
+  };
+  /** Plan a real recipe at its slot. The REF is what is kept (`withRecipeAt`
+   *  goes through `recipeRef`); the dish is held in state so the row can be
+   *  drawn now without paying for a second read of something already in hand. */
+  const planRecipe = (m: PlannedRecipe) => {
+    if (m.pos < 0) return;
+    setRecipeLive((prev) => ({ ...prev, [m.sourceId]: m }));
+    setRecipePlan((prev) => withRecipeAt(prev, m.pos, m));
+  };
+  /** Hand a slot back to the plan's own meal. */
+  const unplanRecipe = (pos: number) => setRecipePlan((prev) => withoutRecipeAt(prev, pos));
   // The rest of the slot's catalogue, portioned like the planned meal so the
   // calories on the rows are the calories the plan would carry. The planned
   // meal leads and is not repeated. Real search over real rows; an empty
   // query lists the first of the catalogue, which is what the board draws.
   const slotOptions = useMemo((): PlannedMeal[] => {
-    const lead = slotMeals[0];
+    const lead = genSlotMeals[0];
     if (!slotSel || !lead) return [];
     const q = mealQuery.trim();
     // Neighbouring indices differ only in the last component — "Berry oats",
@@ -766,9 +922,57 @@ export default function Nutrition() {
       .slice(0, 12)
       .map((m) => ({ ...m, pos: lead.pos, servings: lead.servings,
         K: Math.round(m.k * lead.servings), P: Math.round(m.p * lead.servings), C: Math.round(m.c * lead.servings), F: Math.round(m.f * lead.servings) }));
-  }, [slotMeals, slotSel, mealQuery, diet, c.avoid]);
-  const coachPick = (pos: number) => coachOverride[pos] != null && override[pos] == null;
-  const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
+  }, [genSlotMeals, slotSel, mealQuery, diet, c.avoid]);
+  // A position the member has put a recipe in is not showing the coach's pick,
+  // whatever the override maps say: the row under the label would be the
+  // member's own choice with the coach's name on it.
+  const coachPick = (pos: number) => coachOverride[pos] != null && override[pos] == null
+    && !(todayPlan[pos] && isRecipeMeal(todayPlan[pos]));
+  const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => {
+    // `swapIndex` steps along the catalogue FROM an index. See `choose`.
+    if (!Number.isInteger(idx) || idx < 0) return;
+    setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
+  };
+  // ── the recipe search, and only when asked ─────────────────────────────
+  //
+  // Null until `recipeSearchOpen`, and the hook spends nothing on null. The
+  // calorie band is the GENERATED lead's `K` — the slot's share of the day —
+  // so what comes back can be portioned to the slot without halving or
+  // tripling it. An empty box is a real search ("breakfasts for my diet"), one
+  // or two letters are not, and the hook debounces the typing: all three are
+  // its rules (src/ui/useRecipeSearch.ts), followed here rather than restated.
+  //
+  // To the nearest 50 kcal, for the SEARCH only. Every generated dish lands on
+  // a slightly different `K` (servings move in quarters), the hook asks again
+  // whenever its params change by value, and 612 against 598 is not a new
+  // question worth three points. The rows are still portioned to the exact `K`.
+  //
+  // The three doors of the early return below close it too. They already keep
+  // this list off screen, but the hook runs ABOVE them, and a search sent with
+  // `avoid: []` because the profile read failed is the defect they exist for.
+  const recipeLead = genSlotMeals[0] ?? null;
+  const recipes = useRecipeSearch(recipeSearchOpen && hasBody && !adjustUnknown && !foodRulesUnknown && slotSel && recipeLead
+    ? { slot: slotSel, diet, avoid: c.avoid, query: mealQuery, targetKcal: Math.round(recipeLead.K / 50) * 50, number: 8 }
+    : null);
+  const found = recipeSearchOpen ? recipes.result : null;
+  const recipeRows: PlannedRecipe[] = recipeLead && found && (found.status === 'ready' || found.status === 'partial')
+    ? found.meals
+      // The hook keeps its last answer while the next one is out, so the rows
+      // dim rather than flash away. Across a change of SLOT that answer is for
+      // another meal of the day, and is not drawn under this one at all.
+      .filter((m) => m.slot === slotSel)
+      // The planned recipe already leads the list; it is not listed twice.
+      .filter((m) => !slotMeals.some((x) => isRecipeMeal(x) && x.sourceId === m.sourceId))
+      .map((m) => portionRecipe(m, recipeLead.K, recipeLead.pos))
+    : [];
+  // Planned recipes in this slot whose dish is NOT in hand: still reading, or
+  // the read failed. The generated row is standing in for each of them.
+  const recipesWaiting = genSlotMeals
+    .map((m) => ({ pos: m.pos, ref: recipePlan[m.pos] }))
+    .filter((x): x is { pos: number; ref: NonNullable<typeof x.ref> } => !!x.ref && !recipeDish(x.ref.sourceId));
+  // Whether any recipe stands in today's list. It decides the one caption that
+  // says how far a planned recipe reaches.
+  const recipeInPlan = todayPlan.some((m) => isRecipeMeal(m));
   // The seven days the member is actually shown, decided ONCE and used by both
   // the week view below and the grocery list. `coachWeekDay` is the coach's
   // written day where there is one and null where there is not, which is the
@@ -977,9 +1181,116 @@ export default function Nutrition() {
     );
   }
 
+  // ── today's list: the rows, and how one is drawn ───────────────────────
+  //
+  // The plan's own rows lead; a generated dish a recipe has displaced follows
+  // as an ordinary row (it is how the member gets back to it from the list);
+  // then the rest of the slot's catalogue. Real recipes are drawn by the same
+  // `mealRow`, under their own sub-head, further down.
+  const mealQ = mealQuery.trim().toLowerCase();
+  const recipeQueryShort = mealQ.length > 0 && mealQ.length < 3;
+  const matchesQuery = (m: PlannedMeal) => !mealQ || m.n.toLowerCase().includes(mealQ);
+  const generatedRows: PlannedMeal[] = [
+    ...slotMeals.filter(matchesQuery),
+    ...genSlotMeals.filter((g) => todayPlan[g.pos] !== g).filter(matchesQuery),
+    ...slotOptions,
+  ];
+  /** One row of today's list — a generated dish or a real recipe, drawn alike.
+   *  `dim` is the recipe rows while the next search is out: the old answer
+   *  stays put, faded, rather than flashing away and back. */
+  const mealRow = (m: PlannedMeal, ruled: boolean, dim = false) => {
+    const real = isRecipeMeal(m) ? m : null;
+    // Read once and used twice — for the mark and for the sentence.
+    // Two reads is how the two come to disagree.
+    //
+    // For a recipe this is Repple's OWN reading of the ingredient list, measured
+    // and unmeasured, against today's exclusions — never the remote filter's
+    // word for it, and not the `flagged` the dish was read with either, which
+    // is as old as the read.
+    const inIt = real ? recipeAllergens(real, c.avoid) : mealAllergens(m, c.avoid);
+    const planned = slotMeals.some((x) => sameDish(x, m));
+    return (
+      <View key={`${m.pos}-${dishKey(m)}`} style={dim ? { opacity: 0.5 } : undefined}>
+        {ruled ? <Rule /> : null}
+        <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
+          // Not `m.n`. A Pressable is one accessibility element, so a
+          // label on it REPLACES the lines below rather than adding
+          // to them — and the line it was replacing hardest is the
+          // allergen mark. See `mealRowSpoken`.
+          accessibilityLabel={`${mealRowSpoken({
+            slot: m.slot, coachPick: planned && coachPick(m.pos), name: m.n,
+            allergens: inIt, kcal: String(m.K),
+          })}${real ? ', a real recipe' : ''}${planned ? ', in your plan' : ''}`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
+          {/* The dish's own glyph in a circle where the board puts a
+              photograph. There is no photography of a generated
+              meal, and none is invented.
+
+              A real recipe HAS one, and it is drawn over the glyph rather
+              than instead of it: while it loads, when the publisher has
+              none, and when it fails, the tile underneath is what shows.
+              `cachePolicy="memory"` because Spoonacular's terms let the
+              image URL be kept and say nothing that lets the bytes be. */}
+          <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
+            {real?.image ? (
+              <GuardedImage source={{ uri: real.image }} contentFit="cover" cachePolicy="memory"
+                style={{ position: 'absolute', width: 48, height: 48 }} />
+            ) : null}
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }} numberOfLines={2}>{m.n}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }} numberOfLines={1}>
+              {m.ing.slice(0, 3).map((x) => x[0]).join(', ')}
+            </Text>
+            {/* Which row is the plan's, said in words: the list is
+                the whole catalogue now, and one of them is today's. */}
+            {planned ? (
+              <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand, marginTop: 2 }}>{real ? 'In your plan · Your recipe' : coachPick(m.pos) ? "In your plan · Coach's pick" : 'In your plan'}</Text>
+            ) : null}
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(m.K)} kcal · P{m.P} · C{m.C} · F{m.F}</Text>
+            {/* On the row somebody is about to cook, not only at the
+                top of the screen. A warning about the plan does not
+                tell you which dish. crit in the MARK, the words in
+                ink — colour is never the only channel. */}
+            {inIt.length ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                <Text style={{ ...ty.caption, color: t.ink2 }}>
+                  Contains {inIt.map(allergenLabel).join(' and ')}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+        </Pressable>
+      </View>
+    );
+  };
+  // The sheet's dish, narrowed once. Everything recipe-only on the sheet — the
+  // photograph, the credit, the unmeasured ingredients, the disclaimer, and
+  // WHICH of the two "Use This Meal" paths a tap takes — hangs off this.
+  const sheetRecipe = recipe && isRecipeMeal(recipe) ? recipe : null;
+  const sheetAllergens = !recipe ? [] : sheetRecipe ? recipeAllergens(sheetRecipe, c.avoid) : mealAllergens(recipe, c.avoid);
+  // One reader per planned recipe whose dish is not already in hand — by
+  // `sourceId`, so the same recipe in two slots is one read, not two.
+  const recipesToRead = plan.reduce<{ sourceId: number; slot: Slot }[]>((acc, m) => {
+    const ref = recipePlan[m.pos];
+    if (ref && !recipeLive[ref.sourceId] && !acc.some((x) => x.sourceId === ref.sourceId)) acc.push({ sourceId: ref.sourceId, slot: m.slot });
+    return acc;
+  }, []);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
+
+        {/* Draw nothing; read the member's planned recipes back from their ids.
+            Mounted here, below the three doors above, so nothing is read for a
+            member whose diet and exclusions are unknown — the allergen re-check
+            on what comes back is made against `c.avoid`. */}
+        {recipesToRead.map((r) => (
+          <PlannedRecipeRead key={r.sourceId} sourceId={r.sourceId} ctx={{ slot: r.slot, diet, avoid: c.avoid }} onRead={onRecipeRead} />
+        ))}
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
@@ -1011,7 +1322,7 @@ export default function Nutrition() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Targets</Text>
           </Pressable>
           <Pressable accessibilityRole="tab" accessibilityState={{ selected: false, disabled: plan.length === 0 }} accessibilityLabel="Recipes" disabled={plan.length === 0}
-            onPress={() => { if (plan[0]) setRecipe(plan[0]); }} style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
+            onPress={() => { if (todayPlan[0]) setRecipe(todayPlan[0]); }} style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ ...ty.label, color: plan.length ? t.ink3 : t.ring }}>Recipes</Text>
           </Pressable>
         </View>
@@ -1153,7 +1464,9 @@ export default function Nutrition() {
                   and a five-meal day with two snacks scrolls rather than
                   squeezing "Breakfast" to a stub. */}
               <Segmented scroll={planSlots.length > 4} style={{ marginBottom: sp.md }} value={slotSel}
-                onChange={(slot) => { setSlotPick(slot); setMealQuery(''); }}
+                // And the recipe search closes with it: recipes for Dinner are a
+                // search nobody has asked for yet, and it is not free.
+                onChange={(slot) => { setSlotPick(slot); setMealQuery(''); setRecipeSearchOpen(false); }}
                 options={planSlots.map((slot) => ({ key: slot, label: slot }))} />
               {/* The board's search row, searching the list under it. */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
@@ -1162,59 +1475,125 @@ export default function Nutrition() {
                   accessibilityLabel={`Search ${slotSel ?? 'meals'}`} returnKeyType="search" autoCorrect={false} clearButtonMode="while-editing"
                   style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }} />
               </View>
-              {[...(mealQuery.trim() ? slotMeals.filter((m) => m.n.toLowerCase().includes(mealQuery.trim().toLowerCase())) : slotMeals), ...slotOptions].map((m, i) => {
-                // Read once and used twice — for the mark and for the sentence.
-                // Two reads is how the two come to disagree.
-                const inIt = mealAllergens(m, c.avoid);
-                const planned = slotMeals.some((x) => x.idx === m.idx);
+              {/* The way into the real recipe library, and a deliberate one:
+                  every search spends quota the whole customer base shares, so
+                  nothing is asked until this is tapped — not on mount, not on
+                  focus. Once open it says what it is doing, because the rows it
+                  adds arrive UNDER the plan's own and may be below the fold.
+
+                  'not-configured' draws nothing for a member: the library does
+                  not exist yet as far as they are concerned and there is
+                  nothing for them to do about it. The owner, in a dev build,
+                  gets the one line that says why the rows never came. */}
+              {recipeLead ? (
+                !recipeSearchOpen ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <Ghost label="Search Real Recipes" icon="search" onPress={() => setRecipeSearchOpen(true)} />
+                  </View>
+                ) : found?.status === 'not-configured' ? (
+                  __DEV__ ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Recipe library not configured</Text> : null
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
+                    <Text accessibilityLiveRegion="polite" style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                      {recipeQueryShort ? 'Type at least three letters to search real recipes.'
+                        : recipes.loading ? 'Searching real recipes…'
+                        : 'Real recipes are listed under your plan’s meals.'}
+                    </Text>
+                    <Pressable onPress={() => setRecipeSearchOpen(false)} accessibilityRole="button" accessibilityLabel="Hide real recipes" hitSlop={hitSlopFor(24)}>
+                      <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Hide</Text>
+                    </Pressable>
+                  </View>
+                )
+              ) : null}
+              {/* A planned recipe whose dish is not in hand. The generated row
+                  below is standing in for it — a failed read is not an empty
+                  slot, and a ref has no figures to draw — and this says which
+                  recipe, and whether it is still being read or could not be. */}
+              {recipesWaiting.map(({ pos, ref }) => {
+                const read = recipeReads[ref.sourceId];
+                const failed = read && !read.loading && read.result && read.result.status !== 'ready' ? read.result : null;
                 return (
-                <View key={`${m.pos}-${m.idx}`}>
-                  {i > 0 ? <Rule /> : null}
-                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
-                    // Not `m.n`. A Pressable is one accessibility element, so a
-                    // label on it REPLACES the lines below rather than adding
-                    // to them — and the line it was replacing hardest is the
-                    // allergen mark. See `mealRowSpoken`.
-                    accessibilityLabel={`${mealRowSpoken({
-                      slot: m.slot, coachPick: planned && coachPick(m.pos), name: m.n,
-                      allergens: inIt, kcal: String(m.K),
-                    })}${planned ? ', in your plan' : ''}`}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
-                    {/* The dish's own glyph in a circle where the board puts a
-                        photograph. There is no photography of a generated
-                        meal, and none is invented. */}
-                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }} numberOfLines={2}>{m.n}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }} numberOfLines={1}>
-                        {m.ing.slice(0, 3).map((x) => x[0]).join(', ')}
-                      </Text>
-                      {/* Which row is the plan's, said in words: the list is
-                          the whole catalogue now, and one of them is today's. */}
-                      {planned ? (
-                        <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand, marginTop: 2 }}>{coachPick(m.pos) ? "In your plan · Coach's pick" : 'In your plan'}</Text>
-                      ) : null}
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(m.K)} kcal · P{m.P} · C{m.C} · F{m.F}</Text>
-                      {/* On the row somebody is about to cook, not only at the
-                          top of the screen. A warning about the plan does not
-                          tell you which dish. crit in the MARK, the words in
-                          ink — colour is never the only channel. */}
-                      {inIt.length ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>
-                            Contains {inIt.map(allergenLabel).join(' and ')}
-                          </Text>
+                  <View key={`waiting-${pos}`} style={{ marginTop: sp.md }}>
+                    {failed ? (
+                      <>
+                        <Flag tone={t.warn}>
+                          Your recipe “{ref.title}” could not be read, so your plan’s meal is shown in its place. {failed.message}
+                        </Flag>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+                          {/* Not for a recipe the library no longer has, nor for
+                              a library that is switched off: asking again
+                              spends a read on an answer that cannot change. */}
+                          {failed.status === 'limited' || failed.status === 'error' ? (
+                            <Ghost label="Try Again" a11yLabel={`Try reading ${ref.title} again`} onPress={read!.refresh} />
+                          ) : null}
+                          <Ghost label="Back to Plan’s Meal" a11yLabel={`Take ${ref.title} out of your plan`} onPress={() => unplanRecipe(pos)} />
                         </View>
-                      ) : null}
-                    </View>
-                    <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
-                  </Pressable>
-                </View>
+                      </>
+                    ) : (
+                      <Text accessibilityLiveRegion="polite" style={{ ...ty.caption, color: t.ink3 }}>
+                        Reading your recipe “{ref.title}”… Your plan’s meal stands in until it is read.
+                      </Text>
+                    )}
+                  </View>
                 );
               })}
+              {generatedRows.map((m, i) => mealRow(m, i > 0))}
+              {/* ── real recipes, under the plan's own rows ──────────────────
+                  Five outcomes and only two of them carry rows (see
+                  `RecipeSearchResult`). "No recipes matched." is said ONLY of a
+                  search that worked; limited and failed each get their own
+                  words and the one retry there is — the hook never retries by
+                  itself, because a retry against a spent quota cannot succeed
+                  and one against a flaky connection pays for answers nobody
+                  receives. */}
+              {recipeSearchOpen && found && found.status !== 'not-configured' ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text accessibilityRole="header" style={{ ...ty.micro, color: t.ink3 }}>Recipes</Text>
+                  {recipeRows.map((m, i) => mealRow(m, i > 0, recipes.loading))}
+                  {found.status === 'partial' ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      {found.dropped === 1 ? '1 recipe' : `${num(found.dropped)} recipes`} could not be read and {found.dropped === 1 ? 'is' : 'are'} not listed.
+                    </Text>
+                  ) : null}
+                  {found.status === 'ready' && !recipes.loading && !found.meals.some((m) => m.slot === slotSel) ? (
+                    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>No recipes matched.</Text>
+                  ) : null}
+                  {found.status === 'limited' || found.status === 'error' ? (
+                    <View style={{ marginTop: sp.sm }}>
+                      <Flag tone={t.warn}>{found.message}</Flag>
+                      <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
+                        <Ghost label="Try Again" a11yLabel="Try the recipe search again" disabled={recipes.loading} onPress={recipes.refresh} />
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+              {/* Wherever a recipe is drawn: the library's backlink, as a
+                  link (their terms ask for it on the free plan; it is drawn on
+                  every plan — see RECIPE_ATTRIBUTION), and the disclaimer their
+                  terms make Repple's job, beside the figures it is about. */}
+              {recipeRows.length > 0 || slotMeals.some((m) => isRecipeMeal(m)) ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{RECIPE_DISCLAIMER}</Text>
+                  <Pressable onPress={() => openLink('meals.recipeAttribution', RECIPE_ATTRIBUTION.url)} accessibilityRole="link"
+                    accessibilityLabel={`${RECIPE_ATTRIBUTION.text}. Opens spoonacular.com`} hitSlop={hitSlopFor(20)}
+                    style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand }}>{RECIPE_ATTRIBUTION.text}</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              {/* How far a planned recipe reaches, said once and where it is
+                  true. The week, the grocery list and the shared plan document
+                  are composed by `planWeek`/`buildPlan` from catalogue indices,
+                  and a recipe is not one; drawing it there as well means
+                  portioning, shopping and allergen-marking seven days around a
+                  dish whose figures may not be stored. Until that is built the
+                  honest thing is to say where it stops. */}
+              {recipeInPlan ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  A recipe you choose replaces today’s meal in this list. This Week, the Grocery List and the plan you share stay on your plan’s own meals.
+                </Text>
+              ) : null}
               {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
                   4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
                   plan and the macro split immediately. */}
@@ -1225,7 +1604,9 @@ export default function Nutrition() {
                   return (
                     <Pressable
                       key={n}
-                      onPress={() => c.setMealsPerDay(n)}
+                      // Rebuilding the day moves every slot's calories, and an
+                      // open recipe search would quietly ask again for each.
+                      onPress={() => { setRecipeSearchOpen(false); c.setMealsPerDay(n); }}
                       accessibilityRole="button"
                       accessibilityState={{ selected: on }}
                       accessibilityLabel={`${n} meals per day`}
@@ -1664,9 +2045,34 @@ export default function Nutrition() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           {recipe && (
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}</Text>
+              {/* A real recipe's photograph, where it has one. Over the slot's
+                  glyph, as on the row, so a picture that is slow or will not
+                  load leaves a tile rather than a hole; from memory only, as on
+                  the row, because the terms do not let the bytes be kept. A
+                  generated dish has no photograph and none is invented. */}
+              {sheetRecipe?.image ? (
+                <View style={{ height: 180, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginBottom: sp.lg }}>
+                  <Text style={{ fontSize: 44 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{sheetRecipe.ico}</Text>
+                  <GuardedImage source={{ uri: sheetRecipe.image }} contentFit="cover" cachePolicy="memory"
+                    accessibilityLabel={`Photograph of ${sheetRecipe.n}`}
+                    style={{ position: 'absolute', width: '100%', height: '100%' }} />
+                </View>
+              ) : null}
+              <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}{sheetRecipe ? ' · Recipe' : ''}</Text>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', marginTop: 4 }}>{recipe.n}</Text>
               <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
+              {/* What the recipe says of itself. The figures above are THIS
+                  slot's portion of it; "makes 4" is the recipe as written, and
+                  is here so the two are not mistaken for each other. */}
+              {sheetRecipe ? (
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>
+                  {[
+                    sheetRecipe.readyInMinutes != null ? `Ready in ${num(sheetRecipe.readyInMinutes)} min` : null,
+                    `Makes ${numUpTo(sheetRecipe.recipeServings, 1)} servings as written`,
+                    `Your portion is ${numUpTo(recipe.servings, 2)} of them`,
+                  ].filter(Boolean).join(' · ')}
+                </Text>
+              ) : null}
               {/* A snack idea has no slot in the plan, so there is nothing for a
                   swap to write to — logging it is the action it has. */}
               {/* Both, for a planned meal. "Log This Meal" existed for snack
@@ -1678,15 +2084,42 @@ export default function Nutrition() {
                 <Ghost label="Log This Snack" icon="plus" onPress={() => { void logPlanned(recipe, batch); setRecipe(null); }} />
               ) : (<>
                 <Ghost label="Log This Meal" icon="plus" onPress={() => { void logPlanned(recipe, batch); setRecipe(null); }} />
-                {plan[recipe.pos]?.idx === recipe.idx
+                {/* Three cases, and the FIRST test is which kind of dish this is.
+                    A recipe's `idx` is -1: it goes to `planRecipe`, which keeps
+                    a ref beside the swaps, and never to `choose` or `swap`,
+                    which write catalogue indices into `buildPlan`'s input.
+
+                    A recipe already in the slot offers the way back instead.
+                    A generated dish in a slot a recipe holds is "Use This
+                    Meal" even when it is the plan's own — using it is what
+                    takes the recipe out — and it only writes a swap when it is
+                    a DIFFERENT dish from the one the plan composed, so a
+                    coach's pick handed back stays the coach's pick. */}
+                {sheetRecipe ? (
+                  recipePlan[recipe.pos]?.sourceId === sheetRecipe.sourceId
+                    ? <Ghost label="Back to Plan’s Meal" icon="swap" onPress={() => { unplanRecipe(recipe.pos); setRecipe(null); }} />
+                    : <Ghost label="Use This Meal" icon="check" onPress={() => { planRecipe(sheetRecipe); setRecipe(null); }} />
+                ) : recipePlan[recipe.pos] ? (
+                  <Ghost label="Use This Meal" icon="check" onPress={() => {
+                    unplanRecipe(recipe.pos);
+                    if (plan[recipe.pos]?.idx !== recipe.idx) choose(recipe.pos, recipe.idx);
+                    setRecipe(null);
+                  }} />
+                ) : plan[recipe.pos]?.idx === recipe.idx
                   ? <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
                   : <Ghost label="Use This Meal" icon="check" onPress={() => { choose(recipe.pos, recipe.idx); setRecipe(null); }} />}
               </>)}
-              {mealAllergens(recipe, c.avoid).length ? (
+              {sheetAllergens.length ? (
                 <View style={{ marginTop: sp.md }}>
+                  {/* Two different reasons a dish contains what was excluded,
+                      and each sheet gives its own. A generated dish has it
+                      because the pools ran out; a recipe has it because the
+                      library's filter — computed from ingredient text — let it
+                      through, and Repple's own reading of the list caught it. */}
                   <Flag tone={t.crit}>
-                    This contains {mealAllergens(recipe, c.avoid).map(allergenLabel).join(' and ')}, which you asked to
-                    avoid. There are not enough suitable components in this diet to build every meal without it.
+                    {sheetRecipe
+                      ? `This contains ${sheetAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid. The recipe library’s own filter let it through; ${appName} read the ingredient list again and found it.`
+                      : `This contains ${sheetAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid. There are not enough suitable components in this diet to build every meal without it.`}
                   </Flag>
                 </View>
               ) : null}
@@ -1711,6 +2144,20 @@ export default function Nutrition() {
                   <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{Math.round(ing[1] * recipe.servings * batch * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
                 </View>
               ))}
+              {/* Ingredients the recipe gives no amount for — "salt, to taste",
+                  "butter, for greasing". Listed AS such rather than with a
+                  nought beside them: they are still in the dish, they are still
+                  read for allergens, and "0 g butter" is a figure nobody wrote. */}
+              {sheetRecipe && sheetRecipe.unmeasured.length ? (
+                <>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>No Amount Given</Text>
+                  {sheetRecipe.unmeasured.map((name, i) => (
+                    <View key={`${name}-${i}`} style={{ paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                      <Text style={{ ...ty.body, color: t.ink2 }}>{name}</Text>
+                    </View>
+                  ))}
+                </>
+              ) : null}
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.md }}>Method</Text>
               {recipe.steps.map((s, i) => (
                 <View key={i} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
@@ -1718,6 +2165,32 @@ export default function Nutrition() {
                   <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{s}</Text>
                 </View>
               ))}
+              {/* A recipe the library holds no steps for. Said, rather than a
+                  heading over nothing; the publisher's page below has them. */}
+              {sheetRecipe && recipe.steps.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>The library has no written method for this one.{sheetRecipe.credit?.url ? ' The publisher’s page, linked below, does.' : ''}</Text>
+              ) : null}
+              {sheetRecipe ? (
+                <View style={{ marginTop: sp.lg, gap: sp.sm }}>
+                  {/* The original publisher, by name and WITH the hyperlink —
+                      Spoonacular's terms ask for the credit "in the same
+                      manner" they give it. Plain text only when they named
+                      somebody and gave no address to link. */}
+                  {sheetRecipe.credit ? (
+                    sheetRecipe.credit.url ? (
+                      <Pressable onPress={() => openLink('meals.recipeCredit', sheetRecipe.credit!.url!)} accessibilityRole="link"
+                        accessibilityLabel={`Recipe from ${sheetRecipe.credit.name}. Opens the publisher’s page`} hitSlop={hitSlopFor(20)}
+                        style={{ alignSelf: 'flex-start' }}>
+                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Recipe from {sheetRecipe.credit.name}</Text>
+                      </Pressable>
+                    ) : <Text style={{ ...ty.label, color: t.ink2 }}>Recipe from {sheetRecipe.credit.name}</Text>
+                  ) : null}
+                  {/* Their terms make this Repple's to say, and it would be
+                      owed without them: neither the macros nor the allergen
+                      marks above have seen the packet. */}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{RECIPE_DISCLAIMER}</Text>
+                </View>
+              ) : null}
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Close" onPress={() => setRecipe(null)} />
               </View>

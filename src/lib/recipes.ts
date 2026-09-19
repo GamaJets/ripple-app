@@ -160,6 +160,29 @@ export function deptForAisle(aisle: string | null, name: string): Dept {
   return 'Pantry & Other';
 }
 
+// ── the allergen re-check ──────────────────────────────────────────────────
+
+/**
+ * Which of `avoid` a recipe contains, by Repple's own reading of it.
+ *
+ * Reads EVERY ingredient name, measured or not. "Butter, for greasing" has no
+ * amount and is exactly as much dairy as 50 g of it — and `mealAllergens` on the
+ * row alone would miss it, because `unmeasured` is not in `ing`.
+ *
+ * `flagged` on a `RecipeMeal` is this, as of the exclusions the dish was read
+ * under. A dish that outlives that moment — one held on screen, or chosen for a
+ * slot, while the member ticks another allergen — is asked again through here
+ * with today's list rather than drawn with yesterday's answer.
+ */
+export function recipeAllergens(
+  meal: Pick<RecipeMeal, 'n' | 'ing' | 'unmeasured'>, avoid: readonly Allergen[],
+): Allergen[] {
+  return mealAllergens(
+    { n: meal.n, ing: [...meal.ing, ...meal.unmeasured.map((u): RecipeMeal['ing'][number] => [u, 0, '', 'Pantry & Other'])] },
+    [...avoid],
+  );
+}
+
 // ── one recipe → one row ───────────────────────────────────────────────────
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -212,12 +235,7 @@ export function toRecipeMeal(r: RecipeWire, ctx: RecipeContext): RecipeMeal | nu
     // grocery list multiplies it by the row's `servings`.
     ing.push([item, tidy(m.qty / r.servings, m.unit), m.unit, deptForAisle(i.aisle, i.name)]);
   }
-  // The allergen re-check reads EVERY ingredient name, measured or not. "Butter,
-  // for greasing" has no amount and is exactly as much dairy as 50 g of it.
-  const flagged = mealAllergens(
-    { n: r.title, ing: [...ing, ...unmeasured.map((u): RecipeMeal['ing'][number] => [u, 0, '', 'Pantry & Other'])] },
-    [...ctx.avoid],
-  );
+  const flagged = recipeAllergens({ n: r.title, ing, unmeasured }, ctx.avoid);
   return {
     n: r.title,
     slot: ctx.slot,

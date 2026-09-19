@@ -6,7 +6,7 @@ import {
   type RecipeWire, type RecipeSearchRequest,
 } from './recipeWire';
 import {
-  toRecipeMeal, toRecipeMeals, portionRecipe, deptForAisle, recipeRef, readRecipeRef, isRecipeMeal,
+  toRecipeMeal, toRecipeMeals, portionRecipe, deptForAisle, recipeAllergens, recipeRef, readRecipeRef, isRecipeMeal,
   readRecipeReply, readRecipeDetailReply, recipeLoadStatus, searchBody,
   RECIPE_ATTRIBUTION, RECIPE_DISCLAIMER, type RecipeContext,
 } from './recipes';
@@ -176,6 +176,13 @@ same(toRecipeMeal(greased, { ...CTX, avoid: ['dairy'] })!.flagged, ['dairy'], '"
 same(toRecipeMeal({ ...greased, ingredients: [greased.ingredients[0]] }, { ...CTX, avoid: ['dairy'] })!.flagged, [],
   'and it is the SAME matcher the generated dishes use — butternut is not butter here either');
 same(toRecipeMeal({ ...wire, title: 'Prawn Linguine' }, { ...CTX, avoid: ['shellfish'] })!.flagged, ['shellfish'], 'the title is read too');
+// A dish read before the member ticked Dairy is still on screen, or in their
+// plan, after they tick it. `flagged` is the answer as of the read; the screens
+// ask again with today's exclusions rather than draw yesterday's.
+const readClean = toRecipeMeal(greased, CTX)!;
+same(readClean.flagged, [], 'read with nothing excluded, nothing was flagged');
+same(recipeAllergens(readClean, ['dairy']), ['dairy'], 'asked again under a new exclusion, the unmeasured butter is found without another read');
+same(recipeAllergens(toRecipeMeal(greased, { ...CTX, avoid: ['dairy'] })!, []), [], 'and an exclusion lifted is a mark lifted');
 
 /* ── portioning: exactly buildPlan's arithmetic ──────────────────────────── */
 

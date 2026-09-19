@@ -863,6 +863,8 @@
     "src/lib/costTrend.test.ts",
     "src/lib/recipeWire.ts",
     "src/lib/recipes.ts",
-    "src/lib/recipes.test.ts"
+    "src/lib/recipes.test.ts",
+    "src/lib/recipePlan.ts",
+    "src/lib/recipePlan.test.ts"
   ]
 }

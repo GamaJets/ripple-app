@@ -183,9 +183,45 @@ So:
 
 ## How the screens consume it
 
-Neither screen was edited by this lane; this is the wiring.
+The member's Meals list is wired (below, "As built"); the coach's Nutrition Plan
+is not, and what it needs first is at the end of this section. The sketch that
+follows is the design both were built to.
 
-**Meals list (the member's Meals tab).** The rows under the slot segments come
+**As built — `app/(client)/nutrition.tsx`.**
+
+- *Entry.* "Search Real Recipes" under the slot's search field sets
+  `recipeSearchOpen`; the hook gets `null` until then, and again after a change
+  of slot or of meals-per-day, so mounting the tab spends nothing. The search
+  `targetKcal` is the generated lead's `K` rounded to 50 (so swapping between
+  near-equal dishes is not a new search); rows are portioned to the exact `K`.
+- *Rows.* One `mealRow` draws both kinds. Rows are told apart by `sameDish` /
+  `dishKey` (`sourceId` for a recipe, `idx` otherwise) — never by `idx` alone,
+  which is -1 on every recipe. The allergen mark on a recipe is
+  `recipeAllergens(m, c.avoid)`: the same re-check `flagged` came from, asked
+  again with today's exclusions.
+- *Planned recipes.* `src/lib/recipePlan.ts` keeps `{ pos → RecipeRef }` under
+  `repple.recipePlan:<uid>` — the ref and nothing else, in both directions.
+  `todayPlan` is `plan` with a planned recipe standing in at its position once
+  its dish is in hand: either the dish the member just chose out of a search
+  (held in state, so choosing costs no second read) or a `PlannedRecipeRead`
+  (one `useRecipeDetail` per planned recipe, 1.1 points, once per mount of the
+  tab). Until that read is whole the generated row stays and the list says which
+  recipe it is waiting for, or could not read, with "Try Again" and "Back to
+  Plan's Meal".
+- *The door on `-1`.* The sheet branches on `isRecipeMeal` before any button is
+  built: a recipe goes to `planRecipe`/`unplanRecipe`, and `choose` and `swap`
+  refuse anything that is not a non-negative integer as a second lock.
+  Catalogue arithmetic (`slotOptions`' stride and `mealAt`) reads `genSlotMeals`
+  — the engine's rows — never `slotMeals`, whose lead may be a recipe.
+- *Reach.* A planned recipe replaces TODAY'S row only. This Week, the Grocery
+  List and the shared plan document are still composed by `planWeek`/`buildPlan`
+  from catalogue indices, and the list says so in one caption whenever a recipe
+  is in the plan. Carrying it further means choosing which day of the synthetic
+  week holds it, shopping `unmeasured` ingredients, marking `recipeAllergens` in
+  `weekAllergens`, and gating the week's figures on every detail read being
+  whole.
+
+**Meals list (the design).** The rows under the slot segments come
 from `slotOptions` (generated dishes from `searchMeals`/`mealAt`, portioned to
 the lead row's servings), filtered by `mealQuery` for the selected `slotSel`.
 Feed recipes into that same list:

@@ -120,7 +120,10 @@ export interface RecipeSearch {
  * Pass `null` while the search is not on screen and nothing is spent. The
  * params may be a fresh object every render; they are compared by value.
  *
- * unused-ok: the Meals list and the coach's Nutrition Plan call this once the lead wires it in — both screens were another lane's this round, and docs/RECIPES-SPOONACULAR.md gives the call sites.
+ * Called by the member's Meals list (app/(client)/nutrition.tsx), behind its
+ * "Search Real Recipes" row. The coach's Nutrition Plan does not call it yet:
+ * what a coach saves for a client has to be a `RecipeRef`, and the plan column
+ * cannot hold one — see docs/RECIPES-SPOONACULAR.md.
  */
 export function useRecipeSearch(params: RecipeSearchParams | null): RecipeSearch {
   const [result, setResult] = useState<RecipeSearchResult | null>(null);
@@ -185,7 +188,9 @@ export interface RecipeDetail { result: RecipeDetailResult | null; loading: bool
  * drawing a list of saved recipes, which is what the ref's own title and image
  * are for.
  *
- * unused-ok: the recipe sheet calls this once the lead wires it in; see `useRecipeSearch` above.
+ * Called once per PLANNED recipe by `PlannedRecipeRead` in the Meals list, and
+ * only for one whose dish is not already in memory from the search it was
+ * chosen out of.
  */
 export function useRecipeDetail(sourceId: number | null, ctx: RecipeContext): RecipeDetail {
   // The REPLY is what is held, not the dish. The flags on a dish depend on the
