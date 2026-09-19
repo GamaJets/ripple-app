@@ -73,7 +73,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Rect, Line, Text as SvgText } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Cta, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Cta, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -105,7 +105,6 @@ import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
 // than a column on the workout row.
 import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 /* ── the read ─────────────────────────────────────────────────────────────
@@ -409,15 +408,9 @@ export default function History() {
   const pull = usePullToRefresh(useCallback(() => { void read(); cd.reload(); }, [read, cd.reload]));
 
   const G = layout.gutter;
-  const header = (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-      <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-      <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>How far you have come</Text>
-        <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your History</Text>
-      </View>
-    </View>
-  );
+  // The board's pushed-page head: back, the title centred, and none of the
+  // eyebrow prose the first viewport used to open with.
+  const header = <PageHead title="Your History" />;
   const frame = (children: ReactNode) => (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
@@ -559,13 +552,31 @@ export default function History() {
         part of a lifetime that fitted in one query is not a smaller number, it
         is a wrong one — the same rule `money()` follows for a currency nobody
         chose. `historyNote` goes with it: it counts days and sessions. */}
-    <Hero
-      label={whole ? `Lifted since ${monthLabel(sinceKey)}` : `Lifted since ${monthLabel(sinceKey)}, at least`}
-      figure={whole ? fig(headline?.figure.toLocaleString()) : fig(null)}
-      unit={whole && headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : undefined}
-      note={whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}
-    />
-    {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
+    {/* The board's figure card where the Hero was: the label as the head,
+        one big figure with its unit, the sentence under it. */}
+    <Section>
+      <SectionHead title={whole ? `Lifted Since ${monthLabel(sinceKey)}` : `Lifted Since ${monthLabel(sinceKey)}, at Least`} />
+      <View accessible accessibilityLabel={[
+        whole ? `Lifted since ${monthLabel(sinceKey)}` : `Lifted since ${monthLabel(sinceKey)}, at least`,
+        [whole ? fig(headline?.figure.toLocaleString()) : fig(null), whole && headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : ''].filter(Boolean).join(' '),
+        whole ? historyNote(log) : 'More than this page can add up in one read — see above.',
+      ].join(', ')}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+            style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>
+            {whole ? fig(headline?.figure.toLocaleString()) : fig(null)}
+          </Text>
+          {whole && headline ? (
+            <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>
+              {headline.unit === 't' ? 'tonnes' : headline.unit}
+            </Text>
+          ) : null}
+        </View>
+        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+          {whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}
+        </Text>
+      </View>
+    {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unitNote}</Text> : null}
     {/* The note blames the member's record when the fault is this read: it
         says "your own weight is not recorded for the day you did them". Only
         say that when we actually know it. */}
@@ -578,6 +589,7 @@ export default function History() {
           : 'Some bodyweight sets are not in this total because your weight history could not be read just now. That is this screen rather than a gap in your record, and nothing has been lost.'}
       </Text>
     ) : null}
+    </Section>
 
     <Rule />
 

@@ -60,7 +60,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { fmtFullDay } from '../../src/lib/format';
 import { useSettings } from '../../src/ui/settings';
 import { reportError } from '../../src/lib/reportError';
-import { Rule, Section, SectionHead, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { listProgressPhotos, comparePair, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
 import { fetchMyCoach, fetchMyShares, shareStateOf, shareLabel, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
@@ -85,7 +85,7 @@ import { daysApart as calendarDaysApart } from '../../src/lib/photoTimeline';
 import { BodyYear } from '../../src/ui/BodyYear';
 import { useNow } from '../../src/ui/today';
 import { shareText } from '../../src/lib/exportShare';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 
 /** Expo Router hands a repeated query param back as an array and a single one
  *  as a string. Neither shape is special-cased at the two call sites. */
@@ -284,13 +284,8 @@ export default function Compare() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Progress photos</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Before &amp; After</Text>
-          </View>
-        </View>
+        {/* The board's pushed-page head: back, the title centred. */}
+        <PageHead title="Before & After" />
 
 
         {photos === null ? (

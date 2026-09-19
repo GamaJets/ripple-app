@@ -50,7 +50,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Field, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -69,7 +69,6 @@ import { BARS, PLATES, loadBar } from '../../src/lib/plateMath';
 // src/lib/repEstimate.ts for the 3,430 kg hero figure that produced.
 import { readReps, epleyCaveat } from '../../src/lib/repEstimate';
 import { warmupRamp, warmupNote, warmupRefusal } from '../../src/lib/warmupRamp';
-import { BACK_ICON } from '../../src/ui/direction';
 
 function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  // Empty, not "60". A prefilled number on a screen that used to assume
@@ -131,16 +130,27 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {/* A refused load says so where the answer would have been, rather than
      leaving the last good estimate on screen next to a number it was not
      computed from. */}
- <Hero label="Estimated 1RM · Epley" figure={fig(oneRm || null)} unit={wu}
- note={!read.ok ? read.reason
- : !repRead.ok ? repRead.reason
- : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'} />
- {/* The caveat is its own line under the hero, in ink rather than in the
+ {/* The board's figure card where the Hero was. */}
+ <Section>
+   <SectionHead title="Estimated 1RM · Epley" />
+   {/* Label, figure, unit and sentence are one fact, and one stop. */}
+   <View accessible accessibilityLabel={['Estimated 1RM · Epley', [fig(oneRm || null), wu].filter(Boolean).join(' '), !read.ok ? read.reason : !repRead.ok ? repRead.reason : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'].filter(Boolean).join(', ')}>
+     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+       {/* Shrunk to fit and never wrapped: a figure broken across two lines
+           is a figure read wrong. */}
+       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+         style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(oneRm || null)}</Text>
+       <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{wu}</Text>
+     </View>
+     <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{!read.ok ? read.reason : !repRead.ok ? repRead.reason : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'}</Text>
+   </View>
+ {/* The caveat is its own line under the figure, in ink rather than in the
      reserved warn colour — this screen already had that rule corrected once,
      on "Closest loadable". */}
  {caveat ? (
  <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{caveat}</Text>
  ) : null}
+ </Section>
 
  {oneRm > 0 ? (<>
  <Rule />
@@ -483,13 +493,8 @@ export default function Tools() {
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>Calculators for the gym floor</Text>
- <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Lifting Tools</Text>
- </View>
- </View>
+ {/* The board's pushed-page head: back, the title centred. */}
+ <PageHead title="Lifting Tools" subtitle="Calculators for the gym floor" />
 
  <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
  {([['1rm', '1RM'], ['plates', 'Plates'], ['macros', 'Macros']] as const).map(([k, label]) => {

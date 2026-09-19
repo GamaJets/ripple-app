@@ -30,9 +30,8 @@ import { exerciseSlug } from '../../src/lib/exerciseId';
 import { holdRecords, holdLabel, timedSetLabel } from '../../src/lib/timedSets';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
-import { Rule, Section, SectionHead, Hero, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 export default function Records() {
@@ -209,13 +208,9 @@ export default function Records() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
-  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-   <View style={{ flex: 1 }}>
-    <Text style={{ ...ty.micro, color: t.ink3 }}>Best estimated 1-rep max per lift</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Records</Text>
-   </View>
-  </View>
+  {/* The board's pushed-page head; what a record IS here is the one quiet
+      line under the title. */}
+  <PageHead title="Personal Records" subtitle="Best estimated 1-rep max per lift" />
 
   {/* An empty PR board has three causes and only one of them is "you have not
       set a PR yet". Saying that to a lifter whose log simply did not load
@@ -317,24 +312,33 @@ export default function Records() {
 
    {/* ── the hero: the heaviest thing you have lifted ────────────────── */}
    {top ? (<>
-   <Hero
-    label={logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift'}
-    figure={fig(est1RMIn(top.est1RM, wu))}
-    unit={`${wu} est. 1RM`}
-    // Through `bestSetLabel`, like the row below and the spoken label above.
-    // This line used to build the phrase by hand and skipped `PR.bodyweight`
-    // doing it, so an 84 kg member's weighted pull-up was announced here as
-    // "best set 104 kg × 12" — a load that is partly their own weigh-in,
-    // presented as a bar — while the row eleven lines down read "12 reps at
-    // bodyweight +20 kg" about the very same set. The hero is the figure people
-    // quote. See src/lib/bestSet.ts.
-    note={`${top.exercise} · best set ${bestSetLabel(top, setLoad(top), setAdded(top))} on ${dstr(top.at)}`}
-   />
-   {/* The board is kept in kilograms and read out in pounds, so the figures
-       here and the ones on a coach's console are the same lifts said twice
-       rather than a discrepancy. Absent for a metric reader, who is being
-       shown the record itself. */}
-   {note ? <Text style={{ ...ty.caption, color: t.ink3 }}>{note}</Text> : null}
+   {/* The board's figure card where the Hero was. The sentence under the
+       figure goes through `bestSetLabel`, like the row below and the spoken
+       label above. It used to build the phrase by hand and skipped
+       `PR.bodyweight` doing it, so an 84 kg member's weighted pull-up was
+       announced here as "best set 104 kg × 12" — a load that is partly their
+       own weigh-in, presented as a bar — while the row eleven lines down read
+       "12 reps at bodyweight +20 kg" about the very same set. This is the
+       figure people quote. See src/lib/bestSet.ts. */}
+   <Section>
+     <SectionHead title={logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift'} />
+     {/* Label, figure, unit and sentence are one fact, and one stop. */}
+     <View accessible accessibilityLabel={[logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift', [fig(est1RMIn(top.est1RM, wu)), `${wu} est. 1RM`].filter(Boolean).join(' '), `${top.exercise} · best set ${bestSetLabel(top, setLoad(top), setAdded(top))} on ${dstr(top.at)}`].filter(Boolean).join(', ')}>
+       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+         {/* Shrunk to fit and never wrapped: a figure broken across two lines
+             is a figure read wrong. */}
+         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+           style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(est1RMIn(top.est1RM, wu))}</Text>
+         <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{`${wu} est. 1RM`}</Text>
+       </View>
+       <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{`${top.exercise} · best set ${bestSetLabel(top, setLoad(top), setAdded(top))} on ${dstr(top.at)}`}</Text>
+     </View>
+     {/* The board is kept in kilograms and read out in pounds, so the figures
+         here and the ones on a coach's console are the same lifts said twice
+         rather than a discrepancy. Absent for a metric reader, who is being
+         shown the record itself. */}
+     {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text> : null}
+   </Section>
 
    <Rule />
 

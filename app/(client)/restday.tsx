@@ -32,7 +32,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Flag, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Notice, Flag, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -43,7 +43,7 @@ import { volumeHeadline } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { useToday } from '../../src/ui/today';
 import { dayKeyOf } from '../../src/lib/entryEdit';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 // The shared readiness derivation, never a fourth hand-rolled copy of it. Three
 // screens assembled this out of five providers and drifted from each other in
 // two separate ways that shipped; see the header of src/ui/readiness.ts.
@@ -179,6 +179,8 @@ export default function RestDay() {
     readiness: read,
   });
   const { headline, body } = advice;
+  /** Days trained as a share of the week, for the bar — null until known. */
+  const weekPct = known ? Math.round(Math.max(0, Math.min(1, wk.days / 7)) * 100) : null;
   const tone = advice.call === 'unknown' ? t.warn
     : advice.call === 'deload' ? t.s3
     : advice.call === 'rest' ? t.warn
@@ -195,33 +197,44 @@ export default function RestDay() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            {/* Not "What your log suggests" any more, because it is no longer
-                only the log. The kicker is the first thing a member reads and
-                it has to describe the evidence the sentence below it was
-                actually built from. */}
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What your log and your nights suggest</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>When to Rest</Text>
-          </View>
-        </View>
+        {/* The board's pushed-page head. The line under the title is not
+            "What your log suggests" any more, because it is no longer only
+            the log: it has to describe the evidence the call below it was
+            actually built from. */}
+        <PageHead title="When to Rest" subtitle="What your log and your nights suggest" />
 
         {/* ── the call, above the hero ────────────────────────────────────── */}
         <View style={{ marginTop: sp.lg }}>
           <Notice tone={tone} kicker="Recovery" title={headline} note={body} />
         </View>
 
-        {/* ── the hero: how loaded this week already is ───────────────────── */}
-        <Hero
-          label="Trained This Week"
-          figure={known ? fig(wk.days) : fig(null)}
-          unit={known ? (wk.days === 1 ? 'day' : 'days') : undefined}
-          arc={known ? wk.days / 7 : undefined}
-          arcLabel="of the week trained"
-          tone={tone}
-          note={known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading — an empty ring here is not an empty week.' : 'Nothing this screen can count — an empty ring here is not an empty week.'}
-        />
+        {/* ── the figure: how loaded this week already is ─────────────────
+            The board's figure card where the Hero was; the ring is a thin bar
+            of the week in the call's own tone. */}
+        <Section>
+          <SectionHead title="Trained This Week" />
+          {/* Label, figure, unit and sentence are one fact, and one stop. */}
+          <View accessible accessibilityLabel={['Trained This Week', [known ? fig(wk.days) : fig(null), known ? (wk.days === 1 ? 'day' : 'days') : undefined].filter(Boolean).join(' '), known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading — an empty bar here is not an empty week.' : 'Nothing this screen can count — an empty bar here is not an empty week.'].filter(Boolean).join(', ')}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+              {/* Shrunk to fit and never wrapped: a figure broken across two lines
+                  is a figure read wrong. */}
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{known ? fig(wk.days) : fig(null)}</Text>
+              {known ? (
+                <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{known ? (wk.days === 1 ? 'day' : 'days') : undefined}</Text>
+              ) : null}
+            </View>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading — an empty bar here is not an empty week.' : 'Nothing this screen can count — an empty bar here is not an empty week.'}</Text>
+          </View>
+          {weekPct != null ? (
+            <View accessible accessibilityRole="progressbar"
+              accessibilityLabel={`${weekPct}% of the week trained`}
+              accessibilityValue={{ min: 0, max: 100, now: weekPct }}
+              style={{ height: 4, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
+              <View style={{ height: 4, borderRadius: 2, width: `${weekPct}%`, backgroundColor: tone }} />
+            </View>
+          ) : null}
+        </Section>
 
 
         <Section>

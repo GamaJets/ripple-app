@@ -35,9 +35,8 @@ import { useCallback, useState } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useGlucose } from '../../src/ui/glucoseData';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -50,7 +49,6 @@ import { glucoseSource } from '../../src/lib/wearables/glucoseSource';
 // The shared date and clock, in the reader's own locale — see `when` below for
 // what this screen was printing instead.
 import { fmtDay, fmtTime } from '../../src/lib/format';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const UNITS: GlucoseUnit[] = ['mmol/L', 'mg/dL'];
 
@@ -79,7 +77,6 @@ function when(iso: string): string {
 
 export default function Glucose() {
   const t = useTheme();
-  const router = useRouter();
   const g = useGlucose();
   const [unit, setUnit] = useState<GlucoseUnit>('mmol/L');
   const [typing, setTyping] = useState(false);
@@ -203,13 +200,8 @@ export default function Glucose() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Blood Sugar</Text>
-          </View>
-        </View>
+        {/* The board's pushed-page head: back, the title centred. */}
+        <PageHead title="Blood Sugar" />
 
         {/* The quoted range, in the unit the reader picked. It was typed as
             "3.9–7.8 mmol/L" whatever the toggle below said, so somebody

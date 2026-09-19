@@ -36,7 +36,7 @@ import { ensureMediaPermission, offerCameraSettings } from '../../src/ui/permiss
 import { usePhotoAI } from '../../src/ui/photoAI';
 import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../../src/lib/machines';
 import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Field } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Notice, Field } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, readLift, readNumber } from '../../src/lib/units';
@@ -338,13 +338,10 @@ export default function ScanMachine() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Log a machine</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Scan Machine</Text>
-          </View>
-          <Ghost label="Close" onPress={() => router.back()} />
-        </View>
+        {/* The board's pushed-page head. The one control on it closes the
+            scanner, and says so: the round control at the leading edge is the
+            board's, the word is this screen's. */}
+        <PageHead title="Scan Machine" backLabel="Close" onBack={() => router.back()} />
 
         {!showForm ? (
           <View>

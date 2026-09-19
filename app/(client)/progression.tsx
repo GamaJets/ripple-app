@@ -22,9 +22,8 @@ import { useSettings } from '../../src/ui/settings';
 import { liftIn, liftLabel, liftDeltaIn, convertedNote } from '../../src/lib/units';
 import { suggestProgression, type ProgressAction } from '../../src/lib/progression';
 import { deltaLabel } from '../../src/lib/deltaLabel';
-import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 const META: Record<ProgressAction, { label: string; icon: string; color: (t: any) => string }> = {
@@ -62,13 +61,9 @@ export default function Progression() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>From your logged lifts</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Next-session Targets</Text>
-          </View>
-        </View>
+        {/* The board's pushed-page head; where the targets come from is the
+            one quiet line under the title. */}
+        <PageHead title="Next-session Targets" subtitle="From your logged lifts" />
 
 
         {/* This screen prescribes a load, and every target is

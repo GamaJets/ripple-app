@@ -12,8 +12,8 @@ import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, grown, type as ty, numeric } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { shownStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
@@ -286,18 +286,32 @@ export default function Consistency() {
     return frozenSet.has(key(d)) ? `${base}. A freeze covered this day, so your streak held` : base;
   };
 
+  /* The sentence under the streak. Said before the freeze budget and before
+   * the best run, because it is about the figure directly above it rather
+   * than about anything beside it. "Best 14 · 2 freezes in reserve" —
+   * fourteen what? The other arm of this same ternary says "Best 14 days",
+   * so the unit was lost on exactly one of the two paths through one
+   * sentence. */
+  const streakNote = !known
+    ? (logStatus === 'loading' ? 'Reading your training log…' : 'Not a broken streak — an unread one.')
+    : claim.bounded
+    ? BOUNDED_STREAK_NOTE
+    : !countable
+    ? freezes > 0
+      ? `${freezes} freeze${freezes === 1 ? '' : 's'} in reserve · best run not all read`
+      : 'Best run not all read'
+    : freezes > 0
+    ? `Best ${best} day${best === 1 ? '' : 's'} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
+    : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Last {WEEKS} weeks</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Consistency</Text>
-          </View>
-        </View>
+        {/* The board's pushed-page head; the window is the one quiet line
+            under the title. */}
+        <PageHead title="Consistency" subtitle={`Last ${WEEKS} weeks`} />
 
         {/* Before the streak figure, which is the number people argue with.
             What counts as a training day and what breaks a streak decide both
@@ -323,35 +337,27 @@ export default function Consistency() {
             printing that as "Best 14" tells a client their best run was shorter
             than it was. The freeze budget stays — it is counted from the recent
             weeks the cap keeps. */}
-        <Hero
-          label="Current Streak"
-          figure={known ? fig(streak) : fig(null)}
-          // "days or more" where the chain runs off the bottom of the read. The
-          // qualifier goes in the unit rather than in front of the figure: the
-          // figure slot is display type shrunk to a single line, and the Hero
-          // speaks label, figure, unit and note as one sentence, so VoiceOver
-          // gets "Current Streak, 140 days or more" rather than a bare 140.
-          unit={!known ? undefined
-            : claim.bounded ? boundedStreakUnit(streak)
-            : streak === 1 ? 'day' : 'days'}
-          note={!known
-            ? (logStatus === 'loading' ? 'Reading your training log…' : 'Not a broken streak — an unread one.')
-            // Said before the freeze budget and before the best run, because it
-            // is about the figure directly above it rather than about anything
-            // beside it.
-            : claim.bounded
-            ? BOUNDED_STREAK_NOTE
-            : !countable
-            ? freezes > 0
-              ? `${freezes} freeze${freezes === 1 ? '' : 's'} in reserve · best run not all read`
-              : 'Best run not all read'
-            : freezes > 0
-            // "Best 14 · 2 freezes in reserve" — fourteen what? The other arm
-            // of this same ternary says "Best 14 days", so the unit was lost on
-            // exactly one of the two paths through one sentence.
-            ? `Best ${best} day${best === 1 ? '' : 's'} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
-            : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`}
-        />
+        {/* The board's figure card where the Hero was. "days or more" where
+            the chain runs off the bottom of the read: the qualifier goes in
+            the unit rather than in front of the figure, and the card speaks
+            label, figure, unit and note as one sentence, so VoiceOver gets
+            "Current Streak, 140 days or more" rather than a bare 140. */}
+        <Section>
+          <SectionHead title="Current Streak" />
+          {/* Label, figure, unit and sentence are one fact, and one stop. */}
+          <View accessible accessibilityLabel={['Current Streak', [known ? fig(streak) : fig(null), !known ? undefined : claim.bounded ? boundedStreakUnit(streak) : streak === 1 ? 'day' : 'days'].filter(Boolean).join(' '), streakNote].filter(Boolean).join(', ')}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+              {/* Shrunk to fit and never wrapped: a figure broken across two lines
+                  is a figure read wrong. */}
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{known ? fig(streak) : fig(null)}</Text>
+              {known ? (
+                <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{!known ? undefined : claim.bounded ? boundedStreakUnit(streak) : streak === 1 ? 'day' : 'days'}</Text>
+              ) : null}
+            </View>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{streakNote}</Text>
+          </View>
+        </Section>
 
         {/* ── the days a freeze actually covered ────────────────────────────
             The budget is earned from the log, spent silently, and until now

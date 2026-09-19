@@ -102,9 +102,24 @@ import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWearables } from '../../src/ui/wearables';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, hairline } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
+
+/**
+ * The four ways in, as the board's segmented bar lists them. One is open at a
+ * time: the panel under the bar is that method's controls and nothing else's,
+ * so the screen a member opens four times a day is one bar and one panel
+ * rather than four stacked cards to scroll through. Every method's code path
+ * is unchanged — the bar only decides which of them is on screen.
+ */
+const WAYS_IN = [
+  { key: 'photo', label: 'Photo' },
+  { key: 'barcode', label: 'Barcode' },
+  { key: 'search', label: 'Search' },
+  { key: 'describe', label: 'Describe' },
+] as const;
+type WayIn = (typeof WAYS_IN)[number]['key'];
 
 // Gone with `add` below: a local `Food` shape (`{ n, k, p, c, f }`) and a
 // `Logged = Food & { via: string }` that nothing referred to. Every food on
@@ -975,6 +990,9 @@ export default function FoodLog() {
  // Was `barcodeNote`: an alert that said nothing had been scanned and pointed
  // at the Meals screen. A button whose only function was to name another button.
  const [bcOpen, setBcOpen] = useState(false);
+ // Which way in is open under the bar. Search first: it is the one that needs
+ // no permission, no hardware and no model, so it is the one that always works.
+ const [way, setWay] = useState<WayIn>('search');
 
  const macroRow = (label: string, cur: number, tg: number, dim?: boolean) => {
  const rem = tg - cur;
@@ -995,41 +1013,74 @@ export default function FoodLog() {
  const G = layout.gutter;
  const field = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
- return (
- <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
-
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
- <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Food Log</Text>
- </View>
- </View>
-
- {/* ── the hero: what is left in the day ──────────────────────────── */}
- <Hero
- label={remK == null ? 'Calories Eaten' : remK >= 0 ? 'Calories Remaining' : 'Calories Over'}
- figure={!dayWhole ? fig(null) : remK == null ? fig(tot.k) : fig(Math.abs(remK))}
- unit="kcal"
- note={!dayWhole
+ /* The sentence under the figure. Three reasons there is no target, and only
+  * one of them is the member's to fix: sending somebody to add a weight they
+  * already have, because their coach's adjustment or their own profile could
+  * not be read, is the app blaming them for its own failed request. And under
+  * a short read of the day, what is left cannot be worked out — the meals
+  * listed are real, the subtraction is not. */
+ const dayNote = !dayWhole
   ? (dayReading
    ? 'Reading today’s food log…'
    : fl.status === 'partial'
    ? 'You have logged more today than this screen can read in one go, so what is left in the day cannot be worked out from it. What is listed below is real.'
    : "We couldn't read all of today's log, so anything already eaten may be missing from this. What is listed below is real; the number left in the day is not something we can work out yet.")
   : (target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}`
-   // Three reasons there is no target, and only one of them is the member's to
-   // fix. Sending somebody to add a weight they already have, because their
-   // coach's adjustment or their own profile could not be read, is the app
-   // blaming them for its own failed request.
    : adjustUnknown ? `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · we couldn’t read your coach’s adjustment, so there is no target to show`
    : foodRulesUnknown ? `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · ${foodRulesReading ? 'reading what you are training for and how you eat' : 'we couldn’t read what you are training for or how you eat, and the target is worked out from both'}`
-   : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`)}
- arc={dayWhole && target && target.kcal ? tot.k / target.kcal : undefined}
- arcLabel="of today's calories eaten"
- tone={dayWhole && remK != null && remK < 0 ? t.crit : undefined}
- />
+   : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`);
+ /* How far through the day's calories, as a whole percentage clamped to the
+  * bar — 103% of a target is a full bar, and the figure above already says
+  * how far over. Null wherever the figure is a dash. */
+ const pctEaten = dayWhole && target && target.kcal
+  ? Math.round(Math.max(0, Math.min(1, tot.k / target.kcal)) * 100)
+  : null;
+
+ return (
+ <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
+
+ <PageHead title="Food Log" />
+
+ {/* ── the figure: what is left in the day ────────────────────────────
+     The board's figure card where the old Hero block was: the label as the
+     card's head, one big number with its unit, a thin bar for how far
+     through the day's calories the member is, and the sentence that says
+     what the number was worked out from. Everything the Hero withheld this
+     card withholds — no figure and no bar until today's log is a whole
+     read — and the bar is said as a percentage to a screen reader, as the
+     ring was. */}
+ <Section>
+ <SectionHead title={remK == null ? 'Calories Eaten' : remK >= 0 ? 'Calories Remaining' : 'Calories Over'} />
+ {/* Label, figure, unit and sentence are one fact, and one stop. */}
+ <View accessible accessibilityLabel={[
+   remK == null ? 'Calories eaten' : remK >= 0 ? 'Calories remaining' : 'Calories over',
+   `${!dayWhole ? fig(null) : remK == null ? fig(tot.k) : fig(Math.abs(remK))} kcal`,
+   dayNote,
+ ].join(', ')}>
+ <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+ {/* Shrunk to fit and never wrapped, for the same reason the Hero did it:
+     a figure broken across two lines is a figure read wrong. */}
+ <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+  style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>
+  {!dayWhole ? fig(null) : remK == null ? fig(tot.k) : fig(Math.abs(remK))}
+ </Text>
+ <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>kcal</Text>
+ </View>
+ <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{dayNote}</Text>
+ </View>
+ {/* How far through the day, as the board draws it under a figure: a thin
+     bar, brand-coloured until the day is over its target and then the alarm
+     colour. Only over a whole read of a day with a target — the same gate
+     as the figure, because the two say the same thing. */}
+ {pctEaten != null ? (
+ <View accessible accessibilityRole="progressbar"
+  accessibilityLabel={`${pctEaten}% of today's calories eaten`}
+  accessibilityValue={{ min: 0, max: 100, now: pctEaten }}
+  style={{ height: 4, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
+ <View style={{ height: 4, borderRadius: 2, width: `${pctEaten}%`, backgroundColor: remK != null && remK < 0 ? t.crit : t.brand }} />
+ </View>
+ ) : null}
 
  {/* The burn named in the note above is the last thing the device told us
      rather than a current reading. Same sentence as the Meals tab and the two
@@ -1039,44 +1090,6 @@ export default function FoodLog() {
  <Flag tone={t.warn}>
  The calories burned above are the last figures we had, not a current reading — your device could not be reached just now. Pull down to try again.
  </Flag>
- ) : null}
-
- <Rule />
-
- {/* ── macros against target ──────────────────────────────────────── */}
- <Section>
- <SectionHead title="Macros" />
- {/* Same rule as the hero: these bars are "how much of your protein have you
-     had", and a sum over a day we could not read whole answers a question
-     nobody asked. The meals themselves are still listed further down. */}
- {target && dayWhole ? macroRow('Protein', tot.p, target.protein) : null}
- {target && dayWhole ? macroRow('Carbs', tot.c, target.carbs, true) : null}
- {target && dayWhole ? macroRow('Fat', tot.f, target.fat, true) : null}
- {/* The other half of the same rule, for the other missing side of the sum.
-     A member whose coach's adjustment could not be read had three bars simply
-     not drawn, under a heading, with nothing said. */}
- {!target && adjustUnknown ? (
-  <Text style={{ ...ty.label, color: t.ink3 }}>
-   We couldn’t read your coach’s adjustment to your macros, so these bars would be measuring you against the generic figures rather than your plan. They are left out rather than shown as yours.
-  </Text>
- ) : null}
- {/* And the member's own half of the same sum. Their goal and their diet are
-     what split the calories into protein, carbs and fat — a bar drawn from the
-     defaults would be measuring somebody who is cutting on keto against a
-     meat-eating bulk. */}
- {!target && !adjustUnknown && foodRulesUnknown ? (
-  <Text style={{ ...ty.label, color: t.ink3 }}>
-   {foodRulesReading
-    ? 'Reading what you are training for and how you eat — your protein, carb and fat targets are worked out from both.'
-    : 'We couldn’t read what you are training for or how you eat, and your protein, carb and fat targets are worked out from both. Bars drawn without them would be somebody else’s split, so they are left out rather than shown as yours. Pull down to try again.'}
-  </Text>
- ) : null}
- {target && !dayWhole ? (
-  <Text style={{ ...ty.label, color: t.ink3 }}>
-   {dayReading
-    ? 'Today’s log is still loading, so we can’t yet say how much of your protein, carbs and fat you have had.'
-    : 'Today’s log didn’t load in full, so we can’t say how much of your protein, carbs and fat you have had.'}
-  </Text>
  ) : null}
  </Section>
 
@@ -1129,25 +1142,236 @@ export default function FoodLog() {
      reads as a button that did not work. */}
  {dayWarning ? <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{dayWarning}</Flag> : null}
 
- <View style={{ flexDirection: 'row', gap: sp.sm }}>
- <Pressable accessibilityLabel="Take a meal photo" accessibilityRole="button" onPress={() => takeMealPhoto(true)}
- style={{ flex: 1, backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
- <Icon name="camera" size={18} color={t.brandInk} />
- <Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>Photo</Text>
- </Pressable>
- <Pressable accessibilityLabel="Add meal photo from library" accessibilityRole="button" onPress={() => takeMealPhoto(false)}
- style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
- <Icon name="plus" size={18} color={t.ink2} />
- <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Upload</Text>
- </Pressable>
- <Pressable accessibilityLabel="Scan barcode" accessibilityRole="button" onPress={() => setBcOpen(true)}
- style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
- <Icon name="search" size={18} color={t.ink2} />
- <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Barcode</Text>
+ {/* ── the four ways in, one open at a time ───────────────────────────
+     The board's segmented bar over one panel, where three buttons and two
+     more cards used to be. Photo needs the camera and the member's consent,
+     Barcode the camera, Describe the text model — Search needs nothing,
+     which is why the bar opens on it. Every route below is the same code
+     it was; the bar only chooses which one is on screen. */}
+ <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginBottom: sp.md }}>
+ {WAYS_IN.map((w) => {
+  const on = way === w.key;
+  return (
+  <Pressable key={w.key} onPress={() => setWay(w.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+   style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+  <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{w.label}</Text>
+  </Pressable>
+  );
+ })}
+ </View>
+
+ {way === 'photo' ? (<>
+ {/* Two ways to get a frame, the camera first. The question about where the
+     frame goes is still asked before either opens — see `askPhoto`. */}
+ <Cta label="Take a Photo" a11yLabel="Take a meal photo" wide onPress={() => takeMealPhoto(true)} />
+ <View style={{ height: sp.sm }} />
+ <Ghost label="Choose From Library" a11yLabel="Add meal photo from library" onPress={() => takeMealPhoto(false)} />
+ </>) : way === 'barcode' ? (<>
+ <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>A packet's own label, looked up from its barcode.</Text>
+ <Cta label="Scan a Barcode" a11yLabel="Scan barcode" wide onPress={() => setBcOpen(true)} />
+ </>) : way === 'search' ? (<>
+
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
+ <Icon name="search" size={16} color={t.ink3} />
+ <TextInput value={q} onChangeText={setQ} placeholder="Chicken, pad thai, a brand…" placeholderTextColor={t.ink3}
+ accessibilityLabel="Search foods"
+ style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: 11 }} />
+ </View>
+ {/* Why every row carries a source. A Common or Restaurant figure is a typical
+     value for the portion named, not a measurement of the food in front of
+     this person; a Branded figure is the product's own label. Rendering the
+     two identically is how a generic average comes to be read as somebody's
+     own packet, so the difference is said once here and shown on each row. */}
+ <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
+ Common and restaurant figures are typical portions, not a measurement of yours.
+ A branded row is the product's own label — use it when there is one.
+ </Text>
+ {q.trim().length > 0 && q.trim().length < 3 ? (
+ <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>Keep typing — three letters or more.</Text>
+ ) : null}
+ {/* Said whether or not local rows came back. The old version showed this only
+     when the list was empty, so a throttled branded search with a couple of
+     common foods behind it looked like the whole answer. A shorter list is not
+     allowed to pass for a complete one. */}
+ {q.trim().length >= 3 && !searching && searchDown ? (
+ <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>
+ {results.length
+   ? "Branded products could not be reached just now, so these are the common foods and restaurant dishes only. Scan the barcode for a packet's own figures."
+   : 'Food search could not be reached just now — this says nothing about whether the food is in there. Scan the barcode or describe it in the meantime.'}
+ </Text>
+ ) : null}
+ {q.trim().length >= 3 && !searching && !searchDown && results.length === 0 ? (
+ <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>
+ Nothing found. Try the brand name, scan the barcode, or describe it in words.
+ </Text>
+ ) : null}
+ {/* Above the rows. A mark with no caveat reads the wrong way round: an
+     unmarked result is one nothing has checked, not one that has been
+     cleared — and under an unread exclusion list NOTHING has been checked,
+     which is the loudest of the four sentences rather than the absence of
+     one. Tone follows the state, as on Eating Out. */}
+ {marksText && results.length ? (
+ <Flag tone={marks.state === 'unknown' ? t.crit : marks.state === 'checking' ? t.ink3 : t.warn}
+   style={{ paddingTop: sp.sm }}>{marksText}</Flag>
+ ) : null}
+ {results.map((r, i) => {
+ // Only when the exclusions were actually read. Marking against a list that
+ // is empty because nothing came back puts a mark on nothing and leaves
+ // every other row looking cleared.
+ const mark = marks.marked ? dishAllergenMark(dishAllergens(r.name, cd.avoid)) : null;
+ return (
+ <View key={r.key}>
+ {i > 0 ? <Rule /> : null}
+ {/* The sheet, not a straight write. A row logged on one tap recorded one
+     portion of whatever basis the source used, so half a packet and two
+     packets were the same entry — see src/ui/LogFoodSheet.tsx. */}
+ <Pressable onPress={() => { setPendingTitle(undefined); setPendingNote(null); setPendingPhoto(null); setPendingVia('search'); setPending({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, basis: r.basis }); }}
+ accessibilityRole="button" accessibilityLabel={mark ? `Log ${r.name} — ${r.label}. ${mark}` : `Log ${r.name} — ${r.label}`} accessibilityHint="Opens a sheet to say how much of it you had"
+ style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+ <View style={{ flex: 1 }}>
+ <Text style={{ ...ty.body, color: t.ink }} numberOfLines={2}>{r.name}</Text>
+ <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{r.label}</Text>
+ {mark ? (
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+ <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+ <Text style={{ ...ty.caption, color: t.ink2 }}>{mark}</Text>
+ </View>
+ ) : null}
+ </View>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(r.kcal)} kcal</Text>
+ <Icon name="plus" size={16} color={t.brand} />
  </Pressable>
  </View>
+ );
+ })}
+ {/* What the head of the old Search Foods card said beside its title: how
+     many came back, or that the branded index is down. Under the results
+     now, where the count is about the rows it sits with. */}
+ {q.trim() ? (
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+ {searching ? 'Searching…'
+   : searchDown ? (results.length ? `${results.length} local · branded search down` : 'Branded search down')
+   : `${results.length} match${results.length === 1 ? '' : 'es'}`}
+ </Text>
+ ) : null}
+ </>) : (<>
+
+ <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>In your own words — the AI reads it into macros</Text>
+ <View style={{ flexDirection: 'row', gap: sp.sm }}>
+ <TextInput value={nl} onChangeText={setNl} placeholder='"chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={logNL} returnKeyType="done"
+ accessibilityLabel="Describe what you ate"
+ style={{ ...field, flex: 1 }} />
+ <Pressable onPress={logNL} disabled={nlBusy || !nl.trim()}
+ accessibilityRole="button"
+ accessibilityLabel={nlBusy ? 'Reading what you typed' : 'Log what you typed'}
+ accessibilityState={{ disabled: nlBusy || !nl.trim(), busy: nlBusy }}
+ style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
+ {nlBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
+ </Pressable>
+ </View>
+ </>)}
+
  <ListRow icon="meals" title="Eating Out?" note="Estimate a restaurant meal" onPress={() => router.push('/(client)/restaurant')} />
  </Section>
+
+ <Rule />
+
+ {/* ── today's entries, or an honest empty state ──────────────────── */}
+ <Section>
+ {/* `num()`, not the raw figure: a day's calories passes a thousand routinely
+     and "3500 kcal" is a reader's own separator missing from the one place on
+     this screen that states the day's total. Every other figure here already
+     goes through it. */}
+ <SectionHead title="Logged Today" note={dayWhole ? `${num(tot.k)} kcal` : undefined} />
+ {/* Meals on this phone that the server has not taken. They count toward
+     today here and they are not lost — but they are not in the log a coach
+     or another device reads, and only one of those two things is obvious
+     from looking at the list. */}
+ {unsentNote(fl.unsent, 'meal') ? (
+ <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{unsentNote(fl.unsent, 'meal')}</Flag>
+ ) : null}
+ {entries.length === 0 ? (
+ // An empty list under 'error' means we could not ask, never that nobody
+ // ate anything — and "Nothing logged yet today" is exactly the sentence
+ // that sends somebody to log their breakfast a second time.
+ <Text style={{ ...ty.label, color: t.ink3 }}>
+ {dayWhole ? 'Nothing logged yet today.'
+  : dayReading ? 'Reading today’s log…'
+  : 'We couldn’t read today’s log just now, so we don’t know what is in it. Anything you add here is kept and goes up when you have signal.'}
+ </Text>
+ ) : (<>
+ <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap a meal to correct what it was worth.</Text>
+ {entries.map((fe, i) => (
+ <View key={fe.id}>
+ {i > 0 ? <Rule /> : null}
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+ <Pressable onPress={() => openEdit(fe)} accessibilityRole="button"
+  accessibilityLabel={`Edit ${fe.name}, ${num(fe.kcal)} calories`}
+  accessibilityHint="Opens the sheet to correct what it was worth"
+  style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+ {/* A round thumbnail where the board puts a photograph of the dish. The
+     log keeps no picture of a meal — the photo route reads the frame and
+     does not store it — so the circle carries the way the meal came in,
+     and no photography is invented. */}
+ <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+ <Icon name={fe.via === 'photo' ? 'camera' : fe.via === 'barcode' ? 'grid' : fe.via === 'manual' ? 'pencil' : 'meals'} size={20} color={t.brand} />
+ </View>
+ <View style={{ flex: 1, minWidth: 0 }}>
+ <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }} numberOfLines={2}>{fe.name}</Text>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>{num(fe.kcal)} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
+ </View>
+ <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+ </Pressable>
+ <Pressable onPress={() => removeMeal(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}
+  style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center' }}>
+ <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
+ </Pressable>
+ </View>
+ </View>
+ ))}
+ </>)}
+ </Section>
+
+ <Rule />
+
+ {/* ── macros against target ──────────────────────────────────────── */}
+ <Section>
+ <SectionHead title="Macros" />
+ {/* Same rule as the hero: these bars are "how much of your protein have you
+     had", and a sum over a day we could not read whole answers a question
+     nobody asked. The meals themselves are still listed further down. */}
+ {target && dayWhole ? macroRow('Protein', tot.p, target.protein) : null}
+ {target && dayWhole ? macroRow('Carbs', tot.c, target.carbs, true) : null}
+ {target && dayWhole ? macroRow('Fat', tot.f, target.fat, true) : null}
+ {/* The other half of the same rule, for the other missing side of the sum.
+     A member whose coach's adjustment could not be read had three bars simply
+     not drawn, under a heading, with nothing said. */}
+ {!target && adjustUnknown ? (
+  <Text style={{ ...ty.label, color: t.ink3 }}>
+   We couldn’t read your coach’s adjustment to your macros, so these bars would be measuring you against the generic figures rather than your plan. They are left out rather than shown as yours.
+  </Text>
+ ) : null}
+ {/* And the member's own half of the same sum. Their goal and their diet are
+     what split the calories into protein, carbs and fat — a bar drawn from the
+     defaults would be measuring somebody who is cutting on keto against a
+     meat-eating bulk. */}
+ {!target && !adjustUnknown && foodRulesUnknown ? (
+  <Text style={{ ...ty.label, color: t.ink3 }}>
+   {foodRulesReading
+    ? 'Reading what you are training for and how you eat — your protein, carb and fat targets are worked out from both.'
+    : 'We couldn’t read what you are training for or how you eat, and your protein, carb and fat targets are worked out from both. Bars drawn without them would be somebody else’s split, so they are left out rather than shown as yours. Pull down to try again.'}
+  </Text>
+ ) : null}
+ {target && !dayWhole ? (
+  <Text style={{ ...ty.label, color: t.ink3 }}>
+   {dayReading
+    ? 'Today’s log is still loading, so we can’t yet say how much of your protein, carbs and fat you have had.'
+    : 'Today’s log didn’t load in full, so we can’t say how much of your protein, carbs and fat you have had.'}
+  </Text>
+ ) : null}
+ </Section>
+
+ <Rule />
 
  {/* ── again, please ──────────────────────────────────────────────── */}
  {/* Nothing at all until there is something to offer. An empty "Quick Add"
@@ -1223,158 +1447,6 @@ export default function FoodLog() {
  ) : null}
  </Section>
  </>) : null}
-
- <Rule />
-
- {/* ── describe it in words ───────────────────────────────────────── */}
- <Section>
- <SectionHead title="Describe It" />
- <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>In your own words — the AI reads it into macros</Text>
- <View style={{ flexDirection: 'row', gap: sp.sm }}>
- <TextInput value={nl} onChangeText={setNl} placeholder='"chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={logNL} returnKeyType="done"
- accessibilityLabel="Describe what you ate"
- style={{ ...field, flex: 1 }} />
- <Pressable onPress={logNL} disabled={nlBusy || !nl.trim()}
- accessibilityRole="button"
- accessibilityLabel={nlBusy ? 'Reading what you typed' : 'Log what you typed'}
- accessibilityState={{ disabled: nlBusy || !nl.trim(), busy: nlBusy }}
- style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
- {nlBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
- </Pressable>
- </View>
- </Section>
-
- <Rule />
-
- {/* ── search the food table ──────────────────────────────────────── */}
- <Section>
- <SectionHead
- title="Search Foods"
- note={!q.trim() ? undefined
-   : searching ? 'searching…'
-   : searchDown ? (results.length ? `${results.length} local · branded search down` : 'branded search down')
-   : `${results.length} match${results.length === 1 ? '' : 'es'}`} />
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
- <Icon name="search" size={16} color={t.ink3} />
- <TextInput value={q} onChangeText={setQ} placeholder="Chicken, pad thai, a brand…" placeholderTextColor={t.ink3}
- accessibilityLabel="Search foods"
- style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: 11 }} />
- </View>
- {/* Why every row carries a source. A Common or Restaurant figure is a typical
-     value for the portion named, not a measurement of the food in front of
-     this person; a Branded figure is the product's own label. Rendering the
-     two identically is how a generic average comes to be read as somebody's
-     own packet, so the difference is said once here and shown on each row. */}
- <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
- Common and restaurant figures are typical portions, not a measurement of yours.
- A branded row is the product's own label — use it when there is one.
- </Text>
- {q.trim().length > 0 && q.trim().length < 3 ? (
- <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>Keep typing — three letters or more.</Text>
- ) : null}
- {/* Said whether or not local rows came back. The old version showed this only
-     when the list was empty, so a throttled branded search with a couple of
-     common foods behind it looked like the whole answer. A shorter list is not
-     allowed to pass for a complete one. */}
- {q.trim().length >= 3 && !searching && searchDown ? (
- <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>
- {results.length
-   ? "Branded products could not be reached just now, so these are the common foods and restaurant dishes only. Scan the barcode for a packet's own figures."
-   : 'Food search could not be reached just now — this says nothing about whether the food is in there. Scan the barcode or describe it below in the meantime.'}
- </Text>
- ) : null}
- {q.trim().length >= 3 && !searching && !searchDown && results.length === 0 ? (
- <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>
- Nothing found. Try the brand name, scan the barcode, or describe it below.
- </Text>
- ) : null}
- {/* Above the rows. A mark with no caveat reads the wrong way round: an
-     unmarked result is one nothing has checked, not one that has been
-     cleared — and under an unread exclusion list NOTHING has been checked,
-     which is the loudest of the four sentences rather than the absence of
-     one. Tone follows the state, as on Eating Out. */}
- {marksText && results.length ? (
- <Flag tone={marks.state === 'unknown' ? t.crit : marks.state === 'checking' ? t.ink3 : t.warn}
-   style={{ paddingTop: sp.sm }}>{marksText}</Flag>
- ) : null}
- {results.map((r, i) => {
- // Only when the exclusions were actually read. Marking against a list that
- // is empty because nothing came back puts a mark on nothing and leaves
- // every other row looking cleared.
- const mark = marks.marked ? dishAllergenMark(dishAllergens(r.name, cd.avoid)) : null;
- return (
- <View key={r.key}>
- {i > 0 ? <Rule /> : null}
- {/* The sheet, not a straight write. A row logged on one tap recorded one
-     portion of whatever basis the source used, so half a packet and two
-     packets were the same entry — see src/ui/LogFoodSheet.tsx. */}
- <Pressable onPress={() => { setPendingTitle(undefined); setPendingNote(null); setPendingPhoto(null); setPendingVia('search'); setPending({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, basis: r.basis }); }}
- accessibilityRole="button" accessibilityLabel={mark ? `Log ${r.name} — ${r.label}. ${mark}` : `Log ${r.name} — ${r.label}`} accessibilityHint="Opens a sheet to say how much of it you had"
- style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.body, color: t.ink }} numberOfLines={2}>{r.name}</Text>
- <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{r.label}</Text>
- {mark ? (
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
- <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
- <Text style={{ ...ty.caption, color: t.ink2 }}>{mark}</Text>
- </View>
- ) : null}
- </View>
- <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(r.kcal)} kcal</Text>
- <Icon name="plus" size={16} color={t.brand} />
- </Pressable>
- </View>
- );
- })}
- </Section>
-
- <Rule />
-
- {/* ── today's entries, or an honest empty state ──────────────────── */}
- <Section>
- {/* `num()`, not the raw figure: a day's calories passes a thousand routinely
-     and "3500 kcal" is a reader's own separator missing from the one place on
-     this screen that states the day's total. Every other figure here already
-     goes through it. */}
- <SectionHead title="Logged Today" note={dayWhole ? `${num(tot.k)} kcal` : undefined} />
- {/* Meals on this phone that the server has not taken. They count toward
-     today here and they are not lost — but they are not in the log a coach
-     or another device reads, and only one of those two things is obvious
-     from looking at the list. */}
- {unsentNote(fl.unsent, 'meal') ? (
- <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{unsentNote(fl.unsent, 'meal')}</Flag>
- ) : null}
- {entries.length === 0 ? (
- // An empty list under 'error' means we could not ask, never that nobody
- // ate anything — and "Nothing logged yet today" is exactly the sentence
- // that sends somebody to log their breakfast a second time.
- <Text style={{ ...ty.label, color: t.ink3 }}>
- {dayWhole ? 'Nothing logged yet today.'
-  : dayReading ? 'Reading today’s log…'
-  : 'We couldn’t read today’s log just now, so we don’t know what is in it. Anything you add here is kept and goes up when you have signal.'}
- </Text>
- ) : (<>
- <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap a meal to correct what it was worth.</Text>
- {entries.map((fe, i) => (
- <View key={fe.id}>
- {i > 0 ? <Rule /> : null}
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
- <Pressable onPress={() => openEdit(fe)} accessibilityRole="button" accessibilityLabel={'Edit ' + fe.name} style={{ flex: 1 }}>
- <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{fe.name}</Text>
- <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(fe.kcal)} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
- </Pressable>
- <Pressable onPress={() => openEdit(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Edit ' + fe.name}>
- <Icon name="pencil" size={15} color={t.ink3} />
- </Pressable>
- <Pressable onPress={() => removeMeal(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
- <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
- </Pressable>
- </View>
- </View>
- ))}
- </>)}
- </Section>
 
  <Rule />
 

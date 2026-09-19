@@ -43,14 +43,14 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useBackFromHub } from '../../src/ui/backTo';
-import { Rule, Section, SectionHead, Notice, PartialRead, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, PartialRead, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useProgrammeLibrary } from '../../src/ui/workoutTemplates';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { isWhole } from '../../src/ui/loadStatus';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
-import { BACK_ICON, FORWARD_CHAR } from '../../src/ui/direction';
+import { FORWARD_CHAR } from '../../src/ui/direction';
 import {
   filterTemplates, isFiltering, goalsPresent, difficultiesPresent,
   goalLabel, difficultyLabel, tagLabel, frequencyLabel, restLabel, setsLabel,
@@ -446,19 +446,15 @@ export default function Programmes() {
             closes the programme rather than leaving the screen — the member's
             way back to the list is the control they already used to get here,
             and a Back that jumped two levels would drop the filters they set. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost
-            icon={BACK_ICON}
-            a11yLabel={open ? 'Back to the list of programmes' : 'Back'}
-            onPress={() => { if (open) setOpenId(null); else goBack(); }}
-          />
-          {!open ? (
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Ready-made, for anyone</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Programmes</Text>
-            </View>
-          ) : null}
-        </View>
+        {/* The board's pushed-page head. On the list it carries the title;
+            on an open programme only the back control, because the card under
+            it names the programme. */}
+        <PageHead
+          title={open ? undefined : 'Programmes'}
+          subtitle={open ? undefined : 'Ready-made, for anyone'}
+          backLabel={open ? 'Back to the list of programmes' : 'Back'}
+          onBack={() => { if (open) setOpenId(null); else goBack(); }}
+        />
 
         {open ? detail(open) : list()}
       </ScrollView>

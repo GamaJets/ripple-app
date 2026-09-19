@@ -37,7 +37,7 @@ import { readinessMadeOf } from '../../src/lib/readiness';
 import { connectedProviders } from '../../src/lib/wearables/sleep';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { localDate } from '../../src/lib/localDate';
 import { Icon } from '../../src/ui/Icon';
@@ -59,7 +59,7 @@ import type { ProviderId } from '../../src/lib/wearables/types';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { readNumber } from '../../src/lib/units';
 import { num1 } from '../../src/lib/format';
-import { BACK_ICON, END_ALIGN, FORWARD_ICON, turn } from '../../src/ui/direction';
+import { END_ALIGN, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 const MOBILITY = [
  { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
@@ -375,13 +375,9 @@ export default function Recovery() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
-  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-   <View style={{ flex: 1 }}>
-    <Text style={{ ...ty.micro, color: t.ink3 }}>Heart rate, hydration, sleep &amp; mobility</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Recovery</Text>
-   </View>
-  </View>
+  {/* The board's pushed-page head. What the page covers is the one quiet
+      line under the title rather than an eyebrow over it. */}
+  <PageHead title="Recovery" subtitle="Heart rate, hydration, sleep & mobility" />
 
   {/* ── readiness: the number the home screen leads with, taken apart ─
 
@@ -400,7 +396,8 @@ export default function Recovery() {
   <Section>
    <SectionHead title="Readiness" note={rv.readiness != null ? rv.readiness.label : undefined} />
    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
-    <Text style={{ ...value(30), ...numeric, color: rv.readiness != null ? t.ink : t.ink3 }}>
+    {/* The one headline figure on the page, at the board's figure size. */}
+    <Text style={{ ...ty.hero, ...numeric, color: rv.readiness != null ? t.ink : t.ink3 }}>
      {rv.readiness != null ? String(rv.readiness.score) : fig(null)}
     </Text>
     <Text style={{ ...ty.caption, color: t.ink3 }}>out of 100</Text>
@@ -436,45 +433,60 @@ export default function Recovery() {
 
   <Rule />
 
-  {/* ── the hero: today's hydration ─────────────────────────────────── */}
-  <Hero
-   label="Hydration"
-   figure={fig(hydration.showCount ? cups : null)}
-   unit={hydration.showRing && goalCups != null ? `of ${goalCups} glasses`
-    : !hydration.showCount ? 'glasses today'
-    : cups === 1 ? 'glass today' : 'glasses today'}
-   arc={pct == null ? undefined : pct / 100}
-   // The ring is glasses drunk against the water goal, so that is what it is
-   // announced as. It said "recovered", and Hero renders arcLabel as
-   // `${pct}% ${arcLabel}` — so a VoiceOver user on the Recovery screen was
-   // told "75% recovered", a recovery score this app does not compute, read
-   // out of a water count, on the one screen where they would believe it.
-   arcLabel="of today's water goal"
-   // "Goal met today — nice." is a congratulation, and a filled ring is the
-   // same congratulation without words. Both were drawn from a count the
-   // caveat underneath admits may be missing glasses logged on another device
-   // — so under a failed water read the qualification arrived after the claim
-   // it qualifies. It now leads.
-   note={hydration.text}
-   // Only when we KNOW there is no goal. A hero that links to the goal editor
-   // because the goal read had not landed sends somebody to change a target on
-   // the strength of a number that had not arrived.
-   onPress={hydration.offerGoal ? () => router.push('/(client)/habits') : undefined}
-  />
-  {/* Dead until the count has arrived, which is the same fact `hydration`
-      already withholds the figure on. `pushWater` in src/ui/habits.tsx upserts
-      an ABSOLUTE count for the day and `addWater` computes it from a ref that
-      is 0 until the read lands — so a member who logged five glasses on another
-      device this morning and taps here too early writes 1 over their 5. The
-      hero above already says "Reading today's glasses…"; a live Add beside it
-      invited exactly the tap that does the damage. */}
-  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingBottom: layout.section }}>
-   <Ghost icon="minus" onPress={removeCup} disabled={!hydration.showCount} />
-   <View style={{ flex: 1 }}>
-    <Cta label={hydration.showCount ? 'Add a Glass' : 'Reading today’s glasses…'}
-     disabled={!hydration.showCount} wide onPress={addCup} />
+  {/* ── today's hydration, as a figure card ─────────────────────────── */}
+  {/* The board's figure card where the Hero was: Hydration as the head,
+      the count as the figure with "of N glasses" beside it, a thin bar for
+      the fraction the ring used to draw, the sentence under it, and the two
+      controls inside the same card. */}
+  <Section>
+   {/* Only when we KNOW there is no goal. A head that links to the goal
+       editor because the goal read had not landed sends somebody to change a
+       target on the strength of a number that had not arrived. */}
+   <SectionHead title="Hydration" note={hydration.offerGoal ? 'Set a water goal' : undefined}
+    onPress={hydration.offerGoal ? () => router.push('/(client)/habits') : undefined} />
+   <View accessible accessibilityLabel={['Hydration', [fig(hydration.showCount ? cups : null), hydration.showRing && goalCups != null ? `of ${goalCups} glasses` : !hydration.showCount ? 'glasses today' : cups === 1 ? 'glass today' : 'glasses today'].join(' '), hydration.text].join(', ')}>
+    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+     <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+      style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(hydration.showCount ? cups : null)}</Text>
+     <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>
+      {hydration.showRing && goalCups != null ? `of ${goalCups} glasses`
+       : !hydration.showCount ? 'glasses today'
+       : cups === 1 ? 'glass today' : 'glasses today'}
+     </Text>
+    </View>
+    {/* "Goal met today — nice." is a congratulation, and a filled bar is the
+        same congratulation without words. Both are drawn from a count the
+        caveat underneath admits may be missing glasses logged on another
+        device — so under a failed water read the qualification leads. */}
+    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{hydration.text}</Text>
    </View>
-  </View>
+   {/* The bar is glasses drunk against the water goal, so that is what it is
+       announced as. The ring it replaces once said "recovered" — so a
+       VoiceOver user on the Recovery screen was told "75% recovered", a
+       recovery score this app does not compute, read out of a water count,
+       on the one screen where they would believe it. */}
+   {pct != null ? (
+    <View accessible accessibilityRole="progressbar"
+     accessibilityLabel={`${Math.round(Math.max(0, Math.min(100, pct)))}% of today's water goal`}
+     accessibilityValue={{ min: 0, max: 100, now: Math.round(Math.max(0, Math.min(100, pct))) }}
+     style={{ height: 4, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
+     <View style={{ height: 4, borderRadius: 2, width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: t.brand }} />
+    </View>
+   ) : null}
+   {/* Dead until the count has arrived, which is the same fact `hydration`
+       already withholds the figure on. `pushWater` in src/ui/habits.tsx upserts
+       an ABSOLUTE count for the day and `addWater` computes it from a ref that
+       is 0 until the read lands — so a member who logged five glasses on another
+       device this morning and taps here too early writes 1 over their 5. The
+       figure above already says "Reading today's glasses…"; a live Add beside
+       it invited exactly the tap that does the damage. */}
+   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.lg }}>
+    <Ghost icon="minus" a11yLabel="Remove a glass" onPress={removeCup} disabled={!hydration.showCount} />
+    <View style={{ flex: 1 }}>
+     <Cta label={hydration.showCount ? 'Add a Glass' : 'Reading today’s glasses…'}
+      disabled={!hydration.showCount} wide onPress={addCup} />
+    </View>
+   </View>
   {/* Which copy of the count is on screen.
       The figure above is REAL either way — it is this phone's tally, and a
       client who drank six glasses drank them whether or not the server heard.
@@ -483,10 +495,11 @@ export default function Recovery() {
       is cheaper than a silently divergent number, and it is the same thing
       availability.ts learnt to say about a coach's cached week. */}
   {waterStatus === 'error' ? (
-   <Text style={{ ...ty.label, color: t.ink3, paddingBottom: layout.section }}>
+   <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
     Counted on this phone. We couldn’t check it against your account just now, so if you have logged water on another device today this may not be the whole picture.
    </Text>
   ) : null}
+  </Section>
 
   <Rule />
 

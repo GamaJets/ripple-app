@@ -23,10 +23,9 @@
 import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -52,7 +51,6 @@ import {
   GOAL_METRIC, MEASURED_KINDS, MIN_TREND_DAYS,
   type GoalKind, type GoalProgress, type GoalTarget, type MeasuredKind, type Point,
 } from '../../src/lib/goalTargets';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const KIND_TAB: { kind: GoalKind; label: string }[] = [
   ...MEASURED_KINDS.map((k) => ({ kind: k as GoalKind, label: k === 'weight' ? 'Weight' : k === 'bodyfat' ? 'Body Fat' : 'Muscle' })),
@@ -130,7 +128,6 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit): stri
 
 export default function Goal() {
   const t = useTheme();
-  const router = useRouter();
   const c = useClientData();
   const g = useGoalTracker();
   // The targets, and the measurements they are measured against.
@@ -337,14 +334,10 @@ export default function Goal() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Progress</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Goals</Text>
-          </View>
-        </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>What you’re working toward, and how it’s going</Text>
+        {/* The board's pushed-page head: back, the title centred. The
+            eyebrow and the tagline under it were two lines of prose in the
+            first viewport that the board does not have. */}
+        <PageHead title="Goals" />
 
         {/* The projected finish is drawn beside a date the member chose, which
             is exactly what makes it read as a commitment. Said before either
@@ -367,20 +360,37 @@ export default function Goal() {
         ) : (
           <>
             {lead && leadProgress ? (
+              // The board's figure card where the Hero was: the goal as the
+              // card's head, the current reading as the one big figure, how
+              // far along on its own line, a thin bar for the same fraction the
+              // ring used to draw, and the projection under it in the same
+              // card rather than in a second one.
               <View>
-                <Hero
-                  label={goalLabel(lead)}
-                  figure={fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu))}
-                  unit={goalUnit(lead.kind as MeasuredKind, wu)}
-                  arc={leadProgress.pct / 100}
-                  arcLabel="of the way to your goal"
-                  note={`${leadProgress.pct}% of the way · ${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`}
-                />
-                {projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu) ? (
-                  <Section>
-                    <Text style={{ ...ty.body, color: t.ink2 }}>{projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu)}</Text>
-                  </Section>
-                ) : null}
+                <Section>
+                  <SectionHead title={goalLabel(lead)} note={['Target', fig(goalValue(leadProgress.target, lead.kind as MeasuredKind, wu)), goalUnit(lead.kind as MeasuredKind, wu)].join(' ')} />
+                  {/* Goal, figure, unit and progress are one fact and one stop. */}
+                  <View accessible accessibilityLabel={[goalLabel(lead), [fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu)), goalUnit(lead.kind as MeasuredKind, wu)].join(' '), `${leadProgress.pct}% of the way`, `${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`].join(', ')}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                        style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>
+                        {fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu))}
+                      </Text>
+                      <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{goalUnit(lead.kind as MeasuredKind, wu)}</Text>
+                    </View>
+                    <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.brand, marginTop: 3 }}>
+                      {`${leadProgress.pct}% of the way · ${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`}
+                    </Text>
+                  </View>
+                  <View accessible accessibilityRole="progressbar"
+                    accessibilityLabel={`${leadProgress.pct}% of the way to your goal`}
+                    accessibilityValue={{ min: 0, max: 100, now: leadProgress.pct }}
+                    style={{ height: 4, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
+                    <View style={{ height: 4, borderRadius: 2, width: `${Math.max(0, Math.min(100, leadProgress.pct))}%`, backgroundColor: t.brand }} />
+                  </View>
+                  {projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu) ? (
+                    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>{projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu)}</Text>
+                  ) : null}
+                </Section>
                 <Rule />
               </View>
             ) : measuredOpen && !readingsWhole ? (

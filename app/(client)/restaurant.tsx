@@ -16,7 +16,6 @@ import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'reac
 import { Icon } from '../../src/ui/Icon';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useFoodLog } from '../../src/ui/foodLog';
 // The gesture DISH_MARK_UNKNOWN promises. That sentence — the one an allergic
@@ -40,13 +39,11 @@ import { useClientData } from '../../src/ui/clientData';
 import { dishAllergens, dishAllergenMark, dishMarkNotice } from '../../src/lib/foodAllergens';
 import { Flag } from '../../src/ui/kit';
 import { CUISINES, PORTIONS, searchDishes, estimateDish, type Dish } from '../../src/lib/restaurant';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Restaurant() {
   const t = useTheme();
-  const router = useRouter();
   const fl = useFoodLog();
   const cd = useClientData();
   // `cd.reload()` alone: the exclusions are the only thing on this screen that a
@@ -89,13 +86,8 @@ export default function Restaurant() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Eating Out</Text>
-          </View>
-        </View>
+        {/* The board's pushed-page head: back, the title centred. */}
+        <PageHead title="Eating Out" />
 
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
           Pick a dish for a macro estimate, set the portion, and log it. These are typical restaurant servings, not label data.

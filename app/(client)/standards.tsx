@@ -36,7 +36,7 @@ import { useCallback } from 'react';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { personalRecords } from '../../src/lib/streaks';
-import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, fig } from '../../src/ui/kit';
 import { gradeLift } from '../../src/lib/strengthLevel';
 // Which lift is furthest behind the others, measured on each lift's own ladder
 // rather than on the ratio column. See the note where `balance` is built.
@@ -44,7 +44,6 @@ import { balanceLine, weakestLift } from '../../src/lib/strengthBalance';
 import { STRENGTH_LIFTS, countsFor } from '../../src/lib/strengthLifts';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /** A converted weight in the reader's own spelling, or null for `fig` to dash.
  *  The same two steps `weightLabel` takes, without the unit — this screen draws
@@ -157,13 +156,9 @@ export default function Standards() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
-  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-   <View style={{ flex: 1 }}>
-    <Text style={{ ...ty.micro, color: t.ink3 }}>Best lifts vs bodyweight · approximate</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Strength Standards</Text>
-   </View>
-  </View>
+  {/* The board's pushed-page head; what the grades are and how rough they
+      are is the one quiet line under the title. */}
+  <PageHead title="Strength Standards" subtitle="Best lifts vs bodyweight · approximate" />
 
   {/* Above the grades, not below them. A member reads "Novice" first, and this
       card is what stops that landing as a verdict on them rather than as the

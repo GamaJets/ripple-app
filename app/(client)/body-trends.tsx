@@ -116,10 +116,9 @@ import { useToday } from '../../src/ui/today';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { goalOfKind, goalOnBody } from '../../src/lib/goalOnBody';
-import { Rule, Section, SectionHead, Ghost, Notice, Spark } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Spark } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 
 interface MetricDef {
   key: string; label: string; unit: string; better: 'up' | 'down';
@@ -307,17 +306,13 @@ export default function BodyTrends() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>
-              {bodyWhole
-                ? `Every body metric across ${scans.length} scan${scans.length === 1 ? '' : 's'}${cd.weightSeries.length > scanCount ? ' and your latest weigh-in' : ''}`
-                : 'Every body metric you have on record'}
-            </Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Composition Trends</Text>
-          </View>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-        </View>
+        {/* The board's pushed-page head. What the page is drawn from — and
+            how many scans that is, only when the read was whole — is the one
+            quiet line under the title. */}
+        <PageHead title="Composition Trends"
+          subtitle={bodyWhole
+            ? `Every body metric across ${scans.length} scan${scans.length === 1 ? '' : 's'}${cd.weightSeries.length > scanCount ? ' and your latest weigh-in' : ''}`
+            : 'Every body metric you have on record'} />
 
         {/* Said once, at the top, and only when the figures below genuinely do
             come from different instruments or different days. This is the

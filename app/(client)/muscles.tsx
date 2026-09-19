@@ -66,8 +66,8 @@ import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useNow } from '../../src/ui/today';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -78,7 +78,6 @@ import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { isWhole } from '../../src/ui/loadStatus';
 import { MuscleBody } from '../../src/ui/MuscleBody';
 import type { BodySide } from '../../src/ui/muscleArt';
-import { BACK_ICON } from '../../src/ui/direction';
 import { num, num1 } from '../../src/lib/format';
 import { volumeIn, convertedNote } from '../../src/lib/units';
 import {
@@ -184,26 +183,24 @@ export default function Muscles() {
   const retry = useCallback(() => { reloadLog(); reloadCatalogue(); }, [reloadLog, reloadCatalogue]);
 
   const G = layout.gutter;
-  const header = (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-      <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-      <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>What you have actually worked</Text>
-        <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your Muscles</Text>
-      </View>
-    </View>
-  );
+  // The board's pushed-page head: back, the title centred. The eyebrow it
+  // had ("What you have actually worked") is what the Training Summary card
+  // below now says in figures.
+  const header = <PageHead title="Your Muscles" />;
 
+  // The window as three equal chips, the way Progress draws its range under
+  // the chart: the chosen one filled green. The CAPTION is never built from
+  // this number — see `windowNote`.
   const picker = (
-    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
+    <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
       {WINDOWS.map((d) => {
         const on = days === d;
         return (
           <Pressable key={d} onPress={() => setDays(d)}
-            accessibilityRole="button" accessibilityState={{ selected: on }}
+            accessibilityRole="tab" accessibilityState={{ selected: on }}
             accessibilityLabel={`Last ${d} days`}
-            style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: 999, backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{d} days</Text>
+            style={{ flex: 1, minHeight: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+            <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>{d} days</Text>
           </Pressable>
         );
       })}
@@ -290,47 +287,19 @@ export default function Muscles() {
   return frame(<>
     {picker}
 
-    {/* ── Training Summary ─────────────────────────────────────────────── */}
-    {/* `setsCounted`, never `Σ muscles[].primarySets`. One set of back squats
-        is one set here and five muscles on the board below it; summing the
-        rows would report a number of sets nobody performed. */}
-    <Hero
-      label={floor ? 'Sets logged, at least' : 'Sets logged'}
-      figure={fig(num(board.setsCounted))}
-      note={caption ?? undefined}
-    />
-    <KpiRow items={[
-      {
-        label: 'Muscles Worked',
-        value: fig(num(board.muscles.length)),
-        delta: floor ? 'at least' : undefined,
-      },
-      {
-        label: 'Movements',
-        value: fig(num(movements)),
-        delta: floor ? 'at least' : undefined,
-      },
-    ]} />
-    {/* Work that happened and is in NO figure above: a movement we have never
-        heard of, and a movement in our own catalogue with no muscles recorded
-        against it. Two different problems with two different owners, which is
-        why `gapNote` writes them as two sentences. */}
-    {gaps ? <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{gaps}</Flag> : null}
-
-    <Rule />
-
     {/* ── the body ─────────────────────────────────────────────────────── */}
     <Section>
-      <SectionHead title="The Body" note={side === 'front' ? 'Front' : 'Back'} />
-      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+      {/* The body is what this screen is for, so it is the first card and
+          the front/back choice is the board's segmented bar over it. */}
+      <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginBottom: sp.lg }}>
         {(['front', 'back'] as const).map((s) => {
           const on = side === s;
           return (
             <Pressable key={s} onPress={() => setSide(s)}
-              accessibilityRole="button" accessibilityState={{ selected: on }}
+              accessibilityRole="tab" accessibilityState={{ selected: on }}
               accessibilityLabel={s === 'front' ? 'Front of the body' : 'Back of the body'}
-              style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: 999, backgroundColor: on ? t.brand : t.surface2 }}>
-              <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>
+              style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
+              <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>
                 {s === 'front' ? 'Front' : 'Back'}
               </Text>
             </Pressable>
@@ -388,6 +357,41 @@ export default function Muscles() {
           it and the manifest draws none of them — and a member who trained it
           and sees an unlit body is owed the reason. */}
       {undrawn ? <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>{undrawn}</Flag> : null}
+    </Section>
+
+    <Rule />
+
+    {/* ── Training Summary ─────────────────────────────────────────────── */}
+    {/* `setsCounted`, never `Σ muscles[].primarySets`. One set of back squats
+        is one set here and five muscles on the board below it; summing the
+        rows would report a number of sets nobody performed. */}
+    {/* The board's figure card where the Hero was: the label as the head,
+        one big figure, the window caption under it, and the two counts as a
+        KpiRow inside the same card. */}
+    <Section>
+      <SectionHead title={floor ? 'Sets Logged, at Least' : 'Sets Logged'} />
+      <View accessible accessibilityLabel={[floor ? 'Sets logged, at least' : 'Sets logged', fig(num(board.setsCounted)), caption].filter(Boolean).join(', ')}>
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(num(board.setsCounted))}</Text>
+        {caption ? <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{caption}</Text> : null}
+      </View>
+      <View style={{ marginTop: sp.lg }} />
+    <KpiRow items={[
+      {
+        label: 'Muscles Worked',
+        value: fig(num(board.muscles.length)),
+        delta: floor ? 'at least' : undefined,
+      },
+      {
+        label: 'Movements',
+        value: fig(num(movements)),
+        delta: floor ? 'at least' : undefined,
+      },
+    ]} />
+    {/* Work that happened and is in NO figure above: a movement we have never
+        heard of, and a movement in our own catalogue with no muscles recorded
+        against it. Two different problems with two different owners, which is
+        why `gapNote` writes them as two sentences. */}
+    {gaps ? <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{gaps}</Flag> : null}
     </Section>
 
     <Rule />

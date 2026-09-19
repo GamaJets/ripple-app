@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Flag, PartialRead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useCallback, useMemo } from 'react';
@@ -41,7 +41,7 @@ import { useClientWeek } from '../../src/ui/clientWeek';
 import { clientWeekLine } from '../../src/lib/clientBlock';
 import { weekLabel } from '../../src/lib/programBlock';
 import { WEEK_DAYS, isoDay, jsDayForIndex, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
-import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 // Which of the movements the plan names have actually appeared in the log.
 // `planVsActual` has done this arithmetic since it was written and its only
 // reader was the coach's client-training screen; `myPlanWeek` is the member's
@@ -229,13 +229,9 @@ export default function ThisWeek() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }} numberOfLines={1}>{program.title}{coachProgram ? ' · coach plan' : ''}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>This Week</Text>
-          </View>
-        </View>
+        {/* The board's pushed-page head; the programme this week belongs to
+            is the one quiet line under the title. */}
+        <PageHead title="This Week" subtitle={`${program.title}${coachProgram ? ' · coach plan' : ''}`} />
 
         {/* ── whose copy of the coach's plan this is ──────────────────────
             Non-null for exactly as long as the phone's own copy is what is

@@ -26,14 +26,13 @@
 import { useState, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import { useToast } from '../../src/ui/toast';
 import { useMeasurements, METRICS, type MeasureEntry, type MetricKey } from '../../src/ui/measurements';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote, weightLabel } from '../../src/lib/units';
@@ -43,7 +42,7 @@ import { agoLabel, dayLabel, shortDayLabel, daysBetween, STALE_AFTER_DAYS } from
 import { useToday } from '../../src/ui/today';
 import { useClientData } from '../../src/ui/clientData';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 
 // Which tape sites a goal has an opinion about. A waist and a hip measurement
 // follow the fat, so Fat Loss and Tone want them down; a chest, an arm and a
@@ -130,7 +129,6 @@ function ScanBeside({ t, tapeISO, scans, scansStatus, wu, dense }: {
 export default function Measurements() {
  const t = useTheme();
  const toast = useToast();
- const router = useRouter();
  const { entries, status, addEntry, updateMetric, removeMetric, reload } = useMeasurements();
  // The member's own goal, purely so the mark beside a fall can stop claiming to
  // be good news for everybody. Nothing else on this screen reads it.
@@ -284,6 +282,20 @@ export default function Measurements() {
  const stale = latestDays != null && latestDays > STALE_AFTER_DAYS
   ? `Your last tape entry is ${latestDays} days old — these figures describe the body you had then.`
   : null;
+ // The three arms — a movement, no movement, and no earlier entry — are
+ // deltaLabel's, so this cannot drift out of step with the same sentence on
+ // Progress. `prev` is non-null exactly when `waistMove` is.
+ // `noBaseline` says WHICH baseline is missing. An entry holds one row per
+ // body part per date, so a session where somebody taped their chest and not
+ // their waist is ordinary — and "First entry" was then printed on their
+ // fifth tape session, because `waistMove` is null whenever the previous
+ // entry has no waist, not only when there is no previous entry.
+ const waistLine = deltaLabel(waistMove, {
+  since: prev && prev.waist != null ? fmtDate(prev.at) : null,
+  unit: lu,
+  noChange: 'Unchanged',
+  noBaseline: prev ? 'No waist measured last time' : 'First entry',
+ });
  const G = layout.gutter;
 
  return (
@@ -291,44 +303,38 @@ export default function Measurements() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
-  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-   <View style={{ flex: 1 }}>
-    <Text style={{ ...ty.micro, color: t.ink3 }}>Tape measurements in {lu}</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Body Measurements</Text>
-   </View>
-  </View>
+  {/* The board's pushed-page head; the unit the tape is read in is the one
+      quiet line under it. */}
+  <PageHead title="Body Measurements" subtitle={`Tape measurements in ${lu}`} />
 
-  {/* ── the hero: waist, when there is one ──────────────────────────── */}
+  {/* ── the figure: waist, when there is one ────────────────────────── */}
+  {/* The board's figure card where the Hero was: Waist as the head, the day
+      it was taped as the head's note, one big figure with its unit, and the
+      movement since the previous waist on its own line under it. */}
   {waistNow != null ? (
-   <Hero
-    label="Waist"
-    figure={fig(waistNow)}
-    unit={lu}
-    // The date this figure was actually measured on, and how long ago that
-    // was — not just the date it is being compared against. A waist with no
-    // date is a rumour, and a five-week-old one presented as current is a
-    // rumour with a number on it.
-    // The three arms — a movement, no movement, and no earlier entry — are
-    // deltaLabel's, so this cannot drift out of step with the same sentence on
-    // Progress. `prev` is non-null exactly when `waistMove` is.
-    // `noBaseline` says WHICH baseline is missing. An entry holds one row per
-    // body part per date, so a session where somebody taped their chest and not
-    // their waist is ordinary — and "First entry" was then printed on their
-    // fifth tape session, because `waistMove` is null whenever the previous
-    // entry has no waist, not only when there is no previous entry.
-    note={deltaLabel(waistMove, {
-     since: prev && prev.waist != null ? fmtDate(prev.at) : null,
-     unit: lu,
-     noChange: 'Unchanged',
-     noBaseline: prev ? 'No waist measured last time' : 'First entry',
-    }) + ` · measured ${dayLabel(latest.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
-   />
-  ) : null}
-  {/* Where a figure is stale, how stale. The client is the only person who can
-      judge whether a six-week-old waist still describes them, and they can only
-      judge it if they are given the six weeks. */}
-  {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{stale}</Text> : null}
+   <Section>
+    {/* The date this figure was actually measured on, and how long ago that
+        was — not just the date it is being compared against. A waist with no
+        date is a rumour, and a five-week-old one presented as current is a
+        rumour with a number on it. */}
+    <SectionHead title="Waist" note={`Measured ${dayLabel(latest.at)}${latestAgo ? ` · ${latestAgo}` : ''}`} />
+    <View accessible accessibilityLabel={['Waist', [fig(waistNow), lu].join(' '), waistLine].join(', ')}>
+     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+       style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(waistNow)}</Text>
+      <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{lu}</Text>
+     </View>
+     {/* Green only where the waist moved the way the member's goal reads it
+         — the colour is a verdict, and where the goal has no opinion the
+         line is plain ink. */}
+     <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: waistMove != null && waistMove !== 0 && goalRead('waist', waistMove) ? t.brand : t.ink2, marginTop: 3 }}>{waistLine}</Text>
+    </View>
+    {/* Where a figure is stale, how stale. The client is the only person who
+        can judge whether a six-week-old waist still describes them, and they
+        can only judge it if they are given the six weeks. */}
+    {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{stale}</Text> : null}
+   </Section>
+  ) : stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{stale}</Text> : null}
 
   {/* ── latest snapshot with change vs previous ─────────────────────── */}
   {latest ? (<>

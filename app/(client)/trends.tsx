@@ -38,14 +38,13 @@ import { isTimedSet, holdLabel } from '../../src/lib/timedSets';
 import { holdSeries, heldMovements, liftedMovements, holdChangeSecs, holdLoadNote } from '../../src/lib/holdTrend';
 import { useClientData } from '../../src/ui/clientData';
 import type { WorkoutEntry } from '../../src/lib/mockData';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { startOfWeek } from '../../src/lib/weekStart';
 import { fmtAxisDay } from '../../src/lib/format';
 // The local calendar day of an instant, so one movement done twice in an
 // afternoon is one point on the trend rather than two.
 import { dayKeyOf } from '../../src/lib/entryEdit';
-import { BACK_ICON } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 const WEEKS = 10;
@@ -296,6 +295,15 @@ export default function Trends() {
   // a trend, so the chart only draws once something has actually been lifted.
   const thisWeek = weeks[weeks.length - 1];
   const weekNote = tonnageNote({ kg: thisWeek.vol, unknownSets: thisWeek.unpriced });
+  /** The sentence under this week's figure: the days trained, or which of the
+   *  three ways the log could not answer. A short read is never "a quiet
+   *  week". */
+  const weekLine = logStatus === 'loading' ? 'Reading your training log…'
+    : logStatus === 'partial' ? 'More logged than this screen can read at once, so the weekly figures would be short.'
+    : !logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
+    : thisWeek.days
+    ? `${thisWeek.days} training day${thisWeek.days === 1 ? '' : 's'} this week`
+    : 'Nothing logged this week yet.';
   const anyVolume = weeks.some((w) => w.vol > 0);
   const bestWeek = weeks.reduce((m, w) => (w.vol > m.vol ? w : m), weeks[0]);
 
@@ -339,34 +347,37 @@ export default function Trends() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>See your training move over time</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Trends</Text>
+        {/* The board's pushed-page head: back, the title centred. */}
+        <PageHead title="Trends" />
+
+        {/* ── the figure: this week's tonnage ────────────────────────────── */}
+        {/* The board's figure card where the Hero was. */}
+        <Section>
+          <SectionHead title="Lifted This Week" />
+          {/* Label, figure, unit and sentence are one fact, and one stop. */}
+          <View accessible accessibilityLabel={['Lifted This Week', [logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null), logKnown ? wu : undefined].filter(Boolean).join(' '), weekLine].filter(Boolean).join(', ')}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+              {/* Shrunk to fit and never wrapped: a figure broken across two lines
+                  is a figure read wrong. */}
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}</Text>
+              {logKnown ? (
+                <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{logKnown ? wu : undefined}</Text>
+              ) : null}
+            </View>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{weekLine}</Text>
           </View>
-        </View>
-
-        {/* ── the hero: this week's tonnage ──────────────────────────────── */}
-        <Hero
-          label="Lifted This Week"
-          figure={logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}
-          unit={logKnown ? wu : undefined}
-          note={logStatus === 'loading' ? 'Reading your training log…' : logStatus === 'partial' ? 'More logged than this screen can read at once, so the weekly figures would be short.' : !logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
-            : thisWeek.days
-            ? `${thisWeek.days} training day${thisWeek.days === 1 ? '' : 's'} this week`
-            : 'Nothing logged this week yet.'}
-        />
-
-        {/* Said once, under the hero, rather than beside each figure: a pounds
-            reader is reading kilograms converted, and their coach's console is
-            not, so the two disagreeing is worth explaining before it is seen. */}
-        {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
-        {/* And said whenever the tonnage above is short. A bodyweight set whose
-            load nobody has recorded is real training that cannot be weighed,
-            and a hero figure printed over it without this is understating the
-            week while looking exactly like a measurement. */}
-        {logKnown && weekNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{weekNote}</Text> : null}
+          {/* Said once, under the figure, rather than beside each figure: a
+              pounds reader is reading kilograms converted, and their coach's
+              console is not, so the two disagreeing is worth explaining before
+              it is seen. */}
+          {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unitNote}</Text> : null}
+          {/* And said whenever the tonnage above is short. A bodyweight set
+              whose load nobody has recorded is real training that cannot be
+              weighed, and a figure printed over it without this is understating
+              the week while looking exactly like a measurement. */}
+          {logKnown && weekNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{weekNote}</Text> : null}
+        </Section>
 
 
         {/* ── weekly volume ──────────────────────────────────────────────── */}
