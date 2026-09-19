@@ -867,7 +867,7 @@ export default function TrainerAnalytics() {
             who is at risk — client outcomes, and only then the money. All
             three are already computed below under a whole roster read and
             are dashes otherwise; the notice under this strip says why. */}
-        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
           <KpiRow items={[
             { label: 'Adherence', value: avgAdh == null ? fig(null) : String(avgAdh), unit: avgAdh == null ? undefined : '%' },
             { label: 'Clients', value: fig(clients) },

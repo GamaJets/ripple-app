@@ -1641,7 +1641,7 @@ export default function ClientScreen() {
             submitted check-in is not at 0% adherence, and an unread count
             the read did not return is not none. */}
         {client ? (
-          <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+          <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
             <KpiRow items={[
               { label: 'Adherence', value: client.adherence == null ? fig(null) : String(client.adherence), unit: client.adherence == null ? undefined : '%' },
               { label: 'Last Active', value: client.lastActive },

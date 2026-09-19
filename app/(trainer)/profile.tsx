@@ -744,7 +744,7 @@ export default function CoachProfile() {
             accessibilityState={{ checked: lc.applies }}
             style={{
               flexDirection: 'row', alignItems: 'center', gap: sp.md,
-              backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg, ...elevation.e1,
+              backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg, ...elevation.e1,
               ...(lc.applies ? { borderWidth: hairline, borderColor: t.brand } : null),
             }}
           >
@@ -847,7 +847,7 @@ export default function CoachProfile() {
             accessibilityState={{ checked: p.listed }}
             style={{
               flexDirection: 'row', alignItems: 'center', gap: sp.md,
-              backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg, ...elevation.e1,
+              backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg, ...elevation.e1,
               ...(p.listed ? { borderWidth: hairline, borderColor: t.brand } : null),
             }}
           >

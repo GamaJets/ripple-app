@@ -999,7 +999,7 @@ export default function Nutrition() {
             for a whole read, and the line under the figure says which read
             is short. undefined arc, not 0: an empty ring drawn for a target
             we do not have is a figure invented to fill a slot. */}
-        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg }}>
+        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
             <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
               accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories could not be counted. Open the food log'}

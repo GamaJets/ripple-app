@@ -160,7 +160,7 @@ export default function ClientLayout() {
         tabBarActiveTintColor: t.brand,
         tabBarInactiveTintColor: t.ink3,
         // The scale's smallest step, in sentence case and at the emphasis weight.
-        tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' },
+        tabBarLabelStyle: { ...ty.caption, fontSize: 11, fontWeight: '500' },
         sceneStyle: { backgroundColor: t.bg },
       }}
     >

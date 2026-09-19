@@ -103,7 +103,7 @@ import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWearables } from '../../src/ui/wearables';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, elevation, type as ty, numeric, hairline } from '../../src/theme/scale';
 import { BACK_ICON } from '../../src/ui/direction';
 
 // Gone with `add` below: a local `Food` shape (`{ n, k, p, c, f }`) and a
@@ -1537,7 +1537,7 @@ export default function FoodLog() {
      nothing happening after the shutter reads as a button that did not work. */}
  <Modal visible={reading} transparent animationType="fade" onRequestClose={() => setReading(false)}>
   <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: G }}>
-   <View style={{ backgroundColor: t.surface, borderRadius: radius.md, padding: 20, alignItems: 'center', gap: sp.md, ...elevation.e2 }}>
+   <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: 20, alignItems: 'center', gap: sp.md, ...elevation.e2 }}>
     {photoUri ? <Image source={{ uri: photoUri }} accessible accessibilityLabel="The meal you photographed" style={{ width: 180, height: 120, borderRadius: radius.sm, backgroundColor: t.surface2 }} resizeMode="cover" /> : null}
     <ActivityIndicator color={t.brand} />
     <Text style={{ ...ty.label, color: t.ink3 }}>Reading your meal&hellip;</Text>

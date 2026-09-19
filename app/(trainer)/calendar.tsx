@@ -3043,7 +3043,7 @@ export default function TrainerSchedule() {
             is actually nought — one booking in 249 slots is not "0% filled"
             (src/lib/sharePercent.ts). The proportion is over every slot the
             coach has loaded, not over one day, and the label says so. */}
-        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
           <KpiRow items={[
             { label: 'Booked', value: countable ? fig(booked.length) : fig(null), unit: countable ? (booked.length === 1 ? 'session' : 'sessions') : undefined },
             { label: 'Open', value: countable ? fig(open.length) : fig(null), unit: countable ? (open.length === 1 ? 'slot' : 'slots') : undefined },

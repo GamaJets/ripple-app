@@ -64,7 +64,7 @@ export default function TrainerLayout() {
           },
           tabBarActiveTintColor: t.brand,
           tabBarInactiveTintColor: t.ink3,
-          tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' },
+          tabBarLabelStyle: { ...ty.caption, fontSize: 11, fontWeight: '500' },
           sceneStyle: { backgroundColor: t.bg },
         }}
       >

@@ -372,7 +372,7 @@ export default function CoachBrand() {
           {/* ── live preview: exactly what a client of theirs sees ─────────── */}
           <Section>
             <SectionHead title="Live Preview" />
-            <View style={{ backgroundColor: t.surface, borderRadius: radius.md, overflow: 'hidden', ...elevation.e1 }}>
+            <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, overflow: 'hidden', ...elevation.e1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
                 <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: preview }} />
                 {/* Their trading name where they have one, their own name

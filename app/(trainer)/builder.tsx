@@ -2271,7 +2271,7 @@ export default function Builder() {
             week's days as pills: each opens or folds its section below, which
             is how the board's "Workout Days" circles behave here, and the plus
             adds one. */}
-        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
           <KpiRow items={[
             { label: 'Weeks', value: String(blockWeeks.length) },
             { label: 'Days', value: String(days.length), unit: blockWeeks.length > 1 ? 'this week' : undefined },
@@ -2961,7 +2961,7 @@ export default function Builder() {
                     // Lifted: it must read as picked up, or a coach cannot tell
                     // a drag from a list that has started scrolling.
                     zIndex: 10, elevation: 6, opacity: 0.96,
-                    backgroundColor: t.surface, borderRadius: radius.md,
+                    backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring,
                     shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
                   } : null),
                   transform: [{ translateY: isDragging ? dragY : (shift as number) }],

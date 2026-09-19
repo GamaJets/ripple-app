@@ -290,7 +290,7 @@ export default function OwnerBrand() {
         {/* ── live preview: chrome and the primary action, no invented data ─ */}
         <Section>
           <SectionHead title="Live Preview" />
-          <View style={{ backgroundColor: t.surface, borderRadius: radius.md, overflow: 'hidden', ...elevation.e1 }}>
+          <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, overflow: 'hidden', ...elevation.e1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
               <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: t.brand }} />
               {/* The gym's name where it is known, and this app's own label

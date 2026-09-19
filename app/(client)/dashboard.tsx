@@ -28,7 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Cta, Ghost, QuickRow, Notice, Card, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, type as ty, numeric, hairline } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { num, fmtTime } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
@@ -667,7 +667,7 @@ export default function Home() {
             empty ring over "0 of 4" is a claim about the member's week that a
             failed or capped read cannot make, and the two Notices further down
             say which of the two it was. */}
-        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg }}>
+        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Weekly Goal</Text>

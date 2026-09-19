@@ -2102,7 +2102,7 @@ export default function TrainerClients() {
             whole, and the day's sessions until the diary answered. The
             sentence under the strip says which read is short, and why; a
             dash on its own would only say "something". */}
-        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
+        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
           <KpiRow
             onPress={(k) => { if (k.route) router.push(k.route as never); }}
             items={[
