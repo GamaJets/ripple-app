@@ -27,6 +27,9 @@ import type { GymClass, ClassBookingStatus } from '../lib/classesMock';
 // once a cancellation stops being a DELETE, "is there a row" and "do they still
 // hold a place" are different questions with different answers.
 import { seatStanding, holdsPlace, type SeatStanding } from '../lib/classSeat';
+// Who is signed in, with the `error` kept beside the session. Two calls became
+// one: see the note at the call for why `getUser()` is not asked any more.
+import { sessionUid } from '../lib/sessionUid';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
@@ -215,15 +218,42 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     // end should be told that rather than told the timetable is broken.
     let truncated = false;
     try {
-      // Signed out is a true answer, not a failed read: getUser() rejects when
-      // there is no session, which marked this whole load as failed on the
-      // first tick — before anybody had signed in — and `load` never changed
-      // identity, so the effect below never asked again.
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setStatus('ready'); setReady(true); return; }
-      const { data: auth, error: authErr } = await supabase.auth.getUser();
-      if (authErr) failed = true;
-      const id = auth?.user?.id ?? null;
+      // ── who is asking, and which of the two nobodies it is ──────────────
+      //
+      // Signed out is a true answer and not a failed read; that part was always
+      // right. What was wrong is that `!sess?.session` was the only test of it
+      // and the line above it discarded `error`.
+      //
+      // src/lib/sessionUidRead.ts has the library's own body for it: when the
+      // stored access token has expired and the refresh cannot reach GoTrue,
+      // `getSession()` resolves with `session: null` AND a retryable error —
+      // indistinguishable, on that line, from a phone nobody has signed in on.
+      // So an outage took the `setStatus('ready')` branch, and 'ready' is
+      // src/ui/loadStatus.ts's word for the server's own answer. The member was
+      // shown an EMPTY, CONFIRMED timetable — "no classes are scheduled" at a
+      // gym running forty a week — with `myRow` never read, so every class they
+      // hold a seat on rendered as bookable again, and `uid` set to null, which
+      // takes `book` down the offline branch at the bottom of this file.
+      //
+      // One call, not two. `getUser()` was only ever here for the id and
+      // getSession() carries it; asking the network for a uid that is already
+      // on the device is what src/ui/glucoseData.ts records leaving a member
+      // looking at "Still loading." for a whole session.
+      //
+      // Narrowed on `fate`, never on `!who.uid` — `string` includes '', so
+      // `!who.uid` does not discriminate UidRead and the compiler refuses it.
+      const who = await sessionUid('classes.load');
+      if (who.fate === 'signed-out') { setStatus('ready'); setReady(true); return; }
+      if (who.fate !== null) {
+        // 'unreadable'. Nothing was established about this person, so nothing
+        // is retracted and nothing is confirmed: `uid` and `liveUid` are left
+        // exactly as they were, whatever is on screen stays on screen, and the
+        // status says the read failed. `sessionUid` has already reported it.
+        setStatus('error');
+        setReady(true);
+        return;
+      }
+      const id = who.uid;
       setUid(id);
       setLiveUid(id);
 
@@ -495,8 +525,27 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
     }
-    // No backend to book against: the seat exists on this device only, so this
-    // is the offline path rather than a confirmed reservation.
+    // ── the tail, and the one case it must NOT answer for ────────────────
+    //
+    // With `USE_SUPABASE` off there is no backend at all: this device IS the
+    // record, the seat genuinely exists, and `optimistic` is the true answer.
+    //
+    // With it ON and `uid` null, it is not. That combination means the auth
+    // read above did not produce an account — which, before the fate was kept,
+    // was ALSO what an outage looked like — and this line then returned
+    // 'booked' for a member nothing had been sent for. The screen above reads
+    // a non-null answer as a confirmed seat, says "Booked — you're in" and arms
+    // the hour-before reminder. They arrange their evening around a seat that
+    // does not exist: the same harm the missing `error` at the top of this file
+    // caused, arriving by the last door that fix left open.
+    //
+    // So the optimistic entry is rolled back and the answer is null, which the
+    // interface already defines as "DO NOT tell them they are in".
+    if (USE_SUPABASE) {
+      setMyRow((p) => { const n = { ...p }; delete n[id]; return n; });
+      if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
+      return null;
+    }
     return optimistic;
   };
 
@@ -507,23 +556,67 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     // standing into 'booked' on the way back, which is the one thing this build
     // must never do with a word it cannot read.
     const was = myRow[id];
+    const standing = seatStanding(was);
+    // ── the gate, and why `cancel_class` cannot be its own ────────────────
+    //
+    // `cancel_class` RETURNS VOID. Read its body in
+    // supabase/parts/3180-cancelling-a-class-stops-being-a-delete.sql §3: it
+    // locks the member's row, and when the status it finds is null or is not
+    // one of 'booked'/'waitlist' it `return`s — writing nothing, raising
+    // nothing. A cancel of a cancellation and a cancel of a class the member
+    // never booked both come back as `{ error: null }`, byte for byte the
+    // answer a real cancellation gives, and there is no count to check because
+    // an RPC returning void has no rows to count.
+    //
+    // So `!error` cannot be this function's test of success, and the test has
+    // to be made HERE, before the call, off the standing the server last gave
+    // us. `holdsPlace` is that question and it is the only shape of it: a
+    // truthiness test on `was` is true of 'cancelled', and the string compare
+    // that used to guard the seat count below was true of nothing else.
+    //
+    // 'unknown' is refused by the same line, which is the point src/lib
+    // /classSeat.ts makes about arming a control against a word nobody can
+    // name: cancelling off a fifth status this build has never seen would send
+    // an RPC whose effect nothing here can predict and report it as done.
+    if (!holdsPlace(standing)) return false;
     setMyRow((p) => { const n = { ...p }; delete n[id]; return n; });
-    if (was === 'booked') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
+    // The seat count follows the STANDING, not a string compare. 'held' is the
+    // only standing that occupies a seat; a member leaving the queue frees
+    // nothing, which is the same gate `cancel_class` applies server-side before
+    // it promotes anybody.
+    if (standing === 'held') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
     // Put the seat back on screen if the server did not take the cancellation.
     // A member who thinks they cancelled and did not is a no-show the gym
     // charges them for.
     const restore = () => {
       if (!was) return;
       setMyRow((p) => ({ ...p, [id]: was }));
-      if (was === 'booked') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: x.booked + 1 } : x)));
+      if (standing === 'held') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: x.booked + 1 } : x)));
     };
-    if (!USE_SUPABASE || !uid) return false;
+    if (!USE_SUPABASE || !uid) { restore(); return false; }
     try {
       const { error } = await supabase.rpc('cancel_class', { p_class: id });
       if (error) {
         restore();
         return false;
       }
+      // ── and why the row is read again rather than guessed at ────────────
+      //
+      // The key was deleted above so that nothing goes on reading this as a
+      // held seat, and an absent key is 'none' to every reader of `myStanding`
+      // — which is the ABSENCE of a row, the one standing that means they never
+      // booked. That is now the wrong word for this member: part 3180 keeps the
+      // row and sets 'cancelled' or 'late_cancelled' on it, and which of the
+      // two it chose depends on `tenants.class_cancel_hours` against the class
+      // start, neither of which this provider reads. Writing either word from
+      // here would be inventing the server's answer, and getting it wrong in
+      // the direction that matters: 'cancelled' over a late cancellation drops
+      // the half of `seatNote` that says it was inside the notice period, which
+      // is the sentence a member needs before a fee they did not expect.
+      //
+      // So it is asked for instead. Until the answer lands the member holds no
+      // place, which is true, and says nothing about why, which is honest.
+      void load();
       return true;
     } catch {
       restore();

@@ -13,10 +13,10 @@
 // three apps to serve two routes would be the wrong trade.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
 import type { ChatMsg } from '../lib/coach';
 import { coachChatKey, readThread, threadForConsent, writeThread, type ThreadSide } from '../lib/coachChat';
+import { sessionUid } from '../lib/sessionUid';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 
@@ -92,21 +92,59 @@ export function useCoachChat(side: ThreadSide, opts: { ready: boolean; health: b
     if (!ready) return;
     let cancelled = false;
     (async () => {
-      let uid: string | null = null;
-      try {
-        // getSession() and not getUser(): the first reads the session already
-        // on the device and answers offline, the second goes to the network to
-        // revalidate and resolves with a null user when there is no signal.
-        // Every provider in this folder fronts it for that reason.
-        const { data } = await supabase.auth.getSession();
-        uid = data?.session?.user?.id ?? null;
-      } catch { /* treated as signed out */ }
+      // getSession() and not getUser(): the first reads the session already on
+      // the device and answers offline, the second goes to the network to
+      // revalidate and resolves with a null user when there is no signal. Every
+      // provider in this folder fronts it for that reason, and src/ui/
+      // glucoseData.ts records what the other way round cost.
+      //
+      // ── but a null session was two answers and this read only had one ─────
+      //
+      // It was `const { data } = await supabase.auth.getSession()` with the
+      // error discarded, and `catch { /* treated as signed out */ }` underneath
+      // saying so out loud. getSession() resolves with `{ session: null, error }`
+      // when the stored access token has expired and the refresh cannot reach
+      // the server — src/lib/sessionUidRead.ts quotes `__loadSession` — so an
+      // outage arrived as the same null a phone with nothing in storage gives.
+      //
+      // That was the worst possible branch to get wrong HERE, and not because
+      // of the sentence. The thread lives on this device under a key that names
+      // the account: `coachChatKey(uid, side)`. With no uid there is no key, so
+      // the branch below does not merely draw an empty screen — it cannot open
+      // the copy that is sitting on the disk. Offline is exactly the condition
+      // under which that copy is the only copy, and it was exactly the
+      // condition that made this read call itself signed out and skip it. The
+      // member then saw the empty state, which for this screen is a greeting
+      // and a row of suggestions: a confident "you have not asked me anything"
+      // over a fortnight of conversation that is still on the phone.
+      const who = await sessionUid('coachChat.read');
       if (cancelled) return;
-      uidRef.current = uid;
-      // Nobody signed in: there is no account to key a thread by, so nothing is
-      // read and nothing will be kept. A settled empty rather than an unread
-      // one, and the screen says "not kept" rather than spinning.
-      if (!uid) { writable.current = false; if (!touched.current) setMsgs([]); setStatus('ready'); return; }
+      uidRef.current = who.uid;
+      if (who.fate === 'signed-out') {
+        // Nobody signed in: there is no account to key a thread by, so nothing
+        // is read and nothing will be kept. A settled empty rather than an
+        // unread one, and the screen says "not kept" rather than spinning.
+        writable.current = false;
+        if (!touched.current) setMsgs([]);
+        setStatus('ready');
+        return;
+      }
+      if (who.fate !== null) {
+        // 'unreadable'. We could not find out whose thread to open, so we do
+        // not open one and we do not claim there is none. 'partial' is this
+        // hook's existing word for "this phone is holding something we could
+        // not read", which is the truth: the bytes are there and the key is
+        // not. Nothing is written either — a turn written under no account
+        // would be written to no key at all.
+        writable.current = false;
+        setStatus('partial');
+        return;
+      }
+      // Narrowed on `fate`, never on `!who.uid`: UidRead's members are told
+      // apart by fate, and `string` includes '', so `!who.uid` would leave the
+      // failure branch holding an `AuthReadFate | null`. The two guards above
+      // are exhaustive, so this is the signed-in member and `uid` is a string.
+      const uid = who.uid;
       let raw: string | null = null;
       let failed = false;
       try { raw = await AsyncStorage.getItem(coachChatKey(uid, side)); }

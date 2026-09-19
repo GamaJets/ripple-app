@@ -152,6 +152,10 @@ import {
   hourLabel, logDayOptions, logStamp, logStampProblem, logWhenLine,
 } from '../../src/lib/sessionWhen';
 import { isoDay } from '../../src/lib/weekStart';
+// What day it is, kept true for as long as this screen is open. This screen is
+// registered `href: null` in app/(trainer)/_layout.tsx, so it mounts once and is
+// never torn down — see the block above `logDay` for what that cost.
+import { useNow } from '../../src/ui/today';
 // Whose record this screen is showing. This file is the eighth and last user of
 // it, and the only one that WRITES — src/lib/routeSubject.ts quotes the exact
 // line that was here and sets out why a `useState` initialiser is the wrong
@@ -403,8 +407,37 @@ export default function LogSession() {
     const d = new Date(sessionAt);
     return Number.isFinite(d.getTime()) ? d : null;
   })();
-  const [logDay, setLogDay] = useState(() => isoDay(seededStart ?? new Date()));
-  const [logHour, setLogHour] = useState(() => (seededStart ?? new Date()).getHours());
+  /* ── the default is a derived value, not state ─────────────────────────
+   *
+   * Both of these were `useState(() => … new Date() …)`, and the only thing
+   * that ever re-read the clock was the client-change block below. A `useState`
+   * initialiser runs ONCE, at mount, and this screen is registered `href: null`
+   * inside <Tabs> (app/(trainer)/_layout.tsx): it mounts the first time a coach
+   * opens it and is never unmounted, not on `router.back()` and not on the app
+   * being backgrounded. So a coach who opened Log Session on Sunday evening and
+   * wrote a session up on Monday morning filed it under SUNDAY — and unlike a
+   * stale label, `logStamp` WRITES that day, into the client's log, their
+   * streak, their weekly report, plan-versus-actual and the fee that follows
+   * the session.
+   *
+   * So the coach's CHOICE is the state, and the default is derived from a clock
+   * that stays current. `useNow()` (src/ui/today.ts) re-renders this screen at
+   * the next local midnight, on every foreground and on every focus, and it is
+   * this tree's one clock subscription — there is no second ticker here.
+   * `null` means "not chosen", which is also what makes the re-seed below a
+   * single line rather than two clock reads that could disagree.
+   *
+   * The HOUR follows the same clock and not just the day, and that is not
+   * tidiness: leave the hour frozen at mount and a coach who opened the screen
+   * at 23:00 on Sunday and logged at 00:30 on Monday would be offered Monday at
+   * 11 pm — an hour that has not happened, which `logStampProblem` refuses. A
+   * day that moves under an hour that does not is a screen that cannot save.
+   */
+  const now = useNow();
+  const [chosenDay, setChosenDay] = useState<string | null>(null);
+  const [chosenHour, setChosenHour] = useState<number | null>(null);
+  const logDay = chosenDay ?? isoDay(seededStart ?? now);
+  const logHour = chosenHour ?? (seededStart ?? now).getHours();
   /**
    * Whether Save also marks the session delivered. On by default, and off in
    * one tap.
@@ -500,7 +533,9 @@ export default function LogSession() {
    *
    * The day and hour are re-seeded with the sheet rather than left, for the
    * reason their own initialisers exist: on a cleared sheet they are the seed
-   * for the session now in the route, and `new Date()` is the ordinary case.
+   * for the session now in the route, and the current day and hour are the
+   * ordinary case. Both are now derived rather than held, so re-seeding them is
+   * clearing the coach's choice — see the block above `logDay`.
    */
   const [seenSession, setSeenSession] = useState<RouteParam>(sessionParam);
   const movedSession = subjectChange(seenSession, sessionParam);
@@ -515,8 +550,12 @@ export default function LogSession() {
     setPickedPlanDay(null);
     setPlanNote(null);
     setFailure(null);
-    setLogDay(isoDay(seededStart ?? new Date()));
-    setLogHour((seededStart ?? new Date()).getHours());
+    // Back to the default, which is the seed for the session now in the route
+    // and otherwise the day and hour it is NOW. Read from `useNow()` above
+    // rather than from a second `new Date()` here, so the value and the picker
+    // beside it cannot come from two different instants.
+    setChosenDay(null);
+    setChosenHour(null);
   }
 
   const pickedRow = r.roster.find((c) => c.id === picked) ?? null;
@@ -924,12 +963,19 @@ export default function LogSession() {
     return rows
       .map((r) => {
         const pairs = r.sets
+          // zero-ok: `s.reps` is the coach's own text box on this screen, not a
+          // figure anybody reported. A blank or unreadable box is not a set of
+          // zero reps — it is a row that was never filled in — and the `> 0`
+          // here is exactly the filter that drops it. See the comment above.
           .filter((s) => (parseInt(s.reps, 10) || 0) > 0)
           .map((s) => {
             const load = readLift(s.kg, wu);
             // A refused load is not written as a number at all. `ready` below
             // withholds the save while any refusal stands, so this only ever
             // runs on figures that read.
+            // zero-ok: only reached for a set the filter above has already
+            // read as more than zero reps, so this coercion cannot produce the
+            // 0 it is written with. Same box, same argument.
             return [parseInt(s.reps, 10) || 0, load.ok && load.kg != null ? load.kg : 0] as [number, number];
           });
         return pairs.length ? { t: at, exercise: r.name, sets: pairs } : null;
@@ -943,6 +989,9 @@ export default function LogSession() {
   const loadProblem = (): string | null => {
     for (const r of rows) {
       for (const st of r.sets) {
+        // zero-ok: the coach's own rep box again, and the zero is the arm that
+        // SKIPS the row rather than one that gets written. A blank set is a row
+        // they tabbed past; its load is not asked about because there is no set.
         if ((parseInt(st.reps, 10) || 0) <= 0) continue;
         const load = readLift(st.kg, wu);
         if (!load.ok) return `${r.name}: ${load.reason}`;
@@ -954,11 +1003,21 @@ export default function LogSession() {
   /** Whether there is anything worth writing. The same rule `entriesToWrite`
    *  applies — only a set with a rep count is a set — asked without needing a
    *  timestamp, so the button can be held before one has been settled on. */
+  // zero-ok: the same rep box and the same `> 0` validity test `entriesToWrite`
+  // applies, asked of the whole sheet. An empty box reads as zero and means
+  // "nothing typed here yet", which is what this question is for.
   const hasSets = rows.some((r) => r.sets.some((st) => (parseInt(st.reps, 10) || 0) > 0));
 
   /** Why the day and hour on the picker cannot be used, or null. A session
    *  dated into the future counts towards a streak nobody has earned, and the
    *  client cannot correct it because they did not type it. */
+  //
+  // A FRESH read, deliberately, and the one place on this screen that is not
+  // `now`. This asks "has that hour happened yet", and the answer has to be
+  // about the moment of asking: `useNow()` settles at midnight, on foreground
+  // and on focus, so at 14:01 it may still be holding 13:59 — and a coach who
+  // stepped the hour to 2 pm would be told 2 pm has not happened. A render-body
+  // read is re-evaluated on every render, and every tap on this screen is one.
   const whenProblem = logStampProblem(logDay, logHour, new Date());
 
   // Withheld while any load is unreadable. Saving a session with one bad
@@ -1507,11 +1566,15 @@ export default function LogSession() {
             <SectionHead title="When" />
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
               style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: sp.sm, paddingHorizontal: 2 }}>
-              {logDayOptions(new Date()).map((d) => {
+              {/* The same instant the default day above is derived from, not a
+                  second read of the clock: a chip list built from one `new Date()`
+                  and a `logDay` built from another disagree across midnight, and
+                  the coach is shown a picker with nothing selected on it. */}
+              {logDayOptions(now).map((d) => {
                 const on = d.day === logDay;
                 return (
                   <Pressable key={d.day} onPress={() => {
-                    setLogDay(d.day);
+                    setChosenDay(d.day);
                     // And the programme day goes back to following the date. A
                     // coach who switches from Tuesday to Monday is asking about
                     // Monday's session; a chip that stayed selected would be
@@ -1538,7 +1601,12 @@ export default function LogSession() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
               <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>Start hour</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.sm }}>
-                <Pressable onPress={() => setLogHour((h) => (h + 23) % 24)} hitSlop={8}
+                {/* Stepped from the hour ON SCREEN, which is the coach's choice
+                    where they have made one and the current hour where they have
+                    not. Not a functional updater: the state behind this is
+                    `null` until the first tap, and `null` is not an hour to step
+                    from. */}
+                <Pressable onPress={() => setChosenHour((logHour + 23) % 24)} hitSlop={8}
                   accessibilityRole="button" accessibilityLabel="An hour earlier"
                   style={{ paddingHorizontal: 14, paddingVertical: 10 }}>
                   <Icon name="minus" size={15} color={t.ink2} />
@@ -1546,7 +1614,7 @@ export default function LogSession() {
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, minWidth: 64, textAlign: 'center' }}>
                   {hourLabel(logHour)}
                 </Text>
-                <Pressable onPress={() => setLogHour((h) => (h + 1) % 24)} hitSlop={8}
+                <Pressable onPress={() => setChosenHour((logHour + 1) % 24)} hitSlop={8}
                   accessibilityRole="button" accessibilityLabel="An hour later"
                   style={{ paddingHorizontal: 14, paddingVertical: 10 }}>
                   <Icon name="plus" size={15} color={t.ink2} />
@@ -1562,7 +1630,7 @@ export default function LogSession() {
               </View>
             ) : (
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
-                {logWhenLine(logDay, logHour, new Date(), first)}
+                {logWhenLine(logDay, logHour, now, first)}
               </Text>
             )}
           </Section>

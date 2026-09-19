@@ -31,7 +31,7 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
-import type { PauseReport } from '../lib/reschedule';
+import { queueLength, type PauseReport } from '../lib/reschedule';
 
 /** One hole, as the screen holds it. Dates are LOCAL dates in the series' own
  *  zone (`YYYY-MM-DD`), never instants — a range stored as instants would move
@@ -98,8 +98,14 @@ function readPauseReport(data: unknown): PauseReport {
     skipId: r?.skip_id ? String(r.skip_id) : null,
     fromOn: r?.from_on ? String(r.from_on) : null,
     toOn: r?.to_on ? String(r.to_on) : null,
-    freed: Number(r?.freed) || 0,
-    charged: Number(r?.charged) || 0,
+    // `queueLength` and not `Number(…) || 0`. These are counts of a member's own
+    // sessions, read back after an irreversible act, and the three ways of not
+    // being told — absent key, null column, empty string — all arrive as the
+    // same 0, which `pauseOutcomeLines` words as "Nothing was booked in them, so
+    // nothing was cancelled." The unknown travels instead; the sentence for it
+    // is next door.
+    freed: queueLength(r?.freed),
+    charged: queueLength(r?.charged),
     // Postgres `numeric` arrives as a string through PostgREST often enough
     // that Number(null) === 0 is a live hazard here: this is a fee, and a 0
     // printed for "we could not read it" is the whole class of bug this
@@ -107,7 +113,7 @@ function readPauseReport(data: unknown): PauseReport {
     fees: r?.fees == null ? null : (Number.isFinite(Number(r.fees)) ? Number(r.fees) : null),
     currency: typeof r?.currency === 'string' ? r.currency : null,
     mixedCurrencies: !!r?.mixed_currencies,
-    notFreed: Number(r?.not_freed) || 0,
+    notFreed: queueLength(r?.not_freed),
   };
 }
 
@@ -160,27 +166,30 @@ export async function pauseSeries(
  * gets printed over a pause that is still in place, so the function counts and
  * this reads its answer rather than the absence of an error.
  */
-export async function resumeSeries(skipId: string): Promise<{ resumed: boolean; created: number; error: string | null }> {
+export async function resumeSeries(skipId: string): Promise<{ resumed: boolean; created: number | null; error: string | null }> {
   if (!USE_SUPABASE) {
-    return { resumed: false, created: 0, error: 'This build has no server, so there is nothing to resume on it.' };
+    return { resumed: false, created: null, error: 'This build has no server, so there is nothing to resume on it.' };
   }
   try {
     const { data, error } = await supabase.rpc('resume_my_session_series', { p_skip: skipId });
     if (error || !data) {
       reportError('seriesPause.resume', error ?? new Error('resume_my_session_series returned nothing'));
-      return { resumed: false, created: 0, error: 'That did not save, so those dates are still paused.' };
+      return { resumed: false, created: null, error: 'That did not save, so those dates are still paused.' };
     }
     const r = data as any;
     if (!r.resumed) {
       return {
-        resumed: false, created: 0,
+        resumed: false, created: null,
         error: 'Nothing was resumed. Open this screen again — that pause may already have been lifted somewhere else.',
       };
     }
-    return { resumed: true, created: Number(r.created) || 0, error: null };
+    // `created` is how many sessions came back, and `resumedLine` reads 0 as
+    // "there was nothing still to come inside it". A resume that answered
+    // without a count has not said that, so the null is carried.
+    return { resumed: true, created: queueLength(r.created), error: null };
   } catch (e) {
     reportError('seriesPause.resume', e);
-    return { resumed: false, created: 0, error: 'That did not reach the server, so those dates are still paused.' };
+    return { resumed: false, created: null, error: 'That did not reach the server, so those dates are still paused.' };
   }
 }
 

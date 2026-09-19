@@ -639,13 +639,45 @@ export function pushWindow(
   return { fromMs: nowMs - Math.max(0, floorMs), toMs: to.getTime() };
 }
 
-/** What the server did, as counts. Nothing about which sessions, because the
- *  coach does not need it and a log line naming one would be a client's
- *  appointment in a table. */
+/**
+ * What the server did, as counts. Nothing about which sessions, because the
+ * coach does not need it and a log line naming one would be a client's
+ * appointment in a table.
+ *
+ * Each count is NULL when the response did not carry it. The reading was
+ * `Number(payload?.created) || 0`, and 0 on all three is the sentence
+ * `pushSummaryLine` words as "Your Google calendar already matches what is on
+ * your Repple schedule, so nothing was changed." A sync that answered without
+ * counts is not a sync that changed nothing — it is a sync whose effect on
+ * somebody else's diary is unknown — and that is the one sentence a coach reads
+ * after granting Repple access to write into it.
+ */
 export interface PushResult {
-  created: number;
-  updated: number;
-  removed: number;
+  created: number | null;
+  updated: number | null;
+  removed: number | null;
+}
+
+/** The counts that came back, split into what was said and what was not. `part`
+ *  is the phrases for the figures the server gave; `unread` names the ones it
+ *  did not, so a sentence can say which. */
+function splitCounts(r: PushResult): { parts: string[]; unread: string[] } {
+  const parts: string[] = [];
+  const unread: string[] = [];
+  const take = (n: number | null, word: string): void => {
+    if (n == null) { unread.push(word); return; }
+    if (n > 0) parts.push(`${n} ${word}`);
+  };
+  take(r.created, 'added');
+  take(r.updated, 'updated');
+  take(r.removed, 'removed');
+  return { parts, unread };
+}
+
+/** "added", "added and updated", "added, updated and removed". */
+function andList(words: readonly string[]): string {
+  if (words.length <= 1) return words[0] ?? '';
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 
 /**
@@ -657,10 +689,19 @@ export interface PushResult {
  * confusing and they have opposite next steps.
  */
 export function pushSummaryLine(r: PushResult): string {
-  const parts: string[] = [];
-  if (r.created > 0) parts.push(`${r.created} added`);
-  if (r.updated > 0) parts.push(`${r.updated} updated`);
-  if (r.removed > 0) parts.push(`${r.removed} removed`);
+  const { parts, unread } = splitCounts(r);
+  // The unknown is tested BEFORE the empty-parts arm, because an unread count
+  // contributes no phrase and would otherwise land in it — and that arm is a
+  // positive claim that Google's diary already matches Repple's.
+  if (unread.length === 3) {
+    return 'Your schedule was sent, and Google did not say what it changed — so this cannot tell you whether anything was added, updated or removed. Open your Google calendar to see. Only events Repple put there are ever touched.';
+  }
+  if (unread.length > 0) {
+    const head = parts.length
+      ? `${parts.join(', ')} in your Google calendar.`
+      : 'Nothing was reported as changed in your Google calendar.';
+    return `${head} Google did not say how many were ${andList(unread)}, so that much is unknown. Only events Repple put there are ever touched.`;
+  }
   if (parts.length === 0) return 'Your Google calendar already matches what is on your Repple schedule, so nothing was changed.';
   // "Only sessions Repple put there" was true when sessions were all it wrote.
   // The classes a coach teaches go in the same calendar now, and the promise
@@ -688,10 +729,21 @@ export function pushSummaryLine(r: PushResult): string {
  * "0 added" would make a clean failure read as a messy one.
  */
 export function pushPartialLine(r: PushResult): string | null {
-  const parts: string[] = [];
-  if (r.created > 0) parts.push(`${r.created} added`);
-  if (r.updated > 0) parts.push(`${r.updated} updated`);
-  if (r.removed > 0) parts.push(`${r.removed} removed`);
+  const { parts, unread } = splitCounts(r);
+  // An unread count is not the all-zero result this returns null for. The old
+  // reading settled a missing key to 0, so "the server refused and told us it
+  // had done nothing" and "the server refused and told us nothing at all" both
+  // came out as silence — and silence here is read by the coach as a calendar
+  // Repple never touched.
+  if (unread.length === 3) {
+    return 'Repple cannot tell whether any of it reached Google before this stopped, because the answer carried no counts. Check your Google calendar before sending again.';
+  }
+  if (unread.length > 0) {
+    const head = parts.length
+      ? `Part of it did reach Google before this stopped: ${parts.join(', ')}.`
+      : 'Nothing was reported as having reached Google before this stopped.';
+    return `${head} How many were ${andList(unread)} did not come back, so check your Google calendar.`;
+  }
   if (parts.length === 0) return null;
   return `Part of it did reach Google before this stopped: ${parts.join(', ')}. The rest is still only in Repple, and the next send finishes the job.`;
 }

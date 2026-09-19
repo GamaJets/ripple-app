@@ -20,6 +20,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+// The one place this hook asks who is signed in. `getSession()` and NOT
+// `getUser()` — see the note where it is called — routed through the wrapper
+// that keeps the `error` beside the session rather than dropping it.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
@@ -84,18 +88,45 @@ export function useMyAttendance(): MyAttendance {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
-      // getSession and not getUser: getUser REJECTS when nobody is signed in,
-      // and treating that as a failure latches this into 'error' before anybody
-      // has logged in. No session is a true answer, and the true answer for a
-      // signed-out reader is an empty history rather than a broken one.
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess?.session?.user?.id ?? null;
-      if (!uid) {
-        setEvents([]); setUndated([]); setDays([]);
-        setRh({ weeks: [], firstDay: null, countedWeeks: 0, perWeek: null });
-        setStatus('ready');
+      // ── who is asking, and which of the two nobodies it is ──────────────
+      //
+      // getSession and not getUser, and that has not changed: getUser() asks
+      // the network, and a member in a basement has a session on the device
+      // that answers offline. What HAS changed is that the answer is no longer
+      // read as `sess?.session?.user?.id ?? null`.
+      //
+      // That line discarded `error`, and src/lib/sessionUidRead.ts sets out
+      // what getSession() actually resolves with when the stored access token
+      // has expired and the refresh cannot reach the server: `session: null`
+      // with a retryable error beside it — byte for byte the shape of somebody
+      // who has never signed in. So an outage arrived here as a uid of null and
+      // this hook wiped the member's training history to an EMPTY list under a
+      // 'ready' status, which src/ui/loadStatus.ts defines as the server's own
+      // answer. The screen then says "you have not been in" — the exact
+      // sentence the header of this file says must never be said off a failure.
+      //
+      // Told apart by `fate` and never by `!who.uid`: UidRead's two members are
+      // discriminated on fate being null or not, and `string` includes '', so
+      // `!who.uid` does not narrow and the compiler is right to refuse it.
+      const who = await sessionUid('attendance.read');
+      if (who.fate !== null) {
+        if (who.fate === 'signed-out') {
+          // A true answer. Nobody is signed in, so there is no history, and an
+          // empty one under 'ready' is the honest thing to draw.
+          setEvents([]); setUndated([]); setDays([]);
+          setRh({ weeks: [], firstDay: null, countedWeeks: 0, perWeek: null });
+          setStatus('ready');
+          return;
+        }
+        // 'unreadable'. Nothing was established about this person, so nothing
+        // on screen is retracted — the same position the failed read below
+        // takes, and for the same reason: the last thing we knew beats
+        // replacing somebody's training history with nothing. `sessionUid` has
+        // already reported the fault under this key.
+        setStatus('error');
         return;
       }
+      const uid = who.uid;
 
       // ── this device's copy, before the network ──────────────────────────
       //

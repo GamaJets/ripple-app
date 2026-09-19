@@ -249,18 +249,33 @@ export interface PauseReport {
   skipId: string | null;
   fromOn: string | null;
   toOn: string | null;
-  /** Occurrences already booked inside the range that were freed. */
-  freed: number;
-  /** How many of those were inside the coach's notice window and cost a fee. */
-  charged: number;
+  /**
+   * Occurrences already booked inside the range that were freed, and NULL when
+   * the report did not carry a count.
+   *
+   * Widened for the same defect as `RescheduleReport.waiting` above and against
+   * the same reading: `Number(r?.freed) || 0` in src/ui/seriesPause.ts turned an
+   * absent key, a null, an empty string and a NaN alike into 0, and 0 is the
+   * value `pauseOutcomeLines` reads as "Nothing was booked in them, so nothing
+   * was cancelled." That is a claim about a member's own calendar, printed under
+   * the heading Paused, immediately after an irreversible act. Callers read it
+   * with `queueLength`; they do not settle it.
+   */
+  freed: number | null;
+  /** How many of those were inside the coach's notice window and cost a fee,
+   *  and NULL when the report did not carry a count. 0 here is the sentence
+   *  "Nothing was charged", which is a statement about money. */
+  charged: number | null;
   /** The total, in major units. Null when nothing was charged AND null when the
    *  fees were in more than one currency, because that is not a sum of money. */
   fees: number | null;
   currency: string | null;
   mixedCurrencies: boolean;
   /** Occurrences that could not be freed, which at that point means they moved
-   *  under us. Counted rather than hidden. */
-  notFreed: number;
+   *  under us. Counted rather than hidden — and NULL when the report did not
+   *  carry a count, because `notFreed > 0` is false for a null and an unread
+   *  figure would drop the warning line entirely. */
+  notFreed: number | null;
 }
 
 /**
@@ -330,12 +345,23 @@ export function pausePreviewLine(
  *  stated is withheld rather than guessed. */
 export function pauseOutcomeLines(r: PauseReport): string[] {
   const lines: string[] = [];
-  lines.push(r.freed === 0
-    ? 'Those dates are paused. Nothing was booked in them, so nothing was cancelled.'
-    : r.freed === 1
-      ? 'Those dates are paused and the one session booked in them has been cancelled.'
-      : `Those dates are paused and the ${r.freed} sessions booked in them have been cancelled.`);
-  if (r.charged === 0) {
+  // The null arms come FIRST, before anything that compares a count against a
+  // number: `null === 0` is false and `null > 0` is false, so an unread count
+  // falls silently into the arm that says nothing was booked and nothing was
+  // charged. Those are the two sentences a member reads after an irreversible
+  // act, and neither may be printed from a figure nobody sent.
+  if (r.freed == null) {
+    lines.push('Those dates are paused. Repple could not read back how many sessions were booked inside them, so it cannot say how many were cancelled — check those dates on your calendar.');
+  } else {
+    lines.push(r.freed === 0
+      ? 'Those dates are paused. Nothing was booked in them, so nothing was cancelled.'
+      : r.freed === 1
+        ? 'Those dates are paused and the one session booked in them has been cancelled.'
+        : `Those dates are paused and the ${r.freed} sessions booked in them have been cancelled.`);
+  }
+  if (r.charged == null) {
+    lines.push('Repple could not read back how many of them fell inside your coach’s notice period, so it cannot say whether a late fee was recorded. Your fees are listed on your bookings screen.');
+  } else if (r.charged === 0) {
     lines.push('Nothing was charged.');
   } else if (r.mixedCurrencies || r.fees == null) {
     // Deliberately no total. See src/lib/coachMoney.ts on why amounts in
@@ -344,7 +370,9 @@ export function pauseOutcomeLines(r: PauseReport): string[] {
   } else {
     lines.push(`${r.charged === 1 ? 'One of them was' : `${r.charged} of them were`} inside your coach’s notice period, so your coach’s late fee was recorded: ${feeAmountLine(r.fees, r.currency)} in total.${unstatedCurrency(r.currency)}`);
   }
-  if (r.notFreed > 0) {
+  if (r.notFreed == null) {
+    lines.push('Repple could not read back whether any of them failed to cancel, so check those dates on your calendar rather than taking this as all of them.');
+  } else if (r.notFreed > 0) {
     lines.push(`${r.notFreed} could not be cancelled, which usually means somebody already cancelled ${r.notFreed === 1 ? 'it' : 'them'} somewhere else. Check your calendar for those dates.`);
   }
   lines.push('Your standing appointment itself is not ended. It starts again by itself after the last paused date.');
@@ -405,7 +433,14 @@ export function resumeConfirm(from: string, to: string): { title: string; body: 
   };
 }
 
-export function resumedLine(created: number): string {
+export function resumedLine(created: number | null): string {
+  // Null before zero, and for the same reason as `pauseOutcomeLines` above: the
+  // zero arm below is a claim that there was nothing still to come inside the
+  // pause, which a member reads as "my Tuesdays were already gone". An RPC that
+  // answered without a count has not told us that.
+  if (created == null) {
+    return 'That pause is lifted. Repple could not read back how many sessions were booked in again, so check those dates on your calendar.';
+  }
   if (created === 0) {
     return 'That pause is lifted. There was nothing still to come inside it, so no sessions were booked back in. Your usual time carries on as normal.';
   }

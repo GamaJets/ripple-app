@@ -29,6 +29,7 @@
 // so a try/catch alone catches only the network dying. `readAll` throws on
 // `error` for exactly this reason and every call here is wrapped.
 import { supabase } from '../lib/supabase';
+import { signedInUid } from '../lib/signedInUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { readAll } from '../lib/rowCap';
@@ -130,9 +131,31 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
   // that cannot answer, and it says so through the same statuses.
   if (!USE_SUPABASE || !bounds) return nothing('error');
 
-  const { data: auth } = await supabase.auth.getUser();
-  const uid = auth?.user?.id;
-  if (!uid) return nothing('error');
+  // ── who is asking, and the error that used to be thrown away ─────────────
+  //
+  // `getUser()` does not reject. `_getUser` catches every AuthError — and
+  // auth-js brands offline, DNS, CORS, a captive portal and every 5xx as one,
+  // via `AuthRetryableFetchError` — and RESOLVES `{ data: { user: null },
+  // error }`, which is the same shape as a genuinely signed-out session. So the
+  // discard on this line concluded, during an outage, that nobody was signed in.
+  //
+  // The SHAPE of what followed was right: `nothing('error')` puts every one of
+  // the twelve statuses at 'error', and this whole document is built so that an
+  // 'error' section is a named unknown rather than a nought — a coach is never
+  // told they took nothing because a query was refused. What was missing is that
+  // it reached that answer by deciding something about the coach, and left no
+  // trace that anything had failed: a statement that came back blank during a
+  // GoTrue blip produced no record of the blip.
+  //
+  // `signedInUid` classifies the two and reports the outage. Both still return
+  // `nothing('error')` — a statement of record that could not be read is not a
+  // statement about a person who earned nothing, whichever of the two is true —
+  // and nothing here writes, so no figure is stamped anywhere on either path.
+  const who = await signedInUid('coachStatement.session');
+  // Told apart by `fate`, never by `!uid`: `string` includes '', so the falsy
+  // test does not discriminate the union.
+  if (who.fate !== null) return nothing('error');
+  const uid = who.uid;
 
   const [issuer, sessions, packs, subs, receipts, invoices, fees, payouts, payoutsPaid, refunds, disputes, costs] = await Promise.all([
     fetchInvoiceIssuer(),

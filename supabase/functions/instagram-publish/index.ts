@@ -63,6 +63,13 @@
 // here, and it is reported in those words so a coach is not left thinking
 // Repple is broken.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import {
   CARD_BUCKET, CARD_OBJECT_TTL_MIN, cardObjectAbsent, cardObjectKey, cardObjectRemoved,
   cardPublicUrl, isJpegBytes, ratioAccepted, tooLarge,
@@ -310,10 +317,24 @@ Deno.serve(async (req) => {
   // Who is asking, from their JWT alone. Never from the body: a trainer id in a
   // request body is a request to post to somebody else's Instagram account.
   let trainerId = '';
+  // ── and a dropped connection is not a signed-out person ────────────────
+  //
+  // This used to be `const { data } = …` with the error dropped, so a GoTrue
+  // blip produced a null user — indistinguishable here from a token that was
+  // looked at and refused — and the refusal below told a SIGNED-IN person to
+  // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
+  // is where the two are separated; `unreadable` means nothing was established.
+  // The `catch` is the non-AuthError path and establishes nothing either.
+  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+    + 'Nothing has been posted and nothing about your Instagram connection has changed. Try again in a moment.';
   try {
-    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
-    trainerId = data?.user?.id || '';
-  } catch { /* falls through to the check below */ }
+    const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    if (authErr) {
+      if (authReadFate(authErr) === 'unreadable') return fail(CANNOT_ASK);
+    } else {
+      trainerId = data?.user?.id || '';
+    }
+  } catch { return fail(CANNOT_ASK); }
   if (!trainerId) return json({ ok: false, error: 'Sign in to Repple and try again.' }, 401);
 
   // Before anything else this request does. An orphan from a previous publish

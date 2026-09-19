@@ -287,7 +287,9 @@ const RENDER_ROOTS = Object.keys(RENDER_SCOPE_FLOORS);
 
 /**
  * Offenders that are real, are NOT silenced, and were not fixed in the change
- * that added this check — each with a COUNT and the edit it needs.
+ * that added this check — each with a COUNT and the edit it needs. Empty: every
+ * entry this gate has ever carried has been closed by the lane that owned the
+ * file, which is the only way an entry here is meant to leave.
  *
  * A ratchet, not an ignore list, on exactly the terms `KNOWN` sets out in
  * check-dead-exports.mjs: a file listed at 1 fails the build at 2, and a count
@@ -326,20 +328,23 @@ const RENDER_ROOTS = Object.keys(RENDER_SCOPE_FLOORS);
  * it rather than sitting on as a tolerated line.
  */
 const KNOWN = new Map([
-  ['app/(trainer)/log-session.tsx:render-body', {
-    count: 1,
-    fix: '`setLogDay(isoDay(seededStart ?? new Date()))` re-seeds the day being logged when the '
-      + 'coach switches client — correct at that moment, and it is the ONLY moment the day is ever '
-      + 'refreshed, because the matching `useState` initialiser on line 406 read the same clock at '
-      + 'mount. A coach who opens Log Session for one client and comes back the next day logs the '
-      + 'session against yesterday, and `logStamp` writes that date. Seed both from `useToday()` '
-      + 'and keep the render-phase re-seed for the client change.',
-  }],
   // app/(trainer)/statement.tsx:render-body — CLOSED while this rule was being
   // written, by the lane that owns the file, and with exactly the edit the entry
   // named: `const thisYear = useNow().getFullYear()` and an import of
   // src/ui/today. The entry is deleted rather than zeroed — a zero is still an
   // exemption and there is nothing left to exempt.
+  //
+  // app/(trainer)/log-session.tsx:render-body — CLOSED, and it was the worst of
+  // the three because the frozen day was not a label but a WRITE: `logStamp`
+  // files the session under it. The entry asked for `useToday()` and the answer
+  // is `useNow()`, for a reason the entry could not see from outside the file —
+  // the screen holds an HOUR beside the day, seeded from the same mount-time
+  // clock, and moving the day alone would offer a coach who opened the screen
+  // at 23:00 on Sunday "Monday at 11 pm", an hour `logStampProblem` refuses to
+  // save. One subscription now feeds both. The day and hour are also no longer
+  // held at all: the coach's CHOICE is the state and `null` means "not chosen",
+  // so the default follows the clock and the client-change re-seed is
+  // `setChosenDay(null)` rather than a second read of it.
 ]);
 
 const isTest = (f) => /\.test\.[jt]sx?$/.test(f) || f.includes('__tests__');

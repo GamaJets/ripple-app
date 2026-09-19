@@ -84,7 +84,15 @@ import { SkeletonList } from './Skeleton';
 import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+// The two auth reads this file makes, each classified once rather than
+// collapsed. `sessionUid` fronts the list read (storage-first, so it answers
+// offline); `signedInUid` is the stronger check the two deletes take before
+// they read a zero as a refusal. Both end in src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
+import { signedInUid } from '../lib/signedInUid';
+import { authGateMessage } from '../lib/authedUid';
 import { useLive } from './realtime';
+import { useNow } from './today';
 import { BACK_ICON } from './direction';
 
 export interface InboxItem {
@@ -196,8 +204,13 @@ export interface InboxValue {
   remove: (id: string) => Promise<{ ok: boolean; why: string | null }>;
   /** Remove every row of mine that is marked read. Returns how many the server
    *  actually deleted — the count is the only thing that separates "there was
-   *  nothing to clear" from "the policy refused every row". */
-  clearRead: () => Promise<{ ok: boolean; changed: number }>;
+   *  nothing to clear" from "the policy refused every row".
+   *
+   *  `why` is a sentence when the reason is one the shared `clearedNote` cannot
+   *  know about: today that is only the auth gate, where "the server did not
+   *  answer" would be the wrong half of the story. Null otherwise, and the
+   *  caller falls back to `clearedNote`. */
+  clearRead: () => Promise<{ ok: boolean; changed: number; why: string | null }>;
 }
 
 /**
@@ -212,24 +225,44 @@ export interface InboxValue {
  *
  * So before a zero can be reported as a failure of the ROW, the caller has to
  * rule out that it was a failure of the SESSION. `getUser()` reaches the server
- * and rejects when there is no valid one, which is exactly the distinction
- * `getSession()` cannot make — it reads a token off the phone that may have
- * expired hours ago. The load path deliberately uses `getSession()` (a
- * rejection there is a signed-out user, not a failed read); this is the one
- * place the stronger check is worth its round trip, because the alternative is
- * telling somebody their notification could not be deleted when the truth is
- * that they are no longer signed in.
+ * and asks, which is the distinction `getSession()` cannot make — it reads a
+ * token off the phone that may have expired hours ago — and this is the one
+ * place the stronger check is worth its round trip.
+ *
+ * ── THREE answers, because the old two were a false sign-out ──────────────
+ *
+ * This returned a boolean, and it was false for `error` of any kind. The
+ * paragraph above used to say `getUser()` "rejects when there is no valid one",
+ * and that is not what the installed library does: src/lib/authReadFate.ts
+ * quotes the `catch` at the bottom of `_getUser`, which RESOLVES with
+ * `{ data: { user: null }, error }` for every AuthError — and a dead fetch,
+ * a DNS failure, a captive portal and every 5xx are all AuthErrors
+ * (`AuthRetryableFetchError`). So an aeroplane, a lift, or ten seconds of
+ * GoTrue being down came back `false`, and `remove()` said in so many words:
+ * "you are not signed in on this device any more. Sign in and try again." To
+ * somebody who was signed in, about a session that was fine, with the one
+ * remedy that cannot help. The person then signs out to sign back in, which is
+ * the only way this advice can make anything worse.
+ *
+ * 'no' is now reserved for what it says: the credential was looked at and
+ * refused, or the account that answered is not the one these rows were read
+ * for. Everything else is 'unknown', and the callers say so instead.
  *
  * Same shape as src/ui/pushNotifications.ts `registerForPush`, which gates its
  * `push_tokens` upsert on getUser() for the same reason.
  */
-async function signedInAs(expected: string | null): Promise<boolean> {
-  if (!expected) return false;
-  try {
-    const { data, error } = await supabase.auth.getUser();
-    if (error) return false;
-    return data?.user?.id === expected;
-  } catch { return false; }
+type StillMe = 'yes' | 'no' | 'unknown';
+
+async function signedInAs(expected: string | null, context: string): Promise<StillMe> {
+  if (!expected) return 'no';
+  // Narrowed on `fate`, never on `!who.uid`: UidRead's signed-in member is
+  // `string`, which includes '', so `!who.uid` does not discriminate the union.
+  const who = await signedInUid(context);
+  if (who.fate === 'unreadable') return 'unknown';
+  // A genuine sign-out, or a different account on this phone. Both are 'no':
+  // the rows on screen were read for `expected` and nobody else may act on
+  // them, and in both cases signing in as the right account is the true remedy.
+  return who.uid === expected ? 'yes' : 'no';
 }
 
 /**
@@ -307,21 +340,39 @@ export function useNotifications(group: AppVariant): InboxValue {
   };
 
   const load = useCallback(async (): Promise<void> => {
-    let id: string | null = null;
-    try {
-      // getSession(), not getUser(): getUser() REJECTS when nobody is signed
-      // in, and reading that rejection as a failed read is how sibling
-      // providers in this folder used to latch into 'error' before anybody had
-      // signed in at all.
-      const { data: sess } = await supabase.auth.getSession();
-      id = sess?.session?.user?.id ?? null;
-    } catch { /* no local session; treated as signed out below */ }
+    // getSession(), not getUser(): it answers from device storage and therefore
+    // answers offline, which is what an inbox on a phone in a gym needs. What
+    // it cannot do is tell an outage from a sign-out on its own — when the
+    // stored access token has expired and the refresh cannot get out it
+    // resolves `{ data: { session: null }, error }`, the same shape as a phone
+    // with nothing in storage — so the `error` is classified rather than
+    // dropped. See src/lib/sessionUidRead.ts.
+    const who = await sessionUid('notifications.load');
 
+    if (who.fate === 'unreadable') {
+      // We do not know who this is. The branch below would have called that a
+      // sign-out: it cleared `uid`, cleared the LIST — including the
+      // AsyncStorage-cached copy standing in front of a dropped connection —
+      // and set 'ready', which is this screen's word for "this is true". The
+      // person was then shown `emptyTitle` ("Nothing to catch up on") and a
+      // bell with no mark on it, which is the app stating that nobody has
+      // written to them. It is the one sentence this whole file exists to
+      // refuse, and an outage reached it by the only door that was unlocked.
+      //
+      // So: nothing is cleared and nothing is claimed. Whatever is on screen
+      // stays, `uid` stays (the stored session did not change — a refresh
+      // failed), and 'error' puts the "Not confirmed" notice over it. The
+      // realtime channel stays open on the account it already had.
+      setStatus('error');
+      return;
+    }
+
+    const id = who.uid;
     cacheable.current = true;
-    // Signed out, or a build with no backend. Nothing is addressed to nobody,
-    // and there is no absent server to misreport — so this is 'ready', and an
-    // empty inbox here is a true statement.
-    if (!id || !USE_SUPABASE) { uid.current = null; setLiveUid(null); setItems([], null); setStatus('ready'); return; }
+    // Genuinely signed out, or a build with no backend. Nothing is addressed to
+    // nobody, and there is no absent server to misreport — so this is 'ready',
+    // and an empty inbox here is a true statement.
+    if (id === null || !USE_SUPABASE) { uid.current = null; setLiveUid(null); setItems([], null); setStatus('ready'); return; }
     uid.current = id;
     setLiveUid(id);
 
@@ -503,8 +554,15 @@ export function useNotifications(group: AppVariant): InboxValue {
     if (!USE_SUPABASE || !uid.current) return { ok: false, why: 'This notification could not be deleted.' };
     const row = listRef.current.find((i) => i.id === id);
     if (!row) return { ok: false, why: 'That notification is no longer on this list, so nothing was deleted.' };
-    if (!(await signedInAs(uid.current))) {
+    const me = await signedInAs(uid.current, 'notifications.remove');
+    if (me === 'no') {
       return { ok: false, why: 'Nothing was deleted — you are not signed in on this device any more. Sign in and try again.' };
+    }
+    if (me === 'unknown') {
+      // Not a sign-out. The delete is not sent, so `authGateMessage`'s "nothing
+      // has been changed" is literally true, and the row is still on the list
+      // where the reader can see it.
+      return { ok: false, why: `This notification was not deleted. ${authGateMessage('unreadable')}` };
     }
     try {
       const res = await supabase
@@ -548,10 +606,24 @@ export function useNotifications(group: AppVariant): InboxValue {
    * Verified live that RLS alone already scopes it correctly: one account's
    * clear-read deleted 2 of their own rows and none of the other account's.
    */
-  const clearRead = useCallback(async (): Promise<{ ok: boolean; changed: number }> => {
+  const clearRead = useCallback(async (): Promise<{ ok: boolean; changed: number; why: string | null }> => {
     const me = uid.current;
-    if (!USE_SUPABASE || !me) return { ok: false, changed: 0 };
-    if (!(await signedInAs(me))) return { ok: false, changed: 0 };
+    if (!USE_SUPABASE || !me) return { ok: false, changed: 0, why: null };
+    const still = await signedInAs(me, 'notifications.clearRead');
+    if (still === 'no') {
+      return {
+        ok: false,
+        changed: 0,
+        why: 'Nothing was deleted — you are not signed in on this device any more. Sign in and try again.',
+      };
+    }
+    if (still === 'unknown') {
+      // The delete is not sent, so nothing has changed and the read rows are
+      // all still there. Saying "the server did not answer" — which is what the
+      // shared sentence says for `ok: false` — would be close but would send
+      // somebody looking at the wrong thing.
+      return { ok: false, changed: 0, why: `Nothing was deleted. ${authGateMessage('unreadable')}` };
+    }
     try {
       const res = await supabase
         .from('notifications')
@@ -562,7 +634,7 @@ export function useNotifications(group: AppVariant): InboxValue {
       // marked read" is a real and common outcome, and the caller is handed the
       // count so it can say which happened. `count == null` is a failure though
       // — it means nobody counted — which is what writeFailure checks for.
-      if (res.error || res.count == null) return { ok: false, changed: 0 };
+      if (res.error || res.count == null) return { ok: false, changed: 0, why: null };
       // Painted only when the server says it deleted something. A DELETE the
       // policy filtered out answers 204 with a count of zero and no error —
       // indistinguishable, at this line, from "nothing was marked read" — so
@@ -574,8 +646,8 @@ export function useNotifications(group: AppVariant): InboxValue {
       // screen this would have removed anyway, so the only case this changes is
       // the refusal.
       if (res.count > 0) setItems(listRef.current.filter((i) => !i.read), me);
-      return { ok: true, changed: res.count };
-    } catch { return { ok: false, changed: 0 }; }
+      return { ok: true, changed: res.count, why: null };
+    } catch { return { ok: false, changed: 0, why: null }; }
   }, []);
 
   return {
@@ -700,6 +772,24 @@ export function NotificationInbox(f: InboxFraming) {
   // rows the person is looking at for a skeleton — so the spinner needs its own
   // flag or it never appears and the gesture looks broken.
   const [refreshing, setRefreshing] = useState(false);
+  /**
+   * The instant every row's age is measured from.
+   *
+   * `inboxAge(item.at)` defaults its second argument to `Date.now()`, read in
+   * this render body — which is only as fresh as the last render. All three
+   * route files register this screen with `href: null` (app/(client)/_layout.tsx
+   * and its two siblings), so it is mounted once and never torn down, and
+   * backgrounding the app does not tear it down either. A member who opened the
+   * inbox on Sunday and came back on Wednesday was looking at a list where the
+   * newest thing still said "2h" — on the one screen where how old a thing is
+   * decides whether it still matters.
+   *
+   * `useNow()` re-settles on foreground, on focus, and at the next local
+   * midnight, and it is passed in below rather than left to default. See
+   * src/ui/today.ts, and scripts/check-frozen-day.mjs for why the wrong form is
+   * the one that looks right.
+   */
+  const nowMs = useNow().getTime();
   const onRefresh = async () => {
     setNote(null);
     setRefreshing(true);
@@ -886,7 +976,11 @@ export function NotificationInbox(f: InboxFraming) {
             // the confirmation. When it named a figure and none of them came
             // off, it says so rather than repeating a sentence the person can
             // see is wrong.
-            setNote(res.ok && res.changed === 0 && readCount > 0
+            setNote(res.why
+              // The auth gate's own sentence, which is the one thing
+              // `clearedNote` cannot say — it only knows ok and a count.
+              ? res.why
+              : res.ok && res.changed === 0 && readCount > 0
               ? (readCount === 1
                 ? 'Nothing was deleted. The read notification is still in your inbox — the server did not remove it.'
                 : `Nothing was deleted. Those ${num(readCount)} read notifications are still in your inbox — the server did not remove them.`)
@@ -1063,7 +1157,7 @@ export function NotificationInbox(f: InboxFraming) {
                       uppercased aside shouts as loudly as the heading it sits
                       next to. Same change, same reason, as the `Field` hint in
                       src/ui/kit.tsx. */}
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{inboxAge(item.at)}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{inboxAge(item.at, nowMs)}</Text>
                   {/* The unread mark is per row and needs no whole-list read to
                       be true: this row came back with read=false, whatever the
                       status of the set it arrived in. */}

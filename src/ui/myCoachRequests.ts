@@ -38,6 +38,11 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import { readByIds } from '../lib/idLookup';
+// The auth read, with its `error` classified rather than discarded. See
+// src/lib/authReadFate.ts: `getUser()` RESOLVES on a dropped connection with
+// `{ data: { user: null }, error }`, so `auth?.user?.id` was `undefined` for an
+// outage and `undefined` for a member who never signed in.
+import { signedInUid } from '../lib/signedInUid';
 import type { LoadStatus } from './loadStatus';
 import {
   shapeMyCoachRequests, type MyCoachRequest, type RawMyCoachRequest,
@@ -77,11 +82,24 @@ export async function fetchMyCoachRequests(): Promise<{
 }> {
   if (!USE_SUPABASE) return { rows: [], status: 'ready', namesRead: true };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    // Not signed in is not an empty history. 'error' rather than 'ready', so
-    // nothing downstream prints "you haven't asked anybody" over it.
-    if (!uid) return { rows: [], status: 'error', namesRead: false };
+    const who = await signedInUid('myCoachRequests.list');
+    // Not signed in is not an empty history, and neither is an outage. 'error'
+    // rather than 'ready' for BOTH, so nothing downstream prints "you haven't
+    // asked anybody" over either one — which is the sentence that sends a
+    // member who is waiting on an answer off to ask a second coach.
+    //
+    // The two fates are not separated any further here because this function's
+    // return has no room for a third answer, and the honest sentence for both
+    // is the same: we cannot show you what became of your requests. They ARE
+    // separated where it costs something — `signedInUid` reports the outage to
+    // `reportError` under this read's own key and leaves a sign-out unreported,
+    // because being signed out is not a fault.
+    //
+    // Narrowed on `fate`, never on `!who.uid`: `string` includes '', so
+    // `!who.uid` does not discriminate UidRead and `uid` below would not be a
+    // string.
+    if (who.fate !== null) return { rows: [], status: 'error', namesRead: false };
+    const uid = who.uid;
 
     const { data, error } = await supabase
       .from('coach_requests')

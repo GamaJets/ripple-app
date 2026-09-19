@@ -62,14 +62,28 @@
 //
 // This paragraph said "Seventeen more sites in this tree are the shape it warns
 // about" as a statement about today, and it kept saying it while three lanes
-// took the backlog apart underneath it. SIX are left, in THREE files, and they
-// are the whole of KNOWN below — the number in the header is not a second
-// source of truth, KNOWN is, and this sentence exists so a reader who has just
-// read "seventeen" upstairs knows which of the two to believe. The seventeen
-// was true on 14 September 2026 and is kept rather than overwritten because it
-// is what makes the ratchet legible: the backlog has moved 17 → 12 → 6 and has
-// never moved the other way, and that is the only claim this gate is making
-// about the count. Read KNOWN, not a paragraph.
+// took the backlog apart underneath it. The seventeen was true on 14 September
+// 2026 and is kept rather than overwritten because it is what makes the ratchet
+// legible: the backlog has only ever moved one way, and that is the only claim
+// this gate is making about the count. Read KNOWN, not a paragraph.
+//
+// The correction written here in its turn — "SIX are left, in THREE files, and
+// they are the whole of KNOWN below" — went stale exactly the same way, and is
+// recorded rather than rewritten for the same reason. It was already wrong when
+// Lane 173 read it: KNOWN held FIVE sites in TWO files, coach.tsx at 2 and
+// payments.tsx at 3, growth.tsx and client-intake.tsx having been cleared
+// without the paragraph being touched. That is twice now that a sentence about
+// the count has outlived the Map it describes, which is the argument for the
+// rule rather than against it: KNOWN is the source of truth and a paragraph is
+// not, so a stale paragraph is a nuisance and a stale Map would be a broken
+// gate.
+//
+// KNOWN is now EMPTY. The run is 17 → 12 → 6 → 5 → 0, it has never moved the
+// other way, and the backlog is cleared: Lane 173 converted coach.tsx's
+// `Bullets`/`Disclosure` and payments.tsx's `Pick`/`Pots`/`Made` to lowercase
+// calls. From here the gate has nothing to hold and everything to refuse — any
+// hit at all is a fresh one and fails the build, which is what a ratchet is for
+// and is the first time this one has been in that state.
 //
 // ── what this matches, and why each condition is load-bearing ─────────────
 //
@@ -195,32 +209,47 @@ const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/components', 'studio-
  * Offenders that are real, are NOT silenced, and were not fixed in the change
  * that added this check — each with a COUNT and the edit it needs.
  *
+ * IT IS NOW EMPTY, and that is the point of the rest of this comment rather
+ * than a reason to delete it: the ratchet is at zero, so every hit anywhere in
+ * the tree is a fresh one and fails the build outright. Nothing may be added
+ * here. A new offender is a defect to fix or, if a remount is honestly wanted,
+ * a `remount-ok:` with a sentence on the declaration — not a line in this Map.
+ *
  * ── this is a ratchet, not an ignore list ─────────────────────────────────
  *
  * The mechanism `KNOWN` sets out in check-dead-exports.mjs and check-utc-day
  * .mjs: a file listed at 2 fails the build at 3, so the backlog can shrink and
- * can never grow.
+ * can never grow. At zero entries that is simply "any hit fails", which is
+ * where a ratchet is trying to get to.
  *
  * A count that has DROPPED prints and passes, rather than failing. That is
- * check-frozen-hook.mjs's variation and it is right here for its reason: every
- * entry below is in another lane's territory, several of these files are being
- * edited tonight, and failing somebody's build for doing the work is how a
- * gate gets a `--force` written next to it. Lower the number when you see the
- * line.
+ * check-frozen-hook.mjs's variation and it was right here for its reason: every
+ * entry was in another lane's territory, several of those files were being
+ * edited the same night, and failing somebody's build for doing the work is how
+ * a gate gets a `--force` written next to it. The branch is kept and is now
+ * unreachable — with an empty Map nothing can have dropped — and it stays
+ * because the next lane to add a temporary entry would need it back.
  *
- * ── what the six are ──────────────────────────────────────────────────────
+ * ── what the backlog was, and that it is gone ─────────────────────────────
  *
  * Read this section as a log and not as a census. It has been headed "what the
- * twelve are" while holding three entries worth six sites, because each lane
- * that cleared a file edited the Map and left the paragraph — which is the same
- * failure the header upstairs had at "seventeen", one storey down. The history
- * is kept and the current line is stated last, so the next lane can see which
- * sentence is about today:
+ * twelve are" while holding three entries worth six sites, and then "what the
+ * six are" while holding two entries worth five, because each lane that cleared
+ * a file edited the Map and left the paragraph — which is the same failure the
+ * header upstairs had at "seventeen", one storey down. The history is kept and
+ * the current line is stated last, so the next lane can see which sentence is
+ * about today:
  *
  *   17 — counted 14 September 2026, after Lane 95's two fixes.
  *   12 — after Lane 124 cleared the five accessibility sites listed below.
- *    6 — three files, and the entries in the Map are the whole of it. Where
- *        this paragraph and the Map disagree, the Map is right.
+ *    6 — three files. This line was already stale when Lane 173 read it.
+ *    5 — two files, coach.tsx at 2 and payments.tsx at 3, which is what the Map
+ *        actually held at that point.
+ *    0 — Lane 173 converted all five. The Map is empty and there is no backlog.
+ *
+ * Where a paragraph and the Map disagree, the Map is right. The Map is now
+ * empty, so there is nothing left for a paragraph to be wrong about, and the
+ * next lane to touch this file should be adding nothing to it.
  *
  * Seventeen were counted on 14 September 2026, after Lane 95 fixed
  * injury-doc.tsx and injuries.tsx, which is why neither is on this list. None
@@ -244,25 +273,41 @@ const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/components', 'studio-
  *   · app/(trainer)/my-training.tsx `EntryRow` (role="button") — now
  *     `entryRow(key, e)`, used in two `.map`s, `key` on the returned View.
  *
- * What is left is the six below, in three files — all of them other lanes'.
- * None holds a `TextInput` and none has an `accessible` root, so neither of the
- * two failures in the header is live anywhere in this tree; the gate is holding
- * them fixed rather than reporting them.
+ * The last five, which Lane 173 took, and an honest account of what that was
+ * worth. None of them held a `TextInput` and none had an `accessible` root, so
+ * neither of the two failures in the header was live in either file — the
+ * caret-losing bug and the re-announcing list were already fixed, and this was
+ * the tail of the backlog rather than a sixth defect:
  *
- * The wrapper sentence here named four files as carrying the remaining
+ *   · app/(client)/coach.tsx `Bullets` and `Disclosure`, and `Disclosure`
+ *     rendered `<Bullets/>` — two nested types torn down together on a screen
+ *     that re-renders on every keystroke in the question box. Both are
+ *     unlabelled static text, so nothing announced and nothing was typed into
+ *     them; what was lost was layout and scroll position on a disclosure
+ *     somebody reads. Now `bullets(head, items, tone)` and `disclosure()`,
+ *     kept in the body because they close over `t`. Nothing maps over either,
+ *     so no `key` moved: the `key={s}` on the `items.map` was already on the
+ *     returned View and is untouched.
+ *   · app/(trainer)/payments.tsx `Pick`, `Pots` and `Made`. `Pick` is the one
+ *     site of the five carrying accessibility attributes — `role="button"`,
+ *     `accessibilityState={{ selected }}` and a composed label — so its remount
+ *     did move a screen reader's cursor off the option just chosen. `Pots` and
+ *     `Made` are unlabelled figures and were pure wasted teardown, repeated on
+ *     every figure that lands on a 3,300-line screen. Now `pick({…})`,
+ *     `potsRow(label, pots)` and `made(label, taken)`, all kept in the body for
+ *     `t`. None is used inside a `.map`, so again no `key` moved; the
+ *     `key={o.label}` and `key={p.currency}` on the maps INSIDE `pick` and
+ *     `potsRow` were already on the returned elements and are untouched.
+ *
+ * The earlier wrapper sentence here named four files as carrying the remaining
  * `accessibilityRole`/`accessibilityLabel` — coach.tsx, growth.tsx,
  * payments.tsx and client-intake.tsx. Checked against the scan rather than
- * against the paragraph: ONE of the six carries either attribute, and it is
- * `Pick` in app/(trainer)/payments.tsx (`role="button"`). app/(owner)/growth.tsx
- * has no hit at all any more; coach.tsx's `Bullets`/`Disclosure` and
- * client-intake.tsx's `Line` are unlabelled static text. A remount still costs
- * them their whole subtree — that is why they are on the list — but only
- * `Pick` moves a screen reader's cursor when it goes.
+ * against the paragraph, ONE carried either attribute and it was `Pick`;
+ * app/(owner)/growth.tsx had no hit at all any more, and coach.tsx's and
+ * client-intake.tsx's were unlabelled static text. That correction held up: of
+ * the five actually in the Map, `Pick` was the only labelled one.
  */
-const KNOWN = new Map([
-  ['app/(client)/coach.tsx', { count: 2, fix: '`Bullets` and `Disclosure`, and `Disclosure` renders `<Bullets/>` — two nested types rebuilt together. Both are static text; lift them to module scope and pass `t`.' }],
-  ['app/(trainer)/payments.tsx', { count: 3, fix: '`Pick` (Pressable, role="button"), `Pots` and `Made`. This screen is 2,900 lines and re-renders on every figure that lands, so all three are rebuilt repeatedly. Convert to calls.' }],
-]);
+const KNOWN = new Map([]);
 
 /** A test file. A test for this rule has to be able to WRITE the broken shape. */
 const isTest = (f) => /\.test\.[jt]sx?$/.test(f) || f.includes('__tests__');

@@ -22,6 +22,8 @@ import { VARIANT } from '../lib/variant';
 import { reportError } from '../lib/reportError';
 import { writeFailure } from '../lib/wroteRows';
 import { coachBrandColorOf, coachBrandNameOf } from '../lib/coachBrand';
+import { signedInUid } from '../lib/signedInUid';
+import { authGateMessage } from '../lib/authedUid';
 
 /* ── the coach's own branding ─────────────────────────────────────────────── */
 
@@ -95,9 +97,23 @@ export async function saveMyCoachBrand(patch: {
   if (patch.brandColor !== undefined) row.brand_color = patch.brandColor;
   if (!Object.keys(row).length) return null;
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return 'Your branding was not saved.';
+    // ── who is asking, and what it means when that cannot be established ────
+    //
+    // This was `const { data: auth } = await supabase.auth.getUser()` with the
+    // error dropped on the floor. `getUser()` does not reject when the auth
+    // server is unreachable — it RESOLVES with `{ data: { user: null }, error }`
+    // — so an outage arrived here as `uid === undefined`, which is the same
+    // `undefined` a signed-out account produces, and the coach was handed a
+    // flat "Your branding was not saved." with no reason in it. The colour they
+    // had just chosen was gone and nothing on the screen said whether to sign
+    // in again or to try again. src/lib/authReadFate.ts is the whole argument.
+    //
+    // Nothing is written on either fate: this returns above the `.update()`, so
+    // `authGateMessage`'s "nothing has been changed" is literally true here and
+    // no half-branded row can be left behind by a failed check.
+    const who = await signedInUid('coachBrand.save');
+    if (who.fate !== null) return `Your branding was not saved. ${authGateMessage(who.fate)}`;
+    const uid = who.uid;
     const res = await supabase.from('trainers').update(row, { count: 'exact' }).eq('id', uid);
     if (res.error) reportError('coachBrand.save', res.error);
     return writeFailure('Your branding', res);

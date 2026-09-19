@@ -38,6 +38,8 @@
 // app/(trainer)/dashboard.tsx.
 import { createContext, useCallback, useMemo, useRef, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+import { sessionUid } from '../lib/sessionUid';
+import { authGateStatus } from '../lib/authGateStatus';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
@@ -86,19 +88,44 @@ export function CoachNotesProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        // Signed out is an answer, not a failure. getUser() REJECTS with no
-        // session, and a provider that mounts on the welcome screen and treats
-        // that as an error latches into 'error' before anybody has signed in —
-        // see src/ui/authRevision.tsx for the seventeen providers this
-        // happened to.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── signed out is an answer; an outage is not that answer ───────────
+        //
+        // Signed out is an answer, not a failure — a provider that mounts on
+        // the welcome screen and treats it as an error latches into 'error'
+        // before anybody has signed in (see src/ui/authRevision.tsx for the
+        // seventeen providers that happened to). That much was right. The
+        // reason written beside it was not: it said getUser() REJECTS with no
+        // session. It does not. src/lib/authReadFate.ts quotes the installed
+        // auth-js: both calls RESOLVE on a failure, and `getSession()` resolves
+        // with `{ data: { session: null }, error }` whenever the stored access
+        // token has expired and the refresh cannot reach the server.
+        //
+        // `error` was not named on that line, so the dropped connection and the
+        // welcome screen arrived here as the same `session: null` and this
+        // provider answered 'ready'. Under 'ready' an empty list is the
+        // sentence "you have written nothing about this client" — said to a
+        // coach who wrote a note about a shoulder injury a fortnight ago, over
+        // a read that never happened, and the note they are half-remembering
+        // gets written again or gets doubted.
+        //
+        // The call stays `getSession()`: it answers from device storage and
+        // therefore answers in a basement gym, which is where this app is used.
+        // What changes is that its error is read and classified, once, in
+        // src/lib/authReadFate.ts.
+        const who = await sessionUid('coachNotes.load');
         if (cancelled) return;
-        if (!sess?.session) { setUid(null); setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { reportError('coachNotes.auth', authErr); setStatus('error'); return; }
-        const id = auth?.user?.id ?? null;
-        if (!id) { setUid(null); setStatus('ready'); return; }
+        // Signed out is 'ready' — nobody is signed in, so this coach has
+        // written nothing and saying so is true. Unreadable is 'error': nothing
+        // was read, and an empty map under 'ready' is a claim about what this
+        // coach has written. The mapping lives in src/lib/authGateStatus.ts,
+        // where a test fails if the two arms are ever swapped; inline, that
+        // swap compiles and passes every gate in this repo.
+        //
+        // Discriminated on `fate` rather than on `!who.uid`, because `fate` is
+        // what the failure branch needs and `!who.uid` leaves it
+        // `AuthReadFate | null` there.
+        if (who.fate !== null) { setUid(null); setStatus(authGateStatus(who.fate)); return; }
+        const id = who.uid;
         setUid(id);
 
         // Every note this coach has written, in one read, and grouped by client

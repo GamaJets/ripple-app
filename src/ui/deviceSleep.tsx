@@ -43,6 +43,7 @@ import { rowToStored, storableNights, storedToRow, withStored, type StoredNight 
 import { useWearables } from './wearables';
 import { useLinkRevision } from '../lib/wearableLinkLedger';
 import { reportError } from '../lib/reportError';
+import { sessionUid } from '../lib/sessionUid';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { useAuthRevision } from './authRevision';
@@ -147,17 +148,53 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
     const run = ++storedRun.current;
     const live = () => storedRun.current === run;
     setStoredStatus('loading');
-    let id: string | null = null;
-    try {
-      // getSession() reads local storage rather than the network, and REJECTS
-      // for nobody signed in — which is a true answer, not a failed read.
-      const { data: sess } = await supabase.auth.getSession();
-      id = sess?.session?.user?.id ?? null;
-    } catch { /* no local session; treated as signed out below */ }
+    // `getSession()` reads local storage rather than the network, which is the
+    // whole reason it is the call here and why it must never become
+    // `getUser()`: this provider mounts on a phone in a basement gym.
+    //
+    // (The comment that used to be on these lines said `getSession()` REJECTS
+    // for nobody signed in. It does not. It RESOLVES `{ data: { session: null },
+    // error: null }` for a device with nothing in storage — and, when it has to
+    // reach the network to refresh an expired token and cannot, it resolves
+    // `{ data: { session: null }, error }` instead. Thrown away, those two are
+    // one answer, and the three lines that used to follow read the second as
+    // the first.)
+    const who = await sessionUid('deviceSleep.stored');
     if (!live()) return;
-    // Signed out, or a build with no backend: there is no kept week to read and
-    // no absent server to misreport. 'ready' with nothing in it, which is the
-    // same answer src/ui/deviceHrv.ts gives to the same question.
+    // Told apart by `fate`, never by `!who.uid`: `string` includes '', so the
+    // falsy test does not discriminate the union — and this is the branch the
+    // whole distinction lives in.
+    if (who.fate === 'unreadable') {
+      // The kept week is left EXACTLY as it was and `storedStatus` says it was
+      // not checked. This is the same refusal the `error` branch below makes
+      // about the table read, and it has to be made here too, because the cost
+      // of getting it wrong was the larger one:
+      //
+      //   · `setStored([])` took the week out of `withStored`, so
+      //     src/ui/readiness.ts scored the client's home screen over what was
+      //     left of it;
+      //   · under 'ready', `deviceSleepTrust` in src/lib/readinessBreakdown.ts
+      //     was handed a clean status and told the reads had gone fine — the
+      //     exact substitution the two-status split above exists to stop;
+      //   · and 'ready' LATCHED it. `useRecoverRead` only re-runs on 'error',
+      //     this provider is mounted in app/_layout.tsx and never unmounts, so
+      //     a sign-out invented from a blip outlived the blip by the life of
+      //     the process. 'error' is what brings the signal-back retry.
+      //
+      // `uid` stays null, which holds the write-back below.
+      // `device_sleep_nights` is keyed `user_id,night` and there is no uid to
+      // key on; a night written under a guess is worse than one not written.
+      // `sentRef` is untouched — it is cleared by the effect, not here — so the
+      // nights the devices measured go up on the next pass that can establish
+      // who this is. Delayed, not dropped.
+      setUid(null);
+      setStoredStatus('error');
+      return;
+    }
+    const id = who.uid;
+    // Genuinely signed out, or a build with no backend: there is no kept week to
+    // read and no absent server to misreport. 'ready' with nothing in it, which
+    // is the same answer src/ui/deviceHrv.ts gives to the same question.
     if (!id || !USE_SUPABASE) { setUid(null); setStored([]); setStoredStatus('ready'); return; }
     setUid(id);
     const { data, error } = await supabase.from('device_sleep_nights')

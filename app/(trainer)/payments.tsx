@@ -1253,8 +1253,24 @@ export default function TrainerPayments() {
   const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
   /** One row of mutually exclusive choices, drawn from the same tokens as the
-   *  inputs beside it. Local rather than in the kit because it is one form. */
-  const Pick = ({ label, options, chosen, onPick }: {
+   *  inputs beside it. Local rather than in the kit because it is one form.
+   *
+   *  A PLAIN FUNCTION, called as `{pick({…})}` and not rendered as `<Pick …/>`.
+   *  Declared in this body, a capitalised component is a new function object on
+   *  every render, so React sees a different element TYPE and unmounts the row
+   *  instead of reconciling it. This screen is ~3,300 lines and re-renders on
+   *  every figure that lands, so each of the three pickers was being destroyed
+   *  and rebuilt repeatedly — including while somebody was mid-way through the
+   *  promo, package and refund forms they sit in.
+   *  This is the ONE of the five on the ratchet that carries accessibility
+   *  attributes: the Pressables below are `accessibilityRole="button"` with an
+   *  `accessibilityState` and a composed label, so a remount moved the screen
+   *  reader's cursor off the option somebody had just selected. Those three
+   *  attributes are unchanged, line for line, below. It stays in this body
+   *  rather than at module scope because it closes over `t`. The `key` on the
+   *  `options.map` is untouched — it was already on the returned Pressable
+   *  inside this function, and nothing maps over `pick` itself. */
+  const pick = ({ label, options, chosen, onPick }: {
     label: string; options: { key: string | null; label: string }[]; chosen: string | null; onPick: (k: any) => void;
   }) => (
     <View>
@@ -1515,8 +1531,17 @@ export default function TrainerPayments() {
 
   /** A row of money pots, one per currency. Never one figure: AED 600 and
    *  GBP 90 do not add to 690 of anything, and a white-label product sees both
-   *  on the same coach's book the first time a visitor buys a session. */
-  const Pots = ({ label, pots }: { label: string; pots: Pot[] }) => (
+   *  on the same coach's book the first time a visitor buys a session.
+   *
+   *  A plain function called as `{potsRow(…)}`, for the reason on `pick` above —
+   *  and in the same dialect as `potLine` immediately below it, which was
+   *  already written this way. Nothing here is labelled and nothing here is a
+   *  `TextInput`, so no caret and no screen-reader cursor was ever at risk in
+   *  this one: what the conversion saves is the whole totals block being torn
+   *  down and rebuilt every time a figure lands, which is often on this screen.
+   *  The `key={p.currency}` on the `pots.map` is untouched — it is on the
+   *  returned View inside this function, and nothing maps over `potsRow`. */
+  const potsRow = (label: string, pots: Pot[]) => (
     <View style={{ flex: 1 }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>{label}</Text>
       {pots.length === 0 ? (
@@ -1545,7 +1570,12 @@ export default function TrainerPayments() {
    *  the totals because "how much of this repeats next month" is the question a
    *  membership business actually runs on, and it is not answerable from a
    *  single combined figure. */
-  const Made = ({ label, taken }: { label: string; taken: { pots: Pot[] } }) => (
+  /* A plain function called as `{made(…)}`, for the reason on `pick` above.
+     Two lines of unlabelled static `Text`: no caret, no screen-reader cursor,
+     nothing that holds state. The remount was pure waste — four of these were
+     thrown away and rebuilt on every render of a screen that re-renders on
+     every figure — and nothing maps over `made`, so no `key` moved. */
+  const made = (label: string, taken: { pots: Pot[] }) => (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: 4 }}>
       <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{label}</Text>
       <Text style={{ ...ty.caption, color: t.ink2, fontWeight: '500' }}>{fig(potLine(taken.pots))}</Text>
@@ -1767,8 +1797,8 @@ export default function TrainerPayments() {
                 <PartialRead what="payments" shown={buys.length + pays.length} onPress={load} />
               ) : takenAll && takenMonth && oneOffAll && renewAll && oneOffMonth && renewMonth ? (<>
                 <View style={{ flexDirection: 'row', gap: sp.md }}>
-                  <Pots label="This month" pots={takenMonth.pots} />
-                  <Pots label="All time" pots={takenAll.pots} />
+                  {potsRow('This month', takenMonth.pots)}
+                  {potsRow('All time', takenAll.pots)}
                 </View>
 
                 {/* What the total is made of. A membership business lives on the
@@ -1778,11 +1808,11 @@ export default function TrainerPayments() {
                     completely different positions next month. */}
                 <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 2 }}>This month, made up of</Text>
-                  <Made label="One-off sales and packs" taken={oneOffMonth} />
-                  <Made label="Subscription renewals" taken={renewMonth} />
+                  {made('One-off sales and packs', oneOffMonth)}
+                  {made('Subscription renewals', renewMonth)}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, marginBottom: 2 }}>All time, made up of</Text>
-                  <Made label="One-off sales and packs" taken={oneOffAll} />
-                  <Made label="Subscription renewals" taken={renewAll} />
+                  {made('One-off sales and packs', oneOffAll)}
+                  {made('Subscription renewals', renewAll)}
                 </View>
 
                 {/* An amount we cannot put a unit on is missing from the totals
@@ -2895,9 +2925,12 @@ export default function TrainerPayments() {
               {promos.status !== 'error' ? (
                 promoTargets.length ? (
                   <View style={{ marginTop: sp.lg }}>
-                    <Pick label="For which package"
-                      options={promoTargets.map((p) => ({ key: p.id, label: p.name }))}
-                      chosen={promoPkg} onPick={(k: string | null) => setPromoPkg(k)} />
+                    {pick({
+                      label: 'For which package',
+                      options: promoTargets.map((p) => ({ key: p.id, label: p.name })),
+                      chosen: promoPkg,
+                      onPick: (k: string | null) => setPromoPkg(k),
+                    })}
                     <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
                       <View style={{ flex: 2 }}>
                         <TextInput value={promoCode} onChangeText={(v) => setPromoCode(normaliseCode(v))}
@@ -2969,8 +3002,12 @@ export default function TrainerPayments() {
               <TextInput value={name} onChangeText={setName} placeholder="Name — e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Package name" />
 
               <View style={{ marginTop: sp.md }}>
-                <Pick label="Billing" options={INTERVALS.map((i) => ({ key: i.key, label: i.label }))} chosen={interval}
-                  onPick={(k: BillingInterval | null) => { setInterval(k); if (k) setSessions(''); }} />
+                {pick({
+                  label: 'Billing',
+                  options: INTERVALS.map((i) => ({ key: i.key, label: i.label })),
+                  chosen: interval,
+                  onPick: (k: BillingInterval | null) => { setInterval(k); if (k) setSessions(''); },
+                })}
               </View>
 
               {/* The coach's currency, stated rather than picked — and dashed
@@ -3116,10 +3153,12 @@ export default function TrainerPayments() {
               </Text>
 
               <View style={{ marginTop: sp.lg }}>
-                <Pick label="How much"
-                  options={[{ key: 'whole', label: 'All Of It' }, { key: 'part', label: 'Part Of It' }]}
-                  chosen={refundWhole ? 'whole' : 'part'}
-                  onPick={(k: string) => { setRefundWhole(k === 'whole'); setRefundAmt(''); }} />
+                {pick({
+                  label: 'How much',
+                  options: [{ key: 'whole', label: 'All Of It' }, { key: 'part', label: 'Part Of It' }],
+                  chosen: refundWhole ? 'whole' : 'part',
+                  onPick: (k: string) => { setRefundWhole(k === 'whole'); setRefundAmt(''); },
+                })}
               </View>
 
               {!refundWhole ? (

@@ -68,6 +68,13 @@
 // `physique` mode a person's body — to api.anthropic.com on Repple's key, and
 // it did so for anybody holding a string that ships inside the app bundle.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import { providerFor, modelFor, buildCall, readReply, replyProblem, mediaTypeOr } from '../../../src/lib/llmGateway.ts';
 import { readModelJson, answerProblem, numberOrNull, figuresAmong, notGivenAmong } from '../../../src/lib/modelAnswer.ts';
 
@@ -198,10 +205,24 @@ Deno.serve(async (req: Request) => {
   // to a third party. See the header.
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   let userId = '';
+  // ── and a dropped connection is not a signed-out person ────────────────
+  //
+  // This used to be `const { data } = …` with the error dropped, so a GoTrue
+  // blip produced a null user — indistinguishable here from a token that was
+  // looked at and refused — and the refusal below told a SIGNED-IN person to
+  // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
+  // is where the two are separated; `unreadable` means nothing was established.
+  // The `catch` is the non-AuthError path and establishes nothing either.
+  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+    + 'Your photo has not been read and has not been sent anywhere. Try again in a moment.';
   try {
-    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
-    userId = data?.user?.id || '';
-  } catch { /* stays empty, and the refusal below is the answer */ }
+    const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    if (authErr) {
+      if (authReadFate(authErr) === 'unreadable') return json({ error: CANNOT_ASK }, 503);
+    } else {
+      userId = data?.user?.id || '';
+    }
+  } catch { return json({ error: CANNOT_ASK }, 503); }
   if (!userId) return json({ error: 'Sign in to Repple to read a photo this way.' }, 401);
 
   let mode: Mode = 'meal';

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { exerciseSlug } from '../lib/exerciseId';
 import { reportError } from '../lib/reportError';
+import { sessionUid } from '../lib/sessionUid';
 import { capLimit, capped } from '../lib/rowCap';
 import { catalogueMet } from '../lib/exerciseMet';
 import { useAuthRevision } from './authRevision';
@@ -94,16 +95,31 @@ const strs = (v: unknown): string[] =>
  * worse than an admission that we could not look.
  *
  * Cheap: the session is read from local storage, not the network.
+ *
+ * ── and the one case `!data.session` got wrong ────────────────────────────
+ *
+ * This was `const { data } = await supabase.auth.getSession(); return
+ * !!data.session`, with the `error` beside it discarded — and `getSession()`
+ * does go to the network, for the one thing it cannot answer from storage:
+ * refreshing an access token that has actually expired. When that refresh
+ * cannot reach the server it RESOLVES with `session: null` and a retryable
+ * error, which is the identical shape as somebody who has never signed in. So
+ * a member on a train, holding a perfectly good account, was told to sign in
+ * to see a movement the catalogue has had all along — and the `catch` below,
+ * which had already decided that "could not tell" must not blame the person,
+ * never ran, because the library does not throw on that path.
+ *
+ * Now told apart by `fate` and never by the absent session. Only a credential
+ * that was looked at and refused — or that was never there — is a sign-out;
+ * anything unreadable takes the gentler answer the `catch` already chose, so
+ * an empty result is worded as an ordinary empty. src/lib/authReadFate.ts
+ * carries the discrimination and the argument for its direction.
  */
 async function signedIn(): Promise<boolean> {
-  try {
-    const { data } = await supabase.auth.getSession();
-    return !!data.session;
-  } catch {
-    // Could not tell. Treat as signed in, so a storage hiccup words the result
-    // as an ordinary empty rather than blaming the person for being signed out.
-    return true;
-  }
+  // Never throws, so there is no catch to write: `sessionUid` answers
+  // 'unreadable' for a rejection, which is what a rejection is.
+  const who = await sessionUid('exerciseDetail.signedIn');
+  return who.fate !== 'signed-out';
 }
 
 export function useExerciseDetail(name: string | null | undefined) {

@@ -24,6 +24,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
+import { signedInUid } from '../lib/signedInUid';
 import { useAuthRevision } from './authRevision';
 import { useCallback, useEffect, useState } from 'react';
 import type { LoadStatus } from './loadStatus';
@@ -41,7 +42,9 @@ export interface SpansRead {
  * Every relationship on this coach's book, oldest first.
  *
  * Signed out, or the backend off, is 'ready' with nothing: there is no absent
- * server being misreported, which is the rule src/ui/loadStatus.ts states.
+ * server being misreported, which is the rule src/ui/loadStatus.ts states. An
+ * auth read that could not be MADE is a different answer and is 'error' — see
+ * the branch below, and note that the two used to be the same one.
  *
  * `cr_self` (part 06) grants `for all using (coach_id = auth.uid() or client_id
  * = auth.uid())`, so no policy is needed for this — a coach has always been
@@ -51,9 +54,29 @@ export interface SpansRead {
 export async function fetchCoachingSpans(): Promise<SpansRead> {
   if (!USE_SUPABASE) return { spans: [], status: 'ready' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { spans: [], status: 'ready' };
+    // ── an outage used to be READY here, and 'ready' is the load-bearing word ─
+    //
+    // This was `const { data: auth } = await supabase.auth.getUser()` with the
+    // error dropped. getUser() does not reject when the auth server is
+    // unreachable — it resolves `{ data: { user: null }, error }`, which
+    // src/lib/authReadFate.ts sets out — so an outage produced the same absent
+    // `uid` a signed-out account does, and this returned `{ spans: [], status:
+    // 'ready' }`.
+    //
+    // 'ready' is a claim that the server answered and the set really is empty.
+    // On THIS screen an empty set of spans is not a blank panel: every cohort
+    // milestone is computed from it, so the coach was shown a retention curve
+    // built out of no relationships at all and told it was whole. Worse, the
+    // file's own header explains that a history missing its endings draws flat
+    // at 100% — so the failure mode here is a confident, flattering chart, and
+    // there is nothing on it to give it away.
+    const who = await signedInUid('coachCohorts.read');
+    if (who.fate === 'signed-out') return { spans: [], status: 'ready' };
+    // 'unreadable'. We do not know whose spans to read, so the set is UNKNOWN
+    // and says so. `cohortsBlocker` refuses to draw a curve over anything but a
+    // whole read, which is exactly the outcome wanted here.
+    if (who.fate !== null) return { spans: [], status: 'error' };
+    const uid = who.uid;
     const { data, error } = await supabase
       .from('coaching_relationships')
       .select('created_at, ended_at')

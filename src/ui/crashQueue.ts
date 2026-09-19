@@ -22,6 +22,8 @@ import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { classifyWrite, registerFlush } from '../lib/offlineQueue';
+import { uidFromSession } from '../lib/sessionUidRead';
+import type { UidRead } from '../lib/authedUid';
 import {
   CRASH_KEY, addCrash, crashRow, dropCrash, inCrashOrder, newCrash, readCrashQueue,
   type CrashReport,
@@ -137,11 +139,52 @@ export async function flushCrashes(): Promise<void> {
     // every other flush in this app gives — the second goes to the network and
     // resolves null offline, which would drop the attribution of every report
     // sent on a bad connection.
-    let signedInAs: string | null = null;
+    //
+    // ── and `error`, which decides whether this pass runs at all ───────────
+    //
+    // `getSession()` does not reject when the auth server cannot be reached. It
+    // RESOLVES with `{ data: { session: null }, error }` — the same shape it
+    // resolves with on a handset nobody has ever signed in on — so the `error`
+    // discarded here read an outage as a sign-out, and what followed was not a
+    // wrong sentence on a screen but two irreversible things in a row:
+    //
+    //   · every report in the queue went up with `user_id` null, which
+    //     `app_errors_insert` accepts, so the attribution of a crash that
+    //     belonged to a signed-in member was written away as a fact. A
+    //     correction would have to be a second recorded fact and there is
+    //     nothing here that could write one — the local row is dropped on the
+    //     line after the insert.
+    //   · the failed refresh that produced that `error` also leaves the
+    //     PostgREST request carrying a token the server will not take. A 401
+    //     carries a `status`, and `isRefusal` reads `status` before it reads
+    //     `code`, so that answer classifies 'refused' — and 'refused' CONTINUES
+    //     the pass and DROPS the report. A crash nobody can get back, discarded
+    //     because a token could not be refreshed.
+    //
+    // So the two fates are told apart, and 'unreadable' sends nothing at all.
+    // Nothing is lost by waiting: the queue is durable, `registerFlush` brings
+    // `flushAll` back on the next reconnect, and in the ordinary case — the
+    // phone is simply offline — the first insert would have come back 'unsent'
+    // and broken this loop on the very next line anyway.
+    //
+    // `uidFromSession` and not `sessionUid`, which is what every other caller
+    // in this app uses. The header above says why: this module is imported by
+    // src/ui/ErrorBoundary.tsx and by `reportError` itself, and anything it
+    // touches must be something that cannot itself throw. `sessionUid` records
+    // its faults through `reportError`, which imports this file — a crash
+    // reporter reporting its own failures through itself. `uidFromSession` is
+    // pure and imports neither.
+    let who: UidRead;
     try {
-      const { data } = await supabase.auth.getSession();
-      signedInAs = data?.session?.user?.id ?? null;
-    } catch { /* treated as signed out, which is a uid the policy accepts */ }
+      const { data, error } = await supabase.auth.getSession();
+      who = uidFromSession({ data, error });
+    } catch { who = { uid: null, fate: 'unreadable' }; }
+    // Told apart by `fate`, never by `!who.uid`: the union's two members are
+    // discriminated by fate, and `string` includes '' — see sessionUid.ts.
+    if (who.fate === 'unreadable') return;
+    // Null only where the auth server actually said so. Nobody is signed in on
+    // this handset is a true statement and a uid the insert policy accepts.
+    const signedInAs: string | null = who.uid;
     let remaining = list;
     for (const c of inCrashOrder(list)) {
       const { error } = await supabase.from('app_errors').insert(crashRow(c, signedInAs));

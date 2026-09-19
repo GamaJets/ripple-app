@@ -53,6 +53,13 @@
 // event body below is built here from a fixed template. A client's name has no
 // route to Google through this code.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -226,11 +233,24 @@ Deno.serve(async (req) => {
   // Identify the caller from their JWT. Never from the body: a user id in a
   // request body is a request to act as somebody else.
   let userId = '';
+  // ── and a dropped connection is not a signed-out person ────────────────
+  //
+  // The error used to be discarded here, so a GoTrue blip produced a null user
+  // — indistinguishable from a token that was looked at and refused — and the
+  // refusal below told a SIGNED-IN coach to sign in again, in front of a Google
+  // OAuth `code` that is single-use and dead by the time they come back.
+  // src/lib/authReadFate.ts separates the two; `unreadable` established nothing.
+  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+    + 'Nothing has been connected and your existing calendar is untouched. Try connecting again in a moment.';
   try {
     const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '');
-    const { data } = await service.auth.getUser(jwt);
-    if (data?.user?.id) userId = data.user.id;
-  } catch { /* falls through to the refusal below */ }
+    const { data, error: authErr } = await service.auth.getUser(jwt);
+    if (authErr) {
+      if (authReadFate(authErr) === 'unreadable') return fail(CANNOT_ASK);
+    } else if (data?.user?.id) {
+      userId = data.user.id;
+    }
+  } catch { return fail(CANNOT_ASK); }
   if (!userId) return fail('Not signed in — sign in to Repple and try connecting your calendar again.');
 
   const clientId = Deno.env.get('GOOGLE_CALENDAR_CLIENT_ID') || '';

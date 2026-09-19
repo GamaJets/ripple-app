@@ -1519,6 +1519,15 @@ export default function TrainerSchedule() {
       // block raised a raw exclusion_violation and the coach was told their
       // time was NOT blocked by the block that was stopping every booking.
       if (error) outcome = 'failed';
+      // zero-ok: `withdrawn` is not a figure somebody reported about the world,
+      // it is `get diagnostics … row_count` from the very DELETE this call just
+      // ran — supabase/parts/113-block-time-already-blocked.sql declares it
+      // `withdrawn int`, initialises it to 0 and assigns it from the row count,
+      // so on the `ok` branch (and only that branch is read here) it is always
+      // sent and is never null. A 0 means the server deleted no open slots,
+      // which is a measurement and not an absence. This is NOT the
+      // `queueLength` shape: there, the count is of other people and a row that
+      // arrived without it is indistinguishable from a queue of nobody.
       else if (row?.ok) { outcome = 'blocked'; withdrawn = Number(row.withdrawn) || 0; }
       else if (row?.reason === 'booked') outcome = 'booked';
       else if (row?.reason === 'already-blocked') outcome = 'already-blocked';
@@ -2004,6 +2013,10 @@ export default function TrainerSchedule() {
         // The same three answers `doBlock` reads, kept apart for the same
         // reason: only 'failed' means the time may still be bookable.
         if (error) outcome = 'failed';
+        // zero-ok: the same `row_count` off the same RPC as `blockOneDay`
+        // above, and the same argument — `block_time` returns `withdrawn int`
+        // from `get diagnostics`, never null on the `ok` branch, so zero here
+        // is "no open slots were standing in that period" and not "nobody said".
         else if (row?.ok) { outcome = 'blocked'; withdrawn = Number(row.withdrawn) || 0; }
         else if (row?.reason === 'booked') outcome = 'booked';
         else if (row?.reason === 'already-blocked') outcome = 'already-blocked';

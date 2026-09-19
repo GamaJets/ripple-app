@@ -40,6 +40,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { sessionUid } from '../lib/sessionUid';
 import { PROVIDERS } from '../lib/wearables/registry';
 import { recentNights } from '../lib/sleepMerge';
 import {
@@ -118,16 +119,42 @@ export function useDeviceHrv(): DeviceHrvValue {
   );
 
   const load = useCallback(async () => {
-    let id: string | null = null;
-    try {
-      // getSession() reads local storage rather than the network, and REJECTS
-      // for nobody signed in — which is a true answer, not a failed read.
-      const { data: sess } = await supabase.auth.getSession();
-      id = sess?.session?.user?.id ?? null;
-    } catch { /* no local session; treated as signed out below */ }
+    // `getSession()` reads local storage rather than the network, which is why
+    // it is the right call here and why it must not become `getUser()`: this
+    // hook runs on a phone in a basement gym.
+    //
+    // (The comment that used to be on these lines said `getSession()` REJECTS
+    // for nobody signed in. It does not. It RESOLVES `{ data: { session: null },
+    // error: null }` for a device with nothing in storage — and, when it has to
+    // go to the network to refresh an expired token and cannot, it resolves
+    // `{ data: { session: null }, error }` instead. Those two are the same shape
+    // once `error` is thrown away, which is what the discard below did.)
+    const who = await sessionUid('deviceHrv.load');
     sentRef.current = new Set();
-    // Signed out, or a build with no backend: there is no history to read and
-    // no absent server to misreport. 'ready' with nothing in it.
+    // Told apart by `fate`, never by `!who.uid`: `string` includes '', so the
+    // falsy test does not discriminate the union — and this is the branch the
+    // whole distinction lives in.
+    if (who.fate === 'unreadable') {
+      // Nobody said this member is signed out. The question could not be asked,
+      // so the kept nights STAY exactly as they are — clearing them here is the
+      // same disappearance the `error` branch below refuses, reached through the
+      // auth read instead of through the table — and `status` records that they
+      // were not checked. An empty list under 'error' means unknown, so the
+      // screen says the history could not be read rather than "no nights kept
+      // yet", and a baseline of nought is never drawn from it.
+      //
+      // `uid` is left null on purpose, which holds the write below.
+      // `device_hrv_nights` is keyed `user_id,night` and there is no uid to key
+      // tonight's row on; a row written under a guess is worse than one not
+      // written. `sentRef` has been cleared, so the next pass that can establish
+      // who this is sends tonight's figure — nothing is dropped, only delayed.
+      setUid(null);
+      setStatus('error');
+      return;
+    }
+    const id = who.uid;
+    // Genuinely signed out, or a build with no backend: there is no history to
+    // read and no absent server to misreport. 'ready' with nothing in it.
     if (!id || !USE_SUPABASE) { setUid(null); setNights([]); setStatus('ready'); return; }
     setUid(id);
     const floor = recentNights(BASELINE_NIGHTS).slice(-1)[0] ?? '';

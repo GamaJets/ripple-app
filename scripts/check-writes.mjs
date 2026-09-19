@@ -157,6 +157,59 @@
 // HTML comment, where a wrapped reason has no `//` or `*` in front of it and the
 // comment-run test walks straight past it; that cannot happen here, because
 // these roots hold only .ts and .tsx.
+// ── and `supabase/functions`, added 14 September 2026 ─────────────────────
+//
+// The five roots below are the phone apps and the web console. The edge
+// functions are neither, and until yesterday they were on no ROOTS of this
+// gate nor of check-reads.mjs. Widening check-reads onto them is what proved
+// the gap is not academic: it turned up twenty-one discarded auth errors and
+// two `instagram_posts` inserts with nothing destructured off them at all —
+// one of them the row recording a post that IS live on a coach's feed, so a
+// refused write left the post up and the coach's own history without it.
+//
+// Those two inserts are RULE ONE's shape exactly: a mutation standing alone as
+// a statement whose value goes nowhere. They are why this root belongs here.
+// They are also already FIXED — the lane that found them repaired both before
+// this widening landed, and the comments above them now say so in the past
+// tense ("This insert was awaited and never destructured") — so rule one finds
+// nothing in this directory today. That is a repaired tree, not an idle rule:
+// the fixture in the lane note reconstructs the pre-fix line and rule one
+// fails on it.
+//
+// What the widening DOES find is eleven of RULE TWO — updates in the Stripe
+// webhook, in the Google calendar token refresh and in the WHOOP token refresh
+// that read `error` and never the row count. They are ratcheted in
+// `KNOWN_COUNT` below rather than fixed or marked, because those files belong
+// to another lane and the header above `KNOWN` gives the reason.
+//
+// ── WHAT THESE RULES CANNOT SEE OVER THAT DIRECTORY, said plainly ─────────
+//
+// Both rules are TEXT rules everywhere. Everywhere else there is a type
+// checker standing behind them. Over `supabase/functions` there is not, and
+// that bounds what a pass here means:
+//
+//   · Deno is not installed on this machine, and these functions are in no
+//     tsconfig. `npm run check:functions` is the nearest thing to a compiler
+//     they get, and its own header says what it is: it PARSES them, resolves
+//     their relative imports, and type checks their calls into `src/lib`.
+//     Everything behind `npm:`, `jsr:` and `https:` — which is where
+//     `createClient`, and therefore every `.from()`, `.update()` and
+//     `.delete()` result type, comes from — is declared `any` in an ambient
+//     shim. The supabase-js result shape is unverified in this directory:
+//     nothing can tell us that the object a `.update(` was called on is a
+//     PostgREST builder at all, nor that a `count` read off one is this rule's
+//     count.
+//   · So this scanner's brackets are the only thing that knows the shape here,
+//     and every limit the two rules already state for themselves still holds —
+//     a builder passed as an argument is skipped, a call receiver stops
+//     `exprStart`, and rule one cannot tell a bound result that is inspected
+//     from one that is not.
+//
+// A pass over this root therefore means: no mutation in these functions stands
+// alone as a statement, and no update or delete in them goes uncounted beyond
+// what `KNOWN_COUNT` already records. It does not mean the functions are type
+// checked, and it does not mean they are correct. The success line says so too,
+// because the header is not what a passing run puts in front of anybody.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { assertRootFloors } from './gate-floor.mjs';
@@ -165,8 +218,10 @@ const ROOT = new URL('..', import.meta.url).pathname;
 
 /** The same roots as check-reads.mjs, plus the console's components: the web
  *  console writes the same tables through the same client and has the same
- *  failure mode. */
-const ROOTS = ['src', 'app', 'studio-web/app', 'studio-web/lib', 'studio-web/components'];
+ *  failure mode. And `supabase/functions`, which writes those same tables from
+ *  the server with the SERVICE key — see the section on it in the header for
+ *  what a pass over that root does and does not mean. */
+const ROOTS = ['src', 'app', 'studio-web/app', 'studio-web/lib', 'studio-web/components', 'supabase/functions'];
 
 /**
  * Does a marker apply to the statement starting on `line` (1-based)?
@@ -239,30 +294,108 @@ const KNOWN = new Map([]);
  * hide a brand-new unlooked-at write, because the two would be counted into the
  * same total. `KNOWN` stays at zero and means what it says.
  *
- * Both entries are CORRECT code. Each is a delete where zero matched rows is
- * the outcome the member asked for, and each already carries its author's
- * paragraph saying exactly that — src/ui/wearables.tsx even names
- * src/lib/wroteRows.ts and explains why the rule there does not apply. All that
- * is missing is the marker, and the marker is a one-line edit sitting on top of
- * the sentence that justifies it.
+ * Every entry is in `supabase/functions`, and every one of them arrived in the
+ * same change that put that directory on ROOTS. They are ratcheted rather than
+ * fixed or marked for the reason the header above `KNOWN` gives: those files
+ * belong to another lane, and a gate's author annotating other people's code is
+ * how a rule gets weakened by the person least placed to judge it. `src`, `app`
+ * and `studio-web/` are at zero on this rule and stay there — a file not on
+ * this Map fails on a single uncounted update or delete.
  *
- * They are ratcheted rather than marked because src/ui/ belongs to another
- * lane, and the header above `KNOWN` gives the reason: a gate's author
- * annotating other people's code is how a rule gets weakened by the person
- * least placed to judge it. The three sites in src/lib that this rule also
- * reached WERE marked, because this lane can answer for them.
+ * The arithmetic is the one `KNOWN` states: listed at n, fails at n+1, and a
+ * count that has DROPPED fails too, so the list can only shrink. A cleared
+ * entry is deleted, not left behind as a tolerated allowance.
+ *
+ * What is on it, and what each one needs:
  */
-const KNOWN_COUNT = new Map([]);
+const KNOWN_COUNT = new Map([
+  // Eight updates, in four pairs, and all eight are very probably CORRECT code
+  // that needs the marker rather than a count. Each pair follows an
+  // `ignoreDuplicates: true` upsert and then re-applies the row twice — once
+  // `.lte('stripe_event_at', eventAt)` and once `.is('stripe_event_at', null)`
+  // — which is this file's ordering guard against a Stripe redelivery arriving
+  // behind a newer event. Zero rows matched is what that guard DOING ITS JOB
+  // looks like: the upsert inserted the row, or a newer event already holds it.
+  // So the honest edit is `no-count-ok:` with that sentence on each pair, and
+  // the person to write it is whoever owns the webhook — not this gate.
+  // The pairs are `client_subscriptions` (:667, :670), `subscriptions` (:750,
+  // :759), `client_disputes` (:1769, :1772) and `invoices` (:2099, :2102).
+  ['supabase/functions/stripe-webhook/index.ts', {
+    count: 8,
+    fix: "Four ordering-guard pairs where zero rows is the guard working, not a failure. Mark each pair `no-count-ok: an out-of-order redelivery is meant to match nothing here` — or, if a pair is ever meant to be certain it landed, count it and fail the webhook so Stripe retries.",
+  }],
+  // Two token writes on the Google calendar link, both genuinely uncounted and
+  // both worth counting. :752 clears a refresh token Google has revoked, and
+  // the row not being there to clear is the one thing the screen must not keep
+  // reporting as a working connection; :769 stores a ROTATED refresh token, and
+  // a rotation that matched no row leaves the coach holding a token Google will
+  // refuse for ever. Both already log `error`; neither can see zero rows.
+  ['supabase/functions/calendar-sync/index.ts', {
+    count: 2,
+    fix: "Add `{ count: 'exact' }` to both updates and log the zero-row case as loudly as the error case — a refresh token that was rotated and stored against no row is a connection that is already over, and nothing currently tells the coach to reconnect.",
+  }],
+  // The same defect as calendar-sync:769, on WHOOP. The comment above it
+  // already explains that WHOOP retires the token it was sent, so a write that
+  // matched nothing leaves this row holding one WHOOP will never accept again —
+  // and then argues only about the `error` case, which is the half it can see.
+  ['supabase/functions/wearable-day/index.ts', {
+    count: 1,
+    fix: "Add `{ count: 'exact' }` to the `wearable_tokens` update at :856 and log a zero-row match with the same sentence the comment above it already writes for the error case.",
+  }],
+]);
 
 const isTest = (f) => /\.test\.[jt]sx?$/.test(f) || f.includes('__tests__');
 
+/**
+ * Surviving a path that disappears while this gate is running.
+ *
+ * Lanes write this tree while gates run over it, so a path listed by `readdir`
+ * and gone by the time it is stat'd or read is an ordinary event here. The gate
+ * DYING of it is not: an ENOENT out of the top of the script reads as the gate
+ * being broken rather than the tree, which is worse than a red gate because it
+ * sends whoever is looking to the wrong file.
+ *
+ * The tolerance below was checked by running it rather than by reading it, and
+ * what was here before was a third of a fix:
+ *
+ *   · the `walk` already took an `out` parameter, so the ENOENT arm returning
+ *     `out` was sound. The ReferenceError that killed the same copied fix in
+ *     two sibling gates — `out` returned from an arm of a `walk` that never
+ *     took it — is NOT present in this file. Verified by deleting a file out
+ *     from under a running scan, not by reading the line.
+ *   · but the tolerance covered `readdirSync` and nothing else. `statSync` was
+ *     bare, so an entry deleted between the listing and the stat threw; and the
+ *     offender loop below then read the whole list with a bare `readFileSync`,
+ *     where the window is not one directory but the entire scan. Both are
+ *     closed here, which is the same second half a sibling lane had to add to
+ *     check-reads.mjs after the first fix landed.
+ *   · and the `catch` was bare, so EACCES or a dangling symlink was swallowed
+ *     as if the root were absent and left the per-root floor to report a real
+ *     fault as a missing directory. Only ENOENT and ENOTDIR are tolerated now.
+ *
+ * A Set of paths rather than a counter, so one file that is both stat'd and
+ * read cannot be reported as two disappearances. It is printed with the success
+ * line: a gate whose last line names a file count has to say when that count is
+ * short of what was listed.
+ */
+const vanished = new Set();
+const gone = (e) => e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+const readSource = (f) => {
+  try { return readFileSync(f, 'utf8'); }
+  catch (e) { if (gone(e)) { vanished.add(f); return null; } throw e; }
+};
+
 function walk(dir, out = []) {
   let entries;
-  try { entries = readdirSync(dir); } catch { return out; }
+  try { entries = readdirSync(dir); }
+  catch (e) { if (gone(e)) { vanished.add(dir); return out; } throw e; }
   for (const e of entries) {
     if (e === 'node_modules' || e.startsWith('.')) continue;
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) walk(p, out);
+    let st;
+    try { st = statSync(p); }
+    catch (err) { if (gone(err)) { vanished.add(p); continue; } throw err; }
+    if (st.isDirectory()) walk(p, out);
     else if (/\.tsx?$/.test(p) && !isTest(p)) out.push(p);
   }
   return out;
@@ -434,6 +567,9 @@ for (const r of ROOTS) {
   perRoot.set(r, files.length - before);
 }
 assertRootFloors('check:writes', perRoot);
+/* Named on the success line, so the caveat below it is attached to a number
+ * rather than to a directory nobody can size from the output. */
+const fnFiles = perRoot.get('supabase/functions') ?? 0;
 
 // The empty-set guard every gate here has. The first version of check-reads.mjs
 // reported success having read nothing; that is the failure this line exists to
@@ -451,7 +587,10 @@ const found = [];
 let examined = 0;
 let updateOrDelete = 0;
 for (const f of files) {
-  const raw = readFileSync(f, 'utf8');
+  const raw = readSource(f);
+  // Gone between the stat and the read. Counted above and reported with the
+  // success line; it contributes no sites rather than killing the run.
+  if (raw === null) continue;
   const src = blank(raw);
   const rel = relative(ROOT, f);
   const rawLines = raw.split('\n');
@@ -639,8 +778,19 @@ if (failed) process.exit(1);
 const backlog = [...KNOWN.values()].reduce((n, e) => n + e.count, 0);
 const counted = [...KNOWN_COUNT.values()].reduce((n, e) => n + e.count, 0);
 console.log(
-  `check-writes — ok, ${files.length} files across the apps and the console; `
+  `check-writes — ok, ${files.length} files across the apps, the console and the edge functions; `
   + `${examined} supabase mutation chains examined, of which ${updateOrDelete} are updates or deletes; `
   + `no new uncounted write${backlog ? `, ${backlog} known and ratcheted` : ''}`
   + `${counted ? `, ${counted} uncounted update${counted === 1 ? '' : 's'}/delete${counted === 1 ? '' : 's'} ratcheted in another lane's files` : ''}`,
 );
+// Said on every pass, not only in the header, because the header is not what a
+// green run puts in front of anybody. Deno is not installed and these functions
+// are in no tsconfig, so over that one root this is a TEXT rule with no type
+// checker behind it — a pass here is not a statement that they type check.
+console.log(`  of which ${fnFiles} are under supabase/functions, where this is a text rule only: `
+  + 'Deno is not installed and those files are in no tsconfig, so `npm:`/`jsr:`/`https:` imports — '
+  + 'including `createClient` — are typed `any`. A pass is not a claim that they type check.');
+if (vanished.size) {
+  console.log(`  ${vanished.size} path${vanished.size === 1 ? '' : 's'} disappeared mid-scan and ${vanished.size === 1 ? 'was' : 'were'} skipped — `
+    + 'another lane is writing this tree. The count above is that many files short of what was listed.');
+}

@@ -34,6 +34,7 @@
 // timeout, is the worst thing this screen could print.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { fetchGymProfile } from '../lib/gymPolicy';
@@ -107,12 +108,34 @@ export function useMyPayTerms(): PayTerms {
     if (!tenantId) { setPay(null); setStanding(NO_FEE); setPolicy(null); setReadStatus(tenantStatus === 'ready' ? 'ready' : 'loading'); return; }
     setReadStatus('loading');
     try {
-      // getSession and not getUser: getUser REJECTS with nobody signed in,
-      // which would latch this at 'error' before anybody had signed in.
-      const { data: sess } = await supabase.auth.getSession();
+      // ── who is asking, and why the error beside it had to be read ───────
+      //
+      // getSession and not getUser, which stays true and is the deliberate
+      // choice: getSession answers from device storage and therefore answers
+      // offline. The reason written beside it was not true — it said getUser
+      // REJECTS with nobody signed in. It does not; src/lib/authReadFate.ts
+      // quotes the installed auth-js, where every AuthError RESOLVES, and
+      // `getSession()` resolves with `{ data: { session: null }, error }` the
+      // moment a stored access token has expired and the refresh cannot reach
+      // the server.
+      //
+      // `error` was not named here, so that outage arrived as `uid === null`
+      // and this hook answered 'error' — which happens to be the cautious
+      // status, so this site never printed "your gym has agreed no rate with
+      // you" over a timeout. What it did do was give the outage nowhere to be
+      // seen: no report, and the same status as a refusal. `sessionUid` names
+      // the error, classifies it once, and reports the unreadable half under
+      // this hook's own key.
+      const who = await sessionUid('coachPayTerms.load');
       if (cancelled()) return;
-      const uid = sess?.session?.user?.id ?? null;
-      if (!uid) { setReadStatus('error'); return; }
+      // Both fates stay 'error', and deliberately: this is the money paragraph
+      // a coach reads to learn what their gym pays them, and neither "nobody is
+      // signed in" nor "we could not ask" is a rate. `rateCard` refuses
+      // anything that is not 'ready', so neither one can be printed as terms.
+      // Told apart by `fate`, never by `!who.uid` — `string` includes '', so
+      // `!who.uid` does not narrow the union.
+      if (who.fate !== null) { setReadStatus('error'); return; }
+      const uid = who.uid;
 
       const [rate, gym] = await Promise.all([
         supabase.from('gym_trainer_pay')

@@ -44,6 +44,7 @@ import { gymMonthNow, monthAtGym, type MonthBasis } from '../lib/gymMonth';
 import { monthsBefore } from '../lib/closeCosts';
 import { coachCloseView, type CoachCloseView } from '../lib/coachClose';
 import type { GymLink } from '../lib/coachPayTerms';
+import { sessionUid } from '../lib/sessionUid';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { useTenant } from './tenant';
 import { useToday } from './today';
@@ -152,12 +153,31 @@ export function useMyCloseQueue(): MyCloseQueue {
     setClasses(null);
 
     void (async () => {
-      // getSession and not getUser: getUser REJECTS with nobody signed in,
-      // which would latch this at 'error' before anybody had signed in.
-      const { data: sess } = await supabase.auth.getSession();
+      // getSession and not getUser, and the reason written down correctly this
+      // time. The comment that stood here said "getUser REJECTS with nobody
+      // signed in", and that is NOT what it does: `_getUser` catches every
+      // AuthError and RESOLVES with `{ data: { user: null }, error }` — see the
+      // quoted source in src/lib/authReadFate.ts. The real reason to prefer
+      // getSession is the one src/lib/sessionUidRead.ts gives: it answers from
+      // device storage and therefore answers in a basement gym, where fronting
+      // these reads with a network call would stall them. So the call stays as
+      // it is and is NOT converted to getUser().
+      //
+      // What was actually wrong was the discarded `error`. getSession() has the
+      // same defect one layer down — an expired access token whose refresh
+      // cannot reach the server resolves `{ session: null, error }` — so an
+      // outage reached `!uid` as the same null a signed-out phone gives.
+      //
+      // Both fates still end at 'error', and that is deliberate rather than
+      // lazy: neither a signed-out coach nor an unreadable one has a month's
+      // work to show, and 'error' is the status that makes this section say it
+      // does not know instead of drawing an empty marking queue over a month
+      // that is not empty. What changes is that the outage now leaves a trace —
+      // `sessionUid` reports it under this key — where before it left none.
+      const who = await sessionUid('coachClose.session');
       if (cancelled) return;
-      const uid = sess?.session?.user?.id ?? null;
-      if (!uid) { setSessionStatus('error'); setClassStatus('error'); return; }
+      if (who.fate !== null) { setSessionStatus('error'); setClassStatus('error'); return; }
+      const uid = who.uid;
 
       // Settled rather than all-or-nothing: one refusal must not take the other
       // half down. `Promise.all` here would turn a refused RPC into an unread

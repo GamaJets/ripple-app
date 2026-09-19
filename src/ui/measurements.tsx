@@ -23,6 +23,11 @@ import { settleOptimistic } from '../lib/optimisticList';
 import { useOutbox } from './outbox';
 import { useAuthRevision } from './authRevision';
 import { dateParts } from '../lib/localDate';
+// Who this is, with the failure kept rather than collapsed into a null session.
+// `sessionUid` keeps the getSession() call (storage-first, so it answers in a
+// changing room with no signal) and classifies its `error` once, in
+// src/lib/authReadFate.ts.
+import { sessionUid } from '../lib/sessionUid';
 import { useRecoverRead } from './readRefresh';
 
 export interface MeasureEntry {
@@ -93,6 +98,31 @@ const dateOf = (iso: string): string => {
   if (!p) return String(iso).slice(0, 10);
   return `${p[0]}-${String(p[1] + 1).padStart(2, '0')}-${String(p[2]).padStart(2, '0')}`;
 };
+/**
+ * Newest calendar day first, compared as STRINGS and never as instants.
+ *
+ * This was `Date.parse(b.at) - Date.parse(a.at)`, and `at` on a server row is a
+ * bare `YYYY-MM-DD` off a postgres DATE column. `Date.parse` resolves a bare
+ * date to UTC midnight (src/lib/localDate.ts opens with the arithmetic), so
+ * this was ordering calendar days by an instant they do not have — harmless
+ * while every value was a bare date, and not harmless the moment one of them is
+ * not. `addEntry` prepends an optimistic row whose `at` is a full
+ * `toISOString()`, and for a member east of Greenwich taping at 02:00 that
+ * instant is BEFORE UTC midnight of the day it belongs to: their new
+ * measurement sorted underneath the one already filed for today, which on a
+ * screen whose hero figure is `entries[0]` means the figure they just took is
+ * not the one they are shown.
+ *
+ * `dateOf` puts both shapes into the same local calendar day, and two
+ * `YYYY-MM-DD` strings compare correctly with `<` — the format is fixed-width
+ * and zero-padded, which is the whole reason it is the format.
+ */
+const byDayDesc = (a: MeasureEntry, b: MeasureEntry): number => {
+  const x = dateOf(a.at);
+  const y = dateOf(b.at);
+  return x < y ? 1 : x > y ? -1 : 0;
+};
+
 // group flat rows [{taken_at, kind, value}] into MeasureEntry per date
 function rowsToEntries(rows: any[]): MeasureEntry[] {
   const byDate: Record<string, MeasureEntry> = {};
@@ -101,7 +131,7 @@ function rowsToEntries(rows: any[]): MeasureEntry[] {
     byDate[d] = byDate[d] || { id: 'm-' + d, at: d };
     (byDate[d] as any)[r.kind] = Number(r.value);
   }
-  return Object.values(byDate).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  return Object.values(byDate).sort(byDayDesc);
 }
 /**
  * The rows one tape measurement becomes — one per site, each carrying its own
@@ -218,6 +248,9 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(() => setReadTick((n) => n + 1), []);
   const [entries, setEntries] = useState<MeasureEntry[]>([]);
   const [uid, setUid] = useState<string | null>(null);
+  /** The account the rows on screen were read for, as of now rather than as of
+   *  whenever the load effect was scheduled. See the identity check in it. */
+  const lastUid = useRef<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const outbox = useOutbox();
 
@@ -267,18 +300,73 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── Who this is ───────────────────────────────────────────────────
+        //
+        // No session is a true answer, not a failed check — that part was
+        // always right and stays. What was wrong is that it was decided from
+        // `!sess?.session` with the `error` beside it discarded, and that is
+        // precisely the case getSession() cannot distinguish: when the stored
+        // access token has expired and the refresh cannot reach the server it
+        // resolves with `{ data: { session: null }, error }`, byte-for-byte
+        // what it resolves with for somebody who never signed in. So a member
+        // in a basement changing room took the 'ready' branch, `entries` stayed
+        // [], and app/(client)/measurements.tsx drew its "log your first
+        // measurement" empty state over a year of somebody's tape history —
+        // inviting them to start again from nothing. That empty state is the
+        // one this file's header says the status exists to prevent, reached by
+        // the one route the status could not see.
+        //
+        // The second call — `getUser()` — is gone rather than kept. It was a
+        // network revalidation standing behind a storage read, so it turned
+        // every outage into 'error' for a member whose session was perfectly
+        // valid on this phone, and src/lib/sessionUidRead.ts records what the
+        // same substitution did to a member wearing a glucose monitor. One
+        // read, one classification.
+        //
+        // Told apart by `fate`, never by `!who.uid`: UidRead's signed-in member
+        // is `string`, which includes '', so `!who.uid` does not narrow it.
+        const who = await sessionUid('measurements.load');
         if (cancelled) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        if (!id) { setStatus('ready'); return; }
+        if (who.fate === 'signed-out') {
+          // Nobody is signed in. Whatever is on screen belongs to whoever WAS,
+          // and this provider is mounted for the whole app (app/_layout.tsx) —
+          // so a coach and a client sharing a phone at the gym would otherwise
+          // hand one the other's body measurements, and `uid` left standing
+          // would file the next tape measurement under the account that has
+          // gone. Both are cleared before the status says the list is true.
+          lastUid.current = null;
+          setUid(null);
+          setEntries([]);
+          setStatus('ready');
+          return;
+        }
+        if (who.fate !== null) {
+          // The question could not be asked. Nothing is known about who this
+          // is, so nothing may be claimed about their history — 'error' is this
+          // provider's own word for "the list you are looking at was not
+          // confirmed", and the screen draws the unconfirmed notice rather than
+          // the empty state.
+          //
+          // `entries` and `uid` are deliberately LEFT ALONE. This is the same
+          // device, holding the same stored session, and the read that failed
+          // was a refresh rather than a change of person; clearing here would
+          // take a member's own figures off their own screen for a dropped
+          // connection, and clearing `uid` would refuse the measurement they
+          // are standing there holding a tape to record. An account actually
+          // changing bumps `useAuthRevision`, which lands as 'signed-out' above
+          // or as a different id below.
+          setStatus('error');
+          return;
+        }
+        const id = who.uid;
+        // A different person than the one these rows were read for. Cleared
+        // BEFORE the read rather than after it, so there is no window in which
+        // the new member is looking at the old one's waist measurement. The
+        // comparison is against a ref and not against the `uid` state: this
+        // effect's closure holds whatever `uid` was when it was scheduled, and
+        // the ref is the value as of now.
+        if (lastUid.current !== id) setEntries([]);
+        lastUid.current = id;
         setUid(id);
         // One row per tape measurement per site, so a client measuring eight
         // sites weekly writes four hundred rows a year and reaches the ceiling
@@ -313,7 +401,7 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
     // become a false "saved" or a false "waiting".
     if (Object.keys(clean).length === 0) return 'refused';
     const entry: MeasureEntry = { id: 'm' + SEQ++, at: new Date().toISOString(), ...clean };
-    setEntries((p) => [entry, ...p].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)));
+    setEntries((p) => [entry, ...p].sort(byDayDesc));
     /**
      * The other half of the optimistic insert above, which did not exist.
      *

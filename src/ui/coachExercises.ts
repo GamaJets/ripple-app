@@ -16,6 +16,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
+import { sessionUid } from '../lib/sessionUid';
+import { authGateStatus } from '../lib/authGateStatus';
 import { USE_SUPABASE } from '../lib/config';
 
 import { mergeExerciseLists, type CoachExercise } from '../lib/coachExerciseList';
@@ -67,20 +69,43 @@ export function useCoachExercises(): CoachExercisesApi {
     let cancelled = false;
     (async () => {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── who is asking, and WHY there is nobody, when there is nobody ────
+        //
+        // This was `const { data: sess } = await supabase.auth.getSession()`
+        // with a bare `if (!sess?.session)` under it, and the comment that
+        // justified the shape said getUser() REJECTS when nobody is signed in.
+        // It does not. src/lib/authReadFate.ts quotes the installed library:
+        // both calls RESOLVE on a failure, `getSession()` with
+        // `{ data: { session: null }, error }` when the stored access token has
+        // expired and the refresh cannot reach the server. The `error` was not
+        // named, so a gym with no signal arrived here as `session: null` — the
+        // same value a phone that has never been signed in produces — and this
+        // provider answered 'ready' with an empty list. The picker above it
+        // then says the coach has saved no names of their own, which is a
+        // statement about them, made out of an outage.
+        //
+        // `sessionUid` keeps the getSession call (it answers from device
+        // storage, so it answers offline, which is the whole reason this hook
+        // asks it rather than getUser) and classifies the error once, in the
+        // one place that discrimination is written down.
+        const who = await sessionUid('coachExercises.saved');
         if (cancelled) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        // Signed out is not a failure — there is simply nobody to have saved
-        // anything. The built-in list stands on its own.
-        if (!id) { setStatus('ready'); return; }
+        // Told apart by `fate`, never by `!who.uid`. The two are equivalent
+        // here and the compiler will not say so: `!who.uid` DOES narrow the
+        // union in the surviving branch, because `uid` is `string | null` and a
+        // truthy one excludes the null member. Where it does not narrow is
+        // inside the failure branch — `fate` stays `AuthReadFate | null` there,
+        // which is exactly where `authGateStatus` has to be called, and
+        // src/ui/coachReceipts.ts is the site that proves it with a type error.
+        // So the failure is discriminated on the thing that discriminates it.
+        //
+        // Signed out is not a failure: there is nobody to have saved anything,
+        // the built-in list stands on its own, and 'ready' over that empty list
+        // is true. An unreadable read is not that — nothing is known about who
+        // this is, so nothing may be said about what they have saved.
+        // src/lib/authGateStatus.ts holds the mapping and is tested on it.
+        if (who.fate !== null) { setUid(null); setStatus(authGateStatus(who.fate)); return; }
+        const id = who.uid;
         setUid(id);
         // Ordered as well as capped. The list is re-sorted by name below, so the
         // order here is purely about WHICH names survive the ceiling — and left

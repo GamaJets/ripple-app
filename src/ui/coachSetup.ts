@@ -35,6 +35,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { sessionUid } from '../lib/sessionUid';
 import { useAuthRevision } from './authRevision';
 import { fetchMyCurrency } from '../lib/myCurrency';
 import { currencyStepDone } from '../lib/currencyStep';
@@ -52,10 +53,15 @@ export const UNKNOWN_SETUP: CoachSetupFacts = {
 export interface CoachSetupRead {
   facts: CoachSetupFacts;
   /** 'loading' until the first pass lands; 'ready' once it has, whatever the
-   *  individual answers were. There is no 'error' state for the whole read
-   *  because the eight are independent — a screen-level error banner over
-   *  seven good answers would hide them. The per-fact nulls carry the failure,
-   *  which is the point of the shape. */
+   *  individual answers were. The eight reads' own failures are NOT reported
+   *  here — they are independent, a screen-level error banner over seven good
+   *  answers would hide them, and the per-fact nulls carry them, which is the
+   *  point of the shape.
+   *
+   *  'error' means something else and only one thing: who is signed in could
+   *  not be established, so none of the eight was asked. That is not seven good
+   *  answers and one bad one, it is no answers at all, and it is the one failure
+   *  the per-fact nulls cannot distinguish from eight refused reads. */
   status: LoadStatus;
   reload: () => Promise<void>;
 }
@@ -137,14 +143,32 @@ export function useCoachSetup(): CoachSetupRead {
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setFacts(UNKNOWN_SETUP); setStatus('ready'); return; }
-    // getSession and not getUser: getUser REJECTS when nobody is signed in,
-    // which would latch this screen into eight dashes forever on a build that
-    // has simply not logged in yet. The same choice src/ui/nudges.ts makes.
-    let uid: string | null = null;
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      uid = sess?.session?.user?.id ?? null;
-    } catch (e) { reportError('coachSetup.session', e); }
+    // `getSession()` and not `getUser()`, and it stays that way: the session is
+    // read from local storage and answers on a phone with no signal, which is
+    // where a coach opens a checklist.
+    //
+    // (The reason the line here used to give was that `getUser()` REJECTS when
+    // nobody is signed in. It does not. `_getUser` catches every AuthError — a
+    // missing session included — and RESOLVES `{ data: { user: null }, error }`.
+    // The choice is still right, for the reason above; the reason it gave was
+    // not true, and it is not the difference that mattered anyway.)
+    //
+    // What mattered is that `getSession()` ALSO resolves — with
+    // `{ data: { session: null }, error }` — when it has to refresh an expired
+    // token and the auth server cannot be reached. Discarded, that error was
+    // indistinguishable from a handset nobody has signed in on, and this screen
+    // published eight dashes under 'ready': a claim that the pass landed and
+    // that these are its answers, when not one of the eight questions had been
+    // asked. `status` is the only thing here that can carry that difference, so
+    // it carries it.
+    const who = await sessionUid('coachSetup.session');
+    // Told apart by `fate`, never by `!uid`. `authGateFault` has already
+    // recorded the outage under this same key from inside `sessionUid`.
+    if (who.fate === 'unreadable') { setFacts(UNKNOWN_SETUP); setStatus('error'); return; }
+    const uid = who.uid;
+    // Genuinely signed out: nothing established, and nothing that could have
+    // been. Nine dashes under 'ready' is the honest answer, and it is what the
+    // build that has simply not logged in yet has always got.
     if (!uid) { setFacts(UNKNOWN_SETUP); setStatus('ready'); return; }
 
     const settled = await Promise.allSettled([

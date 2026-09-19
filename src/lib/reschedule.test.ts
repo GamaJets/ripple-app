@@ -274,6 +274,25 @@ const partly = pauseOutcomeLines({ ...base, freed: 1, notFreed: 2 }).join(' ');
 ok(/2 could not be cancelled/.test(partly), 'sessions that could not be freed are counted, never hidden');
 ok(/Check your calendar/.test(partly), 'and the member is told to look');
 
+// A report that carried no counts. `null === 0` is false and `null > 0` is
+// false, so every one of these would otherwise fall into the arm that says
+// nothing was booked, nothing was charged and nothing failed to cancel — three
+// claims about a member's own calendar, printed under the heading Paused after
+// an irreversible act.
+const unread = pauseOutcomeLines({ ...base, freed: null, charged: null, notFreed: null }).join(' ');
+ok(/could not read back how many sessions were booked/.test(unread),
+  'an unread freed count says so rather than saying nothing was booked');
+ok(!/Nothing was booked in them/.test(unread), 'and never claims the dates were empty');
+ok(/cannot say whether a late fee was recorded/.test(unread),
+  'an unread charged count says so rather than saying nothing was charged');
+ok(!/Nothing was charged/.test(unread), 'and never makes that claim about money');
+ok(/could not read back whether any of them failed to cancel/.test(unread),
+  'an unread not-freed count is said out loud rather than dropped by `null > 0`');
+ok(!/\b0\b/.test(unread), 'and no zero is printed anywhere in it');
+// The mutation this pins: settling the null back to 0 at the read.
+const settled = pauseOutcomeLines({ ...base, freed: 0, charged: 0, notFreed: 0 }).join(' ');
+ok(settled !== unread, 'a measured zero and an unread count do not read the same');
+
 /* ── the pause, and lifting it ─────────────────────────────────────────── */
 
 eq(pausedRangeLine('7 Sep', '7 Sep', null), 'Paused on 7 Sep.', 'a single day reads as one day');
@@ -289,6 +308,9 @@ ok(/no sessions were booked back in/.test(resumedLine(0)),
   'lifting a pause that had nothing left in it says so rather than implying a failure');
 ok(/one session has been booked back in/.test(resumedLine(1)), 'one is singular');
 ok(/3 sessions have been booked back in/.test(resumedLine(3)), 'and more than one is not');
+ok(/could not read back how many sessions were booked in again/.test(resumedLine(null)),
+  'and a resume that answered without a count does not claim there was nothing still to come');
+ok(!/nothing still to come/.test(resumedLine(null)), 'which is the sentence the zero arm makes');
 
 /* ── the coach moving a client's hour ───────────────────────────────────── */
 

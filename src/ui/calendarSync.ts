@@ -291,14 +291,29 @@ export type PushOutcome =
    *  not say — a transport failure, or a refusal before any write. */
   | { ok: false; reason: string; partial: PushResult | null };
 
-/** The counts off a push response, whether it succeeded or stopped part-way.
- *  `|| 0` on each, because a field the server did not send must not become NaN
- *  in a sentence a coach reads. */
+/**
+ * The counts off a push response, whether it succeeded or stopped part-way.
+ *
+ * `count` and not `Number(…) || 0`. A field the server did not send must not
+ * become NaN in a sentence a coach reads — but nor may it become 0, because 0
+ * on all three is what `pushSummaryLine` words as "Your Google calendar already
+ * matches what is on your Repple schedule, so nothing was changed." That is a
+ * claim about somebody else's diary, made from an answer that contained no
+ * figure at all: an absent key, a null, an empty string and a word all arrive
+ * here as the same confident zero. The unknown is carried instead, and both
+ * sentences in src/lib/calendarSync.ts have words for it.
+ */
+function count(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isInteger(v) && v >= 0 ? v : null;
+  if (typeof v === 'string' && /^\d+$/.test(v.trim())) return Number(v.trim());
+  return null;
+}
+
 function pushCounts(payload: any): PushResult {
   return {
-    created: Number(payload?.created) || 0,
-    updated: Number(payload?.updated) || 0,
-    removed: Number(payload?.removed) || 0,
+    created: count(payload?.created),
+    updated: count(payload?.updated),
+    removed: count(payload?.removed),
   };
 }
 

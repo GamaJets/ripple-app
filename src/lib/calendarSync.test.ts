@@ -483,6 +483,34 @@ const google = (status: BusySourceState['status']): BusySourceState =>
     'and the removals');
   ok(!/\b0\b/.test(pushPartialLine({ created: 9, updated: 0, removed: 0 }) || ''),
     'and never pads the sentence with the zeroes');
+
+  // ── a sync that answered without counts ────────────────────────────────
+  //
+  // The reading was `Number(payload?.created) || 0`, so a response carrying no
+  // figures at all came out as three zeroes — and three zeroes is the sentence
+  // that says Google's diary already matches Repple's. A coach reads that after
+  // granting this app the power to write into their calendar.
+  const blind = pushSummaryLine({ created: null, updated: null, removed: null });
+  ok(/did not say what it changed/.test(blind), 'an answer with no counts says so');
+  ok(!/already matches/.test(blind), 'and never claims the two calendars agree');
+  ok(!/\b0\b/.test(blind), 'and prints no figure it does not have');
+  // The mutation this pins: settling those nulls back to 0 at the read.
+  ok(pushSummaryLine({ created: 0, updated: 0, removed: 0 }) !== blind,
+    'a reported nothing-changed and an unreported one do not read the same');
+
+  const halfBlind = pushSummaryLine({ created: 2, updated: null, removed: null });
+  ok(/2 added/.test(halfBlind), 'the counts that did come back are still said');
+  ok(/updated and removed/.test(halfBlind), 'and the ones that did not are named');
+
+  // Silence on a failure is read as a calendar Repple never touched, so an
+  // unread partial must not be the same as a reported empty one.
+  const partialBlind = pushPartialLine({ created: null, updated: null, removed: null });
+  ok(partialBlind !== null, 'a refusal carrying no counts is not silently a clean failure');
+  ok(/cannot tell whether any of it reached Google/.test(partialBlind || ''),
+    'and says why the coach should look');
+  const partlyRead = pushPartialLine({ created: 4, updated: null, removed: 0 }) || '';
+  ok(/4 added/.test(partlyRead), 'a partly-read partial still says what did land');
+  ok(/How many were updated did not come back/.test(partlyRead), 'and names the half that is unknown');
 }
 
 /* ════════════════════════════════════════════════════════════════════════

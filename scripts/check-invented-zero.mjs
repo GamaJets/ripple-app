@@ -243,8 +243,20 @@ const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/lib', 'studio-web/com
 const KNOWN = new Map([
   ['app/(client)/onboarding.tsx', { count: 1, fix: '[annotate] a unit conversion for a prefilled box, and the ternary in front of it has already ruled the null out. Mark it `zero-ok:` saying the `== null` arm is the unknown.' }],
   ['app/(client)/workouts.tsx', { count: 8, fix: '[annotate] draft set rows the member is typing, plus two display conversions guarded by a `== null` arm. A blank rep box is not an unreported count. Mark them `zero-ok:` naming the box.' }],
-  ['app/(trainer)/calendar.tsx', { count: 2, fix: '[fix] `Number(row.withdrawn) || 0` off an RPC answer. A withdrawal count nobody sent is not a withdrawal count of none — this is the `queueLength` shape exactly.' }],
-  ['app/(trainer)/log-session.tsx', { count: 4, fix: '[annotate] `parseInt(s.reps, 10) || 0` over the coach\'s own draft boxes, every one of them immediately compared `> 0` as a validity filter. The file\'s comment at :901 already makes the argument; mark the four lines `zero-ok:` pointing at it.' }],
+  // app/(trainer)/calendar.tsx — CLOSED by annotation, and the entry's [fix]
+  // reading was wrong. `withdrawn` is not a count of other people read off a
+  // row: it is `get diagnostics … row_count` from the DELETE inside `block_time`
+  // itself (supabase/parts/113-block-time-already-blocked.sql), declared
+  // `withdrawn int`, initialised to 0 and returned only on the `ok` branch the
+  // two call sites read. It cannot arrive absent, so zero there is a
+  // measurement — "no open slots were standing in that period" — and not the
+  // `queueLength` shape, where a row that came back without the count is
+  // indistinguishable from a queue of nobody. Both lines now say so.
+  //
+  // app/(trainer)/log-session.tsx — CLOSED by annotation, as the entry read it.
+  // All four are `parseInt(<box>.reps, 10) || 0` over the coach's own TextInput
+  // state, each immediately compared `> 0` as the filter that drops a row they
+  // tabbed past. A blank rep box is not a set of zero reps reported by anybody.
   ['src/lib/clientTraining.ts', { count: 1, fix: '[annotate] `num(set?.[0]) ?? 0` over a `[reps, kg]` tuple this app wrote itself. Mark it `zero-ok:` saying a set row is dense at the point it is written.' }],
   ['src/lib/coachCredentials.ts', { count: 1, fix: '[fix] `daysUntil(c.expiresOn, today) ?? 0` — an expiry date that would not parse reads as expiring TODAY, which is a specific claim about a coach\'s insurance.' }],
   ['src/lib/coachDocs.ts', { count: 1, fix: '[fix] `Number(r.bytes) || 0` — a document whose size did not come back is shown as a 0-byte file, which reads as an empty upload.' }],
@@ -253,16 +265,13 @@ const KNOWN = new Map([
   ['src/lib/setLadder.ts', { count: 1, fix: '[annotate] a display conversion guarded by `s.loadKg == null ? \'\'` in front of it. Mark it `zero-ok:` saying the null arm is the empty string beside it.' }],
   ['src/lib/timedSets.ts', { count: 4, fix: '[annotate] `Number(set?.[0]) || 0` over stored `[reps, kg]` tuples this app wrote. Mark them `zero-ok:` saying a written set row carries both slots.' }],
   ['src/lib/vendorSleep.ts', { count: 3, fix: '[fix] sleep stages off a vendor payload. A stage the vendor did not report is not zero minutes of that stage, and the stage totals are summed into a night.' }],
-  ['src/lib/wearables/appleHealth.ts', { count: 3, fix: '[fix] `Number(x?.value) || 0` over native bridge samples, two of them inside a `reduce` that then divides by `res.length` — a sample with no value is counted into the denominator as a zero reading.' }],
   ['src/lib/wearables/appleHealthShim.ts', { count: 1, fix: '[fix] the same sum in the shim. Fix with the file above so the two do not diverge.' }],
   ['src/lib/wearables/cloudProvider.ts', { count: 1, fix: '[fix] `Number(r.mins) || 0` — minutes of activity nobody reported, filed as a day with none.' }],
   ['src/ui/availability.ts', { count: 3, fix: '[annotate] `minute` on a slot, absent from cached rows written by a build that predates the column — and the comment above :125 already says null there means "fall back". Mark the three `zero-ok:` pointing at it.' }],
-  ['src/ui/calendarSync.ts', { count: 3, fix: '[fix] `created`, `updated`, `removed` off a sync payload. A sync that answered without counts reads as a sync that changed nothing, which is the sentence a coach checks after granting calendar access.' }],
   ['src/ui/checkins.tsx', { count: 5, fix: '[fix] and it is already documented twice as a defect, from downstream: src/lib/checkinTrend.ts:17 and app/(client)/checkin.tsx:292 both name `Number(r.energy) || 0` and both exist to undo it. The repair belongs here, in `rowToCI`.' }],
   ['src/ui/coachStatement.ts', { count: 1, fix: '[annotate] `seq` is the statement\'s own ordering key, written by the insert that writes the row. Mark it `zero-ok:` saying a line without one has never existed.' }],
   ['src/ui/promos.tsx', { count: 1, fix: '[fix] `Number(r.discount) || 0`, and app/(client)/offers.tsx:46-53 has already fixed the member-facing twin and written down what it cost. Take `discountOf` from there.' }],
   ['src/ui/rosterExercise.ts', { count: 2, fix: '[fix] `recent_outings` and `prior_outings`, counts that `judgeRosterRow` compares against each other. `num` on the same rows already returns null for the loads beside them; these two settle it.' }],
-  ['src/ui/seriesPause.ts', { count: 4, fix: '[fix] `freed`, `charged`, `not_freed`, `created` off a pause/resume RPC. Every one of them is a count of sessions a coach is told about after an irreversible action.' }],
   ['src/ui/wellness.tsx', { count: 2, fix: '[fix] `hours` and `quality` off a sleep row, and `quality` is a 1–5 scale — the same hole-drawn-as-a-score that src/lib/checkinTrend.ts spends a paragraph undoing for the check-in chart.' }],
 ]);
 

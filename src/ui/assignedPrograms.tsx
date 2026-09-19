@@ -27,6 +27,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
+// Who is signed in, with the `error` kept beside the session, and the two
+// sentences that say WHICH kind of nobody it was. Never `getUser()`: see the
+// note at the read, and src/lib/sessionUidRead.ts for why the swap is not a
+// mistake to be undone.
+import { sessionUid } from '../lib/sessionUid';
+import { authGateMessage } from '../lib/authedUid';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
@@ -182,20 +188,41 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     let cancelled = false;
     (async () => {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── who is asking, and which of the two nobodies it is ─────────────
+        //
+        // No session is a true answer and not a failed check; that part was
+        // always right. What was wrong is that `!sess?.session` was the only
+        // test of it and the line above it threw `error` away.
+        //
+        // src/lib/sessionUidRead.ts quotes the installed library: with an
+        // expired access token and no way to reach GoTrue, `getSession()`
+        // resolves `session: null` WITH a retryable error — the same
+        // `session: null` a phone nobody has signed in on returns. So an outage
+        // took the `setStatus('ready')` branch, and this provider then
+        // published an EMPTY assignment map as the server's own answer. The
+        // header of this file is about precisely that reading arriving through
+        // the select: `getProgram` returns null, app/(client)/week.tsx reads a
+        // null under 'ready' as "your coach has not assigned you a programme",
+        // and builds the generic auto programme instead. A client on a bespoke
+        // block trains the wrong session and has nothing on the screen to doubt.
+        //
+        // One call, not two. `getUser()` was here only for the id, which the
+        // session already carries — and it is the one that goes to the network,
+        // which is what src/ui/glucoseData.ts records leaving a member looking
+        // at "Still loading." for a whole session.
+        //
+        // Narrowed on `fate`, never on `!who.uid` — `string` includes '', so
+        // `!who.uid` does not discriminate UidRead and the compiler refuses it.
+        const who = await sessionUid('assignedPrograms.read');
         if (cancelled) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        // Signed out — nobody has been assigned anything, which is true rather
-        // than unknown.
-        if (!id) { setStatus('ready'); return; }
+        if (who.fate !== null) {
+          // 'signed-out' — nobody has been assigned anything, which is true
+          // rather than unknown. 'unreadable' established nothing, and a null
+          // from `getProgram` under it has to mean "we could not find out".
+          setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+          return;
+        }
+        const id = who.uid;
         setUid(id);
         // ── The device's copy, read before the network is asked ────────────
         //

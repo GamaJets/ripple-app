@@ -11,6 +11,10 @@
 // broadcast screen refuse to target a segment it could not actually read.
 import { createContext, useCallback, useRef, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+// Who is signed in, with the `error` kept. The two calls this replaced —
+// `getSession()` to prove somebody is there and `getUser()` to get the id —
+// are one call now, and neither of the two nobodies is read as the other.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
@@ -48,6 +52,11 @@ const Ctx = createContext<TagsValue | null>(null);
 export function ClientTagsProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
   const [map, setMap] = useState<Record<string, string[]>>({});
+  /** The map as of the last render, for the write paths. A write needs to know
+   *  what it is about to overwrite so it can put it back, and reading that out
+   *  of a setter's updater would mean deciding inside another setter. */
+  const mapRef = useRef<Record<string, string[]>>(map);
+  mapRef.current = map;
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   // Bumped by `reload` below, in the read's dependency array beside `authRev`
@@ -61,18 +70,40 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── who is asking, and which of the two nobodies it is ─────────────
+        //
+        // No session is a true answer and not a failed check; that part was
+        // always right. What was wrong is that `!sess?.session` was the ONLY
+        // test, and the line above it dropped `error` on the floor.
+        //
+        // src/lib/sessionUidRead.ts has the library's own code for it: when
+        // the stored access token has expired and the refresh cannot reach
+        // GoTrue, `getSession()` resolves with `session: null` AND a retryable
+        // error — the same `session: null` a phone that has never been signed
+        // in returns. So during an outage this provider took the `setStatus
+        // ('ready')` branch and published an EMPTY tag map as the server's own
+        // answer. The header of this file says what that costs: the broadcast
+        // screen aims at segments built from `allTags`, and a coach picking a
+        // segment off an empty-but-'ready' map sends to nobody and is told it
+        // sent. 'error' is what lets that screen refuse.
+        //
+        // One call, not two. The `getUser()` that followed was only ever here
+        // to fetch the id, and getSession() carries it — going to the network
+        // for a uid that is already on the device is what src/ui/glucoseData.ts
+        // records leaving a member on "Still loading." for a whole session.
+        //
+        // Narrowed on `fate`, never on `!who.uid`: `string` includes '', so
+        // `!who.uid` does not discriminate UidRead and the compiler refuses it.
+        const who = await sessionUid('clientTags.read');
         if (cancelled) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        if (!id) { setStatus('ready'); return; }
+        if (who.fate !== null) {
+          // 'signed-out' is a coach who is not there: no tags, and that is the
+          // server's answer. 'unreadable' established nothing, so the tag map
+          // on screen is of unknown size and must not be published as whole.
+          setStatus(who.fate === 'signed-out' ? 'ready' : 'error');
+          return;
+        }
+        const id = who.uid;
         setUid(id);
         // Several rows per client rather than one, so this reaches the ceiling
         // sooner than the roster it describes: two hundred clients with five
@@ -107,16 +138,41 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
 
   const addTag = async (clientId: string, raw: string): Promise<boolean> => {
     const tag = norm(raw); if (!tag) return false;
+    // Whether this tag was already on this client BEFORE the optimistic write,
+    // so a failure can be undone without taking away one that was already
+    // there. Read off the ref rather than the state: this is a write path, and
+    // what it has to put back is the map as it is NOW.
+    const had = mapRef.current[clientId]?.includes(tag) ?? false;
     setMap((p) => {
       const cur = p[clientId] || [];
       if (cur.includes(tag)) return p;
       return { ...p, [clientId]: [...cur, tag] };
     });
-    if (!USE_SUPABASE || !uid) return false;
+    // ── and why a tag that did not land is TAKEN BACK OFF ─────────────────
+    //
+    // The optimistic entry was left in the map whatever happened, and this is
+    // not a cosmetic map: `allTags` is derived from it and `allTags` is what
+    // the broadcast screen draws its segment chips from. A tag that never
+    // reached `client_tags` therefore became a selectable audience — and the
+    // audience query runs against the SERVER, where the tag does not exist, so
+    // it matches nobody. The coach picks the segment, the screen reports it
+    // sent, and nought people were written to. The header of this file is about
+    // exactly this failure arriving through the read; this is it arriving
+    // through the write.
+    const putBack = () => {
+      if (had) return;
+      setMap((p) => ({ ...p, [clientId]: (p[clientId] || []).filter((x) => x !== tag) }));
+    };
+    if (!USE_SUPABASE || !uid) { putBack(); return false; }
     try {
-      const { error } = await supabase.from('client_tags').insert({ coach_id: uid, client_id: clientId, tag });
-      return !error;
-    } catch { return false; }
+      // COUNTED, on the same argument `removeTag` below already carries. An
+      // insert PostgREST accepted and RLS wrote nothing for is not an error,
+      // and `!error` was this function's whole test of success.
+      const ins = await supabase.from('client_tags')
+        .insert({ coach_id: uid, client_id: clientId, tag }, { count: 'exact' });
+      if (writeFailure('That tag', ins)) { putBack(); return false; }
+      return true;
+    } catch { putBack(); return false; }
   };
 
   const removeTag = async (clientId: string, raw: string): Promise<boolean> => {

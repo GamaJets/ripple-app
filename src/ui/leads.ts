@@ -56,6 +56,13 @@ import { capLimit, capped } from '../lib/rowCap';
 // all of them into one `.in()`. See the note at that read.
 import { readCappedByIds } from '../lib/cappedByIds';
 import { worstStatus, type LoadStatus } from './loadStatus';
+// The auth read, classified once rather than collapsed into `!uid`. See
+// src/lib/sessionUidRead.ts: getSession() resolves with `session: null` and a
+// retryable error beside it when the stored token has expired and the refresh
+// cannot get out — the same shape as a coach who has never signed in.
+import { sessionUid } from '../lib/sessionUid';
+import { authGateMessage } from '../lib/authedUid';
+import type { AuthReadFate } from '../lib/authReadFate';
 import { useAuthRevision } from './authRevision';
 import { fetchMyJoinCodes } from './joinCode';
 import type { KnownCode } from '../lib/adMatch';
@@ -125,6 +132,16 @@ export function useLeads(): LeadBook {
   const [notesUnread, setNotesUnread] = useState(false);
   const [loaded, setLoaded] = useState<Loaded>(EMPTY);
   const [coachId, setCoachId] = useState<string | null>(null);
+  /**
+   * Why there is no `coachId`, when there is not one. Null while there is.
+   *
+   * The three writes below all refused with a sentence beginning "Not signed
+   * in", for any falsy coachId. `authGateMessage` is what tells a coach whose
+   * connection dropped from a coach who signed out; its unreadable arm ends in
+   * "nothing has been changed", which is literally true of all three — each
+   * returns before its statement reaches the database.
+   */
+  const [authFate, setAuthFate] = useState<AuthReadFate | null>(null);
 
   const load = useCallback(async () => {
     // Without a server there is no table to have read, and an empty list under
@@ -136,12 +153,28 @@ export function useLeads(): LeadBook {
       setCodesStatus('error');
       return;
     }
-    // getSession and not getUser: getUser REJECTS when nobody is signed in,
-    // which would latch this into 'error' before anybody has logged in.
-    const { data: sess } = await supabase.auth.getSession();
-    const uid = sess?.session?.user?.id ?? null;
-    setCoachId(uid);
-    if (!uid) { setLoaded(EMPTY); setStatus('error'); setCodesStatus('error'); return; }
+    // getSession and not getUser — it answers from device storage and therefore
+    // answers offline — and through `sessionUid`, which is what stops the
+    // `error` beside it being thrown away. Both fates land on 'error' here and
+    // that is the right pair of answers: `leadCountLine('error', …)` says "Your
+    // enquiries could not be read, so nothing here is a count. This is not an
+    // empty inbox", which is true of a coach who is signed out and true of one
+    // whose connection dropped, and neither of them may be shown "Nobody has
+    // left their details yet" — a sentence about strangers, assembled out of an
+    // absence, that a coach reads as a verdict on the ad they are paying for.
+    //
+    // The fate is kept rather than folded away, because the WRITES below need
+    // it: "Not signed in, so this could not be saved" is a false statement
+    // during an outage, and it is the one sentence that sends somebody to
+    // re-enter a password that was never the problem.
+    //
+    // Told apart by `fate`, never by `!who.uid`: `string` includes '', so
+    // `!who.uid` does not narrow UidRead.
+    const who = await sessionUid('leads.read');
+    setAuthFate(who.fate);
+    setCoachId(who.uid);
+    if (who.fate !== null) { setLoaded(EMPTY); setStatus('error'); setCodesStatus('error'); return; }
+    const uid = who.uid;
 
     // The codes first, and separately, because their failure and the enquiry
     // read's failure say different things on screen.
@@ -295,7 +328,11 @@ export function useLeads(): LeadBook {
 
   const setLeadState = useCallback(async (leadId: string, state: LeadState): Promise<LeadWrite> => {
     if (!USE_SUPABASE || !coachId) {
-      return { ok: false, reason: 'Not signed in, so this could not be saved — the enquiry is still where it was.' };
+      // Which of the two it was decides the sentence. An outage is not a
+      // sign-out and must not be dressed as one; what is true either way is the
+      // second clause, because this returns before the update is sent.
+      const why = authFate ? authGateMessage(authFate) : 'Not signed in, so this could not be saved.';
+      return { ok: false, reason: `${why} The enquiry is still where it was.` };
     }
     // `.select('id')` so a policy that refused the row comes back as zero rows
     // rather than as a silent success: a zero-row update is not an error in
@@ -315,13 +352,14 @@ export function useLeads(): LeadBook {
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, authFate, load]);
 
   const addFollowUp = useCallback(async (leadId: string, body: string): Promise<LeadWrite> => {
     const problem = followUpProblem(body);
     if (problem) return { ok: false, reason: problem };
     if (!USE_SUPABASE || !coachId) {
-      return { ok: false, reason: 'Not signed in, so nothing was recorded — and an unrecorded call is one you will make twice.' };
+      const why = authFate ? authGateMessage(authFate) : 'Not signed in, so nothing was recorded.';
+      return { ok: false, reason: `${why} An unrecorded call is one you will make twice.` };
     }
     const { data, error } = await supabase.from('coach_lead_notes')
       .insert({ lead_id: leadId, coach_id: coachId, body: body.trim().slice(0, MAX_FOLLOW_UP) })
@@ -332,11 +370,14 @@ export function useLeads(): LeadBook {
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, authFate, load]);
 
   const erase = useCallback(async (leadId: string): Promise<LeadWrite> => {
     if (!USE_SUPABASE || !coachId) {
-      return { ok: false, reason: 'Not signed in, so nothing was removed. This enquiry is still on your list.' };
+      // The one of the three where the person on the other end asked to be
+      // forgotten, so the sentence has to say plainly that they have not been.
+      const why = authFate ? authGateMessage(authFate) : 'Not signed in, so nothing was removed.';
+      return { ok: false, reason: `${why} This enquiry is still on your list.` };
     }
     const { data, error } = await supabase.from('coach_leads')
       .delete()
@@ -352,7 +393,7 @@ export function useLeads(): LeadBook {
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, authFate, load]);
 
   return {
     status: combined,

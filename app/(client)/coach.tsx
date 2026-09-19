@@ -398,7 +398,25 @@ export default function Coach() {
      A list somebody has read and agreed to, that no longer describes the code,
      is worse than no list — they have been told something false and have now
      consented to it. */
-  const Bullets = ({ head, items, tone }: { head: string; items: string[]; tone: string }) => (
+  /* PLAIN FUNCTIONS, called as `{bullets(…)}` and `{disclosure()}`, and not
+     components rendered as `<Bullets/>`/`<Disclosure/>`. Declared in this body,
+     a capitalised component is a new function object on every render, so React
+     sees a different element TYPE and unmounts the whole disclosure rather than
+     reconciling it. This screen re-renders on every keystroke in the question
+     box and on every message that lands, and `Disclosure` renders `Bullets`, so
+     the two were being torn down together on each of them.
+     Nothing here holds a `TextInput` and nothing here is an `accessible`
+     element, so the caret and the VoiceOver cursor were never at stake on THIS
+     screen — what this buys is that the disclosure is no longer rebuilt from
+     scratch while somebody is reading it, keeping its layout and scroll
+     position rather than a subtree that is thrown away between characters.
+     They stay in this body rather than being lifted to module scope because
+     they close over `t`, and a lowercase call closes over it correctly where a
+     module-scope hoist would need it threaded through both of them. The `key`
+     on the `items.map` row below is untouched: it was already on the returned
+     View inside the function, and nothing maps over `bullets`/`disclosure`
+     themselves. */
+  const bullets = (head: string, items: string[], tone: string) => (
     <View style={{ marginTop: sp.md }}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>{head}</Text>
       {items.map((s) => (
@@ -410,11 +428,11 @@ export default function Coach() {
     </View>
   );
 
-  const Disclosure = () => (
+  const disclosure = () => (
     <View>
-      <Bullets head="Always sent when you ask something" items={ALWAYS_SENT} tone={t.ink3} />
-      <Bullets head="Only sent if you say yes" items={SENT_WITH_PERMISSION} tone={t.brand} />
-      <Bullets head="Never sent" items={NEVER_SENT} tone={t.ink3} />
+      {bullets('Always sent when you ask something', ALWAYS_SENT, t.ink3)}
+      {bullets('Only sent if you say yes', SENT_WITH_PERMISSION, t.brand)}
+      {bullets('Never sent', NEVER_SENT, t.ink3)}
       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{WHERE_IT_GOES}</Text>
     </View>
   );
@@ -489,7 +507,7 @@ export default function Coach() {
           ) : consent === 'unasked' ? (
             <View>
               <Notice tone={t.brand} kicker="Your data" title={CONSENT_TITLE} note={CONSENT_BODY}>
-                <Disclosure />
+                {disclosure()}
               </Notice>
               {/* The same disclaimer the Injuries screen and the Injury
                   Document screen carry, in the same words, finally on the
@@ -648,7 +666,7 @@ export default function Coach() {
               </View>
               {showsDetail ? (
                 <View style={{ marginTop: sp.sm }}>
-                  <Disclosure />
+                  {disclosure()}
                   {consent === 'no' ? (
                     <Flag tone={t.warn} style={{ marginTop: sp.md }}>{WITHHELD_NOTE}</Flag>
                   ) : null}

@@ -15,6 +15,10 @@ import { nightsFromIntervals, type SleepFamily, type SleepInterval, type SleepRe
 import { canRememberSleepAsk, hasAskedForSleep, markSleepAsked, shouldAutoAskForSleep } from './sleepAccess';
 import { canRememberGlucoseAsk, hasAskedForGlucose, markGlucoseAsked, shouldAutoAskForGlucose } from './glucoseAccess';
 import { parseHealthSamples, type GlucoseRead, type GlucoseReading } from '../glucose';
+// A sample with no readable number is not a reading of zero. See the header of
+// ../healthSamples.ts: the same four characters that made an average heart rate
+// of 36 out of one real measurement and one hole.
+import { avgSamples, newestReading, sampleValue, sumSamples } from '../healthSamples';
 
 const meta: ProviderMeta = {
   id: 'apple',
@@ -187,14 +191,20 @@ export function writeAuthStatus(): Promise<WriteAuth> {
   });
 }
 
-function sumValues(res: any): number | null {
-  if (!Array.isArray(res) || res.length === 0) return null;
-  return Math.round(res.reduce((s: number, x: any) => s + (Number(x?.value) || 0), 0));
-}
-function avgValues(res: any): number | null {
-  if (!Array.isArray(res) || res.length === 0) return null;
-  return Math.round(res.reduce((s: number, x: any) => s + (Number(x?.value) || 0), 0) / res.length);
-}
+// ── the three sample readers ────────────────────────────────────────────────
+//
+// All three used to be `Number(x?.value) || 0` over rows from the native
+// bridge, which counted a sample the bridge could not describe as a reading of
+// ZERO — and `avgValues` then divided by `res.length`, so the hole was in the
+// denominator too. Two heart-rate samples, one of 72 bpm and one unreadable,
+// averaged to 36. The arithmetic and the account of it are in
+// ../healthSamples.ts, which is a plain module precisely so a test can reach
+// it: nothing in THIS file can be loaded under `node`, because it imports
+// react-native, which is how the coercion sat here untested while it was wrong.
+//
+// `sumSamples` and `avgSamples` are called straight from `fetchToday`. What
+// stays here is the pair below, because WHICH sample is the newest one is a
+// fact about how this file's own queries were sorted.
 /**
  * The MOST RECENT sample's value — which is not "the last element" unless you
  * know how the list was sorted, and this file sorted its two heart-rate reads
@@ -214,27 +224,38 @@ function avgValues(res: any): number | null {
  * reading it.
  *
  * So the caller states the sort and this picks the right end.
+ *
+ * It also used to end in `Number(r?.value) || 0`, so a newest sample the bridge
+ * could not describe was published as a heart rate of ZERO BPM — a resting
+ * pulse of nothing, on the Recovery screen, about somebody who is demonstrably
+ * alive. `newestReading` skips rows that carry no number and answers null when
+ * none of them does, which the field is already typed for and the screen
+ * already draws as a dash.
  */
 function newestValue(res: any, ascending: boolean): number | null {
-  if (!Array.isArray(res) || res.length === 0) return null;
-  const r = ascending ? res[res.length - 1] : res[0];
-  return Math.round(Number(r?.value) || 0);
+  const hit = newestReading(res, ascending);
+  return hit ? Math.round(hit.value) : null;
 }
 
 /**
  * WHEN the newest sample was taken, ISO, or null when it does not say.
  *
- * The same row `newestValue` reads, for its time instead of its number. Every
- * HealthKit sample carries one; this file simply never kept it, which is what
- * let a stale heart rate be drawn as a live one.
+ * THE SAME SAMPLE `newestValue` reads, for its time instead of its number —
+ * and that is now guaranteed rather than assumed. Both used to index the list
+ * independently, which was harmless only while neither of them could skip a
+ * row; the moment `newestValue` began stepping past a sample with no readable
+ * number, two independent walks would have put one sample's figure under
+ * another sample's clock, and `hrFreshness` would have called a stale reading
+ * live on the strength of it.
  *
  * `startDate` before `endDate`: a heart-rate sample is an instant and the two
  * are equal, but a sample type that spans time is stamped by when it BEGAN,
  * and taking the end would age it by its own duration.
  */
 function newestAt(res: any, ascending: boolean): string | null {
-  if (!Array.isArray(res) || res.length === 0) return null;
-  const r = ascending ? res[res.length - 1] : res[0];
+  const hit = newestReading(res, ascending);
+  if (!hit) return null;
+  const r = hit.sample as any;
   const raw = r?.startDate ?? r?.start ?? r?.endDate ?? r?.end ?? null;
   if (!raw) return null;
   const ms = Date.parse(String(raw));
@@ -476,19 +497,35 @@ export const appleHealth: WearableProvider = {
       read('getSamples', { ...options, type: 'Workout', limit: 100 }),
     ]);
     const m = emptyMetrics('apple');
-    m.activeKcal = sumValues(active);
-    m.steps = steps && typeof steps.value === 'number' ? Math.round(steps.value) : sumValues(steps);
-    m.heartRateAvg = avgValues(hr);
+    m.activeKcal = sumSamples(active);
+    // `getStepCount` is an aggregate: one row with a `value`, not a list. It is
+    // read through the same `sampleValue` as everything else so that a NaN
+    // cannot reach the field — `typeof NaN === 'number'` passed the old guard,
+    // and `Math.round(NaN)` is NaN, which a `number | null` field accepts and
+    // no screen has a sentence for.
+    const stepsAggregate = sampleValue(steps);
+    m.steps = stepsAggregate != null ? Math.round(stepsAggregate) : sumSamples(steps);
+    m.heartRateAvg = avgSamples(hr);
     m.heartRateLatest = newestValue(hr, false);
     m.heartRateLatestAt = newestAt(hr, false);
     m.heartRateResting = newestValue(rhr, false);
     if (Array.isArray(workouts) && workouts.length) {
-      const mins = workouts.reduce((s: number, w: any) => {
+      // A workout whose start or end would not parse contributes NOTHING, and
+      // is not counted. It used to add a zero into the same total, so an
+      // afternoon of sessions with one unreadable stamp reported less time than
+      // the watch recorded, with nothing to say a row had been dropped. When no
+      // row parses at all the answer is null — an unreadable list is not a day
+      // with no training in it.
+      let mins = 0;
+      let read = 0;
+      for (const w of workouts as any[]) {
         const a = Date.parse(w?.start ?? w?.startDate);
         const b = Date.parse(w?.end ?? w?.endDate);
-        return s + (isFinite(a) && isFinite(b) ? (b - a) / 60000 : 0);
-      }, 0);
-      m.workoutMins = Math.round(mins) || null;
+        if (!isFinite(a) || !isFinite(b) || b <= a) continue;
+        mins += (b - a) / 60000;
+        read++;
+      }
+      m.workoutMins = read > 0 ? (Math.round(mins) || null) : null;
     }
     return m;
   },

@@ -29,6 +29,8 @@
 import { createContext, useCallback, useMemo, useRef, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { CoachAdjust } from '../lib/nutrition';
 import { supabase } from '../lib/supabase';
+import { sessionUid } from '../lib/sessionUid';
+import { authGateStatus } from '../lib/authGateStatus';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
@@ -84,18 +86,43 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        // No session is a true answer, not a failed check. getUser() REJECTS
-        // when nobody is signed in, and treating that as an error latched this
-        // provider into 'error' on the first tick — before anybody had signed
-        // in — where it stayed, because the effect never ran a second time.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── no session, or no answer: this screen decides what somebody EATS ─
+        //
+        // No session is a true answer, not a failed check — that part was
+        // right, and a provider that mounts on the welcome screen must not
+        // latch at 'error' before anybody has signed in. The reason written
+        // beside it was wrong: it said getUser() REJECTS when nobody is signed
+        // in. It does not. src/lib/authReadFate.ts quotes the installed
+        // auth-js: both calls RESOLVE on a failure, `getSession()` with
+        // `{ data: { session: null }, error }` when the stored access token has
+        // expired and the refresh cannot reach the server.
+        //
+        // `error` was not named on that line, so an outage landed as
+        // `session: null` and this provider answered 'ready' with an empty map.
+        // That is the exact substitution this file's own header is about, one
+        // call earlier than the read it describes: under 'ready' a null from
+        // `get()` means "no coach adjustment", the macro screens fall back to
+        // the generic formula, and a client whose coach cut them 400 kcal is
+        // served the uncorrected targets and eats to them. An absence is never
+        // a clearance, and least of all here.
+        //
+        // The call stays `getSession()` — it answers from device storage and
+        // therefore answers with no signal — and its error is now classified
+        // once, in the one place that discrimination is written down.
+        const who = await sessionUid('coachNutrition.load');
         if (cancelled) return;
-        if (!sess?.session) { setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        if (!id) { setStatus('ready'); return; }
+        // Signed out is 'ready': nobody is signed in, there are no
+        // adjustments, and that emptiness is true. Unreadable is 'error', and
+        // it is the arm that matters most in this file — it is what stops every
+        // macro screen presenting the generic target as this client's coach's
+        // instruction. The mapping is src/lib/authGateStatus.ts's, and it is
+        // tested there because reversing it here compiles and passes every gate
+        // this repo has.
+        //
+        // Discriminated on `fate`, not on `!who.uid`: the failure branch is the
+        // one that needs `fate`, and `!who.uid` does not narrow it there.
+        if (who.fate !== null) { setUid(null); setStatus(authGateStatus(who.fate)); return; }
+        const id = who.uid;
         setUid(id);
         // `const { data } = …` — `error` was not even named, so a refused read
         // was indistinguishable from a client with no adjustment.

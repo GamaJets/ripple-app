@@ -53,6 +53,7 @@ import {
 } from '../lib/coachSettlements';
 import type { GymLink } from '../lib/coachPayTerms';
 import { ADJUSTMENT_KINDS, type AdjustmentKind, type ClassPayKind } from '../lib/gymPay';
+import { sessionUid } from '../lib/sessionUid';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { useTenant } from './tenant';
 import { useAuthRevision } from './authRevision';
@@ -160,18 +161,40 @@ export function useMySettlements(): MySettlements {
     }
     setReadStatus('loading');
     try {
-      // getSession and not getUser: getUser REJECTS with nobody signed in,
-      // which would latch this at 'error' before anybody had signed in.
-      const { data: sess } = await supabase.auth.getSession();
+      // `getSession()` and not `getUser()`, and it stays that way: the session
+      // is read from local storage and answers offline, and a coach opening
+      // their pay in a basement gym must not be sent to the network for a
+      // question that does not need it.
+      //
+      // (The reason this line used to give was that `getUser()` REJECTS with
+      // nobody signed in. It does not — `_getUser` catches every AuthError, a
+      // missing session included, and resolves `{ data: { user: null }, error }`.
+      // The choice stands; the reason it gave did not.)
+      //
+      // The discarded `error` was the defect. `getSession()` resolves with
+      // `{ data: { session: null }, error }` when it has to refresh an expired
+      // token and the auth server cannot be reached, so an outage and a genuine
+      // sign-out arrived as the same `!uid` and left NO trace of the difference
+      // anywhere: nothing was reported, and a coach who could not see their pay
+      // during a GoTrue blip produced no record that the blip had happened.
+      const who = await sessionUid('coachSettlements.session');
       if (cancelled()) return;
-      const uid = sess?.session?.user?.id ?? null;
-      if (!uid) {
+      // Told apart by `fate`, never by `!uid`. Both fates still land on
+      // 'error', and that is the right status for both — neither established
+      // anything, so this section may not say "your gym has settled nothing"
+      // on either — but only one of them is a fault, and `sessionUid` has now
+      // recorded that one under this key. `rows` is deliberately untouched:
+      // `paidView` refuses to total anything that is not whole, so what is
+      // already held stays on screen as the last thing that was confirmed
+      // rather than being replaced by an emptiness nobody measured.
+      if (who.fate !== null) {
         setReadStatus('error');
         setAdjustments(NONE<CoachAdjustment>('error'));
         setClassLines(NONE<CoachClassLine>('error'));
         setSessions(NONE<CoachSessionLine>('error'));
         return;
       }
+      const uid = who.uid;
 
       const [runs, adj, cls, ses] = await Promise.all([
         // Ordered on `settled_at` AND `id`: two runs closed in the same second

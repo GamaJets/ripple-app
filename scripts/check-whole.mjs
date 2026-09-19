@@ -339,6 +339,57 @@
 //     fire on it, because the distinction lives in the surrounding English.
 //     Write the `whole-ok:` reason. The rule asks for the sentence; it does not
 //     pretend it can read it.
+// ── `supabase/functions`, added 14 September 2026, and what it found: NOTHING
+//
+// It is on ROOTS below, and the honest report of that widening is that this
+// gate's two rules cannot fire in that directory and did not. That is a
+// finding, not a shrug, and it is written here rather than left for the next
+// lane to rediscover:
+//
+//   · twenty-five server modules, zero occurrences of `!== 'error'`, zero of
+//     `LoadStatus`, zero of `isWhole`, zero of the string `'partial'`. The
+//     enumeration both rules are ABOUT does not exist on the server. Nothing
+//     there imports src/ui/loadStatus.ts, and nothing should — it is a screen's
+//     vocabulary for a read in flight, and a function that has already been
+//     asked a question either answers it or returns a status code.
+//
+// So the root was added for the two things it still buys, and for nothing else:
+//
+//   · the per-root FLOOR. `scripts/gate-floor.mjs` carries
+//     `'supabase/functions': 12`, so the directory is now a thing this gate
+//     must FIND. If it is renamed, moved, or dropped from ROOTS, the run fails
+//     instead of quietly shrinking — which is the exact failure that file's
+//     header was written about, and a root that contributes zero hits is
+//     precisely the root a later edit deletes without noticing.
+//   · a coverage claim that matches the sentence beside it. The success line
+//     names a file count, and that number now covers the same tree
+//     check-writes.mjs and check-reads.mjs cover.
+//
+// ── AND THE DEFECT THAT DOES LIVE THERE, WHICH THIS GATE DOES NOT CATCH ───
+//
+// Saying "zero hits" without this paragraph would be the thing this file's own
+// header calls out: a pass read as a clearance. The server has the short-read
+// problem, it just does not spell it with `LoadStatus`.
+// supabase/functions/owner-metrics/index.ts pages every aggregate with
+// `pageAll(…)` and returns a `truncated` flag beside the rows, for exactly the
+// reason src/lib/rowCap.ts exists — its own header says a count computed off
+// 1000 rows "would have looked entirely reasonable". A total summed there while
+// `truncated` is ignored is rule 1b's defect precisely, and NOTHING in this
+// file would see it: the rules key on the enumeration's spelling, not on the
+// idea. Whoever widens this gate onto `truncated` should read 1b first; it is a
+// different alias family and a different set of honest cases.
+//
+// ── and what a text rule over that root cannot see in any case ────────────
+//
+// Deno is not installed on this machine and these functions are in no tsconfig.
+// `npm run check:functions` is the nearest thing to a compiler they get, and
+// its own header says what it is: it PARSES them, resolves their relative
+// imports, and type checks their calls into `src/lib`. Everything behind
+// `npm:`, `jsr:` and `https:` is declared `any` in an ambient shim. So this
+// gate is a TEXT rule over that directory with nothing standing behind it, and
+// a pass here is not a statement that those functions type check. The success
+// line says so on every run, because the header is not what a green run puts in
+// front of anybody.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { assertRootFloors } from './gate-floor.mjs';
@@ -346,8 +397,10 @@ import { assertRootFloors } from './gate-floor.mjs';
 const ROOT = new URL('..', import.meta.url).pathname;
 
 /** Where LoadStatus is consumed: the three phone apps, the shared providers and
- *  the console. */
-const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/components', 'studio-web/lib'];
+ *  the console. And `supabase/functions`, where it is NOT consumed — see the
+ *  section on that root in the header for why it is on the list anyway and what
+ *  a pass over it does and does not mean. */
+const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/components', 'studio-web/lib', 'supabase/functions'];
 
 /**
  * Offenders that are real, are NOT silenced, and were not fixed in the change
@@ -406,13 +459,55 @@ const KNOWN = new Map([]);
 
 const isTest = (f) => /\.test\.[jt]sx?$/.test(f) || f.includes('__tests__');
 
+/**
+ * Surviving a path that disappears while this gate is running.
+ *
+ * Lanes write this tree while gates run over it, so a path listed by `readdir`
+ * and gone by the time it is stat'd or read is an ordinary event here. The gate
+ * DYING of it is not: an ENOENT out of the top of the script reads as the gate
+ * being broken rather than the tree, which is worse than a red gate because it
+ * sends whoever is looking to the wrong file.
+ *
+ * Checked by running it, not by reading it, and what was here before was a
+ * third of a fix:
+ *
+ *   · the `walk` already took an `out` parameter, so the ENOENT arm returning
+ *     `out` was sound. The ReferenceError that killed the same copied fix in
+ *     two sibling gates — `out` returned from an arm of a `walk` that never
+ *     took it — is NOT present in this file.
+ *   · but the tolerance covered `readdirSync` and nothing else. `statSync` was
+ *     bare, so an entry deleted between the listing and the stat threw; and the
+ *     offender loop below then read the whole list with a bare `readFileSync`,
+ *     where the window is not one directory but the entire scan. Both are
+ *     closed here — the same second half a sibling lane had to add to
+ *     check-reads.mjs after the first fix landed.
+ *   · and the `catch` was bare, so EACCES or a dangling symlink was swallowed
+ *     as if the root were absent and left the per-root floor to report a real
+ *     fault as a missing directory. Only ENOENT and ENOTDIR are tolerated now.
+ *
+ * A Set of paths rather than a counter, so one file that is both stat'd and
+ * read cannot be reported as two disappearances. It is printed with the success
+ * line: a gate whose last line names a file count has to say when that count is
+ * short of what was listed.
+ */
+const vanished = new Set();
+const gone = (e) => e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+const readSource = (f) => {
+  try { return readFileSync(f, 'utf8'); }
+  catch (e) { if (gone(e)) { vanished.add(f); return null; } throw e; }
+};
+
 function walk(dir, out = []) {
   let entries;
-  try { entries = readdirSync(dir); } catch { return out; }
+  try { entries = readdirSync(dir); }
+  catch (e) { if (gone(e)) { vanished.add(dir); return out; } throw e; }
   for (const e of entries) {
     if (e === 'node_modules' || e.startsWith('.')) continue;
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) walk(p, out);
+    let st;
+    try { st = statSync(p); }
+    catch (err) { if (gone(err)) { vanished.add(p); continue; } throw err; }
+    if (st.isDirectory()) walk(p, out);
     else if (/\.tsx?$/.test(p) && !isTest(p)) out.push(p);
   }
   return out;
@@ -510,6 +605,9 @@ for (const r of ROOTS) {
   perRoot.set(r, files.length - before);
 }
 assertRootFloors('check:whole', perRoot);
+/* Named on the success line, so the caveat below it is attached to a number
+ * rather than to a directory nobody can size from the output. */
+const fnFiles = perRoot.get('supabase/functions') ?? 0;
 
 // The empty-set guard every gate here has. A check that passes because it
 // looked at nothing is worse than no check.
@@ -521,7 +619,11 @@ if (files.length < 150) {
 const found = [];
 for (const f of files) {
   const rel = relative(ROOT, f);
-  const lines = readFileSync(f, 'utf8').split('\n');
+  const source = readSource(f);
+  // Gone between the stat and the read. Counted above and reported with the
+  // success line; it contributes no lines rather than killing the run.
+  if (source === null) continue;
+  const lines = source.split('\n');
   /* One pass for the two families of name before any line is judged, because
    * Lane 85's alias was declared at line 163 and used at 784. File-local, by
    * name, no scope analysis — the header names that as an assumption. */
@@ -699,3 +801,15 @@ if (drifted.length) {
 
 const backlog = [...KNOWN.values()].reduce((n, e) => n + e.count, 0);
 console.log(`check-whole — ok, ${files.length} files; no new count, total or empty-state gated on "did not fail"${backlog ? `, ${backlog} known and ratcheted` : ''}`);
+// Said on every pass rather than only in the header, because a file count is a
+// coverage claim and these two rules cannot make good on it over one of the
+// roots behind the number. Deno is not installed and those files are in no
+// tsconfig either, so there is no type checker behind this there.
+console.log(`  ${fnFiles} of those are under supabase/functions, where neither rule can fire: `
+  + "that tree holds no `LoadStatus`, no `isWhole` and no `!== 'error'`. It is on ROOTS for the "
+  + 'per-root floor, so the directory cannot be dropped unnoticed — not because it is being judged. '
+  + 'owner-metrics/index.ts has the same short-read problem spelled `truncated`, and this gate does not read that.');
+if (vanished.size) {
+  console.log(`  ${vanished.size} path${vanished.size === 1 ? '' : 's'} disappeared mid-scan and ${vanished.size === 1 ? 'was' : 'were'} skipped — `
+    + 'another lane is writing this tree. The count above is that many files short of what was listed.');
+}

@@ -46,6 +46,7 @@ import type { LoadStatus } from './loadStatus';
 import { readCoachedModeOrNull, type CoachedMode } from '../lib/types';
 import { deliveryFact, type DeliveryDeclaration, type DeliveryFact } from '../lib/coachDelivery';
 import { useRoster } from './roster';
+import { sessionUid } from '../lib/sessionUid';
 
 interface CoachDeliveryValue {
   /** The coach's own answer, or null. Null means unanswered ONLY when
@@ -83,16 +84,49 @@ export function CoachDeliveryProvider({ children }: { children: ReactNode }) {
     // the same refusal src/ui/coachProfile.ts makes physical.
     if (!USE_SUPABASE || VARIANT !== 'trainer') { setStatus('ready'); return; }
     try {
-      // getSession and not getUser: getUser REJECTS with nobody signed in,
-      // which would latch this provider into 'error' on the first tick, before
-      // anybody had signed in, and leave it there.
-      const { data: sess } = await supabase.auth.getSession();
+      // getSession and not getUser, and the stated reason was wrong. It said
+      // "getUser REJECTS with nobody signed in"; it does not. `_getUser`
+      // catches every AuthError and RESOLVES with `{ data: { user: null },
+      // error }` — the source is quoted in src/lib/authReadFate.ts. The real
+      // reason to keep getSession is src/lib/sessionUidRead.ts's: it answers
+      // from device storage, so it answers in a gym with no signal, and
+      // src/ui/glucoseData.ts records what fronting a provider with the network
+      // call cost the last time somebody tried it. The call is NOT converted.
+      //
+      // ── what was actually wrong: this file's own stated failure mode ──────
+      //
+      // The header says null is three things and only one of them is an answer,
+      // and that collapsing them is how a coach with a live answer gets
+      // prompted to answer again over the top of it. That is precisely what the
+      // discarded `error` did. getSession() resolves `{ session: null, error }`
+      // when the stored token has expired and the refresh cannot reach the
+      // server, so an outage arrived as `id === null` and this set `declared`
+      // UNREAD at status 'ready' — and 'ready' is the word that turns a null
+      // into an answer. `deliveryFact` then read it as a SKIP, which is the
+      // widest declaration, so nothing visibly broke: the coach was simply
+      // asked again how they coach, over an answer they had already given, for
+      // as long as the auth server was unreachable.
+      const who = await sessionUid('coachDelivery.hydrate');
       if (cancelled()) return;
-      const id = sess?.session?.user?.id ?? null;
+      if (who.fate === 'signed-out') {
+        // No session is a true answer and not a failed check. There is nobody
+        // to have an answer, so 'ready' with a null is exactly right.
+        setUid(null);
+        setDeclared(UNREAD);
+        setStatus('ready');
+        return;
+      }
+      if (who.fate !== null) {
+        // 'unreadable'. Nothing was established, so this is the same state a
+        // refused `trainers` read below produces and it takes the same word.
+        // `uid` is cleared with it: a write must not go out under an id from a
+        // check that did not answer.
+        setUid(null);
+        setStatus('error');
+        return;
+      }
+      const id = who.uid;
       setUid(id);
-      // No session is a true answer and not a failed check. There is nobody to
-      // have an answer, so 'ready' with a null is exactly right.
-      if (!id) { setDeclared(UNREAD); setStatus('ready'); return; }
 
       const { data, error } = await supabase
         .from('trainers').select('delivery_mode').eq('id', id).maybeSingle();

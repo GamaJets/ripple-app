@@ -26,6 +26,13 @@
 // one to change.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// `getUser()` does not reject when the auth server is unreachable — it RESOLVES
+// with `{ data: { user: null }, error }`, the same shape a genuinely signed-out
+// caller produces, and auth-js brands offline/DNS/abort and every 5xx as
+// `AuthRetryableFetchError`, which is an AuthError. A leaf module with no
+// relative imports of its own, so Deno can resolve it; it is where the repo
+// writes down "refused the credential" versus "could not be asked".
+import { authReadFate } from '../../../src/lib/authReadFate.ts';
 import { checkRedirect, parseRedirectAllow } from '../../../src/lib/redirectTarget.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
@@ -54,7 +61,22 @@ Deno.serve(async (req) => {
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '');
-  const { data: auth } = await service.auth.getUser(jwt);
+  // ── who is asking, and the difference between "not you" and "could not ask" ──
+  //
+  // This used to be `const { data: auth } = …` with the error thrown away.
+  // `getUser()` RESOLVES rather than rejects for any AuthError, and auth-js
+  // brands a dead fetch and every 500/502/503/504 as `AuthRetryableFetchError`,
+  // which is one — so during a GoTrue blip `auth.user` came back null with the
+  // error discarded, and the line below answered a paying, SIGNED-IN person
+  // 401 "no user". 401 says the credential was looked at and refused; it was
+  // not looked at at all. src/lib/authReadFate.ts separates the two, and an
+  // `unreadable` read now answers 503 — come back — with a sentence that says
+  // nothing was charged rather than asking for a password that was never wrong.
+  const { data: auth, error: authErr } = await service.auth.getUser(jwt);
+  if (authErr && authReadFate(authErr) === 'unreadable') {
+    return json({ error: 'Repple could not check who you are just now — that is our end, not yours. '
+      + 'Nothing has been changed. Try opening your billing again in a moment.' }, 503);
+  }
   const userId = auth?.user?.id;
   if (!userId) return json({ error: 'no user' }, 401);
 

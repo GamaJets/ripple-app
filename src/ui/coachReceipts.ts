@@ -17,6 +17,8 @@
 // same discipline `deactivatePackage` and `updatePackage` keep in
 // src/lib/connect.ts, and it is why the insert asks for the row back.
 import { supabase } from '../lib/supabase';
+import { signedInUid } from '../lib/signedInUid';
+import { authGateMessage } from '../lib/authedUid';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
@@ -121,9 +123,40 @@ export async function recordReceipt(draft: ReceiptDraft): Promise<RecordResult> 
   const minor = draftMinorUnits(draft.amountText, currency);
   if (minor == null) return { ok: false, error: 'That amount could not be read as money.' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { ok: false, error: 'Not signed in.' };
+    // ── "Not signed in." was said to signed-in people ───────────────────────
+    //
+    // This was `const { data: auth } = await supabase.auth.getUser()` with the
+    // error dropped. src/lib/authReadFate.ts quotes the installed auth-js:
+    // getUser() does not reject on a dead connection, it RESOLVES with
+    // `{ data: { user: null }, error }`, and a failed fetch — offline, DNS,
+    // captive portal, a 502 — is branded `AuthRetryableFetchError`, which is an
+    // AuthError like any other. So `uid` was `undefined` for an outage and for a
+    // genuine sign-out alike, and this returned the four words "Not signed in."
+    // to a self-employed coach standing in front of a client who has just handed
+    // them cash. That sentence is a statement about them, it was false, and the
+    // remedy it implies — sign in again — is the one thing that cannot help.
+    //
+    // Two answers now, in the words src/lib/authedUid.ts holds: a refused or
+    // absent credential says so, and an unreadable one says the check failed at
+    // our end and that NOTHING HAS BEEN CHANGED — which is true here, because
+    // this returns before the insert below. See the separate note in
+    // authedUid.ts: a future caller that writes first must not reuse it.
+    const who = await signedInUid('coachReceipts.record');
+    // Told apart by `fate`, never by `!who.uid`: UidRead's signed-in member is
+    // `string`, which includes '', so `!who.uid` does not narrow the union —
+    // and inside the failure branch is exactly where `authGateMessage(fate)`
+    // has to go.
+    if (who.fate !== null) return { ok: false, error: authGateMessage(who.fate) };
+    const uid = who.uid;
+    // The self-payment guard, re-run against the coach id the SERVER just named
+    // rather than the one the caller passed in. `receiptBlockers` refuses a
+    // payment from the coach to themselves by comparing `clientId` with
+    // `coachId`, and a draft that arrived with `coachId` unset skipped that
+    // comparison silently — the guard was there and simply had nothing to
+    // compare. Part 190's CHECK constraint would still refuse the row, but as a
+    // database error rather than as the sentence written for this.
+    const mine = receiptBlockers({ ...draft, coachId: uid });
+    if (mine.length) return { ok: false, error: mine[0] };
     const { data, error } = await supabase
       .from('coach_receipts')
       .insert({

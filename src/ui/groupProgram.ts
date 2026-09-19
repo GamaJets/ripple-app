@@ -35,6 +35,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Program } from '../lib/programs';
 import { programSignature, type GroupVersion } from '../lib/groupProgram';
 import { supabase } from '../lib/supabase';
+// Who is signed in, with the `error` kept beside the session. Two calls became
+// one: see the note at the call for why `getUser()` is not asked any more.
+import { sessionUid } from '../lib/sessionUid';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
 // "Add everyone" is a button, so the verify read below can be handed a list far
@@ -43,6 +46,10 @@ import { readByIds } from '../lib/idLookup';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import { reportError } from '../lib/reportError';
+// The server's own words for a refusal, or a named unknown that admits it gave
+// none. `addMembers` groups its failures by reason, and a reason this file made
+// up would defeat the grouping — see the note there.
+import { serverSaid } from '../lib/serverSaid';
 
 export interface ProgramGroup {
   id: string;
@@ -73,12 +80,59 @@ export interface ProgramGroup {
   createdAt: string | null;
 }
 
+/**
+ * One reason, and everybody it was the reason for.
+ *
+ * The grouping is the point. `addMembers` is a FAN-OUT — "add everyone" is a
+ * button, and the picker hands over whatever was ticked — and the causes
+ * genuinely differ per person inside one tap: the policy refuses a hand-added
+ * client silently while accepting the linked one beside them, and a statement
+ * that failed outright failed for a reason of its own that has nothing to do
+ * with either. Flattening all of that into one sentence tells a coach that
+ * "the server did not accept them" about people who were refused for three
+ * different reasons, only one of which they can do anything about.
+ */
+export interface AddFailure {
+  /** What the server actually said, or — where it said nothing — what its
+   *  silence established. Never a guess about a person's account. */
+  reason: string;
+  /** The clients this reason is the reason for. Never empty. */
+  ids: string[];
+}
+
 /** What an add actually did, per client. Zero rows written is not an error in
  *  PostgREST — a client the policy refused (they are not this coach's, or they
  *  are a hand-added client with no account yet) comes back as a silent no-op —
  *  so the caller is handed the ids that landed and the ids that did not, and
  *  never a boolean that means "the request was accepted". */
-export interface AddResult { added: string[]; failed: string[] }
+export interface AddResult {
+  /** Read back from the server. Present in the group, confirmed. */
+  added: string[];
+  /**
+   * Everybody not confirmed present, whatever the reason.
+   *
+   * A SUPERSET of the ids under `failures` whose reason is a refusal: it also
+   * carries `unknown` below, because the alternative is worse. A screen reading
+   * only this field says too much about the unknown ones; a screen reading
+   * nothing at all about them says nothing to a coach who has just tapped Add
+   * on thirty people. `failures` is what lets a screen tell the two apart, and
+   * app/(trainer)/group.tsx still reads this one flat.
+   */
+  failed: string[];
+  /** The same people, grouped by the reason the server gave. Empty when
+   *  everybody landed. */
+  failures: AddFailure[];
+  /**
+   * Clients whose outcome could not be established at all.
+   *
+   * The verify read is what turns an accepted request into a fact, and when IT
+   * fails there is no fact either way — the upsert may well have worked. These
+   * ids used to be returned as `failed` with nothing to mark them, so a read
+   * failure was reported to the coach as "Nobody was added", which is a claim
+   * about the server that this app was in no position to make.
+   */
+  unknown: string[];
+}
 
 // The store used when the backend is switched off entirely. In that mode the
 // local store IS the source of truth, so its status is 'ready' and its writes
@@ -101,17 +155,36 @@ export function useProgramGroups() {
     (async () => {
       setStatus('loading');
       try {
-        // getUser() REJECTS when nobody is signed in, which is a true answer
-        // and not a failed check — the same latch that pinned
-        // assignedPrograms into 'error' before anybody had signed in.
-        const { data: sess } = await supabase.auth.getSession();
+        // ── who is asking, and which of the two nobodies it is ─────────────
+        //
+        // Nobody signed in is a true answer and not a failed check; that part
+        // was always right. What was wrong is that `!sess?.session` was the
+        // only test of it and the line above it dropped `error`.
+        //
+        // src/lib/sessionUidRead.ts quotes the library body: with an expired
+        // access token and no way to reach GoTrue, `getSession()` resolves
+        // `session: null` WITH a retryable error — the same `session: null` a
+        // phone nobody has signed in on returns. So an outage took the
+        // `setGroups([]); setStatus('ready')` branch, and the header of this
+        // file says exactly what that costs: 'ready' means the server's own
+        // answer, an empty group list under it is "this coach has no groups",
+        // and the screen offers to build one beside the eight that exist.
+        //
+        // One call, not two. `getUser()` was only here for the id, which the
+        // session already carries, and it is the call that goes to the network.
+        //
+        // Narrowed on `fate`, never on `!who.uid` — `string` includes '', so
+        // `!who.uid` does not discriminate UidRead and the compiler refuses it.
+        const who = await sessionUid('programGroups.read');
         if (cancelled) return;
-        if (!sess?.session) { setGroups([]); setStatus('ready'); return; }
-        const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (authErr) { setStatus('error'); return; }
-        const id = auth?.user?.id;
-        if (!id) { setGroups([]); setStatus('ready'); return; }
+        if (who.fate !== null) {
+          if (who.fate === 'signed-out') { setGroups([]); setStatus('ready'); return; }
+          // 'unreadable'. Nothing was established, so the groups on screen are
+          // neither confirmed nor retracted. `sessionUid` has reported it.
+          setStatus('error');
+          return;
+        }
+        const id = who.uid;
         setUid(id);
 
         const { data: gRows, error: gErr } = await supabase
@@ -331,11 +404,11 @@ export function useProgramGroups() {
 
   const addMembers = useCallback(async (id: string, clientIds: string[]): Promise<AddResult> => {
     const wanted = [...new Set(clientIds)];
-    if (!wanted.length) return { added: [], failed: [] };
+    if (!wanted.length) return { added: [], failed: [], failures: [], unknown: [] };
     if (!USE_SUPABASE) {
       LOCAL = LOCAL.map((g) => (g.id === id ? { ...g, memberIds: [...new Set([...g.memberIds, ...wanted])] } : g));
       setGroups(LOCAL);
-      return { added: wanted, failed: [] };
+      return { added: wanted, failed: [], failures: [], unknown: [] };
     }
     try {
       // `ignoreDuplicates` so re-adding somebody already in the group is a
@@ -345,6 +418,14 @@ export function useProgramGroups() {
       const { error } = await supabase.from('program_group_members')
         .upsert(wanted.map((c) => ({ group_id: id, client_id: c })), { onConflict: 'group_id,client_id', ignoreDuplicates: true });
       if (error) reportError('programGroups.addMembers', error, { id });
+      // The statement's OWN reason, kept rather than only reported. One upsert
+      // covers everybody in `wanted`, so when it is refused outright that
+      // refusal is the reason for every id the read-back then does not find —
+      // and it is the server's words, not this file's guess at them. Held in a
+      // variable because it has to survive to the grouping at the bottom.
+      const upsertReason = error
+        ? `The server refused the whole request: ${serverSaid(error)}`
+        : null;
       // Whatever the insert said, this is who is actually in the group. A
       // client the policy refused — not this coach's, or a hand-added client
       // with no account for the foreign key to find — is a silent no-op in
@@ -369,14 +450,62 @@ export function useProgramGroups() {
             .order('client_id', { ascending: true }).range(from, to),
           'who is in this group',
         );
-      } catch (readErr) { reportError('programGroups.addMembers.verify', readErr, { id }); return { added: [], failed: wanted }; }
+      } catch (readErr) {
+        reportError('programGroups.addMembers.verify', readErr, { id });
+        // A FAILED READ IS NOT AN EMPTY LIST. This branch used to return
+        // `{ added: [], failed: wanted }`, and app/(trainer)/group.tsx turns an
+        // empty `added` into the headline "Nobody was added" — a statement
+        // about the server made from the fact that we could not ask it. The
+        // upsert above may well have written every one of them.
+        return {
+          added: [],
+          failed: wanted,
+          failures: [{
+            reason: `We could not check who is in the group, so whether ${wanted.length === 1 ? 'this client was added' : 'these ' + wanted.length + ' clients were added'} is not known. Nothing here says they were not.`,
+            ids: wanted,
+          }],
+          unknown: wanted,
+        };
+      }
       const there = new Set((data ?? []).map((r: any) => r.client_id as string));
       const added = wanted.filter((c) => there.has(c));
       if (added.length) {
         setGroups((gs) => gs.map((g) => (g.id === id ? { ...g, memberIds: [...new Set([...g.memberIds, ...added])] } : g)));
       }
-      return { added, failed: wanted.filter((c) => !there.has(c)) };
-    } catch (e) { reportError('programGroups.addMembers', e, { id }); return { added: [], failed: wanted }; }
+      const failed = wanted.filter((c) => !there.has(c));
+      // ── grouped by the reason the server actually gave ──────────────────
+      //
+      // Two reasons are possible here and they are not the same fact.
+      //
+      //   · the upsert was refused outright, and PostgREST said why. Everybody
+      //     missing from the read-back is missing because of THAT, quoted.
+      //   · the upsert was accepted and the row still is not there. Nothing was
+      //     said, and the silence is the finding: RLS matched no row for them.
+      //     That is the hand-added client with no account, and it is the one
+      //     cause a coach can act on.
+      //
+      // Never both, because `upsertReason` is null in the second case; and
+      // never a sentence about somebody's account written over a 500.
+      const failures: AddFailure[] = failed.length
+        ? [{
+          reason: upsertReason
+            ?? 'The server accepted the request and added nobody for them, which means the row was not theirs to write: a client who is not yours, or one you added by hand who has no account yet.',
+          ids: failed,
+        }]
+        : [];
+      return { added, failed, failures, unknown: [] };
+    } catch (e) {
+      reportError('programGroups.addMembers', e, { id });
+      // Nothing reached the server, or nothing came back from it. Same shape as
+      // the verify failure above and for the same reason: this is an unknown,
+      // not a refusal, and it must not be reported as one.
+      return {
+        added: [],
+        failed: wanted,
+        failures: [{ reason: `That request did not complete, so who is in the group is not known: ${serverSaid(e)}`, ids: wanted }],
+        unknown: wanted,
+      };
+    }
   }, []);
 
   const removeMember = useCallback(async (id: string, clientId: string): Promise<boolean> => {

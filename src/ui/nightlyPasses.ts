@@ -32,6 +32,12 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
+// Who is asking, with the failure kept rather than collapsed. `getUser()`
+// RESOLVES on a dropped connection with `{ data: { user: null }, error }`, so
+// the `auth?.user?.id` this file used to read was `undefined` for an outage and
+// `undefined` for a coach who is genuinely signed out — and both landed on the
+// same line. See src/lib/authReadFate.ts.
+import { signedInUid } from '../lib/signedInUid';
 import type { LoadStatus } from './loadStatus';
 import { PASSES_WINDOW_DAYS, type PassNotice } from '../lib/nightlyPasses';
 
@@ -55,9 +61,20 @@ export async function fetchPassNotices(days: number = PASSES_WINDOW_DAYS): Promi
   // not come back rather than drawing a calm-looking nothing.
   if (!USE_SUPABASE) return { rows: [], status: 'error' };
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { rows: [], status: 'error' };
+    // `signedInUid` keeps the getUser() call this read has always made and
+    // classifies its `error` once, in the one place that discrimination is
+    // written down. Both answers are 'error' here and that is deliberate:
+    // `PassNoticesRead` has two fields and no room for a third fate, and the
+    // sentence this screen draws under 'error' — SILENCE_IS_NOT_PROOF — is the
+    // true one for either. What must never happen is the THIRD reading, an
+    // outage arriving as 'ready' with no rows, which reads as five quiet nights
+    // when nobody looked at all.
+    //
+    // Told apart by `fate`, never by `!who.uid`: UidRead's signed-in member is
+    // `string`, which includes '', so `!who.uid` does not narrow the union.
+    const who = await signedInUid('nightlyPasses.read');
+    if (who.fate !== null) return { rows: [], status: 'error' };
+    const uid = who.uid;
     // A full timestamp, never a bare YYYY-MM-DD: these rows are written at
     // 07:12 UTC and compared against `created_at`, and a date-only bound would
     // be a string compared against a timestamp on whatever the server made of
