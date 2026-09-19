@@ -22,7 +22,7 @@ import { OUTBOX_KINDS, lapsedNote, outboxNote } from '../../src/lib/outbox';
 import { BRAND } from '../../src/lib/brands';
 import { weekIndexOf } from '../../src/lib/weekStart';
 import { trainIntent } from '../../src/lib/trainIntent';
-import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, Image } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -70,6 +70,8 @@ import {
   checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, showChecklist,
 } from '../../src/lib/firstRun';
 import { FORWARD_ICON } from '../../src/ui/direction';
+import { avatarSource } from '../../src/lib/avatarImage';
+import { hitSlopFor } from '../../src/lib/a11y';
 
 // The month and weekday names used to be two hardcoded English arrays here,
 // rendered as `{DAYS[d.getDay()]} {d.getDate()} {MONTHS[d.getMonth()]}` on the
@@ -641,6 +643,20 @@ export default function Home() {
                 screen, so nothing is lost by dropping it: the mark on the bell
                 now counts unread notifications, which is what a bell claims. */}
             <NotificationBell group="client" />
+            {/* The member's own face, top right, as the board draws it — the
+                way to Me from the first screen. `avatarSource`, not `c.photo`:
+                a device path from before uploads existed draws as initials. */}
+            <Pressable onPress={() => router.push('/(client)/profile')} accessibilityRole="button" accessibilityLabel="Your profile"
+              hitSlop={hitSlopFor(36)}
+              style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              {avatarSource(c.photo) ? (
+                <Image source={{ uri: avatarSource(c.photo)! }} style={{ width: 36, height: 36 }} accessibilityIgnoresInvertColors />
+              ) : c.init ? (
+                <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{c.init}</Text>
+              ) : (
+                <Icon name="me" size={16} color={t.brandInk} />
+              )}
+            </Pressable>
           </>}
         />
 
@@ -711,25 +727,6 @@ export default function Home() {
           <View style={{ marginTop: sp.lg }}>
             <Cta label={today.cta} wide tone={today.tone} onPress={() => router.push(trainIntent(today.route) as any)} />
           </View>
-        </View>
-
-        {/* ── the four things to do from here ──────────────────────────────
-            Under the goal card, where the board puts its tiles, rather than
-            at the foot of the screen where nobody scrolled to find them. */}
-        <View style={{ marginTop: sp.md }}>
-          <QuickRow items={[
-            { icon: 'meals', label: 'Meals', onPress: () => router.push('/(client)/nutrition') },
-            { icon: 'moon', label: 'Sleep', onPress: () => router.push('/(client)/recovery') },
-            { icon: 'progress', label: 'Progress', onPress: () => router.push('/(client)/scans') },
-            // One slot, so it goes to whichever of the three this client
-            // actually has: a session to book, a check-in to send, or — with
-            // nobody to send it to — their own report.
-            booksSessions
-              ? { icon: 'calendar' as const, label: 'Book', onPress: () => router.push('/(client)/calendar') }
-              : remoteCoached
-                ? { icon: 'message' as const, label: 'Check-in', onPress: () => router.push('/(client)/checkin') }
-                : { icon: 'chart' as const, label: 'Report', onPress: () => router.push('/(client)/report') },
-          ]} />
         </View>
 
         {/* ── what you are looking at ─────────────────────────────────────
@@ -1193,6 +1190,27 @@ export default function Home() {
           </Section>
         </>) : null}
 
+
+        {/* ── the four things to do from here ──────────────────────────────
+            Below the first viewport, deliberately: the implementation brief
+            says no row of equal feature tiles above the fold — Meals and
+            Progress are tabs already, and the one action up there is the
+            goal card's. These are the quiet way to the rest. */}
+        <View style={{ marginTop: sp.md }}>
+          <QuickRow items={[
+            { icon: 'meals', label: 'Meals', onPress: () => router.push('/(client)/nutrition') },
+            { icon: 'moon', label: 'Sleep', onPress: () => router.push('/(client)/recovery') },
+            { icon: 'progress', label: 'Progress', onPress: () => router.push('/(client)/scans') },
+            // One slot, so it goes to whichever of the three this client
+            // actually has: a session to book, a check-in to send, or — with
+            // nobody to send it to — their own report.
+            booksSessions
+              ? { icon: 'calendar' as const, label: 'Book', onPress: () => router.push('/(client)/calendar') }
+              : remoteCoached
+                ? { icon: 'message' as const, label: 'Check-in', onPress: () => router.push('/(client)/checkin') }
+                : { icon: 'chart' as const, label: 'Report', onPress: () => router.push('/(client)/report') },
+          ]} />
+        </View>
 
       </ScrollView>
     </SafeAreaView>

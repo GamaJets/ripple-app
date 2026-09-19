@@ -695,7 +695,14 @@ export default function Profile() {
 
         <Section style={{ paddingTop: 0 }}>
           <ListRow icon="pencil" title="Edit Profile" note="Photo, name and body details" onPress={openEdit} />
+          <ListRow icon="target" title="Goals" note="What you are working toward, and by when" onPress={() => router.push('/(client)/goal')} />
           <ListRow icon="bell" title="Notifications" note="Choose what you are sent, and when" onPress={() => router.push('/(client)/notification-prefs')} />
+          <ListRow icon="lock" title="Privacy" note="Your account, your data and who can see it" onPress={() => router.push('/(client)/account')} />
+          <ListRow icon="heart" title="Connected Apps" note="Your watch and the apps that feed your day" onPress={() => router.push('/(client)/devices')} />
+          <ListRow icon="message" title="Help & Support" note="Tell us what to improve, or ask for help" onPress={() => router.push('/(client)/feedback')} />
+          {/* Sign Out stays on Settings, where its confirmation and the
+              sentence about what a failed sign-out means already live. */}
+          <ListRow icon="settings" title="Settings" note="Units, appearance, legal and sign out" onPress={() => router.push('/(client)/settings')} />
         </Section>
 
         {/* A photo saved before there was anywhere to put it. The member is the

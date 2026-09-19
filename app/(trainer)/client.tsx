@@ -1604,36 +1604,29 @@ export default function ClientScreen() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── the record's head, the board's way ──────────────────────────
-            Back, the client's initials, their name, and the one line the
-            roster already holds about them; the message control at the
-            trailing edge, because writing to them is what a coach does from
-            here most. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+            Back and the message control on one line; under it the client
+            centred — initials, name, and the one line the roster already
+            holds about them. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back to clients" onPress={() => router.back()} />
-          <View style={{ width: 46, height: 46, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}
+          {id ? <Ghost icon="message" a11yLabel={`Message ${who}`} onPress={go('/(trainer)/chat')} /> : null}
+        </View>
+        <View style={{ alignItems: 'center', paddingTop: sp.md }}>
+          <View style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}
             accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>
+            <Text style={{ ...ty.head, color: t.brand }}>
               {(fullName || 'Client').split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}
             </Text>
           </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>
-              {fullName || 'Client'}
-            </Text>
-            {/* The row's own facts, which the roster already holds.
-                `lastActive` is the roster's string and is printed as it is.
-
-                `next` is NOT here, and its absence is the point.
-                `RosterClient.next` is set to the literal '—' in all three
-                places src/ui/roster.tsx constructs a client and is computed
-                nowhere. The real answer is a section of its own below —
-                src/lib/nextUp.ts — because it is worth more than the tail of
-                a summary line. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
-              {client ? `${client.goal} · ${COACHED_MODE_SHORT[client.mode]} · last active ${client.lastActive}` : 'Your book'}
-            </Text>
-          </View>
-          {id ? <Ghost icon="message" a11yLabel={`Message ${who}`} onPress={go('/(trainer)/chat')} /> : null}
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', textAlign: 'center', marginTop: sp.md }} numberOfLines={1}>
+            {fullName || 'Client'}
+          </Text>
+          {/* `next` is NOT here, and its absence is the point: `RosterClient.next`
+              is the literal '—' everywhere it is built. The real answer is a
+              section of its own below — src/lib/nextUp.ts. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }} numberOfLines={2}>
+            {client ? `${client.goal} · ${COACHED_MODE_SHORT[client.mode]} · last active ${client.lastActive}` : 'Your book'}
+          </Text>
         </View>
 
         {/* Three figures off the roster row, which is the only read this
@@ -1647,28 +1640,6 @@ export default function ClientScreen() {
               { label: 'Last Active', value: client.lastActive },
               { label: 'Unread', value: fig(client.unread ?? null) },
             ]} />
-          </View>
-        ) : null}
-
-        {/* The four screens a coach opens from a record most, as tiles rather
-            than as rows at the bottom of a long page. Each already exists and
-            takes the same clientId and name this screen was opened with; the
-            full list of ways in, with what is in each, is still below. */}
-        {id ? (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-            {([
-              ['grid', 'Program', '/(trainer)/builder'],
-              ['train', 'Training', '/(trainer)/client-training'],
-              ['chart', 'Progress', '/(trainer)/client-body'],
-              ['meals', 'Nutrition', '/(trainer)/client-nutrition'],
-            ] as const).map(([icon, label, path]) => (
-              <Pressable key={label} onPress={go(path)} accessibilityRole="button"
-                accessibilityLabel={`Open ${who}'s ${label.toLowerCase()}`}
-                style={{ flex: 1, minWidth: 72, alignItems: 'center', gap: 6, paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                <Icon name={icon} size={18} color={t.brand} />
-                <Text style={{ ...ty.caption, color: t.ink2 }} numberOfLines={1}>{label}</Text>
-              </Pressable>
-            ))}
           </View>
         ) : null}
 
@@ -1808,6 +1779,137 @@ export default function ClientScreen() {
             ) : null}
           </Section>
         ) : null}
+
+        {/* ── the ways in, each saying whether there is anything in there ─── */}
+        <Section>
+          <SectionHead title="Their Record" />
+
+          <ListRow icon="target" title="What They're Working Toward"
+            note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
+            tone={goalStatus === 'error' ? t.warn : undefined}
+            onPress={go('/(trainer)/client-goals')} />
+
+          {/* Directly under the goals, because the scans on the other side of
+              this row are what two of the three measured goal kinds are held
+              against — and because "how is this person actually going" is the
+              same question asked twice. */}
+          <ListRow icon="chart" title="Their Body Composition"
+            note={unasked ?? bodyLine(
+              scansFailed,
+              scanTop == null && !scansFailed,
+              scanTop?.newestISO ?? null,
+              scanTop?.hasEarlier ?? false,
+              todayISO,
+              who,
+            )}
+            tone={scansFailed ? t.warn : undefined}
+            onPress={go('/(trainer)/client-body')} />
+
+          {/* Directly under the body composition and above the plan, because
+              this is the only row on the screen about what has already
+              happened. Everything else here is an intention — a goal, a marked
+              day, a list, a programme — and a coach standing in front of
+              somebody wants the record before the plan. */}
+          <ListRow icon="train" title="What They've Actually Done"
+            note={unasked ?? trainingLine(trainedStatus, trainingBoardValue, who)}
+            tone={trainedStatus === 'error' ? t.warn : undefined}
+            onPress={go('/(trainer)/client-training')} />
+
+          {/* Directly under "What They've Actually Done", because these two are
+              the same question asked from either end: the hours that happened
+              and the hours that were booked and then were not. The record
+              behind it — `public.session_cancellations`, supabase/parts/380 —
+              was written by a trigger on every cancellation since that part was
+              applied and read by nothing at all, which left the one person who
+              acts on it unable to see it.
+
+              The note is DESCRIPTIVE and carries no figure. This screen does
+              not read that table, and a count summarised from a read that has
+              not happened is the shape every other row here avoids by owning
+              its own status. The screen behind the row gates its figures on
+              `isWhole` and says which of loading, failed and empty it is. */}
+          <ListRow icon="calendar" title="Sessions They Cancelled"
+            note={`Hours booked with you that were cancelled — who ended each one, and how much notice there was.`}
+            onPress={go('/(trainer)/client-cancellations')} />
+
+          <ListRow icon="calendar" title="The Week They've Planned"
+            note={unasked ?? weekLine(weekStatus, week, who)}
+            tone={weekStatus === 'error' ? t.warn : undefined}
+            onPress={go('/(trainer)/client-week')} />
+
+          {/* Beside the training week rather than under it, because the two are
+              the same week seen from either side of the plate: what they are
+              lifting and what they are eating while they do it. Pushed with the
+              id like every row here — client-nutrition falls back to its own
+              roster picker when it is opened without one, so a coach who
+              arrives from Explore is asked who they mean, and a coach who
+              arrives from here is not asked twice. */}
+          <ListRow icon="meals" title="What They're Eating"
+            note={`${who}'s calorie and macro targets, and the week of meals you write them.`}
+            onPress={go('/(trainer)/client-nutrition')} />
+
+          {/* This carried a comment saying `checklists.tsx` "starts on its own
+              client picker and does not read `clientId` off the route", so the
+              summary was about this client and the screen it opened still asked
+              the coach to pick them.
+
+              Both halves were false, and had been since that screen was
+              rewritten. `checklists.tsx:93` reads `clientId` with
+              `useLocalSearchParams` and seeds `picked` from it, and `go()` at
+              line 603 has always pushed `{ clientId: id, name: fullName }`. So
+              the row opened on the right client the whole time.
+
+              Corrected rather than deleted, because a stale comment is worse
+              than none: this one described a gap that was already closed, and
+              the next person to read it would either have "fixed" a working
+              screen or left the row alone believing it was broken. Half the
+              defects in this codebase's own roadmap are comments that outlived
+              the code they described. */}
+          <ListRow icon="check" title="Their Daily Checklist"
+            note={unasked ?? listLine(itemStatus, activeLines, seen, who)}
+            tone={worstStatus(itemStatus, tickStatus) === 'error' ? t.warn : undefined}
+            onPress={go('/(trainer)/checklists')} />
+
+          <ListRow icon="camera" title="Progress Photos They Sent You"
+            note={unasked ?? photosLine(inbox, photosFailed, who)}
+            tone={photosFailed ? t.warn : undefined}
+            onPress={go('/(trainer)/client-photos')} />
+
+          <ListRow icon="train" title={justCheckedIn ? `Log What ${who} Just Did` : 'Log a Session You Ran'}
+            note={justCheckedIn
+              ? `${who} is checked in. Enter the exercises as you go — it lands in their own record and shows up in their app.`
+              : `Goes into ${who}'s own record, marked as logged by you.`}
+            onPress={go('/(trainer)/log-session')} />
+
+          <ListRow icon="chat" title={`Message ${who}`}
+            note={client && client.unread != null && client.unread > 0
+              ? `${client.unread} unread from them in your thread.`
+              : 'Open your thread with them.'}
+            onPress={go('/(trainer)/chat')} />
+
+          {/* Last, because it is the only row here that is the END of something
+              rather than a way into it — twelve weeks, a move, a handover to
+              another coach. It belongs on this screen and not only in Explore:
+              the document is ABOUT a named person, and the moment a coach wants
+              one is the moment they are standing on that person's screen. The
+              id goes with it for the same reason the rows above pass it; open
+              from Explore and client-report asks who the report is for. */}
+          <ListRow icon="pencil" title={`Write ${who} a Report`}
+            note={`The handover document at the end of a block — read from ${who}'s record, not from memory.`}
+            onPress={go('/(trainer)/client-report')} />
+          {/* Sending paperwork starts here, on the screen of the person it is
+              for, because that is where a coach is standing when they decide to
+              — the same argument the report row above makes.
+
+              It is a plain push and not `go`: Documents is about the coach's own
+              paperwork and takes no client, and handing it a clientId it does
+              not read would be a parameter that looks like it does something.
+              The picker on that screen names every client, this one included. */}
+          <ListRow icon="pencil" title="Send Them a Document"
+            note="Your own waivers, agreements and forms — pick one and send it to a single client."
+            onPress={() => router.push('/(trainer)/documents')} />
+        </Section>
+
 
         {/* ── the two things a coach comes here to DO ─────────────────────────
             Both of these existed already and neither could be found: booking a
@@ -2808,137 +2910,6 @@ export default function ClientScreen() {
               </Text>
             ) : null}
           </>) : null}
-        </Section>
-
-
-        {/* ── the ways in, each saying whether there is anything in there ─── */}
-        <Section>
-          <SectionHead title="Open" />
-
-          <ListRow icon="target" title="What They're Working Toward"
-            note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
-            tone={goalStatus === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/client-goals')} />
-
-          {/* Directly under the goals, because the scans on the other side of
-              this row are what two of the three measured goal kinds are held
-              against — and because "how is this person actually going" is the
-              same question asked twice. */}
-          <ListRow icon="chart" title="Their Body Composition"
-            note={unasked ?? bodyLine(
-              scansFailed,
-              scanTop == null && !scansFailed,
-              scanTop?.newestISO ?? null,
-              scanTop?.hasEarlier ?? false,
-              todayISO,
-              who,
-            )}
-            tone={scansFailed ? t.warn : undefined}
-            onPress={go('/(trainer)/client-body')} />
-
-          {/* Directly under the body composition and above the plan, because
-              this is the only row on the screen about what has already
-              happened. Everything else here is an intention — a goal, a marked
-              day, a list, a programme — and a coach standing in front of
-              somebody wants the record before the plan. */}
-          <ListRow icon="train" title="What They've Actually Done"
-            note={unasked ?? trainingLine(trainedStatus, trainingBoardValue, who)}
-            tone={trainedStatus === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/client-training')} />
-
-          {/* Directly under "What They've Actually Done", because these two are
-              the same question asked from either end: the hours that happened
-              and the hours that were booked and then were not. The record
-              behind it — `public.session_cancellations`, supabase/parts/380 —
-              was written by a trigger on every cancellation since that part was
-              applied and read by nothing at all, which left the one person who
-              acts on it unable to see it.
-
-              The note is DESCRIPTIVE and carries no figure. This screen does
-              not read that table, and a count summarised from a read that has
-              not happened is the shape every other row here avoids by owning
-              its own status. The screen behind the row gates its figures on
-              `isWhole` and says which of loading, failed and empty it is. */}
-          <ListRow icon="calendar" title="Sessions They Cancelled"
-            note={`Hours booked with you that were cancelled — who ended each one, and how much notice there was.`}
-            onPress={go('/(trainer)/client-cancellations')} />
-
-          <ListRow icon="calendar" title="The Week They've Planned"
-            note={unasked ?? weekLine(weekStatus, week, who)}
-            tone={weekStatus === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/client-week')} />
-
-          {/* Beside the training week rather than under it, because the two are
-              the same week seen from either side of the plate: what they are
-              lifting and what they are eating while they do it. Pushed with the
-              id like every row here — client-nutrition falls back to its own
-              roster picker when it is opened without one, so a coach who
-              arrives from Explore is asked who they mean, and a coach who
-              arrives from here is not asked twice. */}
-          <ListRow icon="meals" title="What They're Eating"
-            note={`${who}'s calorie and macro targets, and the week of meals you write them.`}
-            onPress={go('/(trainer)/client-nutrition')} />
-
-          {/* This carried a comment saying `checklists.tsx` "starts on its own
-              client picker and does not read `clientId` off the route", so the
-              summary was about this client and the screen it opened still asked
-              the coach to pick them.
-
-              Both halves were false, and had been since that screen was
-              rewritten. `checklists.tsx:93` reads `clientId` with
-              `useLocalSearchParams` and seeds `picked` from it, and `go()` at
-              line 603 has always pushed `{ clientId: id, name: fullName }`. So
-              the row opened on the right client the whole time.
-
-              Corrected rather than deleted, because a stale comment is worse
-              than none: this one described a gap that was already closed, and
-              the next person to read it would either have "fixed" a working
-              screen or left the row alone believing it was broken. Half the
-              defects in this codebase's own roadmap are comments that outlived
-              the code they described. */}
-          <ListRow icon="check" title="Their Daily Checklist"
-            note={unasked ?? listLine(itemStatus, activeLines, seen, who)}
-            tone={worstStatus(itemStatus, tickStatus) === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/checklists')} />
-
-          <ListRow icon="camera" title="Progress Photos They Sent You"
-            note={unasked ?? photosLine(inbox, photosFailed, who)}
-            tone={photosFailed ? t.warn : undefined}
-            onPress={go('/(trainer)/client-photos')} />
-
-          <ListRow icon="train" title={justCheckedIn ? `Log What ${who} Just Did` : 'Log a Session You Ran'}
-            note={justCheckedIn
-              ? `${who} is checked in. Enter the exercises as you go — it lands in their own record and shows up in their app.`
-              : `Goes into ${who}'s own record, marked as logged by you.`}
-            onPress={go('/(trainer)/log-session')} />
-
-          <ListRow icon="chat" title={`Message ${who}`}
-            note={client && client.unread != null && client.unread > 0
-              ? `${client.unread} unread from them in your thread.`
-              : 'Open your thread with them.'}
-            onPress={go('/(trainer)/chat')} />
-
-          {/* Last, because it is the only row here that is the END of something
-              rather than a way into it — twelve weeks, a move, a handover to
-              another coach. It belongs on this screen and not only in Explore:
-              the document is ABOUT a named person, and the moment a coach wants
-              one is the moment they are standing on that person's screen. The
-              id goes with it for the same reason the rows above pass it; open
-              from Explore and client-report asks who the report is for. */}
-          <ListRow icon="pencil" title={`Write ${who} a Report`}
-            note={`The handover document at the end of a block — read from ${who}'s record, not from memory.`}
-            onPress={go('/(trainer)/client-report')} />
-          {/* Sending paperwork starts here, on the screen of the person it is
-              for, because that is where a coach is standing when they decide to
-              — the same argument the report row above makes.
-
-              It is a plain push and not `go`: Documents is about the coach's own
-              paperwork and takes no client, and handing it a clientId it does
-              not read would be a parameter that looks like it does something.
-              The picker on that screen names every client, this one included. */}
-          <ListRow icon="pencil" title="Send Them a Document"
-            note="Your own waivers, agreements and forms — pick one and send it to a single client."
-            onPress={() => router.push('/(trainer)/documents')} />
         </Section>
 
 

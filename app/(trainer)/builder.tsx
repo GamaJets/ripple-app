@@ -50,7 +50,7 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -1335,6 +1335,11 @@ export default function Builder() {
    * one collapsed the wrong day.
    */
   const [foldedDays, setFoldedDays] = useState<Record<number, boolean>>({});
+  // The advanced day/exercise editor opens only when asked for — from the
+  // Exercises row or a day circle — as the implementation brief asks. The
+  // rows above it carry truthful counts, so a coach can see the block's shape
+  // without the four-thousand-line editor under it.
+  const [editorOpen, setEditorOpen] = useState(false);
   const toggleDay = (di: number) => setFoldedDays((p) => ({ ...p, [di]: !p[di] }));
 
   /**
@@ -2258,7 +2263,6 @@ export default function Builder() {
         <ScreenHeader
           eyebrow="Programmes"
           title="Programme Builder"
-          subtitle="Build a weekly plan, save it as a template, and assign it to as many clients as you like."
           leading={cameFrom ? <Ghost icon={BACK_ICON} onPress={goBack} a11yLabel="Back" /> : null}
           actions={<Ghost label="Templates" icon="grid" onPress={() => router.push('/(trainer)/templates')} />}
         />
@@ -2278,23 +2282,47 @@ export default function Builder() {
             { label: 'Exercises', value: num(blockExercises) },
           ]} />
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
-          {days.length === 0 ? (
-            <View style={{ flex: 1 }}><Ghost icon="plus" label="Add a Training Day" onPress={addDay} /></View>
-          ) : (<>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.sm }}>
-            {days.map((day, index) => (
-              <Pressable key={`${day.day}-${index}`} onPress={() => toggleDay(index)} accessibilityRole="button"
-                accessibilityState={{ expanded: !foldedDays[index] }}
-                accessibilityLabel={`${day.day}, ${day.focus || 'training day'}, ${day.exercises.length === 1 ? '1 exercise' : `${day.exercises.length} exercises`}`}
-                style={{ minHeight: 40, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, justifyContent: 'center', backgroundColor: foldedDays[index] ? t.surface2 : t.brand }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: foldedDays[index] ? t.ink2 : t.brandInk }}>{day.day}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-          <Ghost icon="plus" a11yLabel="Add a training day" onPress={addDay} />
-          </>)}
+        {/* The programme's name, first — it is the template's name and the
+            name every client sees over their week. */}
+        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.lg, marginBottom: 6 }}>Programme name</Text>
+        <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
+          accessibilityLabel="Programme name" style={inp} />
+
+        {/* ── the week's days as circles, the board's way ──────────────────
+            One round control per training day in the block, filled in the
+            brand where the day is open in the editor below; tapping one opens
+            the editor at that day. The plus adds a day and opens it. */}
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Workout Days</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.sm }}>
+          {days.map((day, index) => (
+            <Pressable key={`${day.day}-${index}`}
+              onPress={() => { if (!editorOpen) { setEditorOpen(true); if (foldedDays[index]) toggleDay(index); } else toggleDay(index); }}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: editorOpen && !foldedDays[index] }}
+              accessibilityLabel={`${day.day}, ${day.focus || 'training day'}, ${day.exercises.length === 1 ? '1 exercise' : `${day.exercises.length} exercises`}`}
+              style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: editorOpen && !foldedDays[index] ? t.brand : t.surface2 }}>
+              <Text style={{ ...ty.label, fontWeight: '700', color: editorOpen && !foldedDays[index] ? t.brandInk : t.ink2 }}>{day.day.slice(0, 2)}</Text>
+            </Pressable>
+          ))}
+          <Pressable onPress={() => { addDay(); setEditorOpen(true); }} accessibilityRole="button" accessibilityLabel="Add a training day"
+            style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface }}>
+            <Icon name="plus" size={18} color={t.brand} />
+          </Pressable>
         </View>
+
+        {/* Three rows with truthful counts, and the editor behind the first.
+            Supersets are counted the way the editor badges them — a set-group
+            of two or more, see src/lib/setGroups.ts. */}
+        <Section>
+          <ListRow icon="dumbbell" title="Exercises"
+            note={blockExercises === 0 ? 'None yet — open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'editor open below' : 'tap to open the editor'}`}
+            onPress={() => setEditorOpen((o) => !o)} />
+          <ListRow icon="swap" title="Supersets"
+            note={(() => { const n = days.reduce((acc, d) => acc + d.exercises.filter((_, i) => isGrouped(d.exercises, i)).length, 0); return n === 0 ? 'None in this week' : `${num(n)} grouped ${n === 1 ? 'exercise' : 'exercises'} this week`; })()}
+            onPress={() => setEditorOpen(true)} />
+          <ListRow icon="grid" title="Templates" note="Start from one you saved, or save this week as one"
+            onPress={() => router.push('/(trainer)/templates')} />
+        </Section>
 
         {/* ── client ─────────────────────────────────────────────────────── */}
         <Section>
@@ -2504,9 +2532,6 @@ export default function Builder() {
             </Flag>
           ) : null}
 
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Programme name</Text>
-          <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
-            style={[inp, { marginBottom: sp.lg }]} />
 
           {/* ── the day the block begins ──────────────────────────────────
               Coaches sit on their phone on a Sunday night and tap Assign at the
@@ -2778,6 +2803,7 @@ export default function Builder() {
 
 
         {/* ── days ───────────────────────────────────────────────────────── */}
+        {editorOpen ? (<>
         <Section>
           <SectionHead title={blockWeeks.length > 1 ? weekLabel(blockWeeks[weekIdx], weekIdx + 1) : 'Training Days'}
             note={days.length ? `${days.length} day${s(days.length)} · ${num(totalExercises)} exercise${s(totalExercises)}` : undefined} />
@@ -3777,6 +3803,8 @@ export default function Builder() {
           )}
         </Section>
 
+
+        </>) : null}
 
         {/* ── assign ─────────────────────────────────────────────────────── */}
         <Section>
