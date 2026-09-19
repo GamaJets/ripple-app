@@ -1397,7 +1397,6 @@ export default function Train() {
     tapLight();
   };
   const exercises = Array.isArray(workout && workout.exercises) ? workout.exercises : [];
-  const estMin = Math.max(20, exercises.length * 9);
   /**
    * The key everything on this screen is held under: what has been logged, what
    * has been removed, which row is open, which was edited.
@@ -1785,6 +1784,16 @@ export default function Train() {
   const firstOpenId = (() => { for (const _e of planRows) { const _u = uid(_e); if ((logged[_u] || []).length < setCount(_e)) return _u; } return null; })();
   // Presentation only: how much of today's plan is already logged, for the hero ring.
   const doneCount = exercises.filter((e) => (logged[uid(e)] || []).length >= setCount(e)).length;
+  const plannedSets = exercises.reduce((n, e) => n + setCount(e), 0);
+  // WHICH DAY the card and its Start button are about. The day strip that picks
+  // it sits under the card, as the board draws it, so the card has to carry the
+  // answer itself: a member who tapped Thursday to read it and scrolled back up
+  // was looking at "Start Workout" over Thursday's session with nothing on the
+  // card saying it was no longer today's. A filter stays attached to what it
+  // changes. Same date wording as the strip's own spoken label.
+  const cardDay = dayIdx === todayIdx && weekOffset === 0
+    ? 'Today'
+    : dateFor(dayIdx).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   const heroNote = exercises.length === 0
     // A rest day the member has added movements to is still a rest day in the
     // programme, and it is no longer a day with nothing on it — the Start
@@ -1793,7 +1802,15 @@ export default function Train() {
     ? (customEx.length > 0
       ? `Rest day — ${customEx.length} movement${customEx.length === 1 ? '' : 's'} you added`
       : 'Rest day — nothing scheduled')
-    : `~${estMin} min` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
+    // COUNTED, not estimated. This read `~${estMin} min`, where `estMin` was
+    // `max(20, exercises × 9)` — a duration with no set count, no rest and no
+    // measurement in it, printed on the first card of the tab beside the button
+    // it describes. Home refuses the same figure in so many words ("there is no
+    // duration model in this codebase"), so the two screens disagreed about
+    // whether the app knows how long a session is. The set total IS the plan,
+    // through the same `setCount` the rows below are ticked against, and a
+    // reader can price their own evening from it.
+    : `${plannedSets === 1 ? '1 set' : `${plannedSets} sets`}` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
   // Whether the session may be started, asked of the list the runner receives
   // rather than of the programme, and what to say when it may not be. A
   // withheld button that explains nothing is how the injury case reads
@@ -2167,11 +2184,14 @@ export default function Train() {
           {/* The name over the picture, on a scrim, as the board draws it. The
               scrim is what makes white ink readable over any frame; the same
               sentence is spoken once, from the group. */}
-          <View accessible accessibilityLabel={`${program.title}, ${workout.focus}. ${exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`}, ${heroNote}`}
+          <View accessible accessibilityLabel={`${program.title}. ${cardDay}, ${workout.focus}. ${exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`}, ${heroNote}`}
             style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: sp.lg, paddingTop: sp.xxl, paddingBottom: sp.lg, backgroundColor: 'rgba(0,0,0,0.55)' }}>
             <Text style={{ ...ty.head, color: '#ffffff' }} numberOfLines={1}>{program.title}</Text>
-            <Text style={{ ...ty.caption, color: 'rgba(255,255,255,0.82)', marginTop: 2 }} numberOfLines={1}>
-              {workout.focus} · {exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`} · {heroNote}
+            {/* Two lines allowed: the day, the focus, the two counts and what
+                is already done is five facts, and at large text a single line
+                cut the last of them off — which is the one that changes. */}
+            <Text style={{ ...ty.caption, color: 'rgba(255,255,255,0.82)', marginTop: 2 }} numberOfLines={2}>
+              {cardDay} · {workout.focus} · {exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`} · {heroNote}
             </Text>
           </View>
         </View>
@@ -4709,6 +4729,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [prMsg, setPrMsg] = useState<string | null>(null);
+  // WHICH set of this movement the banner above is about, by position. The
+  // banner outlives the set that raised it — it stays up until the movement
+  // changes — so without this an Undo on a mis-tapped record left "New PR!"
+  // standing over a set that is no longer in the session.
+  const prAt = useRef<number | null>(null);
   // What happened when the session was written. 'saving' is a real state on a
   // gym's wifi and the Done button must not be tappable through it; 'failed'
   // is the one this screen used to have no word for at all.
@@ -4916,6 +4941,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     // forty-five second squat.
     setTimedOn(isTimedPrescription(expandSets(cur)[0]?.reps ?? cur.reps));
     setPrMsg(null);
+    prAt.current = null;
     setPendingFeel(null);
     // A new movement opens on its own page 4, with no set clock running: the
     // set page is about one movement's sets and this is a different movement.
@@ -5159,6 +5185,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     );
     if (historyWhole && newE1 > 0 && newE1 > priorBest) {
       setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`);
+      prAt.current = done.length;
       setConfetti(true);
       // The coach is told from INSIDE this branch, and that placement is the
       // whole design. Every guard above — the whole history was read, not a
@@ -5800,6 +5827,10 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     setRpes((prev) => { const n = prev.map((a) => [...a]); if (n[idx].length >= had) n[idx].pop(); return n; });
     // The prompt asks about a set that no longer exists.
     setPendingFeel(null);
+    // And so does the record banner, when the set taken back is the one that
+    // raised it. A banner raised by an EARLIER set of this movement stays: that
+    // set is still in the session and the claim is still true of it.
+    if (prAt.current === had - 1) { prAt.current = null; setPrMsg(null); }
     tapLight();
   };
   /**
@@ -6030,11 +6061,46 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     </View>
   ) : null;
 
+  /* ── the sets done so far, and the way to take the last one back ──────────
+     Reported from TestFlight as "can't untick a log if accidentally press". The
+     ready page could: a filled tick on the checklist is a button that calls
+     `untickLast`. But nothing SAID so, the set page — where Complete Set is —
+     had no such control at all, and a set logged past the end of the plan has
+     no tick row to sit on, so it could not be taken back from anywhere.
+
+     One control, under the chips, on both pages, through the same `untickLast`
+     the tick uses. Only the LAST set, for the reason src/lib/setTicks.ts gives:
+     the log has no set numbers in it, so "undo set 2 of 5" is not a thing the
+     store can express.
+
+     And what the undo is honest about: these sets are not in the log. Nothing
+     in this runner is written anywhere but this phone until the session is
+     finished, so taking one back un-sends nothing and queues nothing — it
+     changes the draft, and the draft effect above rewrites the copy on disk
+     (or removes it, when that was the only set). The line says so, because a
+     member who believes each Complete Set has already reached their coach has
+     the wrong idea of what closing the app mid-session costs them. */
   const loggedChips = done.length > 0 ? (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xl }}>
-      {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.timed
-          ? timedSetLabel(s.reps, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null, s.bw === true)
-          : s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
+    <View style={{ marginTop: sp.xl }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+        {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.timed
+            ? timedSetLabel(s.reps, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null, s.bw === true)
+            : s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+        <Pressable accessibilityRole="button"
+          accessibilityLabel={`Undo set ${done.length} of ${shownName(ex)}`}
+          accessibilityHint="Takes the most recent set back out of this session. Nothing has been sent yet, so nothing is un-sent."
+          onPress={untickLast}
+          style={{ minHeight: MIN_TARGET, paddingHorizontal: sp.md, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring,
+                   flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Icon name="minus" size={14} color={t.ink2} />
+          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Undo Set {done.length}</Text>
+        </Pressable>
+        <Text style={{ ...ty.caption, color: t.ink3, flex: 1, minWidth: 160 }}>
+          Not in your log yet — finishing the session is what saves {done.length === 1 ? 'it' : 'them'}.
+        </Text>
+      </View>
     </View>
   ) : null;
 
@@ -6209,7 +6275,14 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               {pastPlan
                 ? `All ${plan.length} sets done — set ${done.length + 1} is extra`
                 : plan.length ? `Set ${done.length + 1} of ${plan.length}` : `Set ${done.length + 1}`}
-              {variedPlan && nextSet ? ` · ${nextSet.reps}${nextSet.loadKg != null ? ' × ' + fig(liftLabel(nextSet.loadKg, unit)) : ''}` : ''}
+              {/* The ask, on every plan and not only on a ramp. It was drawn
+                  only where the sets differ, on the argument that the ready
+                  page had already said "3 × 8-10 × 42.5 kg" — but this is the
+                  page somebody is on with the bar in their hands, and the load
+                  box beside it is seeded from their LOG, not from the plan. So
+                  a coach's 42.5 was nowhere on the screen that records the
+                  set. Printed as the coach wrote it, through `repsWord`. */}
+              {nextSet ? ` · ${repsWord(nextSet.reps)}${nextSet.loadKg != null ? ' × ' + fig(liftLabel(nextSet.loadKg, unit)) : ''}` : ''}
             </Text>
             {intensityBlock}
 
@@ -6341,6 +6414,10 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               </Pressable>
             ) : null}
 
+            {/* Directly under the control it changed: the green button reads
+                Resume Session while this is up, and the sentence saying what a
+                pause holds used to be under the watch panel, a screen away. */}
+            {pausedNotice}
             {prBlock}
             {pendingFeel != null ? (
               <View style={{ marginTop: sp.xl }}>
@@ -6357,6 +6434,12 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               </View>
             ) : null}
             {loggedChips}
+            {/* Back and Pause, above everything that is only context. The
+                review's order for a live set is the set, the rest, what is done
+                and the way between movements — and THEN the watch, the zones
+                and the music. This row was the last thing on the page, under
+                all three. */}
+            {pauseRow}
             {injuryLine}
             {coachNote}
             {recallBlock}
@@ -6378,8 +6461,6 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
             </Pressable>
             {liveBlock}
-            {pausedNotice}
-            {pauseRow}
           </>
         ) : view === 'demo' ? (
           /* ── page 5: Exercise Demo ──────────────────────────────────────── */
@@ -6572,8 +6653,13 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             {loggedChips}
             {recallBlock}
             {rampBlock}
-            {liveBlock}
 
+            {/* Next, Back and Pause BEFORE the watch panel. They were under it:
+                on a session with a zone board and a music bar, "what do I tap
+                next" once the sets were ticked was answered two screens down,
+                past integrations — which is the one thing the review's
+                acceptance test for this flow rules out. Nothing about the
+                controls changed; `liveBlock` is simply last now, on both pages. */}
             <View style={{ marginTop: sp.xl }}>
               {paused
                 ? <Cta label="Resume Session" wide onPress={resume} />
@@ -6582,6 +6668,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 : <Ghost label={nextLabel} onPress={next} />}
             </View>
             {pauseRow}
+            {liveBlock}
           </>
         )}
 

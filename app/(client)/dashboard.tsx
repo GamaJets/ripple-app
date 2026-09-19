@@ -717,12 +717,31 @@ export default function Home() {
               </Text>
             </Pressable>
           </View>
-          <View style={{ marginTop: sp.lg }}>
+          {/* ── why THIS button, said beside it ──────────────────────────────
+              The button is adaptive — Start Workout, Recovery, Log a Meal, View
+              Plan — and its reason used to live in the Today card, which sits
+              under however many notices the day has raised. An amber "Recovery"
+              under a training goal, with the sentence that explains it a screen
+              away, is an alert without its reason. One line, the call's own
+              headline and (for a session) what the session is; the Today card
+              keeps the full sentence. Nothing here is a new claim: both halves
+              are the `today` and `workout` the card below already draws. */}
+          <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.lg }}>
+            {today.headline}{today.route.includes('workouts') && workout.exercises.length ? ` · ${workout.focus}` : ''}
+          </Text>
+          <View style={{ marginTop: sp.sm }}>
             <Cta label={today.cta} wide tone={today.tone} onPress={() => router.push(trainIntent(today.route) as any)} />
           </View>
         </View>
 
-        {/* ── interrupts: things that need a decision now ─────────────────── */}
+        {/* ── interrupts: what is wrong, before what is next ────────────────
+            The data-layout review's fourth slot: an urgent injury, a write that
+            did not go, or the offline/outbox state — and nothing else. The
+            "Personalise your plan" card and the streak warning used to sit in
+            here, the first of them ABOVE the injury notice; a prompt and a nudge
+            may not outrank a plan changed for an injury, a write that lapsed or
+            a booked session, so both now follow the Today card. An invitation
+            stays: it is somebody waiting on a decision, not a promotion. */}
         <View style={{ marginTop: sp.lg }}>
           {/* First, because it changes how everything under it should be read.
               It deliberately promises nothing about anything being sent later:
@@ -732,12 +751,9 @@ export default function Home() {
             <Notice tone={t.warn} kicker="Offline" title="Showing what this phone already had" note={offline} />
           ) : null}
 
-          {waiting.length > 0 ? (
-            <Notice tone={t.warn} kicker="Waiting to send"
-              title={waiting.length === 1 ? 'One thing is still on this phone' : 'Some things are still on this phone'}
-              note={waiting.join(' ')} />
-          ) : null}
-
+          {/* The write that FAILED, before the ones still in hand: a lapsed
+              intent is the only line here the member has to be told about,
+              because their model is that it happened. */}
           {lapsedKinds.map((k) => (
             <Notice key={`lapsed-${k}`} tone={t.warn} kicker="Not sent"
               title="Something waited too long to send" note={lapsedNote(k)}>
@@ -746,17 +762,11 @@ export default function Home() {
               </View>
             </Notice>
           ))}
-          {needsOnboard ? (
-            <Card onPress={() => router.push('/(client)/onboarding')} tone={t.brand} style={{ marginBottom: sp.md }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                <Icon name="sparkle" size={20} color={t.brand} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Personalise your plan</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>One minute — tailors your workouts and meals to you.</Text>
-                </View>
-                <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
-              </View>
-            </Card>
+
+          {waiting.length > 0 ? (
+            <Notice tone={t.warn} kicker="Waiting to send"
+              title={waiting.length === 1 ? 'One thing is still on this phone' : 'Some things are still on this phone'}
+              note={waiting.join(' ')} />
           ) : null}
 
           {sevInj ? (
@@ -765,20 +775,6 @@ export default function Home() {
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flexGrow: 2, flexBasis: 180 }}><Cta label="Get a Safe Plan" wide onPress={() => router.push('/(client)/coach?ask=injury')} /></View>
                 <View style={{ flexGrow: 1, flexBasis: 110 }}><Ghost label="Update" onPress={() => router.push('/(client)/injuries')} /></View>
-              </View>
-            </Notice>
-          ) : null}
-
-          {risk.atRisk ? (
-            <Notice tone={protectedTonight ? t.brand : t.warn}
-              kicker={protectedTonight ? 'Streak protected' : 'Streak at risk'}
-              title={protectedTonight ? `A freeze is holding your ${streak}-day streak` : `Your ${streak}-day streak is on the line`}
-              note={protectedTonight
-                ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight is covered, but training keeps it growing.`
-                : 'Log one session today to keep it alive.'}>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
-                <View style={{ flexGrow: 1, flexBasis: 140 }}><Cta label="Start Now" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} /></View>
-                {pushAvailable() ? <View style={{ flexGrow: 1, flexBasis: 180 }}><Ghost label="Remind Me Tonight" onPress={remindTonight} /></View> : null}
               </View>
             </Notice>
           ) : null}
@@ -843,20 +839,6 @@ export default function Home() {
           <Notice tone={t.warn} kicker="Today" title="You have more training logged than we can read at once"
             note="Your streak, this week's sessions, your tonnage and your PRs are shown as dashes because they would be counted over part of your history rather than all of it. Nothing is missing from your log." />
         ) : null}
-        {/* Fuel Today is simply absent when its inputs could not be read, which
-            is right — a meter drawn from the defaults would be somebody else's
-            day — but absent on its own reads as "you have no targets". This
-            says which read is missing. Not shown while one is still in flight:
-            an apology for a request that is proceeding normally is a nag. */}
-        {targetInputsUnknown && c.profileStatus !== 'loading' && coachNutrition.status !== 'loading' ? (
-          !isWhole(c.profileStatus) ? (
-            <Notice tone={t.warn} kicker="Today" title="We couldn’t read what you are training for"
-              note="Your goal and how you eat are what split a day into protein, carbs and fat, so Fuel Today is left out rather than drawn from the defaults. Pull down to try again." />
-          ) : (
-            <Notice tone={t.warn} kicker="Today" title="We couldn’t read your coach’s adjustment"
-              note="Fuel Today is left out rather than showing the uncorrected figures as your plan. Pull down to try again." />
-          )
-        ) : null}
 
         {/* ── the one card: today's action ────────────────────────────────── */}
         <Section>
@@ -910,7 +892,92 @@ export default function Home() {
               {workout.cardio ? ` · ${workout.cardio}` : ''}
             </Text>
           ) : null}
+
+          {/* ── the rest of today: the booking, then the check-in ─────────────
+              Both rows used to sit under the snapshot, among History and
+              Challenges, so a session booked for six o'clock this evening was
+              drawn BELOW the water count. They belong to the question this card
+              answers — what is on today and next — and they are the same two
+              rows, with the same gates and the same sentences for a diary that
+              could not be read. */}
+          {/* `|| nextSession` because a booking is a fact, not a preference: a
+              client who switches to online after booking is still expected in
+              the room on Thursday, and hiding the row would be how they miss
+              it. The row appears to show them what exists; only the invitation
+              to book more is gated. */}
+          {(booksSessions || nextSession) ? (
+            <ListRow icon="calendar"
+              // "No Sessions Booked" is a statement about the member's calendar
+              // and only a read that answered may make it. Under a failed or
+              // in-flight read the row still appears — the way to the calendar
+              // must not disappear when the calendar cannot be read — but it
+              // says which of the two it is looking at. 'partial' counts as
+              // known here: the provider reads `starts_at` descending before
+              // capping, so a truncated page holds the future and drops the
+              // ancient history.
+              title={nextSession
+                // `undefined` as a locale is the reader's device and `appLocale()`
+                // is the same handset asked through one place, so these two agreed
+                // by luck. The CLOCK did not: it was a 12-hour am/pm formatter
+                // hand-built in English, and most of the world reads 24 — see
+                // `fmtClock` in src/lib/format.ts.
+                ? `Next session · ${new Date(nextSession.startsAt).toLocaleDateString(appLocale(), { weekday: 'short' })} ${fmtTime(nextSession.startsAt)}`
+                : sessionsKnown ? 'No Sessions Booked'
+                : sessionStatus === 'loading' ? 'Checking Your Sessions'
+                : 'Your Sessions Could Not Be Read'}
+              note={nextSession
+                ? `In person · ${nextSession.durationMin} min with your coach`
+                : sessionsKnown ? 'Tap to book an in-person session'
+                : sessionStatus === 'loading' ? 'Reading your calendar…'
+                : 'This is not a statement that you have none booked. Open your calendar to check before assuming a session is not on.'}
+              onPress={() => router.push('/(client)/calendar')} />
+          ) : null}
+
+          {remoteCoached ? (
+            <ListRow icon="message" title="Weekly Check-in"
+              note={booksSessions
+                ? 'How the weeks you train alone went — your coach reads it'
+                : 'How the week went — your coach only sees what you send'}
+              onPress={() => router.push('/(client)/checkin')} />
+          ) : null}
         </Section>
+
+        {/* ── the nudge and the prompt, after the day itself ────────────────
+            Motivation and setup, in that order, and under the Today card on
+            purpose — see the note on the interrupts above. Neither lost
+            anything on the way down: the streak banner keeps both its actions
+            and the figure it refuses to print off a partial log, and the card
+            still goes straight into setup in one tap. */}
+        {(risk.atRisk || needsOnboard) ? (
+          <View style={{ marginTop: sp.lg }}>
+            {risk.atRisk ? (
+              <Notice tone={protectedTonight ? t.brand : t.warn}
+                kicker={protectedTonight ? 'Streak protected' : 'Streak at risk'}
+                title={protectedTonight ? `A freeze is holding your ${streak}-day streak` : `Your ${streak}-day streak is on the line`}
+                note={protectedTonight
+                  ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight is covered, but training keeps it growing.`
+                  : 'Log one session today to keep it alive.'}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
+                  <View style={{ flexGrow: 1, flexBasis: 140 }}><Cta label="Start Now" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} /></View>
+                  {pushAvailable() ? <View style={{ flexGrow: 1, flexBasis: 180 }}><Ghost label="Remind Me Tonight" onPress={remindTonight} /></View> : null}
+                </View>
+              </Notice>
+            ) : null}
+
+            {needsOnboard ? (
+              <Card onPress={() => router.push('/(client)/onboarding')} tone={t.brand} style={{ marginBottom: sp.md }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  <Icon name="sparkle" size={20} color={t.brand} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Personalise your plan</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>One minute — tailors your workouts and meals to you.</Text>
+                  </View>
+                  <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+                </View>
+              </Card>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Below the first viewport now — the board has nothing between the
             greeting and the goal card — but still one line over three reads, and it is the age of the OLDEST of them:
@@ -928,6 +995,25 @@ export default function Home() {
             reader had seen one, which is why nobody remembered it. */}
         <ScreenHelp screen="home" />
 
+        {/* Beside the figure it explains. This stood above the Today card, a
+            screen away from the Fuel tile whose absence it accounts for; a
+            reader who met the gap in the row below had already scrolled past
+            the reason for it. */}
+        {/* Fuel Today is simply absent when its inputs could not be read, which
+            is right — a meter drawn from the defaults would be somebody else's
+            day — but absent on its own reads as "you have no targets". This
+            says which read is missing. Not shown while one is still in flight:
+            an apology for a request that is proceeding normally is a nag. */}
+        {targetInputsUnknown && c.profileStatus !== 'loading' && coachNutrition.status !== 'loading' ? (
+          !isWhole(c.profileStatus) ? (
+            <Notice tone={t.warn} kicker="Today" title="We couldn’t read what you are training for"
+              note="Your goal and how you eat are what split a day into protein, carbs and fat, so Fuel Today is left out rather than drawn from the defaults. Pull down to try again." />
+          ) : (
+            <Notice tone={t.warn} kicker="Today" title="We couldn’t read your coach’s adjustment"
+              note="Fuel Today is left out rather than showing the uncorrected figures as your plan. Pull down to try again." />
+          )
+        ) : null}
+
         {/* ── daily snapshot ──────────────────────────────────────────────
             A daily briefing, not four miniature dashboards. The body figures,
             the weight chart, the macro meters, the water controls and the
@@ -936,7 +1022,9 @@ export default function Home() {
             Week — where it is drawn with the room it needs. What stays is one
             readiness row and one KPI row, each figure tappable to the screen
             that owns it, so nothing became unreachable and nothing here
-            competes with the card at the top.
+            competes with the card at the top. Three figures at most — readiness,
+            fuel, water — each with what it is measured against and over what
+            period, because a bare number is not a reading.
 
             The first-run rules still apply. `showWeek` and `showFuel` (see
             src/lib/firstRun.ts) withhold a tile that would be a dash on a
@@ -983,18 +1071,15 @@ export default function Home() {
               <KpiRow
                 onPress={(item) => { if (item.route) router.push(item.route as any); }}
                 items={[
-                  // Days, against a goal counted in days — the same pair the
-                  // card at the top draws, and for the same reason.
-                  ...(showWeek(facts) ? [{
-                    label: 'Training',
-                    value: logKnown ? fig(wk.days) : fig(null),
-                    unit: logKnown ? `/${goalDays} days` : undefined,
-                    delta: !logKnown ? 'log not read in full'
-                      : wk.days >= goalDays ? 'goal met this week'
-                      : `${goalDays - wk.days} more this week`,
-                    good: logKnown && wk.days >= goalDays,
-                    route: '/(client)/trends',
-                  }] : []),
+                  // No Training tile any more. It drew `wk.days` of
+                  // `goalDays` — the very pair the goal card at the top of the
+                  // screen is built around — so the week's count was the hero
+                  // AND a supporting figure, and the snapshot ran to four. The
+                  // review's cap is three supporting metrics: readiness above,
+                  // fuel and water here. Trends, where the tile went, is on
+                  // the Train and Progress tabs' own lists. `showWeek` still
+                  // gates the ROW, so a used account without a calorie target
+                  // keeps its water count exactly as before.
                   // `dayCal.net`, the one calorie sum the Meals tab and the
                   // Food Log also read — never a kcalLeft defaulted to zero.
                   // Non-null exactly when `macros` is, which `showFuel` has
@@ -1026,110 +1111,10 @@ export default function Home() {
         </Section>
 
 
-        {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
-        <Section>
-          {/* ── Getting Started ────────────────────────────────────────────
-              Reported as "Repple Coach has a Getting Started, however Client
-              doesn't have this." What the coach app had was the first-run tour
-              firing on a fresh install — a carousel, gone once consumed, and
-              findable afterwards only through a User Guide row buried in
-              Profile. This row is the persistent answer and it is on the HOME
-              screen, because being buried in Profile is the whole of what was
-              reported.
-
-              It leaves when the list is finished — a checklist stuck at 6 of 6
-              is clutter, and clutter is the complaint. It does NOT leave
-              because a read failed: an unknown row keeps it here, which is the
-              LoadStatus rule applied to a list of ticks. The screen itself
-              stays in the Me hub either way.
-
-              Held back while the "personalise your plan" card is up. That card
-              goes straight into setup in one tap and this row's first item is
-              the same errand — two prompts for one thing on the first screen a
-              new member ever sees is the disease, not the cure. */}
-          {showChecklist(started) && !needsOnboard ? (
-            <ListRow icon="sparkle" title="Getting Started"
-              note={startedNext
-                ? `${checklistDone(started)} of ${started.length} done · next, ${startedNext.title.toLowerCase()}`
-                : startedLeft === 0
-                  ? 'some of this could not be read just now'
-                  : `${checklistDone(started)} of ${started.length} done`}
-              onPress={() => router.push('/(client)/getting-started')} />
-          ) : null}
-
-          {/* `|| nextSession` because a booking is a fact, not a preference: a
-              client who switches to online after booking is still expected in
-              the room on Thursday, and hiding the row would be how they miss
-              it. The row appears to show them what exists; only the invitation
-              to book more is gated. */}
-          {(booksSessions || nextSession) ? (
-            <ListRow icon="calendar"
-              // "No Sessions Booked" is a statement about the member's calendar
-              // and only a read that answered may make it. Under a failed or
-              // in-flight read the row still appears — the way to the calendar
-              // must not disappear when the calendar cannot be read — but it
-              // says which of the two it is looking at. 'partial' counts as
-              // known here: the provider reads `starts_at` descending before
-              // capping, so a truncated page holds the future and drops the
-              // ancient history.
-              title={nextSession
-                // `undefined` as a locale is the reader's device and `appLocale()`
-                // is the same handset asked through one place, so these two agreed
-                // by luck. The CLOCK did not: it was a 12-hour am/pm formatter
-                // hand-built in English, and most of the world reads 24 — see
-                // `fmtClock` in src/lib/format.ts.
-                ? `Next session · ${new Date(nextSession.startsAt).toLocaleDateString(appLocale(), { weekday: 'short' })} ${fmtTime(nextSession.startsAt)}`
-                : sessionsKnown ? 'No Sessions Booked'
-                : sessionStatus === 'loading' ? 'Checking Your Sessions'
-                : 'Your Sessions Could Not Be Read'}
-              note={nextSession
-                ? `In person · ${nextSession.durationMin} min with your coach`
-                : sessionsKnown ? 'Tap to book an in-person session'
-                : sessionStatus === 'loading' ? 'Reading your calendar…'
-                : 'This is not a statement that you have none booked. Open your calendar to check before assuming a session is not on.'}
-              onPress={() => router.push('/(client)/calendar')} />
-          ) : null}
-
-          {remoteCoached ? (
-            <ListRow icon="message" title="Weekly Check-in"
-              note={booksSessions
-                ? 'How the weeks you train alone went — your coach reads it'
-                : 'How the week went — your coach only sees what you send'}
-              onPress={() => router.push('/(client)/checkin')} />
-          ) : null}
-
-          <ListRow icon="clock" title="Your History" note="Every month you have trained, back to the start"
-            onPress={() => router.push('/(client)/history')} />
-
-          {/* Beside History because that is where its only other link lives, and
-              one link three levels deep is how a feature ships and is never
-              found. */}
-          <ListRow icon="dumbbell" title="Your Muscles" note="What you worked, on the body, and how long it has rested"
-            onPress={() => router.push('/(client)/muscles')} />
-
-          <ListRow icon="trophy" title="Challenges" note="Track your progress against the goal"
-            onPress={() => router.push('/(client)/challenges')} />
-
-          {/* Unconditional, and that is the point. The block further down shows
-              the LATEST notice from a coach or a gym and nothing else, which is
-              how "we are closed Monday" used to be readable for one day and
-              then nowhere at all. This row is the way back to the older ones,
-              and it is here whether or not there is a notice today — a screen
-              you can only reach when it has something on it is a screen nobody
-              learns exists. */}
-          <ListRow icon="info" title="Notices" note="Everything your gym and your coach have posted"
-            onPress={() => router.push('/(client)/notices')} />
-
-          {needsCoach ? (
-            <ListRow icon="people"
-              title={solo ? 'Work with a Coach' : 'Find Your Coach'}
-              note={solo
-                ? "Enter your coach's code, or browse trainers"
-                : "You have not been linked to a coach yet — enter their code, accept an invitation, or browse trainers"}
-              onPress={() => router.push('/(client)/trainers')} />
-          ) : null}
-        </Section>
-
+        {/* ── updates, before tools ────────────────────────────────────────
+            What the coach and the gym have said comes ahead of History,
+            Challenges and the setup rows: a note is news and is dated, the rows
+            under it are doors that are always there. */}
         {/* ── coach note ─────────────────────────────────────────────────── */}
         {(!solo && (coachNotes.length > 0 || !!ann)) ? (<>
           <Rule />
@@ -1192,6 +1177,71 @@ export default function Home() {
             ) : null}
           </Section>
         </>) : null}
+
+
+        {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
+        <Section>
+          {/* ── Getting Started ────────────────────────────────────────────
+              Reported as "Repple Coach has a Getting Started, however Client
+              doesn't have this." What the coach app had was the first-run tour
+              firing on a fresh install — a carousel, gone once consumed, and
+              findable afterwards only through a User Guide row buried in
+              Profile. This row is the persistent answer and it is on the HOME
+              screen, because being buried in Profile is the whole of what was
+              reported.
+
+              It leaves when the list is finished — a checklist stuck at 6 of 6
+              is clutter, and clutter is the complaint. It does NOT leave
+              because a read failed: an unknown row keeps it here, which is the
+              LoadStatus rule applied to a list of ticks. The screen itself
+              stays in the Me hub either way.
+
+              Held back while the "personalise your plan" card is up. That card
+              goes straight into setup in one tap and this row's first item is
+              the same errand — two prompts for one thing on the first screen a
+              new member ever sees is the disease, not the cure. */}
+          {showChecklist(started) && !needsOnboard ? (
+            <ListRow icon="sparkle" title="Getting Started"
+              note={startedNext
+                ? `${checklistDone(started)} of ${started.length} done · next, ${startedNext.title.toLowerCase()}`
+                : startedLeft === 0
+                  ? 'some of this could not be read just now'
+                  : `${checklistDone(started)} of ${started.length} done`}
+              onPress={() => router.push('/(client)/getting-started')} />
+          ) : null}
+
+          <ListRow icon="clock" title="Your History" note="Every month you have trained, back to the start"
+            onPress={() => router.push('/(client)/history')} />
+
+          {/* Beside History because that is where its only other link lives, and
+              one link three levels deep is how a feature ships and is never
+              found. */}
+          <ListRow icon="dumbbell" title="Your Muscles" note="What you worked, on the body, and how long it has rested"
+            onPress={() => router.push('/(client)/muscles')} />
+
+          <ListRow icon="trophy" title="Challenges" note="Track your progress against the goal"
+            onPress={() => router.push('/(client)/challenges')} />
+
+          {/* Unconditional, and that is the point. The blocks above this list show
+              the LATEST notice from a coach or a gym and nothing else, which is
+              how "we are closed Monday" used to be readable for one day and
+              then nowhere at all. This row is the way back to the older ones,
+              and it is here whether or not there is a notice today — a screen
+              you can only reach when it has something on it is a screen nobody
+              learns exists. */}
+          <ListRow icon="info" title="Notices" note="Everything your gym and your coach have posted"
+            onPress={() => router.push('/(client)/notices')} />
+
+          {needsCoach ? (
+            <ListRow icon="people"
+              title={solo ? 'Work with a Coach' : 'Find Your Coach'}
+              note={solo
+                ? "Enter your coach's code, or browse trainers"
+                : "You have not been linked to a coach yet — enter their code, accept an invitation, or browse trainers"}
+              onPress={() => router.push('/(client)/trainers')} />
+          ) : null}
+        </Section>
+
 
 
         {/* ── the four things to do from here ──────────────────────────────
