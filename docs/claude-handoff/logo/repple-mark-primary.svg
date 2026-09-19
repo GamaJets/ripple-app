@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 54 38" role="img" aria-labelledby="title desc">
+  <title id="title">Repple mark</title>
+  <desc id="desc">Angular Repple R and forward signal mark</desc>
+  <path fill="#0B1D19" fill-rule="evenodd" d="M3 4h24c8 0 12 3 12 9s-4 9-12 9H14v12H3V4Zm11 8v3h13c1 0 2-.5 2-1.5S28 12 27 12H14Z"/>
+  <path fill="#35E59C" d="M33 4h18l-7 8H29l4-8Zm-5 18h15l-7 8H24l4-8Z"/>
+</svg>
