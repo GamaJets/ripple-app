@@ -32,7 +32,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, Ghost, Cta, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { DEFAULT_PALETTE } from '../../src/theme/tokens';
 import { useBrand } from '../../src/ui/brand';
@@ -204,11 +204,11 @@ export default function OwnerBrand() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Owner</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>White-label Studio</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your gym's name and colour — saved to the gym, not to this phone</Text>
-        </View>
+        {/* The board's tab-root opening: a quiet eyebrow, the title, and the
+            one sentence that says where the settings live — the kit's
+            ScreenHeader rather than the same lines by hand. */}
+        <ScreenHeader eyebrow="Your Gym" title="Brand"
+          subtitle="Your gym's name and colour — saved to the gym, not to this phone" />
 
         <Fetched at={fetchedAt} onRefresh={() => { refresh(); }} busy={status === 'loading'} />
 

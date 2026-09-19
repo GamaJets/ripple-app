@@ -32,8 +32,8 @@ import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { catalogueValue as cap } from '../../src/lib/format';
@@ -233,30 +233,39 @@ export default function OwnerLibrary() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What the platform can teach your members</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Exercise Library</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
+
+        {/* A card rather than the kit's bare `Hero`: the one block on this
+            screen the board does not draw. */}
+        {(() => {
+          const figure = countable ? String(rows.length) : '—';
+          const note =
+            status === 'loading' ? 'Reading the catalogue…'
+            : status === 'error' ? 'The catalogue could not be read, so this is unknown — not zero.'
+            : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
+            : signedOut ? 'Not read on this session — this is a sign-in that has not restored, not an empty catalogue.'
+            : rows.length === 0 ? 'The catalogue came back empty.'
+            : 'Every one is available to your members and to your coaches, at no extra cost.';
+          return (
+            <Section>
+              <SectionHead title="Movements in the Catalogue" />
+              <View accessible accessibilityLabel={`Movements in the catalogue, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
 
         <Fetched at={fetchedAt} onRefresh={() => { void reload(); }} busy={status === 'loading'} />
-
-        <View style={{ marginTop: sp.lg }}>
-          <Hero
-            label="Movements in the Catalogue"
-            figure={countable ? String(rows.length) : '—'}
-            note={
-              status === 'loading' ? 'Reading the catalogue…'
-              : status === 'error' ? 'The catalogue could not be read, so this is unknown — not zero.'
-              : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
-              : signedOut ? 'Not read on this session — this is a sign-in that has not restored, not an empty catalogue.'
-              : rows.length === 0 ? 'The catalogue came back empty.'
-              : 'Every one is available to your members and to your coaches, at no extra cost.'
-            }
-          />
-        </View>
 
 
         <Section>

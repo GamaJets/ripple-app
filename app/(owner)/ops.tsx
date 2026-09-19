@@ -61,7 +61,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch, Linking } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, ListRow, Flag, Notice, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, Cta, ListRow, Flag, Notice, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { useAnnouncements } from '../../src/ui/announcements';
@@ -777,33 +777,39 @@ export default function OwnerOps() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          {/* "Platform" named Repple, not this gym — the same drift Overview
-              settled when it dropped "Repple HQ · Platform". Everything on this
-              screen belongs to the owner's own gym. */}
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Operations</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your session fee · notices to members · support · gym activity</Text>
-          {/* The age of this screen. It began as the merchant read alone —
-              "payouts enabled" from a read half an hour old, read by an owner
-              in a plant room with no signal, is something about their money
-              that may no longer be true — and it now speaks for all five reads
-              the tabs below draw on, at the age of the oldest. Refresh and the
-              pull gesture both run every one of them. */}
-          <Fetched at={fetchedAt} busy={merchantStatus === 'loading'} onRefresh={refreshAll} />
-        </View>
+        {/* The board's tab-root opening, from the kit rather than by hand.
+            "Platform" named Repple, not this gym — the same drift Overview
+            settled when it dropped "Repple HQ · Platform". Everything on this
+            screen belongs to the owner's own gym. */}
+        <ScreenHeader eyebrow="Your Gym" title="Operations"
+          subtitle="Your session fee · notices to members · support · gym activity" />
 
         {/* ── the three jobs this screen does ────────────────────────────── */}
-        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
+        {/* The board's segmented bar: a pill of `surface2`, equal segments,
+            the chosen one filled in ink. Said as tabs, which is what they are. */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
           {/* The open count is only offered when the inbox is actually in hand:
               a badge counting the tickets we managed to read is a smaller
               number than the truth, and reads as the whole of it. */}
-          {([['announce', 'Announce'], ['support', `Support${inboxKnown && openCount ? ' (' + openCount + ')' : ''}`], ['activity', 'Activity']] as const).map(([k, label]) => (
-            <Pressable key={k} onPress={() => setTab(k)} style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: tab === k ? t.brand : 'transparent' }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: tab === k ? t.brandInk : t.ink3 }}>{label}</Text>
-            </Pressable>
-          ))}
+          {([['announce', 'Announce'], ['support', `Support${inboxKnown && openCount ? ' (' + openCount + ')' : ''}`], ['activity', 'Activity']] as const).map(([k, label]) => {
+            const on = tab === k;
+            return (
+              <Pressable key={k} onPress={() => setTab(k)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                style={{ flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: on ? t.ink : 'transparent' }}>
+                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
+
+        {/* The age of this screen. It began as the merchant read alone —
+            "payouts enabled" from a read half an hour old, read by an owner
+            in a plant room with no signal, is something about their money
+            that may no longer be true — and it now speaks for all five reads
+            the tabs below draw on, at the age of the oldest. Refresh and the
+            pull gesture both run every one of them. Under the bar rather than
+            in the header, so the header is the board's. */}
+        <Fetched at={fetchedAt} busy={merchantStatus === 'loading'} onRefresh={refreshAll} />
 
         {tab === 'announce' ? (
           <View>

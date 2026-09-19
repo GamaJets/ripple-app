@@ -37,7 +37,7 @@ import { plainExact } from '../../src/lib/units';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Spark, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Spark, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
@@ -386,35 +386,36 @@ export default function OwnerRevenue() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ paddingTop: sp.md }}>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width. Not
+            "Platform revenue". Every figure below is this gym's own — sessions
+            its coaches delivered, at its own session fee — and "the platform"
+            is what a trainer pays Repple, which the header of
+            src/ui/trainers.tsx rules is not a gym owner's business at all. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          {/* Not "Platform revenue". Every figure below is this gym's own —
-              sessions its coaches delivered, at its own session fee — and
-              "the platform" is what a trainer pays Repple, which the header of
-              src/ui/trainers.tsx rules is not a gym owner's business at all. */}
-          <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>Your gym's revenue, forecast &amp; unit economics</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Revenue</Text>
-          {/* Under the title rather than beside the hero, because it is about
-              the whole screen and not about one figure. */}
-          <Fetched at={fetchedAt} onRefresh={refreshAll} busy={busy} />
-          {/* What these figures cover. Null — and so absent entirely — for the
-              one-gym owner, which is the overwhelming case and is asserted in
-              ownedSites.test.ts. */}
-          {sites ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{sites}</Text>
-          ) : null}
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Revenue</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
+        {/* What these figures cover. Null — and so absent entirely — for the
+            one-gym owner, which is the overwhelming case and is asserted in
+            ownedSites.test.ts. */}
+        {sites ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{sites}</Text>
+        ) : null}
 
-        {/* ── the hero ───────────────────────────────────────────────────── */}
-        {/* The hero is the TILL, not the coaching. Whatever the money was for
+        {/* ── the figure ─────────────────────────────────────────────────── */}
+        {/* The figure is the TILL, not the coaching. Whatever the money was for
             — a membership, a class, a pack, a drop-in at the desk — if somebody
             recorded it, it is in here; if nobody did, it is not, and the note
             says how many payments the figure is made of so a suspiciously small
-            one is legible as a recording gap rather than a bad month. */}
-        <Hero
-          label="Taken · 30 Days"
-          figure={fig(till && !till.empty ? money(till.cents, till.currency) : till?.empty ? money(0, cur) : null)}
-          note={takings === undefined
+            one is legible as a recording gap rather than a bad month.
+
+            A card rather than the kit's bare `Hero`: the one block on this
+            screen the board does not draw. */}
+        {(() => {
+          const figure = fig(till && !till.empty ? money(till.cents, till.currency) : till?.empty ? money(0, cur) : null);
+          const note = takings === undefined
             ? 'Reading what your gym was paid…'
             : takings === null
             ? 'Your payments could not be read — this is not a month in which the gym took nothing.'
@@ -422,8 +423,25 @@ export default function OwnerRevenue() {
             ? 'No payment has been recorded in 30 days. That is not the same as no income — it is the same as nobody having entered one.'
             : till && till.currency == null
             ? `${till.count} payments, in more than one currency — so there is no one total to state.`
-            : `${till?.count} payment${till?.count === 1 ? '' : 's'} recorded — memberships, classes, packs and the desk, whatever somebody entered`}
-        />
+            : `${till?.count} payment${till?.count === 1 ? '' : 's'} recorded — memberships, classes, packs and the desk, whatever somebody entered`;
+          return (
+            <Section>
+              <SectionHead title="Taken · 30 Days" />
+              {/* A money figure is shrunk to fit and never wrapped: broken
+                  across two lines it is a different number. */}
+              <View accessible accessibilityLabel={`Taken in 30 days, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
+
+        {/* Under the figure rather than in the header, because it is about
+            the whole screen and not about one figure — and so the first
+            viewport is the till and not the plumbing. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={busy} />
 
         {/* ── money Stripe took that this ledger does not hold ────────────
             Deliberately directly under the hero and deliberately OUTSIDE it.

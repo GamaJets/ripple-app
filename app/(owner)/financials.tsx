@@ -60,10 +60,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Spark, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Notice, Spark, fig } from '../../src/ui/kit';
 import { useMrrHistory } from '../../src/ui/useMrrHistory';
 import { isWhole } from '../../src/ui/loadStatus';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, anyEntered, reviewFinances, reviewBasis, storageNote, type FinInputs, type FinFlag } from '../../src/lib/finReview';
 import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise, sharedCurrency } from '../../src/lib/gymRecord';
@@ -962,16 +962,17 @@ export default function Financials() {
             also put it under the thumb that scrolls, and past the title in
             reading order, so a screen reader announced the screen and then
             offered the way out of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+        {/* The title centred over the page with a trailing spacer the width
+            of the back control, the way every pushed page in the other two
+            apps opens now. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Checks</Text>
-            {/* The typed figures are on this phone; the register they are
-                checked against is not. This line is about the register. */}
-            <Fetched at={fetchedAt} onRefresh={reread} busy={busy} />
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Financial Checks</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
+        {/* The typed figures are on this phone; the register they are
+            checked against is not. This line is about the register. */}
+        <Fetched at={fetchedAt} onRefresh={reread} busy={busy} />
         {/* Says what this is before it says anything about the gym. The
             sentence comes from src/lib/finReview.ts rather than being typed
             here, so a rewrite of this screen cannot quietly drop the one line
@@ -1214,17 +1215,40 @@ export default function Financials() {
           </Section>
         ) : r ? (
           <>
-            {/* ── the hero ─────────────────────────────────────────────── */}
-            <Hero
-              label="Health Score"
-              figure={fig(r.score)}
-              unit="/100"
-              note={cur
+            {/* ── the figure ───────────────────────────────────────────── */}
+            {/* A card, not the kit's bare `Hero`: the one block on this screen
+                the board does not draw. The ring the Hero drew beside the
+                score is a bar under it now — the same 0..1, said aloud as a
+                progressbar the same way, so "how far through" survives the
+                move without a second figure competing with the first. */}
+            {(() => {
+              const note = cur
                 ? `Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${num(r.marginPct)}% margin`
-                : `Grade ${r.grade} · a ${num(r.marginPct)}% net margin. The amounts are not written here because this gym has not set its currency.`}
-              arc={r.score / 100}
-              arcLabel="health score"
-            />
+                : `Grade ${r.grade} · a ${num(r.marginPct)}% net margin. The amounts are not written here because this gym has not set its currency.`;
+              const pctOf100 = Math.round(Math.max(0, Math.min(100, r.score)));
+              return (
+                <Section>
+                  <SectionHead title="Health Score" note={`Grade ${r.grade}`} />
+                  {/* `r.score` is a number by type — the review has run —
+                      so the spoken sentence carries it directly rather than
+                      through fig(), which could only ever draw the dash a
+                      sentence must not contain. */}
+                  <View accessible accessibilityLabel={`Health score, ${num(r.score)} out of 100, ${note}`}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                        style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(r.score)}</Text>
+                      <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>/100</Text>
+                    </View>
+                    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+                  </View>
+                  <View accessible accessibilityRole="progressbar" accessibilityLabel={`${pctOf100}% health score`}
+                    accessibilityValue={{ min: 0, max: 100, now: pctOf100 }}
+                    style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.lg, overflow: 'hidden' }}>
+                    <View style={{ height: 3, borderRadius: 2, width: `${pctOf100}%`, backgroundColor: t.brand }} />
+                  </View>
+                </Section>
+              );
+            })()}
 
             {/* The score is built on what was typed. If the register disagrees,
                 say so here rather than only inside the edit form — this is the

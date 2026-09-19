@@ -37,7 +37,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
 import { plainExact } from '../../src/lib/units';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
@@ -262,26 +262,25 @@ export default function Promotions() {
         {/* Back on the LEADING edge — see the same note in
             app/(owner)/financials.tsx. These two were the only screens in the
             owner portal with it on the trailing side. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your members</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Promotions</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Promotions</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
 
-        {/* When the codes were read, whether this phone is reaching us, and a
-            way to ask again. The hero below is a count over them. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void refresh(); }} busy={status === 'loading'} />
-
-        {/* ── the hero ───────────────────────────────────────────────────── */}
+        {/* ── the figure ─────────────────────────────────────────────────── */}
         {/* `promos.length` was every code the gym had ever made, under the word
-            "Live". This counts the ones a member could actually redeem. */}
-        <Hero
-          label="Live Codes"
-          figure={fig(live)}
-          unit={live === 1 ? 'code' : 'codes'}
-          note={status === 'loading' ? 'Reading your codes…'
+            "Live". This counts the ones a member could actually redeem.
+
+            A card rather than the kit's bare `Hero`: the one block on this
+            screen the board does not draw. */}
+        {(() => {
+          const figure = fig(live);
+          const unit = live === 1 ? 'code' : 'codes';
+          const note = status === 'loading' ? 'Reading your codes…'
             : status === 'error' ? 'Your codes could not be read — this is not a gym with none.'
             : !countable
             // 'partial'. The codes below are real; how many of them there are is
@@ -292,8 +291,25 @@ export default function Promotions() {
               ? (off ?? 0) > 0
                 ? `Nothing is redeemable right now. ${off} code${off === 1 ? ' is' : 's are'} switched off below — switch one back on, or create a new offer.`
                 : 'Create an offer and push it straight to your members.'
-              : `${(off ?? 0) > 0 ? `${off} more switched off. ` : ''}Push a live code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.`}
-        />
+              : `${(off ?? 0) > 0 ? `${off} more switched off. ` : ''}Push a live code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.`;
+          return (
+            <Section>
+              <SectionHead title="Live Codes" />
+              <View accessible accessibilityLabel={`Live codes, ${figure} ${unit}, ${note}`}>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                    style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+                  <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{unit}</Text>
+                </View>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
+
+        {/* When the codes were read, whether this phone is reaching us, and a
+            way to ask again. The figure above is a count over them. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void refresh(); }} busy={status === 'loading'} />
 
 
         {/* ── new promotion ──────────────────────────────────────────────── */}

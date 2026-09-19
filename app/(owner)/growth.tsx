@@ -58,7 +58,7 @@ import { plainExact } from '../../src/lib/units';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
@@ -288,38 +288,50 @@ export default function OwnerGrowth() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Members and trainers</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Growth</Text>
-          <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading || churn.loading} />
-        </View>
+        {/* The board's tab-root opening: a quiet eyebrow and the title. */}
+        <ScreenHeader eyebrow="Members and Trainers" title="Growth" />
 
-        {/* ── the hero ───────────────────────────────────────────────────── */}
-        <Hero
-          label={`New trainers · ${now.toLocaleString(undefined, { month: 'short' })} ${now.getFullYear()}`}
+        {/* ── the figure ─────────────────────────────────────────────────── */}
+        {/* A card rather than the kit's bare `Hero`: the one block on this
+            screen the board does not draw. */}
+        {(() => {
+          const label = `New Trainers · ${now.toLocaleString(undefined, { month: 'short' })} ${now.getFullYear()}`;
           // A month with nobody joining reads "0", not "+0". The plus was
           // unconditional, so the emptiest month on the roster was the one the
           // hero dressed up as an addition.
-          figure={trainersUnknown ? '—' : deltaLabel(newThisMonth, { since: null, decimals: 0, noChange: '0' })}
-          note={loading
+          const figure = trainersUnknown ? '—' : deltaLabel(newThisMonth, { since: null, decimals: 0, noChange: '0' });
+          const note = loading
             ? 'Reading your roster…'
             : trainersUnread
             ? 'Your roster could not be read — this is not a month with no signups in it.'
             : roll.trainers > 0
             ? `${roll.trainers} on the roster · ${roll.trainers - idle} delivering sessions`
-            : 'No trainers yet — this fills in as they join your gym.'}
-        />
+            : 'No trainers yet — this fills in as they join your gym.';
+          return (
+            <Section>
+              <SectionHead title={label} />
+              <View accessible accessibilityLabel={`${label}, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+              {/* Under the figure, not buried at the bottom: this is the
+                  sentence that stops every trainer figure below being read as
+                  a member figure. It used to end by saying member churn was not
+                  derived anywhere on this handset. It is, now — immediately
+                  below, and pointed at from here so an owner reading the figure
+                  knows where the other question is answered. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                This figure and the trainer sections lower down count trainers. Your
+                members are counted separately, in Member Churn below.
+              </Text>
+            </Section>
+          );
+        })()}
 
-        {/* Under the hero, not buried at the bottom: this is the sentence that
-            stops every trainer figure below being read as a member figure. It
-            used to end by saying member churn was not derived anywhere on this
-            handset. It is, now — immediately below, and pointed at from here so
-            an owner reading the hero knows where the other question is
-            answered. */}
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-          The hero above and the trainer sections lower down count trainers. Your
-          members are counted separately, in Member Churn below.
-        </Text>
+        {/* The age of both reads, under the figure rather than in the header
+            so the first viewport is the gym and not the plumbing. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading || churn.loading} />
 
 
         {/* ── member churn ───────────────────────────────────────────────── */}

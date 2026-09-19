@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -351,25 +351,23 @@ export default function OwnerEquipment() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={BACK_ICON} size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Equipment</Text>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Equipment</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
 
-        {/* The pull-to-refresh above already reloads; this says WHEN, which is
-            the half a gesture cannot tell you, and whether the phone can even
-            reach us — a plant room is a basement with weights in it. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} style={{ marginTop: 0, marginBottom: sp.md }} />
-
-        <Hero
-          label="Needing Attention"
-          figure={!loaded ? '—' : String(queue.length)}
+        {/* A card rather than the kit's bare `Hero`: the one block on this
+            screen the board does not draw. */}
+        {(() => {
+          const figure = !loaded ? '—' : String(queue.length);
           // The gym comes BEFORE the register, because until we know whose
           // register it is the loader has not run and `readSt` is describing a
           // read that was never attempted rather than one that has not landed.
-          note={noGym
+          const note = noGym
             ? 'This account is not attached to a gym, so there is no register to read. '
               + 'That is a fact about this account, not a gym with no equipment in it.'
             : tenantStatus === 'error'
@@ -392,8 +390,23 @@ export default function OwnerEquipment() {
               ? 'Nothing on the register yet — add your kit and this becomes the maintenance list.'
               : queue.length === 0
                 ? 'Every scheduled item is in date.'
-                : `${sum?.overdue ?? 0} overdue · ${sum?.due ?? 0} due · ${sum?.unrecorded ?? 0} never serviced`}
-        />
+                : `${sum?.overdue ?? 0} overdue · ${sum?.due ?? 0} due · ${sum?.unrecorded ?? 0} never serviced`;
+          return (
+            <Section>
+              <SectionHead title="Needing Attention" />
+              <View accessible accessibilityLabel={`Needing attention, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
+
+        {/* The pull-to-refresh above already reloads; this says WHEN, which is
+            the half a gesture cannot tell you, and whether the phone can even
+            reach us — a plant room is a basement with weights in it. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} />
 
         {/* Whose day the "due" column was cut on. Printed rather than assumed:
             every date this screen shows, and every date it WRITES when a

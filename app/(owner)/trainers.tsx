@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { num } from '../../src/lib/format';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
@@ -155,11 +155,16 @@ export default function OwnerTrainers() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching staff</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Trainers</Text>
-          <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
-        </View>
+        {/* The board's tab-root opening: eyebrow, title, and the one global
+            action as a round control. Inviting is that action — it is the only
+            write on this screen — and it stays as the full-width button in the
+            Roster card too, because a plus in the corner is not where a first
+            -time owner looks for "add somebody". */}
+        <ScreenHeader
+          eyebrow="Your Coaching Staff"
+          title="Trainers"
+          actions={<Ghost icon="plus" a11yLabel="Invite a trainer by email" onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />}
+        />
 
         {/* Sessions lead, because it is the number that moves. */}
         {/* ── "Delivered" was the one word this figure could not carry ─────
@@ -180,10 +185,12 @@ export default function OwnerTrainers() {
 
             The count is worth having and the word was not. `delivered` now
             appears only beside the figure that means it. */}
-        <Hero
-          label="Sessions · 30 Days"
-          figure={trainersUnknown ? '—' : fig(num(roll.sessions30))}
-          note={
+        {/* A card rather than the kit's bare `Hero`, which is the one block on
+            this screen the board does not draw. The head's note is the way
+            through to Revenue. */}
+        {(() => {
+          const figure = trainersUnknown ? '—' : fig(num(roll.sessions30));
+          const note =
             loading ? 'Loading your roster…'
             : trainersUnread ? 'Your roster could not be read'
             // A prefix of the roster is not the roster, so it carries no count
@@ -204,10 +211,25 @@ export default function OwnerTrainers() {
               // owner. The count is still true, so it is still said.
               : gymMoney(roll.payroll30, cur) == null
               ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${num(roll.delivered30)} marked delivered · set your gym's currency to see what that is worth`
-              : `${num(roll.delivered30)} marked delivered · worth ${gymMoney(roll.payroll30, cur)} at your session fee`
-          }
-          onPress={() => router.push('/(owner)/revenue')}
-        />
+              : `${num(roll.delivered30)} marked delivered · worth ${gymMoney(roll.payroll30, cur)} at your session fee`;
+          return (
+            <Section>
+              <SectionHead title="Sessions · 30 Days" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
+              {/* One spoken sentence over label, figure and note, as the Hero
+                  grouped them. Shrunk to fit and never wrapped — a count broken
+                  across two lines is a count read wrong. */}
+              <View accessible accessibilityLabel={`Sessions in 30 days, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
+
+        {/* The age of all three reads, under the figure rather than in the
+            header so the first viewport is the gym and not the plumbing. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
 
         {/* The whole screen is one list and the figures over it, so the reason
             they are all dashes is worth one sentence rather than seven. */}
@@ -305,7 +327,9 @@ export default function OwnerTrainers() {
                 flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
                 borderTopWidth: ix === 0 ? 0 : hairline, borderTopColor: t.ring,
               }}>
-                <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                {/* 36pt, the size the kit's ListRow draws every row's circle
+                    at, so a monogram row and an icon row sit on one grid. */}
+                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                   <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>{tr.name.split(' ').map((x) => x[0]).join('').slice(0, 2)}</Text>
                 </View>
                 <View style={{ flex: 1 }}>

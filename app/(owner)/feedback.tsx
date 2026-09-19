@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost, PartialRead, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, PartialRead, Flag } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
@@ -116,34 +116,56 @@ export default function OwnerFeedback() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>What testers are telling you</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Feedback</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Feedback</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
 
-        {/* The pull-to-refresh reloads; this says when it last worked, and
-            whether the phone can reach us at all. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void onRefresh(); }} busy={refreshing || loading} />
-
-        {/* ── the hero: the one number that summarises the inbox ─────────── */}
-        <Hero
-          label="Average Rating"
-          figure={num1(avg)}
-          unit={avg == null ? undefined : '/ 5'}
-          arc={avg == null ? undefined : avg / 5}
-          arcLabel="of five stars"
-          note={loading ? 'Loading…'
+        {/* ── the figure: the one number that summarises the inbox ───────── */}
+        {/* A card rather than the kit's bare `Hero`. The ring the Hero drew
+            beside the average is a bar under it now — the same share of five,
+            said aloud the same way — so a second figure never competes with
+            the first. */}
+        {(() => {
+          const figure = num1(avg);
+          const note = loading ? 'Loading…'
             : unread ? 'Could not be read'
             // The count goes with the average. Saying "1,000 submissions" under
             // a dash would state as a total the very figure the dash exists to
             // withhold.
             : truncated ? `More than ${rows.length.toLocaleString()} submissions — too many to average here`
             : rows.length === 0 ? 'No submissions yet'
-            : `${rows.length} submission${rows.length === 1 ? '' : 's'}`}
-        />
+            : `${rows.length} submission${rows.length === 1 ? '' : 's'}`;
+          const pctOfFive = avg == null ? null : Math.round(Math.max(0, Math.min(1, avg / 5)) * 100);
+          return (
+            <Section>
+              <SectionHead title="Average Rating" />
+              <View accessible accessibilityLabel={`Average rating, ${figure}${avg == null ? '' : ' out of 5'}, ${note}`}>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                    style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+                  {avg == null ? null : <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>/ 5</Text>}
+                </View>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+              {pctOfFive == null ? null : (
+                <View accessible accessibilityRole="progressbar" accessibilityLabel={`${pctOfFive}% of five stars`}
+                  accessibilityValue={{ min: 0, max: 100, now: pctOfFive }}
+                  style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.lg, overflow: 'hidden' }}>
+                  <View style={{ height: 3, borderRadius: 2, width: `${pctOfFive}%`, backgroundColor: t.brand }} />
+                </View>
+              )}
+            </Section>
+          );
+        })()}
+
+        {/* The pull-to-refresh reloads; this says when it last worked, and
+            whether the phone can reach us at all. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void onRefresh(); }} busy={refreshing || loading} />
 
 
         <Section>

@@ -47,9 +47,8 @@ import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, KpiRow, fig, Flag } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { supabase } from '../../src/lib/supabase';
 import { isoDate } from '../../src/lib/format';
@@ -337,26 +336,26 @@ export default function OwnerDeletions() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={BACK_ICON} size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Deletion Requests</Text>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Deletion Requests</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
 
-        {/* A deletion request runs against a statutory clock, so how old this
-            read is, is part of the fact. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} style={{ marginTop: 0, marginBottom: sp.md }} />
-
-        <Hero
-          label="Waiting on You"
+        {/* A card rather than the kit's bare `Hero`, which is the one block
+            on this screen the board does not draw. The Hero's tone was a dot
+            beside the note; it still is, and it is the alarm colour only when
+            the read failed or somebody is past the thirty days. */}
+        {(() => {
           // No count over a truncated queue. The rows below are still shown —
           // they are real people with a real clock running — but "14 waiting"
           // when there are more than the ceiling returned is a figure an owner
           // works to, and this screen exists to hold them to a deadline.
-          figure={fig(loaded && !queueShort ? queue.length : null)}
-          tone={failed || overdue ? t.crit : undefined}
-          note={failed
+          const figure = fig(loaded && !queueShort ? queue.length : null);
+          const note = failed
             // Said "pull to retry" over a ScrollView with no RefreshControl, so
             // the one instruction on the most consequential line of this screen
             // did nothing. The gesture is real now, and so is the button in the
@@ -375,8 +374,26 @@ export default function OwnerDeletions() {
                 // it anyway is how "null days" reaches a reader; say what is known instead.
                 : soonest == null
                   ? `${queue.length} waiting, with no clock recorded against ${queue.length === 1 ? 'it' : 'them'}.`
-                  : `Soonest runs out in ${soonest} ${soonest === 1 ? 'day' : 'days'}.`}
-        />
+                  : `Soonest runs out in ${soonest} ${soonest === 1 ? 'day' : 'days'}.`;
+          const mark = failed || overdue ? t.crit : t.brand;
+          return (
+            <Section>
+              <SectionHead title="Waiting on You" />
+              <View accessible accessibilityLabel={`Waiting on you, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
+                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
+                </View>
+              </View>
+            </Section>
+          );
+        })()}
+
+        {/* A deletion request runs against a statutory clock, so how old this
+            read is, is part of the fact. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} />
 
 
         <Section>

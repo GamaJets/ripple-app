@@ -43,7 +43,7 @@ import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Ghost, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
 import { useTenant } from '../../src/ui/tenant';
@@ -794,26 +794,34 @@ export default function OwnerClassAnalytics() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Attendance drives pay</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes & Payroll</Text>
-            {/* Attendance and payroll both. The pay reload rides along, because
-                an owner pressing one control expects the whole screen to be
-                current afterwards, not half of it. */}
-            <Fetched at={fetchedAt} busy={reading} onRefresh={refreshAll} />
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Classes & Payroll</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
 
         {/* ── range ──────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
-          {RANGES.map(([k, label]) => (
-            <Pressable key={k} onPress={() => setRange(k)} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: radius.sm, backgroundColor: range === k ? t.brand : 'transparent' }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: range === k ? t.brandInk : t.ink3 }}>{label}</Text>
-            </Pressable>
-          ))}
+        {/* The board's segmented bar: a pill of `surface2`, equal segments,
+            the chosen one filled in ink. A tab per range, said as one. */}
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
+          {RANGES.map(([k, label]) => {
+            const on = range === k;
+            return (
+              <Pressable key={k} onPress={() => setRange(k)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                style={{ flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: on ? t.ink : 'transparent' }}>
+                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
+
+        {/* Attendance and payroll both. The pay reload rides along, because
+            an owner pressing one control expects the whole screen to be
+            current afterwards, not half of it. */}
+        <Fetched at={fetchedAt} busy={reading} onRefresh={refreshAll} />
 
         {/* A failed refresh over rows that DID land no longer reaches this
             branch — those rows are kept and flagged below. What is left here is
@@ -862,10 +870,11 @@ export default function OwnerClassAnalytics() {
               and React renders null as nothing, which is how a sentence loses
               its middle and reads as a broken screen rather than as a missing
               setting. */}
-          <Hero
-            label="Trainer Payroll"
-            figure={fig(money(totals.payrollCents, totals.payrollCurrency))}
-            note={[
+          {/* A card rather than the kit's bare `Hero`: the one block on this
+              screen the board does not draw. */}
+          {(() => {
+            const figure = fig(money(totals.payrollCents, totals.payrollCurrency));
+            const note = [
               `${totals.attended} check-ins`,
               `${totals.classes} classes`,
               `${totals.showPct ?? '—'}% turned up`,
@@ -881,8 +890,18 @@ export default function OwnerClassAnalytics() {
                 : totals.unpriced > 0
                 ? `${totals.unpriced} class${totals.unpriced === 1 ? '' : 'es'} priced at nothing because the coach has no class rate`
                 : null,
-            ].filter(Boolean).join(' · ')}
-          />
+            ].filter(Boolean).join(' · ');
+            return (
+              <Section>
+                <SectionHead title="Trainer Payroll" />
+                <View accessible accessibilityLabel={`Trainer payroll, ${figure}, ${note}`}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                    style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+                </View>
+              </Section>
+            );
+          })()}
 
           {/* Queued is not paid, said where the figure is rather than in a
               caption under the fold. `Flag` puts the tone in a 6pt dot beside

@@ -27,7 +27,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
@@ -86,15 +85,17 @@ export default function OwnerExercise() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
-            <Icon name={BACK_ICON} size={20} color={t.ink} />
-          </Pressable>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md, marginBottom: sp.lg }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
           {/* The owner sees the catalogue in their own language too, and on
               this screen the marker below is doing a second job: it is how an
               owner reviewing the German library can see, movement by movement,
               what is still English. */}
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
         <Fetched at={fetchedAt} onRefresh={() => { void reload(); }} busy={status === 'loading'}
                  style={{ marginBottom: sp.md }} />

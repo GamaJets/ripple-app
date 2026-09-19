@@ -48,8 +48,7 @@ import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, KpiRow, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -217,15 +216,14 @@ export default function OwnerOrders() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={BACK_ICON} size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Online Orders</Text>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Online Orders</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
-
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={busy}
-          style={{ marginTop: 0, marginBottom: sp.md }} />
 
         {/* Said once, for the whole screen: the hero, the per-currency pots,
             the four KPIs and the book are all derived from this one read, so
@@ -238,19 +236,22 @@ export default function OwnerOrders() {
             worse — a member who paid and got nothing — and spending it on a
             dropped connection is how it stops being read. */}
         {state === 'stale' ? (
-          <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote('order book', reason)}</Flag>
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{staleNote('order book', reason)}</Flag>
         ) : null}
 
-        {/* The hero is the count of orders that need a person, and not the
+        {/* The figure is the count of orders that need a person, and not the
             money. A gym reading "GBP 4,300 taken" over three members who paid
-            and got nothing has been told the comfortable half of the fact. */}
-        <Hero
-          label="Need Attention"
-          figure={fig(loaded ? needsAPerson : null)}
-          tone={needsAPerson > 0 ? t.crit : undefined}
-          note={state === 'failed'
-            // The most important sentence on the screen: the hero figure is a
-            // count of members who paid and got nothing, and a dash over it must
+            and got nothing has been told the comfortable half of the fact.
+
+            A card rather than the kit's bare `Hero`, which is the one block on
+            this screen the board does not draw. The Hero's tone was a dot
+            beside the note; it still is, and it is the alarm colour only when
+            somebody paid and got nothing. */}
+        {(() => {
+          const figure = fig(loaded ? needsAPerson : null);
+          const note = state === 'failed'
+            // The most important sentence on the screen: the figure is a count
+            // of members who paid and got nothing, and a dash over it must
             // never be read as a zero.
             ? `${failedNote('order book', reason)} This is NOT an all-clear.`
             : state === 'loading'
@@ -259,8 +260,24 @@ export default function OwnerOrders() {
             ? `Nothing has been bought online in ${WINDOW_DAYS} days. If that is a surprise, check that card payments are switched on in Operations.`
             : needsAPerson === 0
             ? `${list.length} order${list.length === 1 ? '' : 's'} in ${WINDOW_DAYS} days, and every paid one produced what it was for.`
-            : `${needsAPerson} member${needsAPerson === 1 ? '' : 's'} paid and did not get what they bought.`}
-        />
+            : `${needsAPerson} member${needsAPerson === 1 ? '' : 's'} paid and did not get what they bought.`;
+          const mark = needsAPerson > 0 ? t.crit : t.brand;
+          return (
+            <Section>
+              <SectionHead title="Need Attention" />
+              <View accessible accessibilityLabel={`Need attention, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
+                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
+                </View>
+              </View>
+            </Section>
+          );
+        })()}
+
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={busy} />
 
         {/* Said above the money, because it is more urgent than the money. */}
         {loaded && needsAPerson > 0 ? (

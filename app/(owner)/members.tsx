@@ -21,8 +21,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -698,17 +698,15 @@ export default function OwnerMembers() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={BACK_ICON} size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Members</Text>
+        {/* The pushed-page header the board draws: a round back control at the
+            leading edge, the title centred, and a trailing spacer the width of
+            the control so the title sits on the screen's centre line rather
+            than the centre of what is left beside the button. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Members</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
-
-        {/* When the register was read, whether this phone can reach us, and a
-            way to ask again. An owner at a desk in a basement was reading a
-            roster with nothing on the page saying how old it was. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={reloading} style={{ marginTop: 0, marginBottom: sp.md }} />
 
         {/* One caveat for the whole screen, because staleness is a fact about
             the read and every figure below comes off the same read. Said here
@@ -720,17 +718,19 @@ export default function OwnerMembers() {
             register is the boy who cried wolf on the one screen an owner uses
             to cancel somebody's billing. */}
         {state === 'stale' ? (
-          <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote('register', reason)}</Flag>
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{staleNote('register', reason)}</Flag>
         ) : null}
 
-        <Hero
-          label="Recurring Revenue (monthly)"
+        {/* The figure as a card, the way the coach's Payments card leads with
+            its own — the kit's bare `Hero` was the one block here the board
+            does not draw. */}
+        {(() => {
           // A figure only where there are rows behind it. `summarise` over three
           // empty arrays returns a null MRR today, so this was already a dash
           // under a failed read — by arithmetic rather than on purpose, which is
           // one refactor of `summarise` away from printing a confident 0.
-          figure={hasRows(state) ? (money(sum.mrrCents, mrrCcy.currency) ?? '—') : '—'}
-          note={state === 'failed'
+          const figure = hasRows(state) ? (money(sum.mrrCents, mrrCcy.currency) ?? '—') : '—';
+          const note = state === 'failed'
             ? failedNote('register', reason)
             : state === 'loading'
             ? 'Reading your register…'
@@ -748,8 +748,28 @@ export default function OwnerMembers() {
             ? canSayEmpty(state) && list.length === 0
               ? 'No memberships on the register yet.'
               : 'No active membership sits on a priced plan, so this is not known — which is not the same as nothing.'
-            : `${sum.activeMembers} active${frozen ? ` · ${frozen} frozen` : ''}`}
-        />
+            : `${sum.activeMembers} active${frozen ? ` · ${frozen} frozen` : ''}`;
+          return (
+            <Section>
+              <SectionHead title="Recurring Revenue · Monthly" />
+              {/* One spoken sentence over label, figure and note, as the Hero
+                  grouped them. A money figure is shrunk to fit and never
+                  wrapped: broken across two lines it is a different number. */}
+              <View accessible accessibilityLabel={`Recurring revenue, monthly, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
+
+        {/* When the register was read, whether this phone can reach us, and a
+            way to ask again. An owner at a desk in a basement was reading a
+            roster with nothing on the page saying how old it was. Under the
+            figure rather than over it, so the first viewport is the register
+            and not the plumbing. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={reloading} />
 
 
         <Section>

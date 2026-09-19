@@ -11,9 +11,9 @@ import { View, Text, ScrollView, Pressable, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
-import { Icon, type IconName } from '../../src/ui/Icon';
+import { type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, fig } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
@@ -301,45 +301,26 @@ export default function OwnerOverview() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            {/* The owner's own gym, not "Repple HQ · Platform" — this app is
-                one gym's console, and the previous wording read like an
-                internal admin tool belonging to somebody else. */}
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={1}>
-              {/* Said "in Ops". Ops gained the session FEE; the gym's NAME is
-                  in Brand. Sending an owner to the wrong screen for the one
-                  thing the hero is asking them to do. */}
-              {tenant?.name?.trim() || 'Name your gym in Brand'}
-            </Text>
-            {/* The console's own age. Every figure below is a roll-up of one
-                read, and until now nothing on the page said when it happened
-                or whether the phone could still reach us. */}
-            <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
-          </View>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
-            <Ghost icon="search" onPress={() => router.push('/(owner)/explore')} />
+        {/* The board's opening on every tab root: a quiet eyebrow, the title,
+            and the round controls at the trailing edge. The owner's own gym,
+            not "Repple HQ · Platform" — this app is one gym's console, and the
+            previous wording read like an internal admin tool belonging to
+            somebody else. Said "in Ops" once: Ops gained the session FEE; the
+            gym's NAME is in Brand. */}
+        <ScreenHeader
+          eyebrow="Your Gym"
+          title={tenant?.name?.trim() || 'Name your gym in Brand'}
+          actions={<>
+            <Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(owner)/explore')} />
             {/* Quiet by design — nothing in the product addresses an owner
                 today except what a coach in their gym sends them. It is here
                 anyway, and it is here with a mark that distinguishes "nothing
                 for you" from "we could not find out", which is the difference
                 that matters on a screen an owner reads at a glance. */}
             <NotificationBell group="owner" />
-            <Ghost icon="share" onPress={exportReport} />
-          </View>
-        </View>
-
-        {/* ── shortcuts ──────────────────────────────────────────────────── */}
-        <View style={{ marginTop: sp.lg }}>
-          <QuickRow items={[
-            { icon: 'people', label: 'Trainers', onPress: () => router.push('/(owner)/trainers') },
-            { icon: 'me', label: 'Members', onPress: () => router.push('/(owner)/members') },
-            { icon: 'palette', label: 'Brand', onPress: () => router.push('/(owner)/brand') },
-            { icon: 'trending', label: 'Growth', onPress: () => router.push('/(owner)/growth') },
-            { icon: 'wrench', label: 'Ops', onPress: () => router.push('/(owner)/ops') },
-          ]} />
-        </View>
+            <Ghost icon="share" a11yLabel="Share a platform report" onPress={exportReport} />
+          </>}
+        />
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
@@ -404,10 +385,13 @@ export default function OwnerOverview() {
             money by the figure above it reads a session fee the gym does not
             charge. The count is worth having and the word was not; `delivered`
             now appears only beside the figure that means it. */}
-        <Hero
-          label="Sessions · 30 Days"
-          figure={trainersUnknown ? '—' : num(roll.sessions30)}
-          note={loading
+        {/* The figure is a card now, the way the coach's Payments card leads
+            with its own: the kit's `Hero` sat bare on the ground and was the one
+            block on this screen the board does not draw. The tap through to
+            Revenue is the head's trailing note rather than the whole block. */}
+        {(() => {
+          const figure = trainersUnknown ? '—' : num(roll.sessions30);
+          const note = loading
             ? 'Reading your roster…'
             : trainersUnread
             ? 'Your trainers could not be read'
@@ -421,9 +405,32 @@ export default function OwnerOverview() {
               // unguarded ${} would say "Worth null at your session fee".
               : gymMoney(roll.payroll30, cur) == null
               ? "Set your gym's currency in Ops to value these"
-              : `${num(roll.delivered30)} marked delivered · worth ${gymMoney(roll.payroll30, cur)} at your session fee`}
-          onPress={() => router.push('/(owner)/revenue')}
-        />
+              : `${num(roll.delivered30)} marked delivered · worth ${gymMoney(roll.payroll30, cur)} at your session fee`;
+          return (
+            <Section>
+              <SectionHead title="Sessions · 30 Days" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
+              {/* One spoken sentence for label, figure and note — the Hero
+                  grouped them the same way, and three separate stops over one
+                  fact is what it was there to avoid. */}
+              <View accessible accessibilityLabel={`Sessions in 30 days, ${figure}, ${note}`}>
+                {/* Shrunk to fit and never wrapped, for the reason the Hero
+                    gave: a figure broken across two lines is a figure an owner
+                    reads wrong, and the floor is low enough that iOS shrinks
+                    rather than ellipsises. */}
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              </View>
+            </Section>
+          );
+        })()}
+
+        {/* The console's own age. Every figure on this screen is a roll-up of
+            one read, and nothing on the page used to say when it happened or
+            whether the phone could still reach us. Under the figure rather
+            than in the header, so nothing procedural sits in the first
+            viewport — the same move Home made. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
 
 
         {/* ── the shape of the platform ──────────────────────────────────── */}
@@ -470,6 +477,20 @@ export default function OwnerOverview() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
           )}
         </Section>
+
+        {/* ── shortcuts ──────────────────────────────────────────────────── */}
+        {/* Below the fold, as the board keeps tiles off every first viewport:
+            these are the five tabs again plus Members, and a reader who has
+            scrolled this far is looking for a way onward. */}
+        <View style={{ marginTop: sp.md }}>
+          <QuickRow items={[
+            { icon: 'people', label: 'Trainers', onPress: () => router.push('/(owner)/trainers') },
+            { icon: 'me', label: 'Members', onPress: () => router.push('/(owner)/members') },
+            { icon: 'palette', label: 'Brand', onPress: () => router.push('/(owner)/brand') },
+            { icon: 'trending', label: 'Growth', onPress: () => router.push('/(owner)/growth') },
+            { icon: 'wrench', label: 'Ops', onPress: () => router.push('/(owner)/ops') },
+          ]} />
+        </View>
 
 
         {/* ── trainer health board ───────────────────────────────────────── */}

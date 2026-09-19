@@ -20,8 +20,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -454,18 +453,14 @@ export default function OwnerRota() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={BACK_ICON} size={20} color={t.ink3} />
-          </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Rota</Text>
+        {/* The pushed-page header the board draws: round back control, the
+            title centred, and a trailing spacer the control's own width so the
+            title is centred on the screen and not on what is left of it. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md, marginBottom: sp.lg }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Rota</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
-
-        {/* Who is on the floor this week, and when that was last asked. A rota
-            read in a basement an hour ago and still on screen is exactly the
-            figure somebody staffs a shift against. */}
-        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={!loaded && !failed}
-          style={{ marginTop: 0, marginBottom: sp.md }} />
 
         {/* ── the week being read ────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
@@ -498,12 +493,34 @@ export default function OwnerRota() {
             : `Times are this device’s, not the gym’s — ${clock.note}. Set the gym’s timezone and this screen becomes the gym’s clock.`}
         </Text>
 
-        <Hero
-          label="Uncovered Hours"
-          figure={fig(loaded ? (cov?.uncovered?.length ?? null) : null)}
-          tone={(cov?.uncovered?.length ?? 0) > 0 ? t.crit : undefined}
-          note={heroNote()}
-        />
+        {/* The figure as a card, not the kit's bare `Hero` — the one block on
+            this screen the board does not draw. The Hero's tone was a dot
+            beside the note; it still is, and it is still only the alarm colour
+            when an hour with work booked has nobody on it. */}
+        {(() => {
+          const figure = fig(loaded ? (cov?.uncovered?.length ?? null) : null);
+          const note = heroNote();
+          const mark = (cov?.uncovered?.length ?? 0) > 0 ? t.crit : t.brand;
+          return (
+            <Section>
+              <SectionHead title="Uncovered Hours" />
+              <View accessible accessibilityLabel={`Uncovered hours, ${figure}, ${note}`}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
+                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
+                </View>
+              </View>
+            </Section>
+          );
+        })()}
+
+        {/* Who is on the floor this week, and when that was last asked. A rota
+            read in a basement an hour ago and still on screen is exactly the
+            figure somebody staffs a shift against. Under the figure rather
+            than over the week, so the first viewport is the rota. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={!loaded && !failed} />
 
 
         <Section>

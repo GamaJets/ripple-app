@@ -538,21 +538,15 @@ export default function OwnerSettings() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+        {/* The header as board page 17 draws Settings in the other two apps:
+            a back control at the leading edge and the title centred over the
+            rows — no eyebrow and no subtitle. The trailing spacer is the width
+            of the round Ghost so the title sits on the true centre line. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Settings</Text>
-          </View>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Settings</Text>
+          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Who you are signed in as, your data & this build</Text>
-
-        {/* When the deletion queue and the co-owner count were read, whether
-            this phone is reaching us, and a way to ask again. The figures
-            further down are the only ones on this screen that come from the
-            server rather than from the session, and they were read once at
-            mount with no gesture that would refresh them. */}
-        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={reloading} />
 
 
         <Section>
@@ -579,6 +573,14 @@ export default function OwnerSettings() {
             </View>
           </Pressable>
         </Section>
+
+        {/* When the deletion queue and the co-owner count were read, whether
+            this phone is reaching us, and a way to ask again. The figures
+            further down are the only ones on this screen that come from the
+            server rather than from the session, and they were read once at
+            mount with no gesture that would refresh them. Under the first
+            card rather than the title, so the header is the board's. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={reloading} />
 
 
         {/* Notifications.
