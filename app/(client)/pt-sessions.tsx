@@ -52,7 +52,7 @@ import { View, Text, ScrollView, TextInput, Alert, Modal, Pressable } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Flag, PartialRead, fig, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Flag, PartialRead, fig, PageHead, SyncBadge } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import {
@@ -60,6 +60,7 @@ import {
   DISPUTE_OPTIONS, DISPUTE_MONEY_NOTE, type DisputeKind,
 } from '../../src/lib/sessionDispute';
 import { useSessions } from '../../src/ui/sessions';
+import { useOutbox } from '../../src/ui/outbox';
 import { useClientData } from '../../src/ui/clientData';
 import { sessionPacks, myPtPasses, type PtPassRow } from '../../src/lib/connect';
 import type { PackBalance } from '../../src/lib/packDraw';
@@ -101,7 +102,7 @@ import {
 import { RATE_MEANING_NOTE, sessionRate } from '../../src/lib/sessionRate';
 import { useMyCancellations } from '../../src/ui/cancellations';
 import { useAuth } from '../../src/ui/auth';
-import { num } from '../../src/lib/format';
+import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import type { Theme } from '../../src/theme/tokens';
 
@@ -297,6 +298,13 @@ export default function PtSessions() {
   // had answered.
   const verdict = (s: { approvalState?: string | null; approvedAt?: string | null }) =>
     verdictOf({ state: s.approvalState ?? null, approvedAt: s.approvedAt ?? null });
+  // The next hour this member has booked and has not begun — the other side of
+  // the `hasStarted` boundary `mine` is cut on, so a session is in exactly one
+  // of the two. Only off a whole read: see the row it feeds.
+  const nextUp = useMemo(() => (sessionStatus !== 'ready' ? null : sessions
+    .filter((s) => s.clientId === c.id && s.status === 'booked' && !hasStarted(s.startsAt, nowMs))
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0] ?? null),
+  [sessions, sessionStatus, c.id, nowMs]);
   const pending = mine.filter((s) => verdict(s) === 'none');
   const done = mine.filter((s) => verdict(s) === 'approved');
   const disputed = mine.filter((s) => verdict(s) === 'disputed');
@@ -340,6 +348,22 @@ export default function PtSessions() {
    * trained through 2024 reads a list that starts in 2025 as their whole
    * history with the gym. */
   const historyEdge = readBoundary(history, sessionStatus === 'partial');
+
+  // Which sessions have an approval sitting in this phone's outbox. Read from
+  // the outbox itself — the same items `useSessions` registers the
+  // 'pt-approval' handler for — so the mark clears the moment the queue drains.
+  // No outbox above this screen is an empty set, not a claim that all was sent:
+  // the mark is only ever drawn for an item actually held.
+  const outbox = useOutbox();
+  const queuedApprovals = useMemo(() => {
+    const ids = new Set<string>();
+    for (const item of outbox?.pending ?? []) {
+      if (item.kind !== 'pt-approval') continue;
+      const id = (item.payload as { id?: unknown } | null)?.id;
+      if (typeof id === 'string' && id) ids.add(id);
+    }
+    return ids;
+  }, [outbox]);
 
   const approve = async (id: string) => {
     setBusy(id);
@@ -449,27 +473,27 @@ export default function PtSessions() {
           </>
         )}
 
-        {/* The balance says how many. Which hours used the rest, and which of
-            the booked ones are due to draw, are the next two questions and
-            they live on the ledger. It reads a gym-sold PT pass and a
-            coach-sold pack the same way, so a member assigned a coach by their
-            gym gets the same answer as one who buys direct. */}
+        {/* ── what is next, before what already happened ──────────────────
+            The data-layout review asks every scheduling screen to lead with the
+            next confirmed booking, and this one — headed Personal Training —
+            said nothing about the session a member is about to go to: it began
+            at the ones already delivered. One row, off the same `sessions` read
+            the rest of the screen uses, and it opens the calendar, which is
+            where that booking is changed or cancelled.
+
+            "Next" is a claim about the whole diary, so it is made only off a
+            whole read. Under anything else the row still opens the calendar and
+            says why it is not naming a time — never "nothing booked" over a
+            read that did not land. */}
         <Section>
-          <ListRow icon="calendar" title="Session Credits"
-            note="Which sessions used a credit, and what your bookings are due to draw"
-            onPress={() => router.push('/(client)/session-credits')} />
-
-        {/* The second way into asking, because this is the screen somebody is
-            on when they realise there is no session to be seen. The Book screen
-            has the other one, beside the open slots it could not offer. The
-            note says what it is not, in the row itself, because a row headed
-            "Ask for a Time" sitting under a list of credits is otherwise read
-            as another way to spend one. */}
-          <ListRow icon="clock" title="Ask for a Time"
-            note="Ask your coach for an hour they haven’t opened. It asks — it doesn’t book"
-            onPress={() => router.push('/(client)/request-session')} />
+          <ListRow icon="calendar"
+            title={nextUp ? `Next: ${fmtRelativeDay(nextUp.startsAt)} · ${fmtTime(nextUp.startsAt)}` : 'Your Calendar'}
+            note={nextUp ? `${nextUp.durationMin} min · confirmed with your coach. Change or cancel it on your calendar`
+              : sessionStatus === 'loading' ? 'Reading what you have booked…'
+              : !sessionsWhole ? 'What you have booked could not be read in full, so no next session is named here. Nothing has been cancelled.'
+              : 'Nothing booked yet. Your coach’s open times are here'}
+            onPress={() => router.push('/(client)/calendar')} />
         </Section>
-
 
         {/* ── awaiting approval: the only actionable thing here ───────────── */}
         <Section>
@@ -518,8 +542,29 @@ export default function PtSessions() {
                 accessibilityLabel="A comment for your trainer, optional"
                 editable={busy !== s.id} multiline
                 style={{ ...ty.label, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginTop: sp.md, marginBottom: sp.md }} />
-              <Cta label={busy === s.id ? 'Approving…' : 'Approve Session'} wide disabled={busy === s.id}
-                a11yLabel={`Approve the ${s.durationMin} minute session on ${fmt(s.startsAt)}`}
+              {/* ── an approval that is on this phone and nowhere else ────────
+                  `approveSession` keeps an approval it could not send in the
+                  outbox and says so once, in an alert — and then this card went
+                  back to looking exactly as it did before the tap: same button,
+                  same empty box, nothing saying the answer had been given. The
+                  member's next move from there is to approve it again. The
+                  state is said ON the session it belongs to (rule 6) with the
+                  kit's `SyncBadge` and a sentence under it, and the button stands down while it
+                  is true so one session cannot be queued twice. Dispute stays:
+                  it is a different answer and the member may still need it. */}
+              {queuedApprovals.has(s.id) ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <SyncBadge state="queued" />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                    Your approval is saved on this phone and has not reached your trainer yet. It goes up on its own when you are back online.
+                  </Text>
+                </View>
+              ) : null}
+              <Cta label={busy === s.id ? 'Approving…' : queuedApprovals.has(s.id) ? 'Approval Waiting to Send' : 'Approve Session'} wide
+                disabled={busy === s.id || queuedApprovals.has(s.id)}
+                a11yLabel={queuedApprovals.has(s.id)
+                  ? `Approval for the ${s.durationMin} minute session on ${fmt(s.startsAt)} is waiting to send`
+                  : `Approve the ${s.durationMin} minute session on ${fmt(s.startsAt)}`}
                 onPress={() => approve(s.id)} />
               {/* The other answer, and deliberately NOT a second primary button:
                   approving is the ordinary case and should stay the emphasised
@@ -551,6 +596,32 @@ export default function PtSessions() {
             </Text>
           ) : null}
         </Section>
+
+        {/* Under the approvals now, not over them: the review's order is state,
+            next action, then tools, and these two rows are ways into other
+            screens while the block above is the one thing this screen is for.
+            Same rows, same routes. */}
+        {/* The balance says how many. Which hours used the rest, and which of
+            the booked ones are due to draw, are the next two questions and
+            they live on the ledger. It reads a gym-sold PT pass and a
+            coach-sold pack the same way, so a member assigned a coach by their
+            gym gets the same answer as one who buys direct. */}
+        <Section>
+          <ListRow icon="calendar" title="Session Credits"
+            note="Which sessions used a credit, and what your bookings are due to draw"
+            onPress={() => router.push('/(client)/session-credits')} />
+
+        {/* The second way into asking, because this is the screen somebody is
+            on when they realise there is no session to be seen. The Book screen
+            has the other one, beside the open slots it could not offer. The
+            note says what it is not, in the row itself, because a row headed
+            "Ask for a Time" sitting under a list of credits is otherwise read
+            as another way to spend one. */}
+          <ListRow icon="clock" title="Ask for a Time"
+            note="Ask your coach for an hour they haven’t opened. It asks — it doesn’t book"
+            onPress={() => router.push('/(client)/request-session')} />
+        </Section>
+
 
         {/* ── history ────────────────────────────────────────────────────── */}
         {done.length > 0 ? (

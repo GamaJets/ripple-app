@@ -92,7 +92,10 @@ import { useClientReminders } from '../../src/ui/clientReminders';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { canOfferMove } from '../../src/lib/reschedule';
-import { feeAmountLine, unstatedCurrency } from '../../src/lib/booking';
+import { feeAmountLine, unstatedCurrency, lateCancelFee, noticeHoursOf, noticeLabel, type CancellationPolicy } from '../../src/lib/booking';
+// The zone every hour on this screen is drawn in. `fmtTime` formats in the
+// handset's own zone and said so nowhere; see `zoneLine` below.
+import { deviceZone } from '../../src/lib/quietHours';
 // What a charge was FOR. The read under this section used to filter on the one
 // literal string 'late_cancellation', so every other charge levied against this
 // member was invisible to them and to nobody else. See src/lib/chargeReasons.ts.
@@ -124,7 +127,7 @@ import { appLocale } from '../../src/lib/locale';
 // the words move: the Sunday-first order is this app's and every grid below
 // is built to it. See src/lib/calendarNames.ts.
 import { monthNamesLong, weekdayNamesNarrow, weekdayNamesShort } from '../../src/lib/calendarNames';
-import { fmtAxisDay, fmtFullDay, fmtTime, monthNamesShort } from '../../src/lib/format';
+import { fmtAxisDay, fmtFullDay, fmtRelativeDay, fmtTime, monthNamesShort } from '../../src/lib/format';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 // Which week of the block a date belongs to. See src/lib/clientBlock.ts.
 import { useClientWeek } from '../../src/ui/clientWeek';
@@ -192,6 +195,47 @@ function dayKey(iso: string) {
 // house form (a whole hour drops its minutes) survives inside `fmtClock`, so
 // nothing on this screen reads differently in English.
 const timeLabel = (iso: string) => fmtTime(iso);
+
+/**
+ * Which clock the hours on this screen are in.
+ *
+ * Every time here goes through `fmtTime`, which formats in the HANDSET's zone —
+ * correct, and until now unsaid. A member who books from an airport, or whose
+ * coach is a zone away, read "09:00" with nothing telling them whose nine
+ * o'clock it was; the data-layout review asks for the zone before any
+ * confirmation. Named when the runtime can name it, and said without a name
+ * when it cannot: `deviceZone()` returns null rather than guessing UTC, and so
+ * does this.
+ */
+function zoneLine(): string {
+  const z = deviceZone();
+  return z
+    ? `Times are in your phone’s time zone, ${z.replace(/_/g, ' ')}.`
+    : 'Times are in your phone’s own time zone.';
+}
+
+/**
+ * What cancelling this booking later would be held to, said BEFORE it is made.
+ *
+ * `cancelWarningFor` is the sentence at the moment of cancelling and is worded
+ * around "this is inside / more than N hours away", which is not yet true of
+ * anything when a member is only deciding whether to book. This asks the same
+ * helper the same question — `lateCancelFee(policy, true)`, "what would a late
+ * one cost" — so the two can never quote different terms, and words it as a
+ * condition. A policy that has not been read — failed, or still loading — is
+ * said as that, never as "no fee".
+ */
+function cancelTermsLine(policy: CancellationPolicy | null): string {
+  if (!policy) return 'Your coach’s cancellation policy has not been read, so we can’t say what notice they ask for or whether a late cancellation costs anything — check with them.';
+  const w = noticeLabel(noticeHoursOf(policy));
+  const v = lateCancelFee(policy, true);
+  switch (v.kind) {
+    case 'no-policy': return 'Your coach doesn’t charge for a late cancellation.';
+    case 'unpriced': return `Cancel with less than ${w} to go and your coach’s late-cancellation policy applies. They haven’t set an amount here, so ask them what it is — Repple doesn’t charge it.`;
+    case 'fee': return `Cancel with less than ${w} to go and your coach’s late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} applies. Repple doesn’t take this payment.${unstatedCurrency(v.currency)}`;
+    default: return `Cancel with more than ${w} to go and your coach’s late-cancellation policy doesn’t apply.`;
+  }
+}
 
 // "Tue · Sep 10" for a bare `YYYY-MM-DD`. Through `dateParts` for the same
 // reason `dayKey` is — the weekday of a date-only value read as UTC midnight is
@@ -455,6 +499,19 @@ export default function Calendar() {
   // `visible`; it is the FIGURES and the export that are bounded.
   const mine = sessions.filter((s) => s.clientId === cd.id && s.status === 'booked' && upcoming(s));
   const open = sessions.filter((s) => s.status === 'available' && upcoming(s));
+  // The line under the title: the next confirmed booking. "Next" is a claim
+  // about the WHOLE diary, so it is made only off a whole read — under
+  // 'partial' the earliest row that came back may not be the earliest there is,
+  // and a member told "Next: Thursday" does not look for the Tuesday that was
+  // cut off. `mine` is already bounded to what is still to come.
+  const nextMine = mine.reduce<TrainingSession | null>(
+    (a, b) => (!a || Date.parse(b.startsAt) < Date.parse(a.startsAt) ? b : a), null);
+  const nextLine = sessionsStatus === 'loading' ? 'Reading your sessions…'
+    : !sessionsKnown ? 'Your sessions could not be read. Nothing has been cancelled.'
+    : !sessionsCountable ? 'Only part of your calendar loaded, so what is next cannot be said.'
+    : nextMine
+      ? `Next: ${fmtRelativeDay(nextMine.startsAt)} · ${timeLabel(nextMine.startsAt)} · ${nextMine.durationMin} min${coachName ? ` with ${coachName}` : ''}`
+      : 'Nothing booked yet.';
 
   // Days visible to the client: their booked sessions + any open slots.
   const visible = sessions.filter((s) => s.status === 'available' || (s.status === 'booked' && s.clientId === cd.id));
@@ -744,7 +801,43 @@ export default function Calendar() {
   // assert all three had worked, in an alert that appeared before any of them
   // could have answered. The two that can report back are now awaited, and the
   // alert claims only what actually happened.
-  async function book(s: TrainingSession) {
+  // ── review, then confirm ──────────────────────────────────────────────────
+  //
+  // The Book button used to BE the booking: one tap took the slot, drew a
+  // credit off the pack and pushed the coach, and the first the member read
+  // about any of it was the alert afterwards. The data-layout review's order
+  // for scheduling is choose → review → confirm, with the zone, the status, the
+  // credit, the cancellation terms and who it is with all on screen BEFORE the
+  // commitment — so `book` is the review now and `commitBooking` is what it
+  // confirms into. Nothing about the three writes changed.
+  //
+  // Every line is a read this screen already holds. There is no price line:
+  // `session_fee` is deliberately not readable by a client (see the header of
+  // app/(client)/my-coach.tsx on why `my_coach_profile()` withholds it), so what
+  // can be said is what comes off a pack and nothing about money this app has
+  // not seen. `packLeft === 0` cannot tell "used them all" from "never bought
+  // one" — `sessionsRemaining` throws the lines away — so that arm is worded to
+  // be true of both.
+  function book(s: TrainingSession) {
+    if (hasEnded(s)) { void commitBooking(s); return; }   // its own alert says why
+    const when = `${fmtFullDay(s.startsAt)} · ${timeLabel(s.startsAt)} · ${s.durationMin} min`;
+    const who = coachName ? `With ${coachName}.` : 'With your coach.';
+    const credit = packLeft == null
+      ? 'We could not read your session pack, so we cannot say whether this booking comes off one.'
+      : packLeft > 0
+        ? `A session comes off your pack the moment you book. You have ${packLeft} left.`
+        : 'There are no pack sessions to draw from, so this booking is not covered by one.';
+    Alert.alert(
+      'Book this session?',
+      [`${when}\n${who} An open slot — it is yours once you confirm.`, zoneLine(), credit, cancelTermsLine(policyStatus === 'error' ? null : cancelPolicy)].join('\n\n'),
+      [
+        { text: 'Not Now', style: 'cancel' },
+        { text: 'Book It', onPress: () => { void commitBooking(s); } },
+      ],
+    );
+  }
+
+  async function commitBooking(s: TrainingSession) {
     // The second line, and the one that does not depend on which control was
     // drawn. A grid can be looked at for a long time — the hour a member taps
     // may have been in the future when the screen was painted — and everything
@@ -949,9 +1042,17 @@ export default function Calendar() {
             the open slots and the standing appointments used to sit above
             the grid and now sit under the day's agenda, so the first
             viewport is the month and the day, as the board draws it. */}
+        {/* The next confirmed booking leads, as the data-layout review asks of
+            every scheduling screen — and as ONE line under the title, because
+            the board gives this screen's first viewport to the month and the
+            day and a card over the grid is what the last round took away. Tap
+            a day to act on it; this line only says what is next. Gated like
+            every other figure here: under a read that is not whole it does not
+            say "nothing booked". */}
         <ScreenHeader
           eyebrow="Personal Training"
           title="Calendar"
+          subtitle={nextLine}
           leading={<Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.push('/(client)/dashboard')} />}
         />
 
@@ -1327,6 +1428,12 @@ export default function Calendar() {
               </View>
             );
           })}
+          {/* Whose clock those hours are on, under the hours themselves and
+              only when there are some — a zone note over an empty day is a
+              caption about nothing. See `zoneLine`. */}
+          {selDaySessions.length > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{zoneLine()}</Text>
+          ) : null}
 
           {/* ── the hours somebody else has ────────────────────────────────
               A PT slot is one person's, so a "full" slot is a booked one — and

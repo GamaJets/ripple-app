@@ -513,6 +513,15 @@ export default function Settings() {
         </View>
 
 
+        {/* ── the order from here down ─────────────────────────────────────
+            The data-layout review's order for account screens: who you are, then
+            what you are sent and how the app looks, then security, your data's
+            documents and the build, and the way out LAST. Sign Out used to sit in
+            the second card on the page, directly under the email address, and
+            Delete My Account was in the middle of the list between Appearance
+            and Legal — two controls that end something, each a thumb's width
+            from rows people open every week. Every section is the one it was;
+            only the sequence changed. */}
         <Section>
           <SectionHead title="Signed in as" />
           <Line t={t} first label="Name" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.name)} />
@@ -526,22 +535,6 @@ export default function Settings() {
               address every route back into the account goes to. */}
           <ListRow icon="settings" title="Password & Email" note="Change your password or the address you sign in with"
             onPress={() => router.push('/(client)/account')} />
-          <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-            <Ghost label="Sign Out" onPress={signOut} />
-          </View>
-        </Section>
-
-
-        <Section>
-          <SectionHead title="Security" />
-          {/* The unavailable label was 'Require Face ID' on every handset. An
-              Android phone has no Face ID, so the row named a feature the
-              member could not have and the note under it told them to go and
-              find it in iOS Settings. */}
-          <Row t={t} first
-            label={lockRowLabel}
-            sub={lockSettingNote(lock.available, lock.enabled, lock.label, LOCK_PLATFORM, BRAND.label)}
-            right={<Toggle t={t} on={lock.enabled} label={lockRowLabel} onPress={() => { void toggleLock(); }} />} />
         </Section>
 
 
@@ -581,6 +574,82 @@ export default function Settings() {
           <SectionHead title="Appearance" />
           <ListRow icon="palette" title="Theme & Accent Colour" note="10 palettes, applied live"
             onPress={() => router.push('/(client)/appearance')} />
+        </Section>
+
+
+        <Section>
+          <SectionHead title="Security" />
+          {/* The unavailable label was 'Require Face ID' on every handset. An
+              Android phone has no Face ID, so the row named a feature the
+              member could not have and the note under it told them to go and
+              find it in iOS Settings. */}
+          <Row t={t} first
+            label={lockRowLabel}
+            sub={lockSettingNote(lock.available, lock.enabled, lock.label, LOCK_PLATFORM, BRAND.label)}
+            right={<Toggle t={t} on={lock.enabled} label={lockRowLabel} onPress={() => { void toggleLock(); }} />} />
+        </Section>
+
+
+        {/* ── Legal ──────────────────────────────────────────────────────
+            The four sentences below are a SUMMARY, and they used to be the only
+            legal text reachable anywhere in this product: sign-up asserted
+            agreement to a Terms and a Privacy Policy with no route to either,
+            and this paraphrase — written by us, about ourselves — stood in for
+            both. A summary is the part of a document we thought was worth
+            mentioning; it is not what anybody agreed to.
+
+            The summary stays, because it is genuinely the useful thing to read
+            first. What is new is that it says what it is, and the document
+            itself is one tap under it. See src/ui/legal.ts. */}
+        <Section>
+          <SectionHead title="Legal" />
+          <Pressable onPress={() => setLegal(legal === 'privacy' ? null : 'privacy')}>
+            <Row t={t} first label="Privacy Policy" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'privacy' ? '▾' : FORWARD_CHAR}</Text>} />
+          </Pressable>
+          {legal === 'privacy' ? (
+            <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
+              <Text style={{ ...ty.label, color: t.ink3 }}>In short: we store your training, nutrition and body data to power your plan. Health data is never sold or shared with advertisers. You can export or delete your data at any time from your account. Photos and scans are stored securely and visible only to you and your coach.</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The policy you agreed to is the full document.</Text>
+              <View style={{ flexDirection: 'row' }}>
+                <Ghost label="Read The Privacy Policy" onPress={() => { void openLegalDoc('privacy'); }} />
+              </View>
+            </View>
+          ) : null}
+          <Pressable onPress={() => setLegal(legal === 'terms' ? null : 'terms')}>
+            <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : FORWARD_CHAR}</Text>} />
+          </Pressable>
+          {legal === 'terms' ? (
+            <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
+              <Text style={{ ...ty.label, color: t.ink3 }}>In short: {BRAND.label} provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The terms you agreed to are the full document.</Text>
+              <View style={{ flexDirection: 'row' }}>
+                <Ghost label="Read The Terms Of Service" onPress={() => { void openLegalDoc('terms'); }} />
+              </View>
+            </View>
+          ) : null}
+        </Section>
+
+
+        {/* ── Credits ────────────────────────────────────────────────────────
+            Its own section above Build, not a grey line beneath it. Every
+            exercise description, illustration and muscle list in Repple is
+            licensed from RepDB under a free tier whose one condition is a
+            visible credit — that is the whole price of 601 illustrated
+            movements, and it is cheap. scripts/check-attribution.mjs fails the
+            build if this stops being rendered. */}
+        <Section>
+          <SectionHead title="Credits" />
+          <RepdbAttribution />
+        </Section>
+
+
+        {/* Build — the diagnostic for whether an OTA actually landed on this phone. */}
+        <Section>
+          <SectionHead title="Build" />
+          <BuildInfo />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            Which bundle this phone is running. If a fix was published but isn't here, compare Channel and Update against the EAS dashboard before assuming it's a code bug.
+          </Text>
         </Section>
 
 
@@ -650,66 +719,15 @@ export default function Settings() {
         </Section>
 
 
-        {/* ── Legal ──────────────────────────────────────────────────────
-            The four sentences below are a SUMMARY, and they used to be the only
-            legal text reachable anywhere in this product: sign-up asserted
-            agreement to a Terms and a Privacy Policy with no route to either,
-            and this paraphrase — written by us, about ourselves — stood in for
-            both. A summary is the part of a document we thought was worth
-            mentioning; it is not what anybody agreed to.
-
-            The summary stays, because it is genuinely the useful thing to read
-            first. What is new is that it says what it is, and the document
-            itself is one tap under it. See src/ui/legal.ts. */}
+        {/* ── leaving ─────────────────────────────────────────────────────────
+            At the bottom, under everything a member comes here to change. The
+            confirmation, and the sentence about what a failed sign-out means, are
+            in `signOut` and are unchanged — app/(client)/profile.tsx still points
+            here for it. */}
         <Section>
-          <SectionHead title="Legal" />
-          <Pressable onPress={() => setLegal(legal === 'privacy' ? null : 'privacy')}>
-            <Row t={t} first label="Privacy Policy" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'privacy' ? '▾' : FORWARD_CHAR}</Text>} />
-          </Pressable>
-          {legal === 'privacy' ? (
-            <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
-              <Text style={{ ...ty.label, color: t.ink3 }}>In short: we store your training, nutrition and body data to power your plan. Health data is never sold or shared with advertisers. You can export or delete your data at any time from your account. Photos and scans are stored securely and visible only to you and your coach.</Text>
-              <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The policy you agreed to is the full document.</Text>
-              <View style={{ flexDirection: 'row' }}>
-                <Ghost label="Read The Privacy Policy" onPress={() => { void openLegalDoc('privacy'); }} />
-              </View>
-            </View>
-          ) : null}
-          <Pressable onPress={() => setLegal(legal === 'terms' ? null : 'terms')}>
-            <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : FORWARD_CHAR}</Text>} />
-          </Pressable>
-          {legal === 'terms' ? (
-            <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
-              <Text style={{ ...ty.label, color: t.ink3 }}>In short: {BRAND.label} provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text>
-              <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The terms you agreed to are the full document.</Text>
-              <View style={{ flexDirection: 'row' }}>
-                <Ghost label="Read The Terms Of Service" onPress={() => { void openLegalDoc('terms'); }} />
-              </View>
-            </View>
-          ) : null}
-        </Section>
-
-
-        {/* ── Credits ────────────────────────────────────────────────────────
-            Its own section above Build, not a grey line beneath it. Every
-            exercise description, illustration and muscle list in Repple is
-            licensed from RepDB under a free tier whose one condition is a
-            visible credit — that is the whole price of 601 illustrated
-            movements, and it is cheap. scripts/check-attribution.mjs fails the
-            build if this stops being rendered. */}
-        <Section>
-          <SectionHead title="Credits" />
-          <RepdbAttribution />
-        </Section>
-
-
-        {/* Build — the diagnostic for whether an OTA actually landed on this phone. */}
-        <Section>
-          <SectionHead title="Build" />
-          <BuildInfo />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            Which bundle this phone is running. If a fix was published but isn't here, compare Channel and Update against the EAS dashboard before assuming it's a code bug.
-          </Text>
+          <View style={{ flexDirection: 'row' }}>
+            <Ghost label="Sign Out" onPress={signOut} />
+          </View>
         </Section>
 
 

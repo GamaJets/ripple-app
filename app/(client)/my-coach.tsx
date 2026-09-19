@@ -51,7 +51,7 @@ import { View, Text, ScrollView, Image, TextInput, Pressable, Alert, Modal } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ListRow, Ghost, Cta, Flag, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Ghost, Cta, Flag, PageHead, AttentionRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
 // 44pt, and the one place the number lives. See the rating row below.
 import { MIN_TARGET } from '../../src/lib/a11y';
@@ -107,6 +107,14 @@ import { CoachAdvice } from '../../src/ui/CoachAdvice';
 // It is imported for its `reload` alone: see the pull handler below.
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useToday } from '../../src/ui/today';
+// The "Right Now" block: what is open between this member and their coach.
+// All three are reads the app already holds — see `checkinAsk` below.
+import { useCheckIns } from '../../src/ui/checkins';
+import { useOutbox } from '../../src/ui/outbox';
+import { unsentNote } from '../../src/lib/offlineQueue';
+import { daysAgo, checkInAge } from '../../src/lib/coachCheckins';
+import { fmtFullDay } from '../../src/lib/format';
+import { coachedRemotely } from '../../src/lib/types';
 import {
   credentialBadge, credentialLine, expiryLine, sortCredentials, insuranceClaim, insuranceLine,
   credentialState, CLAIM_NOTE, type Credential,
@@ -147,6 +155,7 @@ export default function MyCoach() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const ci = useCheckIns();
   const [coach, setCoach] = useState<CoachProfile | null>(null);
   // Under a ceiling — see src/lib/readDeadline.ts. Nothing here can leave
   // 'loading' without a request settling, and a captive portal settles none.
@@ -337,8 +346,11 @@ export default function MyCoach() {
   // from rather than opening a second reader with a second opinion.
   const { reload: reloadAdvice } = useCoachFeedback();
   const pull = usePullToRefresh(useCallback(() => {
-    void load(); setTick((n) => n + 1); reloadAdvice();
-  }, [load, reloadAdvice]));
+    // The check-ins too: the "Right Now" row's age is read out of that
+    // provider, and a pull that left it alone would re-read everything on this
+    // screen except the one line that says whether something is due.
+    void load(); setTick((n) => n + 1); reloadAdvice(); ci.reload();
+  }, [load, reloadAdvice, ci.reload]));
 
   const openForm = () => {
     setRating(mine && !mine.withdrawnAt ? mine.rating : null);
@@ -483,6 +495,51 @@ export default function MyCoach() {
   const applied = resolveClientBrand(brandInput);
   const brandNote = clientBrandNote(brandInput);
 
+  // ── the current ask ──────────────────────────────────────────────────────
+  //
+  // What the "Right Now" block under the head says. Every branch is a read this
+  // app already makes; nothing is asked of the server for it.
+  //
+  // The check-in row is drawn for anybody coached at a distance — the same gate
+  // the home screen uses for its own check-in row, so the two never disagree
+  // about who is expected to send one — and ALSO for anybody holding an unsent
+  // one, whatever their mode, because a check-in stuck on this phone is news to
+  // its author however they are coached.
+  //
+  // "Due" is a claim about the calendar, not about the coach: the screen it
+  // opens is the WEEKLY check-in, so seven days after the last one the server
+  // holds, this week's has not been sent. It is measured from `latestSent` and
+  // never from `latest` — a pending check-in is not one a coach could have
+  // read, and counting it would call the week done on the strength of a row
+  // nobody has received. Under a read that is not whole there is no age and no
+  // "none yet": the sentence says it could not be checked (rule 5).
+  const checkinAsk = useMemo<{ title: string; note: string; flagged: boolean } | null>(() => {
+    if (!coachedRemotely(cd.coachingMode) && ci.unsent <= 0) return null;
+    const waiting = unsentNote(ci.unsent, 'check-in', 'check-ins');
+    if (waiting) return { title: 'Weekly Check-in', note: `${waiting} Your coach cannot see it until then.`, flagged: true };
+    if (ci.status === 'loading') return { title: 'Weekly Check-in', note: 'Reading when you last sent one…', flagged: false };
+    if (!isWhole(ci.status)) {
+      return { title: 'Weekly Check-in', note: 'When you last sent one could not be checked just now. That is not a statement that none was sent.', flagged: false };
+    }
+    if (!ci.latestSent) return { title: 'Weekly Check-in', note: 'None sent yet. Your coach only sees how the week went if you send one.', flagged: false };
+    const days = daysAgo(ci.latestSent.at);
+    const age = checkInAge(ci.latestSent.at);
+    const last = `Last sent ${fmtFullDay(ci.latestSent.at)}${age ? ` · ${age.toLowerCase()}` : ''}`;
+    return days != null && days >= 7
+      ? { title: 'Check-in Due', note: `${last}. This week’s has not been sent.`, flagged: true }
+      : { title: 'Weekly Check-in', note: last, flagged: false };
+    // `today` so a screen left open over midnight re-ages the line.
+  }, [cd.coachingMode, ci.unsent, ci.status, ci.latestSent, today]);
+
+  // Words typed to the coach that are still on this phone. Counted from the
+  // outbox itself, as app/(trainer)/messages.tsx counts its own, and drawn only
+  // when there are some: an outbox that could not be read is not an empty one,
+  // and this says nothing at all rather than "everything has been sent".
+  const outbox = useOutbox();
+  const queuedWords = outbox ? outbox.countOf('message') : 0;
+  const queuedWordsNote = unsentNote(queuedWords, 'message', 'messages');
+  const showAsk = !!checkinAsk || !!queuedWordsNote;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
@@ -561,6 +618,48 @@ export default function MyCoach() {
               ) : null}
             </View>
 
+
+            {/* ── what is open between the two of you, before anything else ──
+                The data-layout review's order for this screen is identity, then
+                the current ask, then the conversation — and this screen went
+                from the face straight to an index of seven rows, so a member
+                whose check-in had been sitting on their phone since Tuesday
+                read "Book a Session" before anything told them their coach had
+                never received it.
+
+                Two facts, both already held above this screen and neither read
+                here before: the check-in provider's `latestSent`/`unsent`, and
+                the outbox's queued messages. Each is said BESIDE the thing it
+                is about (rule 6) — the check-in's state on the check-in row,
+                the unsent words on a row that opens the thread — rather than in
+                a banner.
+
+                There is deliberately no "unread from your coach" count. Nothing
+                in the client app reads one: `coach_unread_counts()` is the
+                coach's side only, and mounting `useThread` here to count would
+                move the read watermark — it would mark the thread read from a
+                screen that never showed it. A number is not invented to fill
+                the slot.
+
+                The kit's `AttentionRow`, which is this shape — subject, reason,
+                and a `SyncBadge` on the row where the row IS the queued write. */}
+            {showAsk ? (
+              <Section>
+                <SectionHead title="Right Now" />
+                {checkinAsk ? (
+                  <AttentionRow icon="message" name={checkinAsk.title} reason={checkinAsk.note}
+                    tone={checkinAsk.flagged ? t.warn : undefined}
+                    sync={ci.unsent > 0 ? 'queued' : undefined}
+                    onPress={() => go('/(client)/checkin')} />
+                ) : null}
+                {queuedWordsNote ? (
+                  <AttentionRow icon="message" name="Messages to Your Coach" reason={queuedWordsNote}
+                    tone={t.warn} sync="queued" divider={!!checkinAsk}
+                    onPress={() => go('/(client)/messages')} />
+                ) : null}
+              </Section>
+            ) : null}
+
             {/* ── the one thing this screen is opened to do ───────────────
                 Reaching the person it is about. It was reachable only from a
                 row called "Message", four sections down, under a heading that
@@ -579,9 +678,12 @@ export default function MyCoach() {
 
             {/* ── everything else you do with them ─────────────────────────
                 Directly under the primary action, as the board's record pages
-                put their rows: the head, the one button, then the index. The
-                bio and the chips follow, because a member who opened this
-                screen to book or ask has found what they came for by now. */}
+                put their rows: the head, the one button, then the index. What
+                the coach has written follows, then the bio and the chips,
+                because a member who opened this screen to book or ask has found
+                what they came for by now. Only the rows that REACH the coach
+                are here; what was bought, agreed and signed is in "Your
+                Arrangement" further down. */}
             <Section>
               <SectionHead title="Reach Them" />
               {/* "Message" on its own said what the row WAS rather than what
@@ -615,22 +717,85 @@ export default function MyCoach() {
                   apart — asking is not booking, which is the rule that whole
                   screen exists to hold. */}
               <ListRow icon="clock" title="Ask for a Time" note="A time they haven’t opened — it asks, it doesn’t book" onPress={() => go('/(client)/request-session')} />
-              <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
-              {/* A standing appointment is an agreement between these two
-                  people, which is what makes this the screen it belongs on —
-                  and part 135 is explicit that EITHER party may end one. The
-                  row is unconditional rather than shown only to members who
-                  have one: the read that would decide it can fail, and a row
-                  hidden on a failed read hides the way out from the member
-                  whose arrangement could not be confirmed. */}
-              <ListRow icon="clock" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
-              {/* On the screen about this coach, because that is the only place
-                  the answer to "whose waiver is this?" is already on the page.
-                  The same row is in the Me hub for the member who is looking
-                  for a form rather than for their coach. */}
-              <ListRow icon="pencil" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
             </Section>
 
+            {/* Moved up, above the bio and the qualifications: the review's
+                order for this screen is identity, the current ask, the
+                conversation, THEN what is shared between the two — and what a
+                coach wrote to this member last week is read far more often
+                than the paragraph the coach wrote about themselves once. */}
+            {/* ── what they have actually written to you ──────────────────
+                `coach_feedback` is the advice this coach leaves on this member,
+                and until now the member's whole view of it was one line on the
+                dashboard: `coachNotes[0]`, clipped at four lines. Note two and
+                everything before it were unreachable in all three apps, while
+                the coach kept reading the lot from their own client detail —
+                so neither side had any reason to think anything was missing.
+
+                Here rather than on the dashboard because a dashboard that grows
+                a noticeboard stops being a dashboard; that is the argument the
+                gym-notice block on that screen already makes for itself, and it
+                ends "the rest are one tap away in Notices". The coach's advice
+                had no Notices. This is it. */}
+            <CoachAdvice clientId={myId} coachName={coach.name} />
+
+            <Section>
+              <SectionHead title="What They Can See" />
+              {/* Said here rather than left to be discovered. A client is
+                  entitled to know what coaching costs them in privacy, and the
+                  answers are not obvious: the injury document stays with the
+                  client and only the extracted injury reaches the coach, and
+                  blood sugar is invisible until the client turns sharing on. */}
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                Your training log, your check-ins, your scans and measurements, and any injury you have
+                disclosed. Not the document behind an injury — only what was read out of it. Not your blood
+                sugar, unless you turn sharing on yourself.
+              </Text>
+
+              {/* ── and the plan you rewrote ──────────────────────────────
+                  The one thing in that list the member MADE, and the only one
+                  they had no way to check. Every swap, removal, addition and
+                  corrected set goes up to `client_plan_edits` the moment it is
+                  made (src/ui/planEdits.tsx) and nothing in any of the three
+                  apps has ever read the row back — so a member who reinstalled,
+                  or picked up a second handset, could not find out whether a
+                  month of corrections had arrived. This is the server's copy,
+                  not the phone's, which is what makes it an answer.
+
+                  Read-only on purpose. The plan screen owns the writing and
+                  holds its own copy in memory; an undo from here would be
+                  overwritten by that screen's next tap, silently, after the
+                  member had been told it was done. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+                {coachSeesPlanNote(
+                  planEditStatus,
+                  planEdits ? editCount(planEdits.edits) : 0,
+                  planEdits ? planEdits.readable : true,
+                  sentOn(planEdits?.updatedAt ?? null),
+                )}
+              </Text>
+
+              {planEditRows.length > 0 ? (
+                <View style={{ marginTop: sp.md }}>
+                  {planEditRows.map((it) => (
+                    <Text key={it.id} style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
+                      {planEditItemLine(it)}
+                    </Text>
+                  ))}
+                  {/* Where the change was actually made, and the only place it
+                      can be undone. Said rather than implied: the list above
+                      names a day and a kind of change and deliberately does not
+                      name the movement, because the stored key is a slug and
+                      the programme that would turn it into a name is on that
+                      screen and not on this one. */}
+                  <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                    <Ghost label="Open My Plan" onPress={() => go('/(client)/workouts')} />
+                  </View>
+                </View>
+              ) : null}
+            </Section>
+
+            <Rule />
 
             {/* ── who they are ────────────────────────────────────────────── */}
             <Section>
@@ -686,23 +851,6 @@ export default function MyCoach() {
 
             <Rule />
 
-            {/* ── what they have actually written to you ──────────────────
-                `coach_feedback` is the advice this coach leaves on this member,
-                and until now the member's whole view of it was one line on the
-                dashboard: `coachNotes[0]`, clipped at four lines. Note two and
-                everything before it were unreachable in all three apps, while
-                the coach kept reading the lot from their own client detail —
-                so neither side had any reason to think anything was missing.
-
-                Here rather than on the dashboard because a dashboard that grows
-                a noticeboard stops being a dashboard; that is the argument the
-                gym-notice block on that screen already makes for itself, and it
-                ends "the rest are one tap away in Notices". The coach's advice
-                had no Notices. This is it. */}
-            <CoachAdvice clientId={myId} coachName={coach.name} />
-
-            <Rule />
-
             {/* ── what they say they are qualified to do ──────────────────
                 Their own claim, said so on every line. The alternative — a
                 bare list under a heading — reads as something Repple stands
@@ -748,6 +896,33 @@ export default function MyCoach() {
               {credStatus === 'ready' && (creds ?? []).length > 0 ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{CLAIM_NOTE}</Text>
               ) : null}
+            </Section>
+
+            <Rule />
+
+            {/* ── the arrangement itself ───────────────────────────────────
+                These three rows sat in "Reach Them", between Ask for a Time and
+                the bio. They are not ways of reaching anybody — they are what
+                has been bought, what has been agreed and what has been signed —
+                and the review's order puts relationship administration under
+                the conversation and what the coach has written, not beside the
+                booking controls. Same rows, same destinations, same notes. */}
+            <Section>
+              <SectionHead title="Your Arrangement" />
+              <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
+              {/* A standing appointment is an agreement between these two
+                  people, which is what makes this the screen it belongs on —
+                  and part 135 is explicit that EITHER party may end one. The
+                  row is unconditional rather than shown only to members who
+                  have one: the read that would decide it can fail, and a row
+                  hidden on a failed read hides the way out from the member
+                  whose arrangement could not be confirmed. */}
+              <ListRow icon="clock" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
+              {/* On the screen about this coach, because that is the only place
+                  the answer to "whose waiver is this?" is already on the page.
+                  The same row is in the Me hub for the member who is looking
+                  for a form rather than for their coach. */}
+              <ListRow icon="pencil" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
             </Section>
 
             <Rule />
@@ -895,62 +1070,6 @@ export default function MyCoach() {
               <View style={{ flexDirection: 'row' }}>
                 <Ghost label="Leave This Coach" onPress={confirmLeave} />
               </View>
-            </Section>
-
-            <Section>
-              <SectionHead title="What They Can See" />
-              {/* Said here rather than left to be discovered. A client is
-                  entitled to know what coaching costs them in privacy, and the
-                  answers are not obvious: the injury document stays with the
-                  client and only the extracted injury reaches the coach, and
-                  blood sugar is invisible until the client turns sharing on. */}
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                Your training log, your check-ins, your scans and measurements, and any injury you have
-                disclosed. Not the document behind an injury — only what was read out of it. Not your blood
-                sugar, unless you turn sharing on yourself.
-              </Text>
-
-              {/* ── and the plan you rewrote ──────────────────────────────
-                  The one thing in that list the member MADE, and the only one
-                  they had no way to check. Every swap, removal, addition and
-                  corrected set goes up to `client_plan_edits` the moment it is
-                  made (src/ui/planEdits.tsx) and nothing in any of the three
-                  apps has ever read the row back — so a member who reinstalled,
-                  or picked up a second handset, could not find out whether a
-                  month of corrections had arrived. This is the server's copy,
-                  not the phone's, which is what makes it an answer.
-
-                  Read-only on purpose. The plan screen owns the writing and
-                  holds its own copy in memory; an undo from here would be
-                  overwritten by that screen's next tap, silently, after the
-                  member had been told it was done. */}
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
-                {coachSeesPlanNote(
-                  planEditStatus,
-                  planEdits ? editCount(planEdits.edits) : 0,
-                  planEdits ? planEdits.readable : true,
-                  sentOn(planEdits?.updatedAt ?? null),
-                )}
-              </Text>
-
-              {planEditRows.length > 0 ? (
-                <View style={{ marginTop: sp.md }}>
-                  {planEditRows.map((it) => (
-                    <Text key={it.id} style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
-                      {planEditItemLine(it)}
-                    </Text>
-                  ))}
-                  {/* Where the change was actually made, and the only place it
-                      can be undone. Said rather than implied: the list above
-                      names a day and a kind of change and deliberately does not
-                      name the movement, because the stored key is a slug and
-                      the programme that would turn it into a name is on that
-                      screen and not on this one. */}
-                  <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-                    <Ghost label="Open My Plan" onPress={() => go('/(client)/workouts')} />
-                  </View>
-                </View>
-              ) : null}
             </Section>
           </>
         )}

@@ -35,6 +35,7 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PageHead } from '
 // is made in one place, so this screen and the ledger cannot describe the same
 // credit two ways.
 import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
+import { deviceZone } from '../../src/lib/quietHours';
 import { bookableCredits, ledgerStateOf,
   clientLedgerLine, bookingCreditNote, type CreditSession } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
@@ -723,6 +724,7 @@ export default function Bookings() {
   };
 
   const G = layout.gutter;
+  const zone = deviceZone();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -731,21 +733,6 @@ export default function Bookings() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         <PageHead title="My Bookings" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Your upcoming classes and personal-training sessions, all in one place.</Text>
-
-
-        {/* ── book something ─────────────────────────────────────────────── */}
-        {/* One full-width primary, as the board gives every screen, and the
-            quiet ways under it. The two used to share a line, which made the
-            class button half a button and the PT button its equal. */}
-        <Section>
-          <Cta label="Book a Class" wide onPress={() => router.push('/(client)/classes')} />
-          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
-            <View style={{ flex: 1 }}><Ghost label="Book PT" onPress={() => router.push('/(client)/calendar')} /></View>
-            {items.length > 0 ? (
-              <View style={{ flex: 1 }}><Ghost icon="calendar" label="Add to Calendar" onPress={addToCalendar} /></View>
-            ) : null}
-          </View>
-        </Section>
 
 
         {/* ── what you have booked ───────────────────────────────────────── */}
@@ -898,12 +885,41 @@ export default function Bookings() {
               </View>
             </View>
           ))}
+          {/* Whose clock these hours are on, under the hours. `fmtTime` draws
+              in the handset's zone and nothing said so; the same sentence is on
+              the PT calendar and the class timetable, so all three describe
+              their times one way. Unnamed rather than guessed where the runtime
+              cannot name the zone — `deviceZone()` returns null, not UTC. */}
+          {items.length > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {zone ? `Times are in your phone’s time zone, ${zone.replace(/_/g, ' ')}.` : 'Times are in your phone’s own time zone.'}
+            </Text>
+          ) : null}
           {items.length === 0 ? (
             // 'partial' used to land on the literal string "Loading." — which
             // never stopped being displayed and was never true: both reads had
             // finished, and one of them had come back short.
             <Text style={{ ...ty.label, color: t.ink3 }}>{emptyBookingsLine(classStatus, sessionStatus)}</Text>
           ) : null}
+        </Section>
+
+        {/* ── book something ─────────────────────────────────────────────── */}
+        {/* UNDER what is already booked, not over it. The data-layout review's
+            order for scheduling is upcoming first, then choose a type — and
+            this block used to open the screen, so a member who came to check
+            where they had to be tonight read two booking buttons before the
+            one booking they had. Same three controls, same routes. */}
+        {/* One full-width primary, as the board gives every screen, and the
+            quiet ways under it. The two used to share a line, which made the
+            class button half a button and the PT button its equal. */}
+        <Section>
+          <Cta label="Book a Class" wide onPress={() => router.push('/(client)/classes')} />
+          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
+            <View style={{ flex: 1 }}><Ghost label="Book PT" onPress={() => router.push('/(client)/calendar')} /></View>
+            {items.length > 0 ? (
+              <View style={{ flex: 1 }}><Ghost icon="calendar" label="Add to Calendar" onPress={addToCalendar} /></View>
+            ) : null}
+          </View>
         </Section>
 
         {/* ── the queues this member is in ────────────────────────────────

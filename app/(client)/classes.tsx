@@ -30,7 +30,9 @@ import { classFillState, isCancelled, classesThatRan } from '../../src/lib/gymSc
 import {
   holdsPlace, seatControl, seatNote, waitlistNote, placesFree, isFull,
 } from '../../src/lib/classSeat';
-import { classCancelBody, fetchClassCancelPolicy } from '../../src/lib/classCancel';
+import { classCancelBody, fetchClassCancelPolicy, CLASS_POLICY_UNKNOWN_NOTE, type ClassPolicyRead } from '../../src/lib/classCancel';
+// The zone every hour on this timetable is drawn in — see `zoneLine` below.
+import { deviceZone } from '../../src/lib/quietHours';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { Fetched } from '../../src/ui/fetched';
@@ -43,6 +45,7 @@ import { useSettings } from '../../src/ui/settings';
 import { scheduleLocal } from '../../src/ui/pushNotifications';
 import type { GymClass } from '../../src/lib/classesMock';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
+import { useNow } from '../../src/ui/today';
 
 // The weekday name and the date order were this file's own. `DOW` was a
 // hardcoded English array and the fallback read `${d.getDate()}/${d.getMonth() + 1}`,
@@ -52,6 +55,39 @@ import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 // `fmtRelativeDay` and `fmtClock` in src/lib/format.ts.
 const timeLabel = (iso: string) => fmtTime(iso);
 const dayLabel = (iso: string) => fmtRelativeDay(iso);
+
+/**
+ * Which clock these hours are on. `fmtTime` formats in the HANDSET's zone, which
+ * is right and was said nowhere — and a gym with branches in two zones, or a
+ * member booking from somewhere else, reads "18:00" with nothing saying whose
+ * six o'clock. The same sentence app/(client)/calendar.tsx prints, so PT and
+ * classes describe their times one way. Unnamed rather than guessed when the
+ * runtime cannot name the zone.
+ */
+function zoneLine(): string {
+  const z = deviceZone();
+  return z
+    ? `Times are in your phone’s time zone, ${z.replace(/_/g, ' ')}.`
+    : 'Times are in your phone’s own time zone.';
+}
+
+/**
+ * The gym's cancellation terms, said BEFORE a place is taken.
+ *
+ * `classChargeLine` answers "what does cancelling NOW cost", which is a
+ * question about a booking that exists. This is the condition it would be held
+ * to, from the same three fields, and with the same refusals: an unread policy
+ * and an unstated notice both fall to `CLASS_POLICY_UNKNOWN_NOTE` rather than
+ * to "free", and a fee is never printed as a bare number — the amount is left
+ * to the cancel sheet, which has `wholeMoney` and the currency rule behind it.
+ */
+function classTermsLine(policy: ClassPolicyRead): string {
+  if (!policy || policy.notice == null) return CLASS_POLICY_UNKNOWN_NOTE;
+  if (policy.notice === 0) return 'Your gym does not run a notice period for classes, so cancelling this later is not a late cancellation.';
+  const window = `Your gym asks for ${policy.notice} hours’ notice. Cancelling inside that counts as a late cancellation`;
+  if (policy.fee === 0) return `${window}, and your gym has recorded no charge for one.`;
+  return `${window} — what that costs is shown before you confirm a cancellation.`;
+}
 
 export default function Classes() {
   const t = useTheme();
@@ -85,6 +121,21 @@ export default function Classes() {
   const branches = useMemo(() => Array.from(new Set(classes.map((c) => c.branch).filter(Boolean))).sort(), [classes]);
   const filtered = useMemo(() => classes.filter((c) => branch === null || c.branch === branch), [classes, branch]);
 
+  // The line under the title. Across every branch, not the filtered one: what
+  // the member holds does not change with the chip they are browsing by.
+  // The instant comes from `useNow()` and sits in the dependency list: this is
+  // a tab that never unmounts, and a memo that read its own clock would keep
+  // naming a class that started an hour ago as the next one.
+  const nowAt = useNow();
+  const nextHeldLine = useMemo(() => {
+    if (classStatus !== 'ready') return null;
+    const now = nowAt.getTime();
+    const next = classes
+      .filter((c) => myStanding[c.id] === 'held' && !isCancelled(c) && Date.parse(c.startsAt) > now)
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
+    return next ? `Next: ${next.title} · ${dayLabel(next.startsAt)} · ${timeLabel(next.startsAt)}` : null;
+  }, [classes, myStanding, classStatus, nowAt]);
+
   const byDay = useMemo(() => {
     const groups: { key: string; label: string; items: GymClass[] }[] = [];
     const map = new Map<string, GymClass[]>();
@@ -104,6 +155,42 @@ export default function Classes() {
   // to be doing something.
   const [booking, setBooking] = useState<string | null>(null);
   const send = useSubmitOnce('classes.book');
+
+  // ── review, then confirm ──────────────────────────────────────────────────
+  //
+  // Book was one tap and the first thing a member read about what they had
+  // taken was the alert after it. The data-layout review's order for scheduling
+  // is choose → review → confirm, with the zone, the status, the cost, the
+  // cancellation terms and who is teaching it on screen before the commitment.
+  // Every line below is already on the row or one read away; nothing is
+  // invented, and the write itself (`onBook`) is untouched.
+  //
+  // It resolves rather than calls through, so the caller's `submitOnce` guard
+  // holds across the question as well as the write: a second tap while the
+  // sheet is up cannot open a second one. Dismissing it any way is a no.
+  //
+  // "Takes no payment" is the whole of what is said about cost, because it is
+  // the whole of what is true here: see the note on Buy a Pass below — nothing
+  // on this screen charges anybody.
+  const reviewBooking = async (c: GymClass, full: boolean | null, spotsLeft: number | null): Promise<boolean> => {
+    const policy = await fetchClassCancelPolicy(c.id);
+    const state = full === true
+      ? 'This class is full. Confirming puts you on the waitlist — it does not book a place.'
+      : spotsLeft == null ? 'How many spaces are left could not be read. Confirming asks for a place.'
+      : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left. Confirming books your place.`;
+    const body = [
+      `${c.title} · ${dayLabel(c.startsAt)} · ${timeLabel(c.startsAt)} · ${c.durationMin} min\n${c.instructor ? `With ${c.instructor} at ` : 'At '}${c.branch}${c.room ? ' · ' + c.room : ''}.`,
+      zoneLine(),
+      `${state} Booking here takes no payment.`,
+      classTermsLine(policy),
+    ].join('\n\n');
+    return new Promise<boolean>((resolve) => {
+      Alert.alert(full === true ? 'Join this waitlist?' : 'Book this class?', body, [
+        { text: 'Not Now', style: 'cancel', onPress: () => resolve(false) },
+        { text: full === true ? 'Join Waitlist' : 'Book It', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+  };
 
   const onBook = async (c: GymClass) => {
     const st = await book(c.id);
@@ -233,7 +320,15 @@ export default function Classes() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <PageHead title="Classes" />
+        {/* The next class this member HOLDS leads, under the title, as the
+            data-layout review asks of every scheduling screen. 'held' only — a
+            place in a queue is not a booking (app/(client)/bookings.tsx argues
+            that at length) — never a class the gym called off, and only off a
+            whole read: under 'partial' the earliest row that came back may not
+            be the earliest there is. Absent rather than "nothing booked" the
+            rest of the time; My Bookings, one tap below, is where that is said
+            with both reads behind it. */}
+        <PageHead title="Classes" subtitle={nextHeldLine ?? undefined} />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Pick your location and book a spot. Full classes have a waitlist.</Text>
 
         {/* The other half of the same subject, and the half the member has never
@@ -244,6 +339,11 @@ export default function Classes() {
             tab because a member wondering whether to book a class is the same
             member wondering how often they have actually been coming. */}
         <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginTop: sp.lg }}>
+          {/* What is already booked, before what already happened: upcoming
+              first, history second. This screen had no way to the list of what
+              the member holds, which is the first thing the scheduling flow
+              asks for. */}
+          <Ghost label="My Bookings" onPress={() => router.push('/(client)/bookings')} />
           <Ghost label="My Attendance" onPress={() => router.push('/(client)/attendance')} />
           {/* Money and seats, kept apart on purpose.
               A place in a class is scarce and a payment is a second act that
@@ -274,6 +374,12 @@ export default function Classes() {
             between "this landed a second ago" and "this landed before you came
             downstairs" invisible everywhere else. */}
         <Fetched at={readAt} onRefresh={refresh} busy={readBusy} />
+        {/* Whose clock the timetable is on, beside the line that says how old
+            it is — both are facts about how to read every hour below. Only over
+            a timetable that has hours in it. */}
+        {filtered.length > 0 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{zoneLine()}</Text>
+        ) : null}
 
         {/* The timetable came off this phone, not off the server. Said once,
             above the list, because a member reading a cached timetable as a
@@ -409,6 +515,7 @@ export default function Classes() {
                           : full === true ? 'Join Waitlist' : 'Book'}
                           disabled={send.busy}
                           onPress={() => send.run(async () => {
+                            if (!(await reviewBooking(c, full, spotsLeft))) return;
                             setBooking(c.id);
                             try { await onBook(c); } finally { setBooking(null); }
                           })} />

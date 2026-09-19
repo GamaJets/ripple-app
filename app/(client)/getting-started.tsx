@@ -42,7 +42,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, PageHead, ActionBlock } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -183,6 +183,20 @@ export default function GettingStarted() {
             Some of this could not be read just now, so it is shown as a dash rather than as undone.
           </Text>
         )}
+
+        {/* ── the next one, as the one button ─────────────────────────────
+            The data-layout review's stack is state, then the next action, then
+            the evidence — and this screen went from "3 of 6 done" straight to
+            six equal rows, leaving the member to work out which was theirs.
+            `nextTodo` already picks it (the first row that is KNOWN to be
+            undone — never an unread one, which may well be done); this is that
+            row's own title and note over the one full-width primary the board
+            gives every screen — the kit's `ActionBlock`, which is that shape. It
+            opens the same route the row does. */}
+        {next ? (
+          <ActionBlock title={next.title} reason={next.note} meta="Next up"
+            cta={{ label: 'Open', a11yLabel: `Open ${next.title}`, onPress: () => router.push(next.route as any) }} />
+        ) : null}
 
         <Section>
           {rows.map((r) => (

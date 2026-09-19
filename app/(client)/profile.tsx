@@ -689,6 +689,27 @@ export default function Profile() {
               </Text>
               <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3, textAlign: 'center' }}>{statsLine}</Text>
             </Pressable>
+            {/* ── who you are WITH, under who you are ──────────────────────
+                The data-layout review's first item for Me is identity and the
+                coach or membership context, and the head said nothing about
+                either: whether anybody is coaching this member was a radio
+                group four sections down that records what they ASKED for, not
+                what is true. `coachLinked` is the fact — `clients.trainer_id`
+                — and it is three-valued: null is a read that has not landed,
+                and under it this line is not drawn at all rather than telling
+                a coached member they are on their own. It opens Your Coach,
+                which says the right thing in either case. No name: a client
+                cannot read their coach's row from here (see the header of
+                app/(client)/my-coach.tsx), and that screen is where it is. */}
+            {cd.coachLinked != null ? (
+              <Pressable onPress={() => router.push('/(client)/my-coach')} accessibilityRole="button" hitSlop={10}
+                accessibilityLabel={cd.coachLinked ? 'You are working with a coach. Opens Your Coach' : 'You are training on your own. Opens Your Coach'}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs }}>
+                <Icon name="people" size={13} color={t.ink3} />
+                <Text style={{ ...ty.caption, color: t.ink2 }}>{cd.coachLinked ? 'Working With a Coach' : 'Training on Your Own'}</Text>
+                <Icon name={FORWARD_ICON} size={12} color={t.ink3} />
+              </Pressable>
+            ) : null}
           </View>
           {/* Three figures the rest of this screen is built from. A dash
               where nothing has been measured — never a placeholder body. */}
@@ -704,6 +725,13 @@ export default function Profile() {
               { label: 'Badges', value: logWhole ? fig(earnedKeys(badgeFigures(log, cd.weightSeries)).length) : fig(null), unit: logWhole ? `of ${BADGE_COUNT}` : undefined },
               { label: 'Best Streak', value: logWhole ? fig(longestStreak(log)) : fig(null), unit: logWhole ? 'days' : undefined },
             ]} />
+            {/* What period and what source — a figure without either is a
+                number (rule 2). All three are counted over the whole training
+                log, so they are all-time, and under a read that is not whole
+                the line says why the tiles are dashes instead. */}
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
+              {logWhole ? 'All time, from your training log' : 'Your training log has not been read in full, so these are not counted'}
+            </Text>
           </View>
         </Card>
 

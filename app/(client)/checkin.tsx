@@ -45,7 +45,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Cta, PageHead, Spark, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, PageHead, Spark, PartialRead, SyncBadge, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { useClientData } from '../../src/ui/clientData';
@@ -63,6 +63,11 @@ import { checkinTrend, seriesNote, trendLine } from '../../src/lib/checkinTrend'
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isPending } from '../../src/lib/wellnessSync';
 import { unsentNote } from '../../src/lib/offlineQueue';
+// The age of the last check-in the server holds, in the same words the coach's
+// console uses for it — one wording for one fact on both sides of the thread.
+import { checkInAge, ratingLabel } from '../../src/lib/coachCheckins';
+import { isWhole } from '../../src/ui/loadStatus';
+import { useToday } from '../../src/ui/today';
 import { isRTL } from '../../src/ui/direction';
 
 // The range a human weighs, in the kilograms this app stores. Kept in metric
@@ -219,6 +224,7 @@ export default function CheckIn() {
   const router = useRouter();
   const cd = useClientData();
   const ci = useCheckIns();
+  const today = useToday();
   // The history under the form — what was sent, and whether the coach has it —
   // plus the profile the figures are prefilled from.
   const pull = usePullToRefresh(useCallback(() => { ci.reload(); cd.reload(); }, [ci.reload, cd.reload]));
@@ -262,6 +268,17 @@ export default function CheckIn() {
   const [mood, setMood] = useState(0);
   const [adherence, setAdherence] = useState(0);
   const [note, setNote] = useState('');
+
+  // What the line under the title says. See the note on the PageHead below.
+  const waitingNote = unsentNote(ci.unsent, 'check-in', 'check-ins');
+  const stateLine = useMemo(() => {
+    if (ci.status === 'loading') return 'Reading when you last sent one…';
+    if (!isWhole(ci.status)) return 'When you last sent one could not be checked just now';
+    if (!ci.latestSent) return 'None sent yet · your coach reads what you send';
+    const age = checkInAge(ci.latestSent.at);
+    return `Last sent ${fmtFullDay(ci.latestSent.at)}${age ? ` · ${age.toLowerCase()}` : ''}`;
+    // `today`, so a screen left open past midnight re-ages the line.
+  }, [ci.status, ci.latestSent, today]);
 
   const send = useSubmitOnce('checkin.submit');
 
@@ -343,7 +360,37 @@ export default function CheckIn() {
             it was the kicker: the screen sends one check-in, the coach reads
             it weekly, and nothing here is daily. The board draws no kicker at
             all, so none is. */}
-        <PageHead title="Weekly Check-in" />
+        {/* ── where things stand, before the form asks for anything ────────
+            The data-layout review's stack is context, current state, next
+            action — and this screen opened on the next action. When the last
+            check-in went, and whether the coach has it, were two sections below
+            the Submit button, so a member deciding whether this week's was
+            still owed had to scroll past the form to find out.
+
+            One quiet line under the title, which is where the board's pushed
+            pages carry theirs, so the form is still what the first screen is
+            made of. `latestSent`, never `latest`: this line is about what the
+            COACH holds, and a pending check-in is not that. Under a read that
+            is not whole it says so rather than "none sent" (rule 5). */}
+        <PageHead title="Weekly Check-in" subtitle={stateLine} />
+
+        {/* Waiting to go up — and said HERE, above the form, rather than under
+            the button where it used to be. It is the state of the thing this
+            screen is about (rule 6), and the member it matters most to is the
+            one about to fill the form in a second time because nothing told
+            them the first is still on the phone. `unsentNote` is the one
+            wording for it — see the note on it in src/lib/offlineQueue.ts about
+            not letting "saved" read as "delivered". The kit's `SyncBadge` names
+            the state and the sentence says what it means for the coach; colour
+            is never the only carrier (rule 9). */}
+        {waitingNote ? (
+          <View style={{ marginTop: sp.lg }}>
+            <SyncBadge state="queued" />
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs }}>
+              {waitingNote} Your coach cannot see it until then.
+            </Text>
+          </View>
+        ) : null}
 
         {/* ── the board's four, in the board's order ──────────────────────── */}
         <View style={{ marginTop: sp.xxl }}>
@@ -384,23 +431,6 @@ export default function CheckIn() {
         <Cta label={send.busy ? 'Sending…' : 'Submit Check-in'} disabled={send.busy}
           onPress={() => send.run(submit)} wide />
 
-        {/* Waiting to go up. Said here rather than only in the alert that
-            followed the tap, because the alert is gone by the next time this
-            screen is opened and the client's question then is "did that
-            send?". `unsentNote` is the one wording for it — see the note on it
-            in src/lib/offlineQueue.ts about not letting "saved" read as
-            "delivered". */}
-        {unsentNote(ci.unsent, 'check-in', 'check-ins') ? (
-          <View>
-            <Rule />
-            <Section>
-              <SectionHead title="Waiting to Send" />
-              <Text style={{ ...ty.label, color: t.ink3 }}>{unsentNote(ci.unsent, 'check-in', 'check-ins')}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>Your coach cannot see it until then.</Text>
-            </Section>
-          </View>
-        ) : null}
-
         {ci.latest ? (
           <View>
             <Rule />
@@ -417,8 +447,15 @@ export default function CheckIn() {
               {/* The stored kilograms read back in the client's unit. The two
                   ratings beside it are scores out of five and are not a
                   measurement of anything physical, so they are printed as they
-                  are recorded. */}
-              <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{fig(weightLabel(ci.latest.weightKg, wu))} · Energy {ci.latest.energy}/5 · Sleep {ci.latest.sleep}/5</Text>
+                  are recorded.
+
+                  Through `ratingLabel`, and the weight only when it is one: a
+                  score or a weight the row never carried arrives here as the
+                  NUMBER 0 (`rowToCI` coerces with `Number(x) || 0`), and
+                  "Energy 0/5" is a rating nobody gave on a scale that starts at
+                  1. The trend below has always refused to plot those; this line
+                  printed them. Unknown draws the dash (rule 5). */}
+              <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{fig(weightLabel(ci.latest.weightKg > 0 ? ci.latest.weightKg : null, wu))} · Energy {fig(ratingLabel(ci.latest.energy))} · Sleep {fig(ratingLabel(ci.latest.sleep))}</Text>
               {ci.latest.note ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, fontStyle: 'italic' }}>“{ci.latest.note}”</Text> : null}
             </Section>
           </View>
