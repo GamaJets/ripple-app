@@ -138,6 +138,27 @@ and the look is kit-level:
 
 Screenshots at HEAD: https://claude.ai/artifact/RCjxmm2weVTsAtQsz8Epvk
 
+## 4d. The implementation doc, the logo, and the scans (19 Sep, night)
+
+`~/Documents/ChatGPT/REPPLE App Redesign/docs/claude-handoff/CLAUDE-CODE-MOCKUP-IMPLEMENTATION.md` is the
+most specific instruction set and overrides the brief where they differ. Applied: no tiles above the fold on
+Home (avatar top right instead); Client Detail centred with hairline rows, not tiles; Builder = name first,
+day circles, Exercises/Supersets/Templates rows, editor folded; Calendar header with the day's agenda under
+the grid; Me rows (Goals/Notifications/Privacy/Connected Apps/Help/Settings).
+
+**Logo:** the redesign's homepage carried the new mark as an SVG path (P + two signal bars). It is now
+`src/ui/BrandMark.tsx`, the three app icons (near-black plates `#0b0f0e/#0c1210/#0a1311`), favicon, touch
+icon and every web header. The ripple rings are gone.
+
+**Accounts on the simulator:** the client build is signed in as the COACH account (washateria.stl), which
+has no client row — that is why Meals/Progress are empty. The user's real client account is flyguy2006
+(uid 759c8d25…), now holding **14 InBody scans** (5 sheets added, 4 rows given their metrics, 19 Sep). Studio
+build is signed out (door, white-labelled Northline Performance). Sign the simulator in as flyguy2006 for
+truthful client screenshots; that needs the user's password.
+
+Review page (17-item set less Workout View / Active Tracking, which need a signed-in client):
+https://claude.ai/artifact/RCjxmm2weVTsAtQsz8Epvk
+
 ## 5. What to do next
 
 **Port the implemented screens from `repple-redesign`, file by file, re-applying audit fixes on
