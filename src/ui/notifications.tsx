@@ -79,7 +79,7 @@ import { hitSlopFor } from '../lib/a11y';
 import type { AppVariant } from '../lib/variant';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
-import { Section, Ghost, Notice, PartialRead } from './kit';
+import { Section, Ghost, PageHead, Notice, PartialRead } from './kit';
 import { SkeletonList } from './Skeleton';
 import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import type { LoadStatus } from './loadStatus';
@@ -93,7 +93,7 @@ import { signedInUid } from '../lib/signedInUid';
 import { authGateMessage } from '../lib/authedUid';
 import { useLive } from './realtime';
 import { useNow } from './today';
-import { BACK_ICON, FORWARD_ICON } from './direction';
+import { FORWARD_ICON } from './direction';
 
 export interface InboxItem {
   id: string;
@@ -1015,19 +1015,16 @@ export function NotificationInbox(f: InboxFraming) {
             end. The kicker is no longer drawn — the board opens this screen
             with the one word — and the blurb has moved to the foot of the
             list, so nothing procedural sits in the first viewport. When there
-            is no pill a spacer the width of the back button holds the title
-            in the middle. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>{f.title}</Text>
-          {badge.kind === 'count' ? (
+            is no pill PageHead's own blank holds the title in the middle. */}
+        <View style={{ marginBottom: sp.lg }}>
+          <PageHead title={f.title} trailing={badge.kind === 'count' ? (
             <View style={{ paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: t.brand }}>
               {/* caption, not micro: micro uppercases, and "3 NEW" is the same
                   defect as the "2H" timestamp below — a word beside a figure,
                   shouted. */}
               <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{badge.label} new</Text>
             </View>
-          ) : <View style={{ width: 38 }} />}
+          ) : undefined} />
         </View>
 
         {status === 'error' ? (

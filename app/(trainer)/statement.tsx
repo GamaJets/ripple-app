@@ -48,7 +48,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -72,7 +72,6 @@ import {
 import { fetchStatementInput } from '../../src/ui/coachStatement';
 import { DateSheet } from '../../src/ui/DateSheet';
 import { MIN_TARGET } from '../../src/lib/a11y';
-import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * A whole year, one quarter of it, or two dates the coach types.
@@ -473,13 +472,8 @@ export default function StatementOfRecord() {
         {/* The board's head — back at the leading edge, the title centred,
             the way app/(trainer)/money.tsx opens. The eyebrow that stood here
             ("For your accountant") was a line of prose above the title; what it said is
-            still said by the first card below. The trailing spacer is the
-            back control's own width so the title centres on the screen. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Statement of Record</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+            still said by the first card below. */}
+        <PageHead title="Statement of Record" />
 
         <View style={{ marginTop: sp.lg }}>
           <Notice

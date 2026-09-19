@@ -20,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { PLANS } from '../../src/lib/ownerMock';
 import { planOffer } from '../../src/lib/planOffer';
@@ -28,7 +28,6 @@ import { subscribeToPlan, openBillingPortal, fetchMySubscription, money, PRICE_I
 import { trialDisagreement, TRIAL_NOT_YET_ENFORCED } from '../../src/lib/trialGate';
 import { useTrialReading } from '../../src/ui/trialReading';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { BACK_ICON } from '../../src/ui/direction';
 // The billing history this screen promised in its own subtitle and never had.
 // The sentences and the three claims it may not make are in the module; the
 // read is below and the rendering is at the bottom of this file.
@@ -203,13 +202,8 @@ export default function TrainerBilling() {
         {/* The board's head — back at the leading edge, the title centred,
             the way app/(trainer)/money.tsx opens. The eyebrow that stood here
             ("Your Repple plan") was a line of prose above the title; what it said is
-            still said by the first card below. The trailing spacer is the
-            back control's own width so the title centres on the screen. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Billing</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+            still said by the first card below. */}
+        <PageHead title="Billing" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Your Repple plan, payment method and invoices.
         </Text>

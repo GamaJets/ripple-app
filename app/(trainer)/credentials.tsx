@@ -40,7 +40,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
@@ -243,13 +243,8 @@ export default function TrainerCredentials() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 48 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* The header the board gives the Profile family: a back chevron at
-            the leading edge and the title centred, with a spacer the width of
-            the round Ghost so the title sits on the true centre line. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Credentials & Reviews</Text>
-          <View style={{ width: 38 }} />
-        </View>
+            the leading edge and the title centred. */}
+        <PageHead title="Credentials & Reviews" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
           What you are qualified to do, and what your clients have said.
         </Text>

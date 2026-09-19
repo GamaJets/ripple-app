@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, PageHead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -25,7 +25,6 @@ import { volumeIn } from '../../src/lib/units';
 import { BADGES, badgeFigures, badgeState, type BadgeState } from '../../src/lib/badges';
 import { useBadgeWatch } from '../../src/ui/badgeWatch';
 import { Confetti } from '../../src/ui/Confetti';
-import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Achievements() {
   const t = useTheme();
@@ -141,11 +140,7 @@ export default function Achievements() {
             opening — Challenges, board page 14: the title centred between
             the back control and an equal space at the trailing edge. Two
             screens reached from the same rows should open the same way. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Achievements</Text>
-          <View style={{ width: 38 }} />
-        </View>
+        <PageHead title="Achievements" />
 
         {/* ── the hero: how much of the set is unlocked ───────────────────── */}
         <Hero

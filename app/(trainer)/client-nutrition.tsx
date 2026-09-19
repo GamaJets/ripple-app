@@ -68,7 +68,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Meter, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, PageHead, Cta, Notice, Flag, Meter, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 // The board's targets are four small rings. Drawn the way the client's Meals
 // tab draws its one big ring, so the two apps share a shape.
@@ -96,7 +96,7 @@ import {
 } from '../../src/lib/mealPlan';
 import type { Diet, Goal } from '../../src/lib/types';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
-import { BACK_ICON, FORWARD_ARROW, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ARROW, FORWARD_ICON } from '../../src/ui/direction';
 
 const CLIENT_COLS = 'diet, meals_per_day, avoid, goal, activity, manual_weight_kg, manual_body_fat_pct';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
@@ -551,20 +551,9 @@ export default function ClientNutrition() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── the board's head: back, and the title on the centre line ────
-            A spacer the width of the back control keeps the title centred on
-            the screen rather than on what is left of the row. The client's
-            name sits under it because this is one person's plan and the
-            picker that names them is now below the fold. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', flex: 1, paddingHorizontal: sp.sm }}>
-            Nutrition Plan
-          </Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
-        {client ? (
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{client.name}</Text>
-        ) : null}
+            The client's name sits under it because this is one person's plan
+            and the picker that names them is now below the fold. */}
+        <PageHead title="Nutrition Plan" subtitle={client?.name} />
 
         {!USE_SUPABASE ? (
           <Section>

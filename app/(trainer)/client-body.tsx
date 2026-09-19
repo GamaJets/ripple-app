@@ -111,7 +111,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag, Spark, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, Spark, fig } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
@@ -172,7 +172,7 @@ import {
 // so the verb changes with the subject. Already the mechanism on
 // app/(trainer)/client-training.tsx and src/ui/MuscleWorkPanel.tsx.
 import type { HistoryVoice } from '../../src/ui/ExerciseHistory';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 
 // `source` rides along with the three figures because "InBody (OCR)" and
 // "InBody (manual)" are different amounts of trust in a reading, and a coach
@@ -839,20 +839,9 @@ export default function ClientBody() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── the board's head: back, and the title on the centre line ────
-            A spacer the width of the back control keeps the title centred on
-            the screen rather than on what is left of the row. The client's
-            name sits under it because this is one person's record and the
-            picker that names them is now below the fold. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', flex: 1, paddingHorizontal: sp.sm }}>
-            Progress
-          </Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
-        {fullName ? (
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{fullName}</Text>
-        ) : null}
+            The client's name sits under it because this is one person's
+            record and the picker that names them is now below the fold. */}
+        <PageHead title="Progress" subtitle={fullName || undefined} />
 
         {!USE_SUPABASE ? (
           <Section>

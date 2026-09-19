@@ -78,7 +78,7 @@ import { useRouter } from 'expo-router';
 import { useTheme, useThemeControls } from '../../src/ui/components';
 import { metaByKey, paletteForScheme, type Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ListRow, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, PageHead, Flag, fig } from '../../src/ui/kit';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
 import { fmtDay } from '../../src/lib/format';
@@ -771,14 +771,8 @@ export default function TrainerSettings() {
 
         {/* ── the header, as board page 17 draws it ─────────────────────────
             A back chevron at the leading edge and "Settings" centred over the
-            rows — no eyebrow and no subtitle. The trailing spacer is the width
-            of the round Ghost so the title sits on the true centre line rather
-            than the centre of what is left beside the button. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Settings</Text>
-          <View style={{ width: 38 }} />
-        </View>
+            rows — no eyebrow and no subtitle. */}
+        <PageHead title="Settings" />
 
 
         {/* ── the five rows the board opens with ────────────────────────────

@@ -118,7 +118,7 @@ import { useTheme } from '../../src/ui/components';
 // The month window's instant, recomputed at midnight, on foreground and on
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow } from '../../src/ui/today';
-import { Rule, Section, SectionHead, Ghost, Notice, Flag, ListRow, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, ListRow, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/theme/scale';
 import { minorMoney, wholeMoney, type Taken, type TakenRow } from '../../src/lib/coachMoney';
 import { takingsStrands, TAKINGS_IS_GROSS } from '../../src/lib/coachRevenue';
@@ -173,7 +173,6 @@ import {
 } from '../../src/lib/clientValue';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { isWhole } from '../../src/ui/loadStatus';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
 
@@ -706,14 +705,8 @@ export default function CoachMoney() {
             Board page 14 opens with a chevron and "Payments" centred over it;
             the eyebrow this screen had ("What comes in, and what goes out")
             was a second line of prose in the first viewport, and the two
-            ledgers it named are still both here, in the Notice further down.
-            The trailing spacer is the back control's own width so the title
-            is centred on the screen and not on what is left of it. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Payments</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+            ledgers it named are still both here, in the Notice further down. */}
+        <PageHead title="Payments" />
 
         {/* ── THE FIGURE ─────────────────────────────────────────────────
             The board's hero: an eyebrow, one big figure, the movement against

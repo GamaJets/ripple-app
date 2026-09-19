@@ -53,7 +53,7 @@ import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Ghost, PageHead, fig } from '../../src/ui/kit';
 import { RepdbAttribution } from '../../src/ui/Attribution';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
@@ -81,7 +81,7 @@ import {
 } from '../../src/lib/dataExport';
 import { reportError } from '../../src/lib/reportError';
 import { appLocale } from '../../src/lib/locale';
-import { BACK_ICON, END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
+import { END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * Which phone the rest-timer sound note is about.
@@ -482,12 +482,9 @@ export default function Settings() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        {/* Back on its own line and the title centred under it — board page
-            18, and the way app/(trainer)/client.tsx already opens a record. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-        </View>
-        <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.sm }}>Settings</Text>
+        {/* The board's page head — back at the leading edge, the title on
+            the centre line — board page 18. */}
+        <PageHead title="Settings" />
 
         {/* ── the board's six rows ───────────────────────────────────────
             Page 18 opens Settings on a plain list — a round icon, a name, a

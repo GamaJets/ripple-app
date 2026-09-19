@@ -66,7 +66,7 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { DateSheet } from '../../src/ui/DateSheet';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
@@ -86,7 +86,7 @@ import {
 } from '../../src/lib/bulkActions';
 import { assignCtaLabel } from '../../src/lib/assignPicker';
 import { disclosureFact, neverAskedBrief, type DisclosureFact } from '../../src/lib/disclosureFact';
-import { BACK_ICON, FORWARD_CHAR } from '../../src/ui/direction';
+import { FORWARD_CHAR } from '../../src/ui/direction';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useProgrammeLibrary } from '../../src/ui/workoutTemplates';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
@@ -361,18 +361,10 @@ export default function Templates() {
             top of it. Without `a11yLabel` it was also announced as "button"
             and there is no other way back from here. See the same correction
             in src/ui/FeedbackScreen.tsx. */}
-        {/* Centred between the button and a spacer of its width, the way the
-            board heads every page reached from a row (coach page 15 lists
-            this one as Program Templates). The eyebrow went; the line under
-            the title says what the screen is for. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <Text accessibilityRole="header" numberOfLines={1}
-            style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center', paddingHorizontal: sp.sm }}>
-            Program Templates
-          </Text>
-          <View style={{ width: 38 }} />
-        </View>
+        {/* The board's page head (coach page 15 lists this one as Program
+            Templates). The eyebrow went; the line under the title says what
+            the screen is for. */}
+        <PageHead title="Program Templates" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
           Build once, assign to many. Save any program from the builder.
         </Text>

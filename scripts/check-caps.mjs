@@ -133,6 +133,7 @@ const VISIBLE = new Map([
   ['Cta', ['label']],            // ty.label — kit.tsx:427
   ['Ghost', ['label']],          // ty.label — kit.tsx:526
   ['ListRow', ['title']],        // ty.body  — kit.tsx:401
+  ['PageHead', ['title']],       // ty.title — kit.tsx, the board's centred page head
   ['ActionCard', ['title', 'cta']], // ty.body kit.tsx:380, and cta is a <Cta>
 ]);
 

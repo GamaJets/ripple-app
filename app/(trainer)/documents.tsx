@@ -38,7 +38,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, PageHead, Flag } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -76,7 +76,6 @@ import {
 import {
   HAS_NATIVE_DOCUMENT_PICKER, DOCUMENT_PICKER_UNAVAILABLE_NOTE, pickDocument,
 } from '../../src/ui/nativeModules';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const BUCKET = 'coach-docs';
 /** Long enough to read a waiver, short enough that a leaked link is stale. */
@@ -591,18 +590,10 @@ export default function CoachDocumentsScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        {/* Centred between the button and a spacer of its width, the way the
-            board heads every page reached from a row (coach page 15 lists
-            this one as Forms & PDFs; the rows on Profile call it Your
-            Documents, and the title says what it holds). */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" numberOfLines={1}
-            style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center', paddingHorizontal: sp.sm }}>
-            Documents
-          </Text>
-          <View style={{ width: 38 }} />
-        </View>
+        {/* The board's page head (coach page 15 lists this one as Forms &
+            PDFs; the rows on Profile call it Your Documents, and the title
+            says what it holds). */}
+        <PageHead title="Documents" />
 
         {!USE_SUPABASE ? (
           <Section>

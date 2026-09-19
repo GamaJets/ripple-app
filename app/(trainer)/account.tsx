@@ -43,7 +43,7 @@ import { View, Text, TextInput, ScrollView, Alert, Pressable } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, PageHead, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
@@ -52,7 +52,7 @@ import { reportError } from '../../src/lib/reportError';
 import {
   MIN_PASSWORD, changeEmail, changePassword, emailProblem, endOtherSessions, passwordProblem, pendingEmail,
 } from '../../src/lib/accountSecurity';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
@@ -224,15 +224,10 @@ export default function CoachAccount() {
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* The header the board gives every Settings-family page (17, 20): a
-            back chevron at the leading edge, the title centred, and a spacer
-            the width of the round Ghost so the title sits on the true centre
-            line. The one-line description stays, centred under it, because
-            "Account & Sign-in" alone does not say which of the two this is. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Account &amp; Sign-in</Text>
-          <View style={{ width: 38 }} />
-        </View>
+            back chevron at the leading edge, the title centred. The one-line
+            description stays, centred under it, because "Account & Sign-in"
+            alone does not say which of the two this is. */}
+        <PageHead title="Account & Sign-in" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
           The password you sign in with, and the address a reset would go to
         </Text>

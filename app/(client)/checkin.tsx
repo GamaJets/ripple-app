@@ -45,7 +45,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Cta, Ghost, Spark, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, PageHead, Spark, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { useClientData } from '../../src/ui/clientData';
@@ -63,7 +63,7 @@ import { checkinTrend, seriesNote, trendLine } from '../../src/lib/checkinTrend'
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isPending } from '../../src/lib/wellnessSync';
 import { unsentNote } from '../../src/lib/offlineQueue';
-import { BACK_ICON, isRTL } from '../../src/ui/direction';
+import { isRTL } from '../../src/ui/direction';
 
 // The range a human weighs, in the kilograms this app stores. Kept in metric
 // because the record is metric; the two bounds are converted for whichever unit
@@ -338,17 +338,12 @@ export default function CheckIn() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
         {/* The board's header: a back chevron and the title centred over the
-            form. A 38pt blank at the far end is what keeps the title centred
-            on the screen rather than on what is left of it. Said "Daily" over
-            a title reading "Weekly Check-in", above a line calling it a weekly
-            pulse — one of the three had to move and it was the kicker: the
-            screen sends one check-in, the coach reads it weekly, and nothing
-            here is daily. The board draws no kicker at all, so none is. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ flex: 1, ...ty.title, color: t.ink, textAlign: 'center' }}>Weekly Check-in</Text>
-          <View style={{ width: 38 }} />
-        </View>
+            form. Said "Daily" over a title reading "Weekly Check-in", above a
+            line calling it a weekly pulse — one of the three had to move and
+            it was the kicker: the screen sends one check-in, the coach reads
+            it weekly, and nothing here is daily. The board draws no kicker at
+            all, so none is. */}
+        <PageHead title="Weekly Check-in" />
 
         {/* ── the board's four, in the board's order ──────────────────────── */}
         <View style={{ marginTop: sp.xxl }}>

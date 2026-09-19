@@ -40,7 +40,7 @@ import { importSources, withHr, useImportedIds, isLogged, readRecent, readNote, 
 import { isWhole } from '../../src/ui/loadStatus';
 import type { WriteOutcome } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
-import { Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
+import { Section, SectionHead, Hero, ListRow, Cta, Ghost, PageHead, Flag, Notice, fig } from '../../src/ui/kit';
 import { requestHealthAuth, writeAuthStatus, type WriteAuth } from '../../src/lib/wearables/appleHealth';
 import {
   planWrite, readLedger, writeSessions, summariseResult, writeUnavailableReason,
@@ -88,7 +88,6 @@ import { useSettings } from '../../src/ui/settings';
 import { useDeviceHrv } from '../../src/ui/deviceHrv';
 import { hrvBuildingLine, hrvTrendLine } from '../../src/lib/hrvTrend';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
-import { BACK_ICON } from '../../src/ui/direction';
 
 type MetricKey = 'kcal' | 'hr' | 'hrv' | 'steps' | 'source';
 
@@ -860,13 +859,9 @@ export default function Devices() {
    keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
-  {/* Back on its own line and the title centred under it — the way board
-      page 17 opens this screen, and the way app/(trainer)/client.tsx already
-      opens a record. */}
-  <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-  </View>
-  <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.sm }}>Wearables</Text>
+  {/* The board's page head — back at the leading edge, the title on the
+      centre line — the way board page 17 opens this screen. */}
+  <PageHead title="Wearables" />
 
   {/* ── connected apps ──────────────────────────────────────────────────
       First, as board page 17 draws it: one row per app in the catalogue,

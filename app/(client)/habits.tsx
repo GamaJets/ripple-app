@@ -50,7 +50,7 @@ import { Icon, type IconName } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, Field, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, PageHead, Flag, Notice, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -64,7 +64,7 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { readNumber, plain } from '../../src/lib/units';
 import { num } from '../../src/lib/format';
 import { hitSlopFor } from '../../src/lib/a11y';
-import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { END_ALIGN } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 // The three figures the board draws beside a row that this store cannot
 // supply on its own. Steps come off the watch; last night off the devices
@@ -319,13 +319,9 @@ export default function Habits() {
 
         {/* ── header ─────────────────────────────────────────────────────
             The board centres the title between the back chevron and an
-            empty trailing slot; the spacer is the chevron's own width so the
-            title sits on the screen's centre line and not on the row's. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Daily Habits</Text>
-          <View style={{ width: 38 }} />
-        </View>
+            empty trailing slot; PageHead keeps it on the screen's centre
+            line rather than the row's. */}
+        <PageHead title="Daily Habits" />
 
         {/* ── the card: today's list, one row per habit ──────────────────── */}
         <Section>

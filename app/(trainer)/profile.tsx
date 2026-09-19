@@ -21,8 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, fig } from '../../src/ui/kit';
-import { BACK_ICON } from '../../src/ui/direction';
+import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, PageHead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value, fontScale } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 // The three figures under the name — board page 19's "Clients · Rating ·
@@ -390,14 +389,11 @@ export default function CoachProfile() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header, as board page 19 draws it ─────────────────────────────
-            A back chevron at the leading edge and nothing else in the bar —
+            A back chevron at the leading edge and no title in the bar —
             the identity block under it is the title. Settings keeps the
             trailing edge: the one control a coach reaches for from here that
             is not about how clients see them. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Ghost icon="settings" a11yLabel="Open settings" onPress={() => router.push('/(trainer)/settings')} />
-        </View>
+        <PageHead trailing={<Ghost icon="settings" a11yLabel="Open settings" onPress={() => router.push('/(trainer)/settings')} />} />
 
         {/* ── who this is: a large centred avatar, the name, the tagline ────
             Drawn from the provider whatever `access` says, because a name and

@@ -235,7 +235,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 // Which clients the figure at the top of this screen is made of. A BREAKDOWN
@@ -301,7 +301,6 @@ import { accountTypeOf, accountForObject } from '../../src/lib/directCharges';
 // Why a credit did not move, in the words every other draw site uses. One copy
 // of those sentences, in the pure module that owns the outcome union.
 import { drawReason } from '../../src/lib/packDraw';
-import { BACK_ICON } from '../../src/ui/direction';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
   { key: null, label: 'One-off' },
@@ -1627,13 +1626,8 @@ export default function TrainerPayments() {
         {/* The board's head — back at the leading edge, the title centred,
             the way app/(trainer)/money.tsx opens. The eyebrow that stood here
             ("Getting paid") was a line of prose above the title; what it said is
-            still said by the first card below. The trailing spacer is the
-            back control's own width so the title centres on the screen. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Payments & Packages</Text>
-          <View style={{ width: 38 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        </View>
+            still said by the first card below. */}
+        <PageHead title="Payments & Packages" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Get paid by your clients — memberships &amp; session packs.
         </Text>

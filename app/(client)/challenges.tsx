@@ -54,7 +54,7 @@ import { num } from '../../src/lib/format';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, Meter, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, Meter, Cta, Ghost, PageHead, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useChallenges, type BoardResult, type ChallengeRow } from '../../src/ui/challenges';
 import {
@@ -63,7 +63,7 @@ import {
   challengeActionsAllowed, staleChallengeNote,
 } from '../../src/lib/challenges';
 import { notifySuccess } from '../../src/ui/haptics';
-import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 import { useReachability } from '../../src/ui/reachability';
 // The clock this screen judges every challenge against, kept live. See the note
 // at `useNow()` below and src/ui/today.ts.
@@ -242,13 +242,8 @@ export default function Challenges() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         {/* The board centres this title between the back control and an
             equal space at the trailing edge, so the title sits on the
-            screen's axis rather than on the control's. The spacer is the
-            round Ghost's own width. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, flex: 1, textAlign: 'center' }}>Challenges</Text>
-          <View style={{ width: 38 }} />
-        </View>
+            screen's axis rather than on the control's. */}
+        <PageHead title="Challenges" />
 
         {/* ── Active / Completed, as the board draws it ─────────────────── */}
         <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>

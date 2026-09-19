@@ -8,6 +8,7 @@
 // colour marks the live metric and the primary action, and nothing else.
 import { useState, type ReactNode } from 'react';
 import { View, Text, Pressable, type ViewStyle, type StyleProp } from 'react-native';
+import { router } from 'expo-router';
 import Svg, { Circle, Polyline, Line } from 'react-native-svg';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
@@ -21,7 +22,7 @@ import {
   axisLabel, pointLabel, tickIndices, maxTicksForWidth,
   segments, readablePoints, hasInteriorGap, nearestPoint,
 } from '../lib/chartAxis';
-import { END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from './direction';
+import { BACK_ICON, END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from './direction';
 
 /* ── how this kit talks ───────────────────────────────────────────────────
  *
@@ -173,6 +174,78 @@ export function ScreenHeader({
         }}>
           {actions}
         </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * The round Ghost's diameter. A blank that stands in for one — the trailing
+ * slot of a PageHead with nothing in it — has to be exactly this wide, or the
+ * title beside it is centred on the row and not on the screen.
+ */
+const ROUND = 38;
+
+/**
+ * The head of every page reached from a row, the way the approved board draws
+ * it: a round back control at the leading edge, the title on the SCREEN's
+ * centre line, and at the trailing edge either one control — the settings
+ * gear on Profile, the unread pill on Notifications, a share, a + — or a blank
+ * the width of the back control. The blank is the whole trick: a title
+ * centred between a 38pt button and nothing sits 19pt off the axis, which is
+ * visible from across the room and was visible on every one of the twelve
+ * hand copies this replaces.
+ *
+ * A sibling of ScreenHeader rather than a `centered` flag on it, because the
+ * two share nothing but the word "title". ScreenHeader is the tab opening —
+ * eyebrow, a title at the leading edge, up to two actions that STACK under it
+ * at large text — and this is the page opening, which must not stack: the
+ * back control has to stay where the thumb learned it is. A flag that turns
+ * off an eyebrow, a greeting, the leading layout and the stacking is not a
+ * mode, it is a second component wearing the first one's name.
+ *
+ * `leading` and `trailing`, never left and right: the row is a plain flex row
+ * and Yoga swaps the ends for a right-to-left reader on its own. BACK_ICON is
+ * already the mirrored glyph.
+ *
+ * The title wraps — two lines, three at accessibility sizes — rather than
+ * truncating: "Credentials & Reviews" at 1.35 is a fit only as two lines, and
+ * an exercise name is the one thing on a set screen that must not end in an
+ * ellipsis. `title` is optional for the one page whose title is the identity
+ * block under the bar (coach Profile); the slot is then empty and the two
+ * controls hold the two ends.
+ */
+export function PageHead({ title, subtitle, leading, trailing, onBack, backLabel = 'Back' }: {
+  title?: string;
+  /** One quiet line under the title — the client's name under "Nutrition Plan". */
+  subtitle?: string;
+  /** Replaces the back control. Pass `null` for an empty leading slot. */
+  leading?: ReactNode;
+  /** The one trailing control. Absent, a blank of the back control's width. */
+  trailing?: ReactNode;
+  /** Where back goes when it is not `router.back()` — a set screen returning
+   *  to its exercise, say. */
+  onBack?: () => void;
+  /** What the back control says when "Back" is not the whole truth. */
+  backLabel?: string;
+}) {
+  const t = useTheme();
+  return (
+    <View style={{ paddingTop: sp.md }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+        {leading === undefined
+          ? <Ghost icon={BACK_ICON} a11yLabel={backLabel} onPress={onBack ?? (() => router.back())} />
+          : (leading ?? <View style={{ width: ROUND }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />)}
+        {title ? (
+          <Text accessibilityRole="header" numberOfLines={linesAtScale(fontScale, 2)}
+            style={{ ...ty.title, color: t.ink, flex: 1, minWidth: 0, textAlign: 'center' }}>
+            {title}
+          </Text>
+        ) : <View style={{ flex: 1 }} />}
+        {trailing ?? <View style={{ width: ROUND }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />}
+      </View>
+      {subtitle ? (
+        <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{subtitle}</Text>
       ) : null}
     </View>
   );
@@ -457,11 +530,25 @@ export function KpiRow({ items, onPress }: { items: KpiItem[]; onPress?: (i: Kpi
             borderStartWidth: i === 0 ? 0 : hairline,
             borderStartColor: t.ring,
           }}>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>{k.label}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 5 }}>
-            <Text style={{ ...value(22), color: t.ink }}>{k.value}</Text>
-            {k.unit ? <Text style={{ ...ty.caption, color: t.ink3, marginStart: 2 }}>{k.unit}</Text> : null}
+          {/* The figure first and the label UNDER it, the board's way — its
+              KPI figures are the biggest thing on the page ("12 / 8 / 95%" on
+              coach page 2) and the word is a footnote to the number, not a
+              heading over it. 26 rather than the 22 this had: three of these
+              in 358pt at 22 read as body copy beside the board's.
+
+              `adjustsFontSizeToFit` on the figure and not on the unit: at
+              fontScale 1.35 a column is ~100pt and "1,240" at 26 × 1.35 is
+              not, so the figure yields — to 70% — before it wraps or clips.
+              The unit stays caption size whatever the figure does, because
+              "0 of 12" and "under 1%" are a figure and a qualifier, and a
+              qualifier drawn at figure size becomes a second figure. It can
+              wrap; a suffix on a second line is still the suffix. */}
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <Text style={{ ...value(26), color: t.ink, flexShrink: 1 }} numberOfLines={1}
+              adjustsFontSizeToFit minimumFontScale={0.7}>{k.value}</Text>
+            {k.unit ? <Text style={{ ...ty.caption, color: t.ink3, marginStart: 2, flexShrink: 1 }}>{k.unit}</Text> : null}
           </View>
+          <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{k.label}</Text>
           {k.delta ? (
             // Two lines, and the mark aligned to the first of them. Three
             // columns on a 390pt phone give a delta roughly 14 characters at
@@ -766,7 +853,7 @@ export function Ghost({ label, onPress, icon, a11yLabel, disabled }: {
       style={{
         backgroundColor: t.surface2,
         borderRadius: round ? radius.pill : radius.sm,
-        width: round ? 38 : undefined, height: round ? 38 : undefined,
+        width: round ? ROUND : undefined, height: round ? ROUND : undefined,
         paddingVertical: round ? 0 : 11, paddingHorizontal: round ? 0 : sp.lg,
         alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: sp.sm,
         opacity: disabled ? 0.5 : 1,
