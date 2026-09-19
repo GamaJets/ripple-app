@@ -14,7 +14,7 @@
 // looked up: every scan produced the same invented protein bar. The button now
 // says nothing was logged and points at the real Open Food Facts lookup.
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { num } from '../../src/lib/format';
+import { num, fmtTime } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -105,6 +105,11 @@ import { useWearables } from '../../src/ui/wearables';
 import { Rule, Section, SectionHead, PageHead, Cta, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, hairline } from '../../src/theme/scale';
 import { FORWARD_ICON } from '../../src/ui/direction';
+
+/** How a logged meal came in, as a word for its row. 'manual' is everything
+ *  typed or taken from the plan — described meals are logged under it too, see
+ *  the note on `via` in logNL — so it says no more than that. */
+const VIA_LABEL: Record<FoodEntry['via'], string> = { photo: 'Photo', barcode: 'Barcode', search: 'Search', manual: 'Entered' };
 
 /**
  * The four ways in, as the board's segmented bar lists them. One is open at a
@@ -198,14 +203,22 @@ export default function FoodLog() {
  // The day type is not offered here. Zero is the Off day the Meals tab's picker
  // starts on, so the two screens agree for every member who has not moved it —
  // and a member who has is reading a what-if on the tab that offers it.
- const target = (adjustUnknown || foodRulesUnknown) ? null : (dayTarget({
+ const dayPlan = (adjustUnknown || foodRulesUnknown) ? null : dayTarget({
   weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity,
   goal: cd.goal, diet: cd.diet,
   coachAdjust: soloEater ? null : (_adj ?? null),
   weightGoal: goals.find((g) => g.kind === 'weight' && !g.achievedAtISO) ?? null,
   weightSeries: cd.weightSeries,
   nowMs: Date.now(),
- })?.macros ?? null);
+ });
+ const target = dayPlan?.macros ?? null;
+ // Where that target came from, in the words the Meals tab uses under its
+ // ring, so the two screens name one source. Null with the target: a basis
+ // for a figure that is not on screen is a sentence about nothing.
+ const targetSource = !dayPlan ? null
+  : `${!soloEater && _adj ? 'Coach-adjusted · ' : ''}${dayPlan.energyPlan.kind === 'derived'
+   ? 'Target built from your weight goal and date'
+   : 'Target from your measurements and general goal'}`;
 
  const fl = useFoodLog();
  const toast = useToast();
@@ -1056,7 +1069,9 @@ export default function FoodLog() {
  <View accessible accessibilityLabel={[
    remK == null ? 'Calories eaten' : remK >= 0 ? 'Calories remaining' : 'Calories over',
    `${!dayWhole ? fig(null) : remK == null ? fig(tot.k) : fig(Math.abs(remK))} kcal`,
-   dayNote,
+   // Not said twice: over a whole day with a target the row of named
+   // figures under this speaks eaten, target and burned one at a time.
+   ...(dayWhole && target ? [] : [dayNote]),
  ].join(', ')}>
  <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
  {/* Shrunk to fit and never wrapped, for the same reason the Hero did it:
@@ -1067,7 +1082,7 @@ export default function FoodLog() {
  </Text>
  <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>kcal</Text>
  </View>
- <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{dayNote}</Text>
+ {dayWhole && target ? null : <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{dayNote}</Text>}
  </View>
  {/* How far through the day, as the board draws it under a figure: a thin
      bar, brand-coloured until the day is over its target and then the alarm
@@ -1079,6 +1094,22 @@ export default function FoodLog() {
   accessibilityValue={{ min: 0, max: 100, now: pctEaten }}
   style={{ height: 4, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
  <View style={{ height: 4, borderRadius: 2, width: `${pctEaten}%`, backgroundColor: remK != null && remK < 0 ? t.crit : t.brand }} />
+ </View>
+ ) : null}
+ {/* Target, eaten and burned as three named figures under the one that is
+     left, because they are three different facts and the sentence above runs
+     them together. Same gate as the figure: a whole read of a day that has a
+     target. Burned only where a device reported one — no column for a zero
+     nobody measured — and it is shown, not subtracted: `caloriesLeft` never
+     adds it back. */}
+ {dayWhole && target ? (
+ <View style={{ marginTop: sp.lg }}>
+ <KpiRow items={[
+  { label: 'Eaten', value: num(tot.k), unit: 'kcal' },
+  { label: 'Target', value: num(target.kcal), unit: 'kcal' },
+  ...(burned ? [{ label: 'Burned', value: num(burned), unit: 'kcal' }] : []),
+ ]} />
+ {targetSource ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{targetSource}</Text> : null}
  </View>
  ) : null}
 
@@ -1306,7 +1337,7 @@ export default function FoodLog() {
  {i > 0 ? <Rule /> : null}
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
  <Pressable onPress={() => openEdit(fe)} accessibilityRole="button"
-  accessibilityLabel={`Edit ${fe.name}, ${num(fe.kcal)} calories`}
+  accessibilityLabel={`Edit ${fe.name}, ${num(fe.kcal)} calories, ${fmtTime(fe.at)}, ${VIA_LABEL[fe.via]}`}
   accessibilityHint="Opens the sheet to correct what it was worth"
   style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
  {/* A round thumbnail where the board puts a photograph of the dish. The
@@ -1319,6 +1350,12 @@ export default function FoodLog() {
  <View style={{ flex: 1, minWidth: 0 }}>
  <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }} numberOfLines={2}>{fe.name}</Text>
  <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>{num(fe.kcal)} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
+ {/* When, and how it came in — the icon says the second in a picture and
+     this says it in a word, because a figure read off a photograph and one
+     read off a packet are not equally sure and the row should say which it
+     is. `at` is when it was eaten, which for a queued meal is not when it
+     reached the server. */}
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{fmtTime(fe.at)} · {VIA_LABEL[fe.via]}</Text>
  </View>
  <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
  </Pressable>

@@ -1799,19 +1799,19 @@ export default function Scans() {
         {/* ── one metric at a time, as the board draws it ─────────────────
             Weight and body fat are tabs over one figure and one chart;
             Photos is the compare screen, which already exists. */}
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
           {([['weight', 'Weight'], ['bodyfat', 'Body Fat']] as const).map(([key, label]) => {
             const selected = progressMetric === key;
             return (
               <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected }} accessibilityLabel={label} onPress={() => setProgressMetric(key)}
-                style={{ flex: 1, minHeight: 38, borderRadius: radius.sm, backgroundColor: selected ? t.surface : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: selected ? '600' : '400', color: selected ? t.ink : t.ink3 }}>{label}</Text>
+                style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, backgroundColor: selected ? t.ink : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: selected ? '600' : '500', color: selected ? t.bg : t.ink2 }}>{label}</Text>
               </Pressable>
             );
           })}
           <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Photos" onPress={() => router.push('/(client)/compare')}
-            style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.label, color: t.ink3 }}>Photos</Text>
+            style={{ flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center' }}>
+            <Text numberOfLines={1} style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Photos</Text>
           </Pressable>
         </View>
 
@@ -1911,6 +1911,67 @@ export default function Scans() {
           })}
         </View>
 
+        {/* The order from here is the data-layout review's: what the figure is
+            measured against and how old it is, then the way to add a new
+            reading, and only then the history. Both blocks used to sit under
+            the dated list — so the one action on the screen was below a list
+            that grows with every scan, and the staleness sentence, which its
+            own comment says belongs under the figure, was a screen away from
+            it. They moved whole; nothing in them changed but their margins. */}
+        {/* ── What they are aiming at ─────────────────────────────────────
+            Two targets, on the two figures this screen leads with. The Goals
+            screen has stored these for months and no body screen has ever read
+            one, so a member set a target weight and then came here — the screen
+            called Progress — and found no mention of it anywhere.
+
+            Absent under a failed goal read rather than reported as "no target":
+            an empty `goals` list under 'error' means the targets could not be
+            read, and printing "no target set" off a dropped connection tells
+            somebody their goal is gone. */}
+        {bfTarget || wtTarget ? (
+          <View style={{ marginTop: sp.md, gap: 3 }}>
+            {bfTarget ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View accessibilityElementsHidden importantForAccessibility="no"
+                  style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: bfTarget.reached ? t.brand : t.ink3 }} />
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Body fat · {bfTarget.note}</Text>
+              </View>
+            ) : null}
+            {wtTarget ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View accessibilityElementsHidden importantForAccessibility="no"
+                  style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: wtTarget.reached ? t.brand : t.ink3 }} />
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Weight · {wtTarget.note}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* Where a figure is stale, how stale — said under the figure itself,
+            because the client is the only person who can judge whether a scan
+            from eleven weeks ago still describes them, and they can only judge
+            it if they are given the eleven weeks. */}
+        {stalenessNote(bfNow, today) ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{stalenessNote(bfNow, today)}</Text>
+        ) : null}
+
+        {/* ── the one card: the scan you can act on ───────────────────────── */}
+        <Section>
+          <ActionCard
+            title={latest ? 'Latest InBody Scan' : 'Add your first InBody scan'}
+            // The scan's OWN figures and the scan's OWN date. This card is the
+            // one place on the screen whose subject really is the scan, so it
+            // may differ from the Weight tile below — and it now says the date
+            // out loud so that difference reads as two measurements on two days
+            // rather than as the app contradicting itself.
+            note={latest
+              ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${bodyDayLabel(latest.takenAt)}${ago ? ` · ${ago}` : ''}`
+              : 'Snap or upload your report — the numbers are read for you.'}
+            cta={latest ? 'Add Scan' : 'Start'}
+            onPress={() => setShowAdd(true)}
+          />
+        </Section>
+
         {/* ── the dated list, as the board draws it under the chart ────────
             One row per InBody scan, newest first: the day, the instrument,
             and the chosen metric's figure at the trailing edge. Each row is a
@@ -1983,62 +2044,6 @@ export default function Scans() {
         </Section>
 
         <ScreenHelp screen="progress" />
-        {/* ── What they are aiming at ─────────────────────────────────────
-            Two targets, on the two figures this screen leads with. The Goals
-            screen has stored these for months and no body screen has ever read
-            one, so a member set a target weight and then came here — the screen
-            called Progress — and found no mention of it anywhere.
-
-            Absent under a failed goal read rather than reported as "no target":
-            an empty `goals` list under 'error' means the targets could not be
-            read, and printing "no target set" off a dropped connection tells
-            somebody their goal is gone. */}
-        {bfTarget || wtTarget ? (
-          <View style={{ marginBottom: sp.md, gap: 3 }}>
-            {bfTarget ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <View accessibilityElementsHidden importantForAccessibility="no"
-                  style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: bfTarget.reached ? t.brand : t.ink3 }} />
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Body fat · {bfTarget.note}</Text>
-              </View>
-            ) : null}
-            {wtTarget ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <View accessibilityElementsHidden importantForAccessibility="no"
-                  style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: wtTarget.reached ? t.brand : t.ink3 }} />
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Weight · {wtTarget.note}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
-        {/* Where a figure is stale, how stale — said under the figure itself,
-            because the client is the only person who can judge whether a scan
-            from eleven weeks ago still describes them, and they can only judge
-            it if they are given the eleven weeks. */}
-        {stalenessNote(bfNow, today) ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{stalenessNote(bfNow, today)}</Text>
-        ) : null}
-
-
-        {/* ── the one card: the scan you can act on ───────────────────────── */}
-        <Section>
-          <ActionCard
-            title={latest ? 'Latest InBody Scan' : 'Add your first InBody scan'}
-            // The scan's OWN figures and the scan's OWN date. This card is the
-            // one place on the screen whose subject really is the scan, so it
-            // may differ from the Weight tile below — and it now says the date
-            // out loud so that difference reads as two measurements on two days
-            // rather than as the app contradicting itself.
-            note={latest
-              ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${bodyDayLabel(latest.takenAt)}${ago ? ` · ${ago}` : ''}`
-              : 'Snap or upload your report — the numbers are read for you.'}
-            cta={latest ? 'Add Scan' : 'Start'}
-            onPress={() => setShowAdd(true)}
-          />
-        </Section>
-
-
         {/* ── body ───────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Body" note="Measurements" onPress={() => router.push('/(client)/measurements')} />

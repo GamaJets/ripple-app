@@ -544,6 +544,17 @@ export default function BodyTrends() {
                       <Text style={{ ...ty.caption, color: t.ink3 }}>No change since {dayLabel(readings[0].at)}</Text>
                     )}
                   </View>
+                  {/* The date and instrument behind the big number above it.
+                      "Need to see the dates the weight was measured as well" —
+                      this is that line, on every metric on the screen.
+
+                      Directly under the figure, ahead of the rate and the
+                      target: the review's order is the value, then where and
+                      when it came from, then how it moved. A reader deciding
+                      whether to believe a number needs its date before they
+                      need its slope. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{measuredNote(now, today)}</Text>
+                  {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stale}</Text> : null}
                   {/* ── the rate ──────────────────────────────────────────
                       Through `deltaLabel` like every other movement in this
                       app, so the sign, the zero case and the separator are the
@@ -578,11 +589,6 @@ export default function BodyTrends() {
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{target.note}</Text>
                     </View>
                   ) : null}
-                  {/* The date and instrument behind the big number above it.
-                      "Need to see the dates the weight was measured as well" —
-                      this is that line, on every metric on the screen. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{measuredNote(now, today)}</Text>
-                  {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stale}</Text> : null}
                   <View style={{ height: sp.md }} />
                   {/* The two end dates that used to sit in the row below are
                       now the chart's own axis, drawn from the same array it
