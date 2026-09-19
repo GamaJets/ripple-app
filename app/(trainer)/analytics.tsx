@@ -903,7 +903,7 @@ export default function TrainerAnalytics() {
             whole and the training record behind the verdict landed. */}
         {atRisk && atRisk.length > 0 ? (<>
           <Rule />
-          <Section>
+          <View style={{ marginTop: sp.md }}>
             <Card tone={t.warn}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
@@ -939,7 +939,7 @@ export default function TrainerAnalytics() {
                 <Cta label="Review" onPress={() => router.push('/(trainer)/dashboard')} />
               </View>
             </Card>
-          </Section>
+          </View>
         </>) : null}
 
 
