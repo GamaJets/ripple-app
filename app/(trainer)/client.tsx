@@ -1625,7 +1625,7 @@ export default function ClientScreen() {
               is the literal '—' everywhere it is built. The real answer is a
               section of its own below — src/lib/nextUp.ts. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }} numberOfLines={2}>
-            {client ? `${client.goal} · ${COACHED_MODE_SHORT[client.mode]} · last active ${client.lastActive}` : 'Your book'}
+            {client ? `${client.goal} · ${COACHED_MODE_SHORT[client.mode]} · ${/\bago$/.test(client.lastActive) ? `last active ${client.lastActive}` : client.lastActive}` : 'Your book'}
           </Text>
         </View>
 
@@ -1637,7 +1637,12 @@ export default function ClientScreen() {
           <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
             <KpiRow items={[
               { label: 'Adherence', value: client.adherence == null ? fig(null) : String(client.adherence), unit: client.adherence == null ? undefined : '%' },
-              { label: 'Last Active', value: client.lastActive },
+              // `lastActive` is one of five shapes (src/lib/lastActiveLine.ts):
+              // "3d ago" is a figure and goes in the value; the four sentences
+              // — 'no activity yet', '—', 'added by you', 'just added' — are
+              // not figures and go under a dash rather than at figure size.
+              { label: 'Last Active', value: /\bago$/.test(client.lastActive) ? client.lastActive : fig(null),
+                delta: /\bago$/.test(client.lastActive) ? undefined : client.lastActive },
               { label: 'Unread', value: fig(client.unread ?? null) },
             ]} />
           </View>
