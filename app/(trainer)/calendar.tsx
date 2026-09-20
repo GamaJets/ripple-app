@@ -1118,7 +1118,7 @@ export default function TrainerSchedule() {
     if (n === 0) return;
     const dayNames = [...new Set(avDays)].sort((a, b) => a - b).map((d) => DOW[d]).join(', ');
     Alert.alert(
-      `Remove ${n} slot${n === 1 ? '' : 's'}?`,
+      `Remove ${n} Slot${n === 1 ? '' : 's'}?`,
       `This takes every weekly slot between ${avTime(avFrom, avFromMin)} and ${avTime(avTo, avToMin)} off ${dayNames}. `
       + 'Open slots already generated from them are NOT withdrawn — anything a client has booked stays booked, '
       + 'and anything still open stays open until it passes. This only stops new ones being generated.',

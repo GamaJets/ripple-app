@@ -543,7 +543,7 @@ export default function ClientWeek() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
               note="Planned days live on the server and belong to the client, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have marked none." />
           </Section>
         ) : (
@@ -573,7 +573,7 @@ export default function ClientWeek() {
               <View>
                 <Rule />
                 <Section>
-                  <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                  <Notice kicker="No Account" title={`${client?.name ?? 'This client'} has no Repple account`}
                     note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no app for them to plan a week in and no training of theirs to compare a plan against. That is not an empty fortnight and not a failed read. Invite them from your client list and this screen fills in from the day they accept.`} />
                 </Section>
               </View>
@@ -755,7 +755,7 @@ export default function ClientWeek() {
                         screen reads no unit. A count needs none. */}
                     {pva.state === 'ready' && loads ? (
                       <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed load against what was lifted</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed Load Against What Was Lifted</Text>
                         <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>{loads}</Text>
                       </View>
                     ) : null}
@@ -764,7 +764,7 @@ export default function ClientWeek() {
                         this programme does not name. Spelled as they typed it. */}
                     {pva.offPlan.length ? (
                       <View style={{ marginTop: sp.lg }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but not prescribed</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but Not Prescribed</Text>
                         <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{pva.offPlan.map(movement).join(' \u00b7 ')}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                           Work outside the programme is not a fault; it is the part of {who}&rsquo;s training the

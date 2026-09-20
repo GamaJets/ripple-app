@@ -1622,7 +1622,7 @@ export default function ClientScreen() {
     const r = await askToRecordInjury(id, askArea, askNote);
     setAskBusy(false);
     if (!r.sent) {
-      Alert.alert('Not sent', `${who} has not been asked${r.error ? ` (${r.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
+      Alert.alert('Not Sent', `${who} has not been asked${r.error ? ` (${r.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
       return;
     }
     setAskOpen(false); setAskArea(null); setAskNote('');
@@ -1647,7 +1647,7 @@ export default function ClientScreen() {
     const res = await askToCompleteIntake(id, ci.state, ci.progress);
     setIntakeAsking(false);
     if (!res.sent) {
-      Alert.alert('Not sent', `${who} has not been asked${res.error ? ` (${res.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
+      Alert.alert('Not Sent', `${who} has not been asked${res.error ? ` (${res.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
       return;
     }
     Alert.alert(
@@ -1889,7 +1889,7 @@ export default function ClientScreen() {
             the same sentence. A refused roster read is not an empty book. */}
         {!id ? (
           <Section>
-            <Notice tone={t.warn} kicker="No client" title="This screen was opened without a client"
+            <Notice tone={t.warn} kicker="No Client" title="This screen was opened without a client"
               note="Go back to your clients and open somebody from the list." />
           </Section>
         ) : !client && r.status === 'error' ? (
@@ -1899,19 +1899,19 @@ export default function ClientScreen() {
           </Section>
         ) : !client && r.status !== 'loading' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not on your book" title={`${who} is not on your roster`}
+            <Notice tone={t.warn} kicker="Not on Your Book" title={`${who} is not on your roster`}
               note="They may have been removed, or the coaching relationship may have ended. The reads below will come back empty because the policies behind them require a live coaching link." />
           </Section>
         ) : null}
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
               note="Goals, planned days, ticks and photos belong to the client and live on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have none." />
           </Section>
         ) : noAccount ? (
           <Section>
-            <Notice tone={t.s5} kicker="Added by hand" title={`${who} has no Repple account yet`} note={noAccount} />
+            <Notice tone={t.s5} kicker="Added by Hand" title={`${who} has no Repple account yet`} note={noAccount} />
             {/* The control the notice above has always described and never
                 offered. Until this, a coach who wanted to invite the person
                 they were looking at had to go back to Add Client and add them
@@ -2509,7 +2509,7 @@ export default function ClientScreen() {
 
               {att.status === 'error' ? (
                 <View style={{ marginBottom: sp.md }}>
-                  <Notice tone={t.crit} kicker="Not read" title="Their attendance could not be read"
+                  <Notice tone={t.crit} kicker="Not Read" title="Their attendance could not be read"
                     note="The figures below are dashes because the record did not come back. It is NOT a record of them never coming in." />
                 </View>
               ) : null}

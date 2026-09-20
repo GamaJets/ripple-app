@@ -471,7 +471,7 @@ export default function ClientNutrition() {
     const ok = await cn.setPlan(picked, { ...draft, writtenAt: new Date().toISOString() });
     setSending(false);
     if (ok) Alert.alert('Sent', `${who} has the week on their Meals tab.`);
-    else Alert.alert('Not sent', 'The plan did not reach the server, so nothing has changed on their phone. Check your connection and try again.');
+    else Alert.alert('Not Sent', 'The plan did not reach the server, so nothing has changed on their phone. Check your connection and try again.');
   };
 
   const chip = (on: boolean) => ({
@@ -558,7 +558,7 @@ export default function ClientNutrition() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
               note="A client's diet, allergens and body live on the server, so there is no local copy of somebody else's to compose against. Nothing below is a claim about what they have disclosed." />
           </Section>
         ) : (
@@ -620,7 +620,7 @@ export default function ClientNutrition() {
                  apart from `unreadable` in src/lib/coachWellness.ts. */
               <View>
                 <Section>
-                  <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                  <Notice kicker="No Account" title={`${client?.name ?? 'This client'} has no Repple account`}
                     note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to carry a diet, an allergen list or a calorie target — and nowhere for a plan you write here to be delivered to. Nothing of theirs was asked for and nothing was refused. Invite them from your client list and this screen works properly from the day they accept.`} />
                 </Section>
               </View>
@@ -675,14 +675,14 @@ export default function ClientNutrition() {
                   </Section>
                 ) : stale && stale.stale ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Out of date" title="The plan they are following no longer matches their profile"
+                    <Notice tone={t.warn} kicker="Out of Date" title="The plan they are following no longer matches their profile"
                       note={planStaleLine(stale, who) ?? ''} />
                   </Section>
                 ) : null}
 
                 {profileStatus === 'ready' && !input ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Not enough profile" title="There is nothing to scale a plan to"
+                    <Notice tone={t.warn} kicker="Not Enough Profile" title="There is nothing to scale a plan to"
                       note={`A day's meals are scaled to lean body mass, which needs a weight and a body-fat figure, plus a diet, an activity level, a goal and a number of meals a day. ${who} is missing at least one of those, and this screen will not stand a placeholder body in for it. They set every one of them in their own app.`} />
                   </Section>
                 ) : null}
@@ -842,7 +842,7 @@ export default function ClientNutrition() {
                         </Section>
 
                         <Section>
-                          <SectionHead title="What Their App Will Do With This" note={PLAN_WEEKDAYS[dayIdx]} />
+                          <SectionHead title="What Their App Will Do with This" note={PLAN_WEEKDAYS[dayIdx]} />
                           <Text style={{ ...ty.body, color: t.ink2 }}>
                             {planServingNote(built.plan[0]?.servings ?? 1, planDayBaseKcal(draft, dayIdx), built.target.kcal)}
                           </Text>
@@ -985,7 +985,7 @@ export default function ClientNutrition() {
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{g.n}</Text>
-                    {inPlan ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the plan</Text> : null}
+                    {inPlan ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the Plan</Text> : null}
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                       {num(g.k)} kcal · P{num(g.p)} · C{num(g.c)} · F{num(g.f)} — per serving, before
                       their day is scaled to target

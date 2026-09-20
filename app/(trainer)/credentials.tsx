@@ -190,7 +190,7 @@ export default function TrainerCredentials() {
     if (!r.ok) {
       // Never "saved" over a write the server did not make. A zero-row write is
       // not an error in PostgREST, which is why addCredential counts rows.
-      Alert.alert('Not saved', r.reason ?? 'Nothing was written. Try again in a moment.');
+      Alert.alert('Not Saved', r.reason ?? 'Nothing was written. Try again in a moment.');
       return;
     }
     setFormOpen(false);
@@ -201,15 +201,15 @@ export default function TrainerCredentials() {
 
   const remove = (c: Credential) => {
     Alert.alert(
-      'Remove this?',
+      'Remove This?',
       `"${c.title}" comes off your profile for everyone who can see it. You can add it again later.`,
       [
-        { text: 'Keep it', style: 'cancel' },
+        { text: 'Keep It', style: 'cancel' },
         {
           text: 'Remove', style: 'destructive', onPress: () => {
             void (async () => {
               const r = await deleteCredential(c.id);
-              if (!r.ok) { Alert.alert('Not removed', r.reason ?? 'Nothing changed.'); return; }
+              if (!r.ok) { Alert.alert('Not Removed', r.reason ?? 'Nothing changed.'); return; }
               setAttempt((n) => n + 1);
             })();
           },
@@ -220,11 +220,11 @@ export default function TrainerCredentials() {
 
   const sendReply = async () => {
     if (!replyTo || replying) return;
-    if (validateReply(replyText) !== 'ok') { Alert.alert('Too long', `Keep your reply under ${MAX_REPLY} characters.`); return; }
+    if (validateReply(replyText) !== 'ok') { Alert.alert('Too Long', `Keep your reply under ${MAX_REPLY} characters.`); return; }
     setReplying(true);
     const ok = await replyToReview(replyTo.id, replyText);
     setReplying(false);
-    if (!ok) { Alert.alert('Not posted', 'Your reply was not saved. Nothing has changed on your profile — try again in a moment.'); return; }
+    if (!ok) { Alert.alert('Not Posted', 'Your reply was not saved. Nothing has changed on your profile — try again in a moment.'); return; }
     setReplyTo(null);
     setReplyText('');
     setAttempt((n) => n + 1);
@@ -302,7 +302,7 @@ export default function TrainerCredentials() {
         {/* ── credentials ───────────────────────────────────────────────── */}
         <Section>
           <SectionHead
-            title="What You Are Qualified To Do"
+            title="What You Are Qualified to Do"
             note={credStatus === 'ready' && creds ? String(creds.length) : undefined}
           />
 
@@ -351,7 +351,7 @@ export default function TrainerCredentials() {
                       {/* Shown to the coach as well, so nobody is surprised by
                           what a client sees next to their certificate. */}
                       <Text style={{ ...ty.caption, color: t.ink3 }}>
-                        {badge.checked ? badge.label : 'Stated by you'}
+                        {badge.checked ? badge.label : 'Stated by You'}
                       </Text>
                     </View>
                   </View>
@@ -466,7 +466,7 @@ export default function TrainerCredentials() {
 
                   <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
                     <Ghost
-                      label={r.coachReply ? 'Change your reply' : 'Reply'}
+                      label={r.coachReply ? 'Change Your Reply' : 'Reply'}
                       onPress={() => { setReplyTo(r); setReplyText(r.coachReply ?? ''); }}
                     />
                   </View>
@@ -808,7 +808,7 @@ function AskSheet({ row, onClose, onSent }: {
     const r = await send(text);
     setSending(false);
     if (!r.ok) {
-      Alert.alert('Not sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
+      Alert.alert('Not Sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
       return;
     }
     await onSent();
@@ -828,7 +828,7 @@ function AskSheet({ row, onClose, onSent }: {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} onPress={onClose} a11yLabel="Close without sending" />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — nothing sent yet</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — Nothing Sent Yet</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{row.name ?? 'Client'}</Text>
           </View>
         </View>

@@ -234,7 +234,7 @@ export default function CoachDocumentsScreen() {
 
   async function addDocument() {
     if (!uid) {
-      Alert.alert('Not signed in', 'Sign in again and your paperwork will be here.');
+      Alert.alert('Not Signed In', 'Sign in again and your paperwork will be here.');
       return;
     }
     const picked = await pickDocument({ type: DOC_MIME_TYPES });
@@ -243,7 +243,7 @@ export default function CoachDocumentsScreen() {
     // this build has no picker at all, and saying so is the only honest thing —
     // the button is already disabled for it, and this is the second lock.
     if (picked.outcome === 'unavailable') {
-      Alert.alert('This build cannot open your files', DOCUMENT_PICKER_UNAVAILABLE_NOTE);
+      Alert.alert('This Build Cannot Open Your Files', DOCUMENT_PICKER_UNAVAILABLE_NOTE);
       return;
     }
     if (picked.outcome === 'error') {
@@ -279,18 +279,18 @@ export default function CoachDocumentsScreen() {
     const declared = typeof a.size === 'number' && Number.isFinite(a.size) ? a.size : null;
     if (declared !== null) {
       const verdict = checkUpload({ filename: a.name, mime: a.mimeType, bytes: declared });
-      if (!verdict.ok) { Alert.alert('Can’t use that file', uploadRefusalLine(verdict.reason)); return; }
+      if (!verdict.ok) { Alert.alert('Can’t Use That File', uploadRefusalLine(verdict.reason)); return; }
     } else {
       // The two things that can still be settled without a size are settled
       // here, so a file of a kind we cannot use is never read into memory.
-      if (!a.name.trim()) { Alert.alert('Can’t use that file', uploadRefusalLine('name')); return; }
-      if (!extForMime(a.mimeType)) { Alert.alert('Can’t use that file', uploadRefusalLine('type')); return; }
+      if (!a.name.trim()) { Alert.alert('Can’t Use That File', uploadRefusalLine('name')); return; }
+      if (!extForMime(a.mimeType)) { Alert.alert('Can’t Use That File', uploadRefusalLine('type')); return; }
     }
 
     const path = coachDocPath({
       coachId: uid, filename: a.name, mime: a.mimeType as string, millis: Date.now(), token: newToken(),
     });
-    if (!path) { Alert.alert('Can’t use that file', uploadRefusalLine('type')); return; }
+    if (!path) { Alert.alert('Can’t Use That File', uploadRefusalLine('type')); return; }
 
     setBusy(true);
     try {
@@ -301,7 +301,7 @@ export default function CoachDocumentsScreen() {
         bytes = await res.arrayBuffer();
       } catch (e) {
         reportError('coachDocs.read-file', e);
-        Alert.alert('Couldn’t read that file', 'It could not be read off this device, so nothing was uploaded.');
+        Alert.alert('Couldn’t Read That File', 'It could not be read off this device, so nothing was uploaded.');
         return;
       }
       // The real length, whatever the picker said about it — and the whole of
@@ -309,13 +309,13 @@ export default function CoachDocumentsScreen() {
       // so a file too large for the bucket is refused with a sentence rather
       // than by an opaque 413, and an empty one is still called empty.
       const read = checkUpload({ filename: a.name, mime: a.mimeType, bytes: bytes.byteLength });
-      if (!read.ok) { Alert.alert('Can’t use that file', uploadRefusalLine(read.reason)); return; }
+      if (!read.ok) { Alert.alert('Can’t Use That File', uploadRefusalLine(read.reason)); return; }
 
       const { error: upErr } = await supabase.storage
         .from(BUCKET).upload(path, bytes, { contentType: a.mimeType as string, upsert: false });
       if (upErr) {
         reportError('coachDocs.upload', upErr, { path });
-        Alert.alert('Not uploaded', 'That document was not saved, so nothing has been added and nobody has been asked to accept anything.');
+        Alert.alert('Not Uploaded', 'That document was not saved, so nothing has been added and nobody has been asked to accept anything.');
         return;
       }
 
@@ -332,7 +332,7 @@ export default function CoachDocumentsScreen() {
         // second ago — so the storage delete policy allows this.
         // no-error-ok: the row insert already failed and is what the coach is told about; a leftover object is invisible to everybody and is the operator's purge queue's problem, not a second alert
         await supabase.storage.from(BUCKET).remove([path]);
-        Alert.alert('Not added', 'The file uploaded but could not be filed, so it has been removed. Nothing has been asked of anybody.');
+        Alert.alert('Not Added', 'The file uploaded but could not be filed, so it has been removed. Nothing has been asked of anybody.');
         return;
       }
       await load();
@@ -347,11 +347,11 @@ export default function CoachDocumentsScreen() {
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(d.path, SIGNED_TTL_S);
     if (error || !data?.signedUrl) {
       reportError('coachDocs.sign', error, { path: d.path });
-      Alert.alert('Couldn’t open it', 'The link to that document could not be created just now. Try again in a moment.');
+      Alert.alert('Couldn’t Open It', 'The link to that document could not be created just now. Try again in a moment.');
       return;
     }
     try { await WebBrowser.openBrowserAsync(data.signedUrl); }
-    catch (e) { reportError('coachDocs.open', e); Alert.alert('Couldn’t open it', 'This device would not open that document.'); }
+    catch (e) { reportError('coachDocs.open', e); Alert.alert('Couldn’t Open It', 'This device would not open that document.'); }
   }
 
   /* ── Who has accepted ──────────────────────────────────────────────────── */
@@ -466,7 +466,7 @@ export default function CoachDocumentsScreen() {
               if (why) {
                 if (why !== 'unavailable') reportError('coachDocs.send', error, { id: d.id });
                 setSendOff(why === 'unavailable');
-                Alert.alert('Not sent', sendFailureLine(why));
+                Alert.alert('Not Sent', sendFailureLine(why));
                 return;
               }
               // Re-read rather than patching the row in place: the send may have
@@ -523,7 +523,7 @@ export default function CoachDocumentsScreen() {
     // nothing.
     if (error || data !== true) {
       reportError('coachDocs.required', error, { id: d.id });
-      Alert.alert('Not changed', 'That could not be changed just now, so it is still as it was.');
+      Alert.alert('Not Changed', 'That could not be changed just now, so it is still as it was.');
       return;
     }
     await load();
@@ -536,7 +536,7 @@ export default function CoachDocumentsScreen() {
       + 'Everyone who has already accepted it keeps that record and can still read what they agreed to. '
       + 'This cannot be undone — issue a new version instead of bringing this one back.',
       [
-        { text: 'Keep it', style: 'cancel' },
+        { text: 'Keep It', style: 'cancel' },
         {
           text: 'Retire',
           style: 'destructive',
@@ -544,7 +544,7 @@ export default function CoachDocumentsScreen() {
             const { data, error } = await supabase.rpc('retire_coach_document', { p_document: d.id });
             if (error || data !== true) {
               reportError('coachDocs.retire', error, { id: d.id });
-              Alert.alert('Not retired', 'That could not be retired just now, so it is still in circulation.');
+              Alert.alert('Not Retired', 'That could not be retired just now, so it is still in circulation.');
               return;
             }
             await load();
@@ -652,7 +652,7 @@ export default function CoachDocumentsScreen() {
             ) : null}
 
             <Section>
-              <Cta label={busy ? 'Uploading…' : 'Add a document'} onPress={addDocument} disabled={busy || !HAS_NATIVE_DOCUMENT_PICKER} wide />
+              <Cta label={busy ? 'Uploading…' : 'Add a Document'} onPress={addDocument} disabled={busy || !HAS_NATIVE_DOCUMENT_PICKER} wide />
               {/* Disabled with the reason beside it rather than live and inert.
                   A button that opens nothing reads as a broken screen, and the
                   coach's next move is to try it again. */}
@@ -726,7 +726,7 @@ export default function CoachDocumentsScreen() {
                       </View>
 
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-                        <Ghost label={openId === d.id ? 'Hide' : 'Who’s accepted'} onPress={() => showStanding(d)} />
+                        <Ghost label={openId === d.id ? 'Hide' : 'Who’s Accepted'} onPress={() => showStanding(d)} />
                         <Ghost label={sendId === d.id ? 'Hide' : 'Send to a Client'} onPress={() => openSend(d)} />
                         <Ghost label="Retire" onPress={() => retire(d)} />
                       </View>

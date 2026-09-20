@@ -985,7 +985,7 @@ export default function ClientTraining() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This build is running without the server"
               note="Training belongs to the client and lives on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have never trained." />
           </Section>
         ) : (
@@ -1076,7 +1076,7 @@ export default function ClientTraining() {
                      to do about it. */
                   <Section>
                     <SectionHead title="Their Programme" note="not in this read" />
-                    <Notice tone={t.warn} kicker="Row limit" title="We could not tell what they are on"
+                    <Notice tone={t.warn} kicker="Row Limit" title="We could not tell what they are on"
                       note={`Your clients' programmes came back at the row limit and ${who} was past the end of it, so whether ${who} is on a programme is unknown rather than no. Nothing below compares their training against a plan. Pull down to read again.`} />
                   </Section>
                 ) : !program ? (
@@ -1190,7 +1190,7 @@ export default function ClientTraining() {
                         that half the movements named no load at all. */}
                     {pva.state === 'ready' && loadLine(loadTally(pva.movements), who) ? (
                       <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed load against what was lifted</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed Load Against What Was Lifted</Text>
                         <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>
                           {loadLine(loadTally(pva.movements), who)}
                         </Text>
@@ -1209,7 +1209,7 @@ export default function ClientTraining() {
                         common reason a block does not do what it was meant to. */}
                     {pva.offPlan.length ? (
                       <View style={{ marginTop: sp.lg }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but not prescribed</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but Not Prescribed</Text>
                         <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{pva.offPlan.join(' · ')}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                           Spelled as {who} typed {pva.offPlan.length === 1 ? 'it' : 'them'}. Work outside the programme is
@@ -1393,7 +1393,7 @@ export default function ClientTraining() {
                     keeps apart from `unreadable` in src/lib/coachWellness.ts. */}
                 {!askable ? (
                   <Section>
-                    <Notice kicker="No account" title={`${fullName || 'This client'} has no Repple account`}
+                    <Notice kicker="No Account" title={`${fullName || 'This client'} has no Repple account`}
                       note={`You added ${who} to your book by hand, so there is no account for workouts to belong to and nothing of theirs was asked for. That is not an empty training record and not a failed read — a workout row has to hang off an account, and there is not one yet. Invite them from your client list and everything on this page starts filling in from the day they join.`} />
                   </Section>
                 ) : status === 'loading' ? (

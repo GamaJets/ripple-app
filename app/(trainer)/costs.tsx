@@ -194,12 +194,12 @@ export default function Costs() {
   const onRecord = async () => {
     const d = draft();
     const problems = costBlockers(d);
-    if (problems.length) { Alert.alert('Not yet', problems.join('\n\n')); return; }
+    if (problems.length) { Alert.alert('Not Yet', problems.join('\n\n')); return; }
     setBusy(true);
     const res = await recordCost(d);
     setBusy(false);
     if (!res.ok) {
-      Alert.alert('That cost was not recorded', res.error || 'Nothing was written. Try again in a moment.');
+      Alert.alert('That Cost Was Not Recorded', res.error || 'Nothing was written. Try again in a moment.');
       return;
     }
     setOpen(false);
@@ -209,7 +209,7 @@ export default function Costs() {
 
   const onRemove = (c: CoachCost) => {
     Alert.alert(
-      'Remove this line?',
+      'Remove This Line?',
       // The honest framing. Nothing was handed to anybody and no document was
       // made from it, so this is a private ledger line being corrected — but it
       // does leave the figures smaller, and the coach is the only person who
@@ -224,7 +224,7 @@ export default function Costs() {
             void (async () => {
               const gone = await deleteCost(c.id);
               if (!gone) {
-                Alert.alert('Still there', 'That line was not removed and it is still in your figures. Try again in a moment.');
+                Alert.alert('Still There', 'That line was not removed and it is still in your figures. Try again in a moment.');
                 return;
               }
               await load();
@@ -270,13 +270,13 @@ export default function Costs() {
         <PageHead title="What It Costs You" />
 
         {status === 'error' ? (
-          <Notice tone={t.crit} kicker="Not read" title="Your recorded costs could not be read"
+          <Notice tone={t.crit} kicker="Not Read" title="Your recorded costs could not be read"
             note="This list is empty because the read failed, not because you have recorded none. Nothing below is a statement about your records." />
         ) : null}
         {status === 'partial' ? <PartialRead what="recorded costs" shown={rows.length} onPress={() => { void load(); }} /> : null}
 
         {currencyBlocker ? (
-          <Notice tone={t.crit} kicker="Nothing can be recorded yet" title="No currency" note={currencyBlocker} />
+          <Notice tone={t.crit} kicker="Nothing Can Be Recorded Yet" title="No Currency" note={currencyBlocker} />
         ) : null}
 
 
@@ -414,7 +414,7 @@ export default function Costs() {
           <>
             <Rule />
             <Section>
-              <SectionHead title={biggest.top.length === 1 ? 'The Biggest Line' : 'The Biggest Line In Each Currency'} />
+              <SectionHead title={biggest.top.length === 1 ? 'The Biggest Line' : 'The Biggest Line in Each Currency'} />
               {biggest.top.map((b) => (
                 <View key={b.currency} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
@@ -451,7 +451,7 @@ export default function Costs() {
               made from a list that is the whole list. `fetchMyCosts` answers
               `{rows: [], status: 'error'}` for a refused read, and "Nothing
               recorded yet" over that is a sentence this app cannot support. */}
-          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} recorded` : 'Nothing recorded yet') : 'What is on record'} />
+          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} recorded` : 'Nothing Recorded Yet') : 'What Is on Record'} />
           {rows.map((c) => (
             <View key={c.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
@@ -500,17 +500,17 @@ export default function Costs() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={{ ...ty.title, color: t.ink }}>Something you paid for</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>Something You Paid For</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                 Leave out your Repple plan and your ad spend. Both are already counted for you.
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>What it was for</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>What It Was For</Text>
               <TextInput value={description} onChangeText={setDescription}
                 placeholder="September rent at the gym" placeholderTextColor={t.ink3}
-                accessibilityLabel="What it was for" style={inp} />
+                accessibilityLabel="What It Was For" style={inp} />
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>What kind of cost</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>What Kind of Cost</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
                 {COST_CATEGORIES.map((c) => (
                   <Pressable key={c.id} onPress={() => setCategory(c.id)} accessibilityRole="button"
@@ -535,7 +535,7 @@ export default function Costs() {
                 placeholder="450" placeholderTextColor={t.ink3}
                 accessibilityLabel="Amount" style={inp} />
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day you paid it</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The Day You Paid It</Text>
               <TextInput value={dayText} onChangeText={setDayText} autoCapitalize="none" autoCorrect={false}
                 placeholder={`${today}, or leave it for today`} placeholderTextColor={t.ink3}
                 accessibilityLabel="The day you paid it" style={inp} />
@@ -556,7 +556,7 @@ export default function Costs() {
                 The day the money went out, not today. A quarter of receipts written up in one evening belongs in the months they were paid in.
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A note, if you want one (optional)</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A Note, If You Want One (Optional)</Text>
               <TextInput value={note} onChangeText={setNote} multiline
                 placeholder="Paid by standing order" placeholderTextColor={t.ink3}
                 accessibilityLabel="Note" style={[inp, { minHeight: 70, textAlignVertical: 'top' }]} />

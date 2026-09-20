@@ -438,7 +438,7 @@ export default function ClientPhotos() {
               ) : null}
 
               {err ? (
-                <Notice tone={t.warn} kicker="Not loaded" title="Their photos could not be read"
+                <Notice tone={t.warn} kicker="Not Loaded" title="Their photos could not be read"
                   note={`${err} That is not the same as ${firstName} having sent none — nothing came back, so this screen cannot say either way.`} />
               ) : !askable ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>

@@ -541,7 +541,7 @@ export default function ClientReport() {
           <>
             <Rule />
             <Section>
-              <Notice kicker="No account" title={`${fullName || 'This client'} has no Repple account`}
+              <Notice kicker="No Account" title={`${fullName || 'This client'} has no Repple account`}
                 note={`You added ${who} to your book by hand, so there is no account for sessions, training, scans or measurements to belong to — and so there is nothing to put on a page. That is not a record that could not be read, and a document saying it could not be read would be wrong on every line. Invite them from your client list and this becomes a real report from the day they join.`} />
             </Section>
             <View style={{ marginTop: layout.section, flexDirection: 'row' }}>
@@ -554,16 +554,16 @@ export default function ClientReport() {
 
             <Section>
               <SectionHead title="What Will Be on It" note={`Printed in ${pick.unit} and ${lengthUnit}`} />
-              <Row t={t} icon="calendar" tone="brand" label="Sessions booked with you"
+              <Row t={t} icon="calendar" tone="brand" label="Sessions Booked with You"
                 value={reads.sessions.status === 'error' ? 'not read'
                   : reads.sessions.status === 'loading' ? '…'
                   : tally.booked == null ? 'more than could be read'
                   : String(tally.booked)} />
-              <Row t={t} icon="clock" tone="amber" label="Of those, with no outcome recorded"
+              <Row t={t} icon="clock" tone="amber" label="Of Those, with No Outcome Recorded"
                 value={reads.sessions.status === 'error' ? 'not read'
                   : reads.sessions.status === 'loading' ? '…'
                   : tally.unrecorded == null ? '—' : String(tally.unrecorded)} />
-              <Row t={t} icon="dumbbell" tone="purple" label="Days trained"
+              <Row t={t} icon="dumbbell" tone="purple" label="Days Trained"
                 value={reads.training.status === 'error' ? 'not read'
                   : reads.training.status === 'loading' ? '…'
                   : board.dayCount == null ? '—' : String(board.dayCount)} />
@@ -578,17 +578,17 @@ export default function ClientReport() {
                   states on its front page that what it holds is not all of it.
                   'more than could be read' is the sentence the Sessions row two
                   above has always used for the same silence. */}
-              <Row t={t} icon="scale" tone="blue" label="Body-composition scans"
+              <Row t={t} icon="scale" tone="blue" label="Body-composition Scans"
                 value={reads.scans.status === 'error' ? 'not read'
                   : reads.scans.status === 'loading' ? '…'
                   : scanCount == null ? 'more than could be read'
                   : String(scanCount)} />
-              <Row t={t} icon="ruler" tone="teal" label="Days with tape measurements"
+              <Row t={t} icon="ruler" tone="teal" label="Days with Tape Measurements"
                 value={reads.measures.status === 'error' ? 'not read'
                   : reads.measures.status === 'loading' ? '…'
                   : measureDayCount == null ? 'more than could be read'
                   : String(measureDayCount)} />
-              <Row t={t} icon="heart" tone="red" label="Injuries they have disclosed"
+              <Row t={t} icon="heart" tone="red" label="Injuries They Have Disclosed"
                 value={reads.client.status === 'error' ? 'not read'
                   : reads.client.status === 'loading' ? '…' : String(injuries.length)} />
               {tally.unrecorded != null && tally.unrecorded > 0 ? (
@@ -639,7 +639,7 @@ export default function ClientReport() {
             what is in it. */}
         <View style={{ marginTop: sp.lg }}>
           <Notice
-            kicker="What this is"
+            kicker="What This Is"
             title="Everything on record, on one page"
             note="Sessions, logged training, scans, tape measurements and anything they have disclosed. It carries no rating, no percentage and no assessment — only what was entered, and by whom. Anything that could not be read says so on the page."
           />
