@@ -19,8 +19,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig, PageHead, DayBars, Ring, Meter, TonedChip, IconPlate, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font, fontScale } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
@@ -70,6 +70,16 @@ const ROLE_LABEL: Record<ShiftRole, string> = {
   floor: 'Floor', classes: 'Classes', pt: 'PT', desk: 'Desk', admin: 'Admin',
 };
 
+/** What a shift is FOR, as a colour by name — the bar at the row's leading edge
+ *  and the chip that says the role in words beside it. PT is the accent and
+ *  classes are purple, which is what those two are everywhere else in the app
+ *  (a session type keeps one colour across it); floor, desk and admin take the
+ *  hues nothing else on this screen uses. The word is always there: the colour
+ *  lets an eye find the desk shifts in a week of forty rows. */
+const ROLE_TONE: Record<ShiftRole, Tone> = {
+  pt: 'brand', classes: 'purple', floor: 'blue', desk: 'teal', admin: 'neutral',
+};
+
 /**
  * A calendar date rendered as "Mon 7 Sep".
  *
@@ -117,7 +127,7 @@ function Chip({ label, on, onPress, tone }: { label: string; on: boolean; onPres
         paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill,
         backgroundColor: on ? tone : t.surface2,
       }}>
-      <Text style={{ ...ty.caption, fontWeight: on ? '600' : '400', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.caption, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 }
@@ -458,7 +468,7 @@ export default function OwnerRota() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
           <Ghost icon={BACK_ICON} a11yLabel="Previous week" onPress={() => setWeek((w) => shiftWeek(w, -1))} />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
               {dayLabel(days[0] ?? week)} – {dayLabel(days[6] ?? week)}
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -468,6 +478,66 @@ export default function OwnerRota() {
           {week !== thisWeek ? <Ghost label="Today" onPress={() => setWeek(thisWeek)} /> : null}
           <Ghost icon={FORWARD_ICON} a11yLabel="Next week" onPress={() => setWeek((w) => shiftWeek(w, 1))} />
         </View>
+
+        {/* The figure as a card, not the kit's bare `Hero` — the one block on
+            this screen the board does not draw. The Hero's tone was a dot
+            beside the note; it still is, and it is still only the alarm colour
+            when an hour with work booked has nobody on it. */}
+        {/* And since the approved look the card is the week as a PICTURE: the
+            share of booked hours with somebody on them as a ring beside the
+            figure, and the seven days as bars under it — how many hours each
+            day has work booked in, RED on a day with an uncovered hour and the
+            accent on a day that is covered. With no shifts entered the bars go
+            grey and the ring stays empty: what is booked is known, whether it
+            is covered is not, and `cov.blocker` is the sentence that says so. */}
+        {(() => {
+          const figure = fig(loaded ? (cov?.uncovered?.length ?? null) : null);
+          const note = heroNote();
+          const mark = (cov?.uncovered?.length ?? 0) > 0 ? t.crit : t.brand;
+          const rate = loaded ? (cov?.coverRate ?? null) : null;
+          const booked = (d: string) => cov!.hours.filter((h) => h.date === d && (h.classes > 0 || h.ptSessions > 0)).length;
+          const missed = (d: string) => (cov?.uncovered ?? []).filter((g) => g.date === d).length;
+          return (
+            <Section>
+              <SectionHead title="Uncovered Hours" />
+              <View style={{ flexDirection: fontScale >= 1.5 ? 'column' : 'row', alignItems: fontScale >= 1.5 ? 'flex-start' : 'center', gap: sp.lg }}>
+                <View accessible accessibilityLabel={`Uncovered hours, ${figure}, ${note}`} style={{ flex: fontScale >= 1.5 ? undefined : 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                    style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
+                  </View>
+                </View>
+                {/* `coverRate` is null with no shifts and with nothing booked,
+                    and null draws the track and a dash — never a full ring over
+                    a week nobody has rostered. */}
+                <Ring size={104} value={rate} figure={pct(rate)} sub="covered" tone={(cov?.uncovered?.length ?? 0) > 0 ? 'red' : 'brand'}
+                  spoken={rate == null ? 'Booked hours covered, not known' : `${pct(rate)} of booked hours have somebody rostered`} />
+              </View>
+              {loaded ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <DayBars
+                    days={days.map((d) => ({
+                      label: calendarDateText(d, { weekday: 'short' }) ?? '',
+                      value: booked(d),
+                      tone: cov?.blocker ? 'neutral' as const : missed(d) > 0 ? 'red' as const : 'brand' as const,
+                    }))}
+                    spoken={`Hours with work booked, by day. ${days.map((d) => `${dayLabel(d, true)}, ${booked(d)} booked${cov?.blocker ? '' : `, ${missed(d)} uncovered`}`).join('. ')}.`} />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    {cov?.blocker ? 'Booked hours per day · cover not known' : 'Booked hours per day · red has an uncovered hour'}
+                  </Text>
+                </View>
+              ) : null}
+            </Section>
+          );
+        })()}
+
+        {/* Who is on the floor this week, and when that was last asked. A rota
+            read in a basement an hour ago and still on screen is exactly the
+            figure somebody staffs a shift against. Under the figure rather
+            than over the week, so the first viewport is the rota. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={!loaded && !failed} />
 
         {/* Whose clock every time and every column on this screen is drawn on.
             Stated always, in both states, because the failure it closes is
@@ -485,52 +555,28 @@ export default function OwnerRota() {
             : `Times are this device’s, not the gym’s — ${clock.note}. Set the gym’s timezone and this screen becomes the gym’s clock.`}
         </Text>
 
-        {/* The figure as a card, not the kit's bare `Hero` — the one block on
-            this screen the board does not draw. The Hero's tone was a dot
-            beside the note; it still is, and it is still only the alarm colour
-            when an hour with work booked has nobody on it. */}
-        {(() => {
-          const figure = fig(loaded ? (cov?.uncovered?.length ?? null) : null);
-          const note = heroNote();
-          const mark = (cov?.uncovered?.length ?? 0) > 0 ? t.crit : t.brand;
-          return (
-            <Section>
-              <SectionHead title="Uncovered Hours" />
-              <View accessible accessibilityLabel={`Uncovered hours, ${figure}, ${note}`}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
-                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
-                </View>
-              </View>
-            </Section>
-          );
-        })()}
-
-        {/* Who is on the floor this week, and when that was last asked. A rota
-            read in a basement an hour ago and still on screen is exactly the
-            figure somebody staffs a shift against. Under the figure rather
-            than over the week, so the first viewport is the rota. */}
-        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={!loaded && !failed} />
-
 
         <Section>
           <SectionHead title="Supply Against Demand" />
           <KpiRow items={[
             { label: 'Rostered Hours', value: fig(loaded ? hrs(cov?.rosteredHours ?? null) : null), unit: 'h' },
-            { label: 'Booked Hours Covered', value: fig(loaded ? pct(cov?.coverRate ?? null) : null) },
+            // The covered SHARE is the ring in the card above; this is what it
+            // is a share of, which used to be a sentence under the row.
+            { label: 'Booked Hours', value: fig(loaded ? (cov?.demandHours ?? null) : null), unit: 'h' },
             { label: 'Idle Hours', value: fig(loaded ? (cov?.idle?.length ?? null) : null) },
           ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {failed
-              ? 'This week’s shifts and bookings could not be read, so none of these could be worked out.'
-              : !loaded
-              ? 'Reading this week’s shifts, classes and one-to-ones.'
-              : cov?.blocker
-                ? 'An empty rota is not an uncovered gym. These stay blank until shifts are entered, rather than reporting a confident zero.'
-                : `${cov!.demandHours} hour${cov!.demandHours === 1 ? '' : 's'} this week ${cov!.demandHours === 1 ? 'has' : 'have'} a class or a one-to-one booked in ${cov!.demandHours === 1 ? 'it' : 'them'}.`}
-          </Text>
+          {/* Only the sentences that say why a figure is WITHHELD stay on the
+              page; the one that restated the booked-hours count is the tile
+              above now. */}
+          {failed || !loaded || cov?.blocker ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {failed
+                ? 'This week’s shifts and bookings could not be read, so none of these could be worked out.'
+                : !loaded
+                ? 'Reading this week’s shifts, classes and one-to-ones.'
+                : 'An empty rota is not an uncovered gym. These stay blank until shifts are entered, rather than reporting a confident zero.'}
+            </Text>
+          ) : null}
         </Section>
 
 
@@ -621,9 +667,9 @@ export default function OwnerRota() {
                 <View key={`u-${g.date}-${g.hour}`}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                    <IconPlate icon="clock" tone="red" size={36} />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {dayLabel(g.date)} · {hourLabel(g.hour)}
                       </Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -638,9 +684,9 @@ export default function OwnerRota() {
                 <View key={`i-${g.date}-${g.hour}`}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
+                    <IconPlate icon="clock" tone="neutral" size={36} />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {dayLabel(g.date)} · {hourLabel(g.hour)}
                       </Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -692,13 +738,18 @@ export default function OwnerRota() {
                     accessibilityRole="button"
                     accessibilityLabel={`${pulled ? 'Put back' : 'Pull'} ${nameOf(s.trainerId, s.trainerName)}, ${timeOf(s.startsAt, zone)} to ${timeOf(s.endsAt, zone)}`}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, opacity: pulled ? 0.5 : 1 }}>
+                    {/* The role as a bar, in the colour the chip at the other
+                        end says in words. A pulled shift goes grey: it is on
+                        nobody's floor. */}
+                    <View style={{ width: 4, alignSelf: 'stretch', minHeight: 28, borderRadius: 2,
+                      backgroundColor: pulled ? t.surface3 : ROLE_TONE[s.role] === 'brand' ? t.brand : ROLE_TONE[s.role] === 'neutral' ? t.ink3 : t.data[ROLE_TONE[s.role] as 'purple' | 'blue' | 'teal'] }} />
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 92 }}>
                       {timeOf(s.startsAt, zone)}–{timeOf(s.endsAt, zone)}
                     </Text>
                     <Text style={{ ...ty.body, color: t.ink, flex: 1, textDecorationLine: pulled ? 'line-through' : 'none' }} numberOfLines={1}>
                       {nameOf(s.trainerId, s.trainerName)}
                     </Text>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>{pulled ? 'Pulled' : ROLE_LABEL[s.role]}</Text>
+                    <View><TonedChip label={pulled ? 'Pulled' : ROLE_LABEL[s.role]} tone={pulled ? 'neutral' : ROLE_TONE[s.role]} /></View>
                   </Pressable>
                 );
               })}
@@ -708,24 +759,16 @@ export default function OwnerRota() {
 
         {roster.length > 0 ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Hours Per Trainer" />
-              {roster.map((r, i) => (
-                <View key={r.trainerId}>
-                  {i > 0 ? <Rule /> : null}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>
-                      {nameOf(r.trainerId, r.trainerName)}
-                    </Text>
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>
-                      {r.shifts.length} shift{r.shifts.length === 1 ? '' : 's'}
-                    </Text>
-                    <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>
-                      {fig(hrs(r.hours))}{r.hours == null ? '' : 'h'}
-                    </Text>
-                  </View>
-                </View>
+              {/* Against the longest week on the rota, so the bars compare
+                  the staff with each other. A shift with an unreadable end has
+                  no length: `hours` is then null, and the Meter draws no fill
+                  and the note keeps its dash. */}
+              {roster.map((r) => (
+                <Meter key={r.trainerId} label={nameOf(r.trainerId, r.trainerName)} tone="blue"
+                  val={r.hours} target={Math.max(1, ...roster.map((x) => x.hours ?? 0))}
+                  note={`${r.shifts.length} shift${r.shifts.length === 1 ? '' : 's'} · ${fig(hrs(r.hours))}${r.hours == null ? '' : ' h'}`} />
               ))}
             </Section>
           </>
@@ -815,7 +858,7 @@ export default function OwnerRota() {
                 accessibilityRole="button" accessibilityLabel="Save shift"
                 accessibilityState={{ disabled: !who || busy }}
                 style={{ backgroundColor: who && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: who && !busy ? t.brandInk : t.ink3 }}>
+                <Text style={{ ...ty.label, ...font('600'), color: who && !busy ? t.brandInk : t.ink3 }}>
                   {busy ? 'Saving…' : 'Put on the rota'}
                 </Text>
               </Pressable>

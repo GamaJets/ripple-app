@@ -6,16 +6,18 @@
 // (`src/theme/scale`). Same numbers, same routes, same modal — the four tinted
 // stat boxes and eleven bordered cards became one hero figure plus
 // hairline-separated sections, and the Georgia serif header is gone.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
-import { type IconName } from '../../src/ui/Icon';
+import { Icon, type IconName } from '../../src/ui/Icon';
+import { FORWARD_ICON } from '../../src/ui/direction';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, Flag, AttentionRow, FigureCard, ChartShell, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, Flag, AttentionRow, ChartShell, HeroCard, DayBars, Donut, Legend, Meter, TonedChip, fig } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
-import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, value, font, grown } from '../../src/theme/scale';
+import Svg, { Polyline, Circle } from 'react-native-svg';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { num } from '../../src/lib/format';
 import { plainExact } from '../../src/lib/units';
@@ -27,13 +29,28 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { gymRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { riskLabel } from '../../src/lib/status';
 import { HealthPill } from '../../src/ui/charts';
-import { deltaSign } from '../../src/lib/deltaLabel';
+import { deltaSign, deltaMagnitude, deltaMoved, pctChange } from '../../src/lib/deltaLabel';
+import { sharePercent } from '../../src/lib/sharePercent';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { cohorts } from '../../src/lib/ownerAnalytics';
 import { ownerReportDoc, shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
 import { Linking } from 'react-native';
 import { supabase } from '../../src/lib/supabase';
+// The two reads the approved look added to this console, and the clock both
+// are cut on. The till is `gym_payments`, the read Revenue already leads with;
+// the week is the rota's own diary read, `fetchDemand`. Neither is new to the
+// product, and both go through the gym's zone for the reason src/lib/gymMonth.ts
+// and src/lib/rotaClock.ts give: a month or a day cut on the reader's midnight
+// files four hours of a Gulf gym's takings under the wrong one.
+import { fetchPayments, sharedCurrency, normaliseCurrency, money, type GymPayment } from '../../src/lib/gymRecord';
+import { fetchDemand } from '../../src/lib/gymRota';
+import { fetchGymZone } from '../../src/lib/gymZone';
+import { gymRecentMonths, gymMonthKey, monthAtGym } from '../../src/lib/gymMonth';
+import { monthKeyOf } from '../../src/lib/monthEnd';
+import { rotaToday, rotaDay, rotaInstant, addCalendarDays } from '../../src/lib/rotaClock';
+import { calendarDateText, whoseClockNote } from '../../src/lib/gymWhen';
+import { useToday } from '../../src/ui/today';
 // The six settings a gym is computed from, and which of them nobody has set.
 // Shared with the console's Overview, which draws the same six from its own
 // screens — see the header of src/lib/gymSetup.ts for the counts against the
@@ -190,7 +207,144 @@ export default function OwnerOverview() {
   }, [tenantId]);
   useEffect(() => { void loadSetup(); }, [loadSetup]);
 
-  const refreshAll = useCallback(() => { refresh(); refreshTenant(); void loadSetup(); }, [refresh, refreshTenant, loadSetup]);
+  /* ── the till and the week: the two pictures the approved look leads with ──
+   *
+   * `undefined` is "not read yet", `null` is "could not be read", and only an
+   * array is an answer — the three states Revenue keeps for the same payments,
+   * for the same reason: a refused read and a gym that recorded nothing are
+   * both an empty list, and only one of them is a fact about the gym.
+   *
+   * ONE zone read ahead of both, and a refusal of it holds BOTH back. The month
+   * the hero names and the seven days under it are cut on the gym's clock; a
+   * zone that could not be read is not a gym with no zone (src/lib/gymZone.ts
+   * keeps the two apart), and cutting on the phone's clock under a failed read
+   * would caption the reader's September as the gym's.
+   *
+   * What the read was cut WITH is kept beside the rows — the month keys, the
+   * day list and the instant it was asked — so everything derived below is
+   * arithmetic over one settled read and no memo has a clock inside it.
+   *
+   * Seven months: the one running, and the six finished ones the hero's line
+   * is drawn over. A month still running is not a point on that line — on the
+   * 3rd it would draw as a collapse.
+   *
+   * ponytail: seven months of payment ROWS are paged to the phone to make seven
+   * sums, through the one reader every money screen already trusts. Fine at a
+   * few thousand payments; if a gym's till outgrows that, the upgrade is a
+   * per-month, per-currency roll-up on the server, not a second reader here.
+   */
+  const [till, setTill] = useState<{ rows: GymPayment[]; zone: string | null; keys: string[]; asOf: number } | null | undefined>(undefined);
+  const [week, setWeek] = useState<{ days: { day: string; count: number }[]; zone: string | null } | null | undefined>(undefined);
+  const [again, setAgain] = useState(0);
+  // The calendar day, kept current while the console stays mounted: a tab root
+  // is never torn down, and a week read on Monday is not Thursday's week.
+  const today = useToday();
+  useEffect(() => {
+    if (tenantStatus === 'error') { setTill(null); setWeek(null); return; }
+    // No gym on a read that SETTLED is not a read still in flight.
+    if (!tenantId) { setTill(tenantStatus === 'loading' ? undefined : null); setWeek(tenantStatus === 'loading' ? undefined : null); return; }
+    let on = true;
+    (async () => {
+      let zone: string | null;
+      try {
+        const z = await fetchGymZone(supabase, tenantId);
+        if (z.error) throw new Error(z.error);
+        zone = z.zone;
+      } catch (e) {
+        reportError('owner.dashboard.zone', e);
+        if (on) { setTill(null); setWeek(null); }
+        return;
+      }
+      const asOf = Date.now();
+      const keys = gymRecentMonths(7, zone, asOf).keys;
+      const from = monthAtGym(keys[keys.length - 1] ?? '', zone)?.window.fromIso ?? null;
+      const last = rotaToday(zone, asOf);
+      const days = [6, 5, 4, 3, 2, 1, 0].map((n) => addCalendarDays(last, -n));
+      const weekFrom = rotaInstant(days[0], 0, zone);
+      const weekTo = rotaInstant(addCalendarDays(last, 1), 0, zone);
+      // Settled apart: a refused diary must not blank the takings, and a
+      // refused till must not hide a week that did come back.
+      const [pay, diary] = await Promise.allSettled([
+        from ? fetchPayments(supabase, tenantId, from, new Date(asOf).toISOString()) : Promise.reject(new Error('no month window')),
+        weekFrom && weekTo ? fetchDemand(supabase, tenantId, weekFrom, weekTo) : Promise.reject(new Error('no week window')),
+      ]);
+      if (!on) return;
+      // Both throw on a refusal AND on a truncated read, so a fulfilled one is
+      // whole. Null on rejection — a dash and a sentence, never a quiet week.
+      if (pay.status === 'fulfilled') setTill({ rows: pay.value, zone, keys, asOf });
+      else { reportError('owner.dashboard.payments', pay.reason); setTill(null); }
+      if (diary.status === 'fulfilled') {
+        // One-to-ones only, which is what "session" means on every other
+        // figure here; `fetchDemand` has already left the cancelled ones out.
+        const pt = diary.value.filter((d) => d.kind === 'pt');
+        setWeek({
+          zone,
+          days: days.filter((d): d is string => d != null)
+            .map((day) => ({ day, count: pt.filter((d) => rotaDay(d.startsAt, zone) === day).length })),
+        });
+      } else { reportError('owner.dashboard.week', diary.reason); setWeek(null); }
+    })();
+    return () => { on = false; };
+  }, [tenantId, tenantStatus, again, today]);
+
+  /**
+   * The month running at the gym, in money somebody recorded receiving.
+   *
+   * Null when there is no whole money read to lead with — not read, refused,
+   * or a till nobody has used in seven months — and the hero then falls back
+   * to the session count, which is the figure this console led with before.
+   *
+   * NEVER SUMMED ACROSS CURRENCIES. The running month is potted by the
+   * currency each row states and every pot is its own line. The comparison
+   * and the line are drawn only where every row they are made of states the
+   * SAME currency (`sharedCurrency`), because a percentage of dirhams over
+   * pounds is not a percentage.
+   *
+   * The comparison is like for like: this month so far against the SAME SPAN
+   * of the month before. Twenty days of September against all of August reads
+   * as a third of the gym's income gone, on every day but the last.
+   */
+  const revenue = useMemo(() => {
+    if (!till || !till.rows.length) return null;
+    const { rows, zone, keys, asOf } = till;
+    const keyOf = (at: string) => gymMonthKey(at, zone) ?? monthKeyOf(new Date(at));
+    const [nowKey, prevKey] = keys;
+    const mine = rows.filter((r) => keyOf(r.takenAt) === nowKey);
+    const pots = new Map<string | null, number>();
+    for (const r of mine) { const c = normaliseCurrency(r.currency); pots.set(c, (pots.get(c) ?? 0) + r.amountCents); }
+    // A running month with nothing in it yet is a real nought, in the one
+    // currency the rest of the till agrees on, or the gym's own.
+    const lines = mine.length
+      ? [...pots.entries()].map(([c, cents]) => money(cents, c))
+      : [money(0, sharedCurrency(rows) ?? cur)];
+
+    const nowFrom = Date.parse(monthAtGym(nowKey ?? '', zone)?.window.fromIso ?? '');
+    const prevFrom = Date.parse(monthAtGym(prevKey ?? '', zone)?.window.fromIso ?? '');
+    const span = asOf - nowFrom;
+    const before = Number.isFinite(span) && Number.isFinite(prevFrom)
+      ? rows.filter((r) => keyOf(r.takenAt) === prevKey && Date.parse(r.takenAt) < prevFrom + span) : [];
+    const sum = (list: GymPayment[]) => list.reduce((a, r) => a + r.amountCents, 0);
+    const change = mine.length && before.length && sharedCurrency([...mine, ...before])
+      ? pctChange(sum(mine), sum(before)) : null;
+
+    // Six FINISHED months, oldest first. A month before the first payment in
+    // hand is unknown rather than nought: the till may not have been in use.
+    const ended = keys.slice(1).reverse();
+    const past = rows.filter((r) => keyOf(r.takenAt) !== nowKey);
+    const firstKey = past.length ? past.map((r) => keyOf(r.takenAt)).sort()[0] : null;
+    const series = past.length && sharedCurrency(past) && firstKey
+      ? ended.map((k) => (k < firstKey ? null : sum(past.filter((r) => keyOf(r.takenAt) === k))))
+      : null;
+    const monthName = (k: string | undefined) => (k ? calendarDateText(`${k}-01`, { month: 'long' }) : null);
+    return {
+      lines, count: mine.length, mixed: pots.size > 1, change, series,
+      month: monthName(nowKey), prevMonth: monthName(prevKey),
+      from: monthName(ended[0]), to: monthName(ended[ended.length - 1]),
+      clock: whoseClockNote(zone),
+    };
+  }, [till, cur]);
+
+  const refreshAll = useCallback(() => { refresh(); refreshTenant(); void loadSetup(); setAgain((n) => n + 1); }, [refresh, refreshTenant, loadSetup]);
   const pull = usePullToRefresh(refreshAll);
   const setup: SetupItem[] = assessGymSetup({
     tenant: setupTenant,
@@ -219,12 +373,6 @@ export default function OwnerOverview() {
   const maxLoad = Math.max(1, ...byTrainer.map((x) => x.clients));
   // Trainers sorted worst-health first so problems surface at the top.
   const ranked = [...(trainers as TrainerLike[])].map((tr) => ({ tr, h: trainerHealth(tr) })).sort((a, b) => a.h.score - b.h.score);
-  // The one the "Needs a look" card opens. `atRiskCount` counts every risk that
-  // is not 'ok' — idle included — and the button used to look for 'high' or
-  // 'watch' only, so a gym whose flagged trainers were all idle had a Review
-  // button that did nothing. High before watch before idle, and within each the
-  // worst score, which is the order `ranked` is already in.
-  const urgent = ranked.find((r) => r.h.risk === 'high') ?? ranked.find((r) => r.h.risk === 'watch') ?? ranked.find((r) => r.h.risk !== 'ok') ?? null;
   // Sessions in the 30 days that carry an outcome other than completed — a
   // no-show, a cancellation, a late cancellation. All three keep `status =
   // 'booked'` (see the note over the figure card below), so they are inside
@@ -335,57 +483,6 @@ export default function OwnerOverview() {
           </>}
         />
 
-        {/* ── interrupts: things that need a decision now ─────────────────── */}
-        <View style={{ marginTop: sp.lg }}>
-          {/* First, because for a gym in this state everything under it is a
-              dash and this is the reason for all of them. Draws nothing at all
-              once the six are set — and nothing while the reads are in flight,
-              since an unsettled read leaves every item 'unknown' rather than
-              outstanding. */}
-          <SetUp items={setup} onGo={(r) => router.push(r as never)} />
-
-          {/* The noun was pluralised and the verb was not, so a gym with one
-              client under a flagged trainer read "1 client ARE with them". On a
-              small gym's dashboard that count is the commonest case, not an
-              edge.
-
-              The trainer count moves off `> 1` and onto the `=== 1` form the
-              rest of this file and the owner app use. It cannot currently
-              render zero — the card is behind `atRiskCount > 0` on the line
-              below — but `> 1` says "0 trainer" the day that guard moves, and
-              two adjacent lines disagreeing about how to count is what produced
-              the verb bug in the first place. */}
-          {roll.atRiskCount > 0 ? (
-            <Notice tone={t.warn} kicker="Needs a look"
-              title={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} flagged`}
-              /* The reason sits beside the alert. "Review the most urgent" made
-                 an owner open a sheet to learn what the warning was about; the
-                 most urgent trainer and the sentence that put them there are
-                 both already in hand, so they are said here. */
-              note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} ${roll.atRiskClients === 1 ? 'is' : 'are'} with them.${urgent ? ` Most urgent: ${urgent.tr.name} — ${urgent.h.reason}` : ''}`}>
-              <View style={{ marginTop: sp.lg }}>
-                <Cta label="Review" wide onPress={() => { if (urgent) setSel(urgent.tr); }} />
-              </View>
-            </Notice>
-          ) : null}
-
-        </View>
-
-        {!loading && roll.trainers === 0 ? (
-          <Card style={{ marginTop: sp.sm }}>
-            <Text style={{ ...ty.label, color: t.ink2 }}>
-              {trainersUnread
-                ? 'Your trainers could not be read, so this is not "no trainers".'
-                : 'No trainers yet — clients, delivered sessions and trainer health fill in as they join your gym.'}
-            </Text>
-            {trainersUnread ? (
-              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
-                <Ghost label="Try Again" onPress={refresh} />
-              </View>
-            ) : null}
-          </Card>
-        ) : null}
-
         {/* ── the hero ───────────────────────────────────────────────────── */}
         {/* ── "Delivered" was the one word this figure could not carry ─────
             `roll.sessions30` is every booking whose clock has passed, WHATEVER
@@ -405,8 +502,60 @@ export default function OwnerOverview() {
             with its own: the kit's `Hero` sat bare on the ground and was the one
             block on this screen the board does not draw. The tap through to
             Revenue is the head's trailing note rather than the whole block. */}
+        {/* ── and since the approved look, the hero is the night card ────────
+            Revenue where a whole money read exists, the session count where it
+            does not — chosen by what is WHOLE, money preferred, because the
+            month's takings is the first thing an owner opens this console to
+            learn and the session count was only ever standing in for it.
+
+            The figure is the card's `title`, so eyebrow, figure and meta are
+            one spoken sentence with the header role, as the FigureCard said
+            them. Two currencies are two lines of it and never one total. */}
         {(() => {
-          const figure = trainersUnknown ? null : num(roll.sessions30);
+          const open = () => router.push('/(owner)/revenue');
+          if (till === undefined && !revenue) {
+            return <HeroCard eyebrow="REVENUE" title="—" meta="Reading what your gym was paid…" onPress={open} />;
+          }
+          if (revenue) {
+            const pay = `${num(revenue.count)} payment${revenue.count === 1 ? '' : 's'} recorded`;
+            return (
+              <HeroCard onPress={open}
+                eyebrow={revenue.month ? `REVENUE · ${revenue.month.toUpperCase()}` : 'REVENUE · THIS MONTH'}
+                title={revenue.lines.map((l) => fig(l)).join('\n')}
+                meta={revenue.mixed ? `Month to date · ${pay}, in more than one currency, so there is no one total` : `Month to date · ${pay}`}
+                ring={revenue.series ? (
+                  <NightSpark data={revenue.series}
+                    spoken={`Takings by month, ${revenue.from ?? 'six months ago'} to ${revenue.to ?? 'last month'}. Open Revenue for the figures.`} />
+                ) : undefined}>
+                {/* Only where both spans are whole AND in one currency — see
+                    `revenue`. Bright when it is up; the amber plate when it is
+                    not, because a dip is "slipping" and red is "needs you". */}
+                {revenue.change != null && revenue.prevMonth ? (
+                  <View style={{ marginTop: sp.md }}>
+                    {deltaMoved(revenue.change, 0) && revenue.change > 0 ? (
+                      <View accessible accessibilityRole="text" style={{ alignSelf: 'flex-start', minHeight: grown(26), justifyContent: 'center', paddingHorizontal: 11, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: t.brandBright }}>
+                        <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: t.brandDeep }}>
+                          {`${deltaSign(revenue.change, 0)}${deltaMagnitude(revenue.change, 0)}% vs ${revenue.prevMonth} to the same day`}
+                        </Text>
+                      </View>
+                    ) : (
+                      <TonedChip tone={deltaMoved(revenue.change, 0) ? 'amber' : 'neutral'}
+                        label={deltaMoved(revenue.change, 0)
+                          ? `${deltaSign(revenue.change, 0)}${deltaMagnitude(revenue.change, 0)}% vs ${revenue.prevMonth} to the same day`
+                          : `Level with ${revenue.prevMonth} to the same day`} />
+                    )}
+                  </View>
+                ) : null}
+                {/* A money caveat, so it stays on the page: whose clock the
+                    month was cut on, said only when it was not the gym's. */}
+                {revenue.clock ? (
+                  <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>
+                    {`${revenue.clock.charAt(0).toUpperCase()}${revenue.clock.slice(1)}.`}
+                  </Text>
+                ) : null}
+              </HeroCard>
+            );
+          }
           const note = loading
             ? 'Reading your roster…'
             : trainersUnread
@@ -423,17 +572,36 @@ export default function OwnerOverview() {
               ? "Set your gym's currency in Ops to value these"
               : `${num(roll.delivered30)} marked delivered · worth ${gymMoney(roll.payroll30, cur)} at your session fee`;
           return (
-            /* The kit's FigureCard: one spoken sentence for label, figure and
-               note — the Hero grouped them the same way, and three separate
-               stops over one fact is what it was there to avoid — and the
-               figure shrunk to fit and never wrapped, for the reason the Hero
-               gave. `figure` is null rather than a dash typed here, so the
-               card draws the dash and SAYS "no figure" instead of reading a
-               punctuation mark aloud. */
-            <FigureCard title="Sessions · 30 Days" note="Revenue" onPress={() => router.push('/(owner)/revenue')}
-              figure={figure} detail={note} />
+            /* `fig` draws the dash for an unread roster: null is "not
+               counted", and a 0 here told an owner their gym delivered
+               nothing last month. */
+            <HeroCard eyebrow="SESSIONS · 30 DAYS" onPress={open}
+              title={fig(trainersUnknown ? null : num(roll.sessions30))} meta={note}
+              ring={histWhole && months >= 2 ? (
+                <NightSpark data={series} spoken={`Sessions by month, ${labels[0] ?? ''} to ${labels[labels.length - 1] ?? ''}. The trend is further down.`} />
+              ) : undefined} />
           );
         })()}
+
+        {/* ── the three figures under the hero, as tiles on the ground ─────
+            Sessions blue, delivered in the accent, unmarked red: the colours
+            the rest of the app gives the same three things. Only the first has
+            a trend, because only the first has a HISTORY — `useSessionsHistory`
+            has recorded it monthly; nothing has ever recorded the other two,
+            and a strip drawn from one reading would be a picture of nothing. A
+            dash here is explained by the card under it. */}
+        <KpiRow tiles onPress={(k) => { if (k.route) router.push(k.route as never); }} items={[
+          { label: 'Sessions · 30d', tone: 'blue', route: '/(owner)/revenue',
+            value: fig(trainersUnknown ? null : num(roll.sessions30)), trend: histWhole ? series : undefined },
+          // `sharePercent` is null for a gym with no finished session, which is
+          // "no share to state" and not 0%.
+          { label: 'Delivered', tone: 'brand', route: '/(owner)/trainers',
+            value: fig(trainersUnknown ? null : sharePercent(roll.delivered30, roll.sessions30)),
+            delta: trainersUnknown ? undefined : `${num(roll.delivered30)} of ${num(roll.sessions30)} sessions` },
+          { label: 'Unmarked', tone: 'red', route: '/(owner)/trainers',
+            value: fig(trainersUnknown ? null : num(roll.unmarked30)),
+            delta: trainersUnknown ? undefined : 'finished, no outcome recorded' },
+        ]} />
 
         {/* The console's own age. Every figure on this screen is a roll-up of
             one read, and nothing on the page used to say when it happened or
@@ -442,30 +610,151 @@ export default function OwnerOverview() {
             viewport — the same move Home made. */}
         <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
 
+        {/* ── interrupts: things that need a decision now ─────────────────── */}
+        <View style={{ marginTop: sp.lg }}>
+          {/* First, because for a gym in this state everything under it is a
+              dash and this is the reason for all of them. Draws nothing at all
+              once the six are set — and nothing while the reads are in flight,
+              since an unsettled read leaves every item 'unknown' rather than
+              outstanding. */}
+          <SetUp items={setup} onGo={(r) => router.push(r as never)} />
+        </View>
+
+        {!loading && roll.trainers === 0 ? (
+          <Card style={{ marginTop: sp.sm }}>
+            <Text style={{ ...ty.label, color: t.ink2 }}>
+              {trainersUnread
+                ? 'Your trainers could not be read, so this is not "no trainers".'
+                : 'No trainers yet — clients, delivered sessions and trainer health fill in as they join your gym.'}
+            </Text>
+            {trainersUnread ? (
+              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+                <Ghost label="Try Again" onPress={refresh} />
+              </View>
+            ) : null}
+          </Card>
+        ) : null}
+
+        {/* ── sessions by day: the last seven days of the diary ────────────
+            The rota's own read (`fetchDemand`), over the seven gym days ending
+            today, so this is the same count the Rota checks cover against.
+            BOOKED one-to-ones with the cancelled ones left out — not the same
+            population as the 30-day figure above, which keeps them — and the
+            head says so rather than letting the two be added up. */}
+        <Section>
+          <SectionHead title="Sessions by Day" note="Booked · Last 7 Days" onPress={() => router.push('/(owner)/rota')} />
+          <ChartShell status={week === undefined ? 'loading' : week === null ? 'error' : 'ready'}
+            // Seven day-counts are seven readings; a week with nothing in it
+            // is the one state in which "none booked" is a fact.
+            points={week && week.days.some((d) => d.count > 0) ? week.days.length : 0}
+            loadingLine="Reading the last seven days…"
+            errorLine="The last seven days could not be read, so no week is drawn. That is a failed read, not a week with nothing booked. Pull down to try again."
+            emptyLine="No one-to-one was booked in the last seven days.">
+            {week ? (
+              <DayBars
+                days={week.days.map((d) => ({ label: calendarDateText(d.day, { weekday: 'short' }) ?? '', value: d.count, tone: 'brand' as const }))}
+                spoken={`One-to-ones booked by day. ${week.days.map((d) => `${calendarDateText(d.day, { weekday: 'long' }) ?? d.day}, ${num(d.count)}`).join('. ')}.`} />
+            ) : null}
+          </ChartShell>
+          {week && whoseClockNote(week.zone) ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {`${whoseClockNote(week.zone)!.charAt(0).toUpperCase()}${whoseClockNote(week.zone)!.slice(1)}.`}
+            </Text>
+          ) : null}
+        </Section>
+
+        {/* ── needs a look: who, and WHY, on the row ────────────────────────
+            Was a Notice carrying a count, the most urgent name and a Review
+            button. A count sends an owner into a sheet to learn what the
+            warning is about; the sentence that flagged each trainer is already
+            in hand (`trainerHealth().reason`), so each one is a row that says
+            it. High before watch before idle, and within each the worst score
+            — the order `ranked` and `urgent` were already in.
+
+            The counts keep the `=== 1` form: "1 client ARE with them" shipped
+            from a `> 1`, and on a small gym one is the commonest case. */}
+        {!trainersUnknown && roll.atRiskCount > 0 ? (
+          <Section>
+            <SectionHead title="Needs a Look"
+              note={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} · ${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'}`} />
+            {[...ranked.filter((r) => r.h.risk === 'high'), ...ranked.filter((r) => r.h.risk === 'watch'), ...ranked.filter((r) => r.h.risk !== 'ok' && r.h.risk !== 'high' && r.h.risk !== 'watch')]
+              .map(({ tr, h }, i) => (
+                <AttentionRow key={tr.id} divider={i > 0}
+                  icon="bell" name={tr.name} reason={h.reason}
+                  status={riskLabel(h.risk)}
+                  tone={h.risk === 'high' ? t.crit : h.risk === 'watch' ? t.warn : t.ink3}
+                  age={`${tr.clients} client${tr.clients === 1 ? '' : 's'} with them`}
+                  onPress={() => setSel(tr)} />
+              ))}
+          </Section>
+        ) : null}
+
+        {/* ── trainer health board ───────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Trainer Health" note="All" onPress={() => router.push('/(owner)/trainers')} />
+          {loading ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : trainersUnread ? (
+            // Ahead of the empty branch: an unread roster scores nobody, which
+            // is not the same as there being nobody to score.
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so none of them were scored — nobody here has been cleared.</Text>
+          ) : ranked.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>No trainers to score yet.</Text>
+          ) : ranked.map(({ tr, h }, i) => (
+            // Delivered OF booked, over the same thirty days as every other
+            // figure on this console — the figure the score is computed from.
+            // The WHY moved to Needs a Look above for anyone flagged, and is
+            // one tap away in the sheet for everyone else.
+            <HealthRow key={tr.id} divider={i > 0} name={tr.name} score={h.score} band={h.tone}
+              caption={`${num(tr.delivered30 ?? 0)} of ${num(tr.sessions30)} delivered${(tr.unmarked30 ?? 0) > 0 ? ` · ${num(tr.unmarked30 ?? 0)} unmarked` : ''} · ${riskLabel(h.risk)}`}
+              onPress={() => setSel(tr)} />
+          ))}
+        </Section>
+        {/* Under the board rather than over it since the approved look: what a
+            score is made of is reference, and it sat between the hero and the
+            people it describes. Still here, because "worst first" is a
+            conversation with a person and an owner should be able to learn
+            what put them there before having it. */}
+        <ScreenHelp screen="owner-trainers" />
 
         {/* ── delivery: what happened to the sessions above ───────────────── */}
-        {/* Third on the console, straight under the figure it breaks down. The
-            review's order for this screen is attention → one live metric →
+        {/* The review's order for this screen is attention → one live metric →
             today's sessions, attendance and delivery exceptions → trainer
-            health → members → money → administration. This console holds no
-            read of today's bookings — the roster read is thirty days of
-            sessions per trainer — so what is said here is what that read can
-            stand behind: of the sessions whose clock has passed, how many were
-            marked delivered, how many carry another outcome, and how many
-            nobody has marked at all. Today's floor is one tap away on the Rota,
-            which reads the gym's own day in the gym's own zone; inventing a
-            "today" figure here from a 30-day roll-up would be the fabrication.
+            health → members → money → administration. The week above is the
+            diary; THIS is the roster read — thirty days of sessions per
+            trainer — and what it can stand behind: of the sessions whose clock
+            has passed, how many were marked delivered, how many carry another
+            outcome, and how many nobody has marked at all. Today's floor is
+            one tap away on the Rota, which reads the gym's own day in the
+            gym's own zone.
 
-            Three populations that sum to the figure above, named separately
-            because they are different facts: prescribed is not completed is
-            not skipped. */}
+            Three populations that sum to the figure in the middle, named
+            separately because they are different facts: prescribed is not
+            completed is not skipped. A mix, so it is a donut — and under an
+            unread roster it is the grey track and three dashes, never an even
+            split. */}
         <Section>
           <SectionHead title="Delivery · 30 Days" note="Today’s Rota" onPress={() => router.push('/(owner)/rota')} />
-          <KpiRow items={[
-            { label: 'Delivered', value: trainersUnknown ? '—' : fig(num(roll.delivered30)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : 'marked completed' },
-            { label: 'Awaiting Outcome', value: trainersUnknown ? '—' : fig(num(roll.unmarked30)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : 'finished, unmarked' },
-            { label: 'Missed or Cancelled', value: trainersUnknown ? '—' : fig(num(notDelivered30)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : 'no-show or cancelled' },
-          ]} />
+          {(() => {
+            const n = (v: number) => (trainersUnknown ? null : v);
+            const slices = [
+              { label: 'Delivered', value: n(roll.delivered30), tone: 'brand' as const, shown: trainersUnknown ? null : num(roll.delivered30) },
+              { label: 'Awaiting Outcome', value: n(roll.unmarked30), tone: 'amber' as const, shown: trainersUnknown ? null : num(roll.unmarked30) },
+              { label: 'Missed or Cancelled', value: n(notDelivered30), tone: 'red' as const, shown: trainersUnknown ? null : num(notDelivered30) },
+            ];
+            return (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, flexWrap: 'wrap' }}>
+                <Donut slices={slices} centre={trainersUnknown ? null : num(roll.sessions30)} sub="sessions"
+                  spoken={trainersUnknown
+                    ? (loading ? 'Delivery, not read yet' : 'Delivery could not be read')
+                    : `Of ${num(roll.sessions30)} sessions in 30 days, ${num(roll.delivered30)} delivered, ${num(roll.unmarked30)} awaiting an outcome, ${num(notDelivered30)} missed or cancelled`} />
+                <Legend items={slices} />
+              </View>
+            );
+          })()}
+          {trainersUnknown ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{loading ? 'Reading your roster…' : 'Your trainers could not be read, so none of these were counted.'}</Text>
+          ) : null}
           {/* The exception, with its consequence beside it. `payroll30` is null
               while ANY session is unmarked, so this is also the reason the
               payroll figure lower down is a dash for a gym whose fee is set. */}
@@ -483,49 +772,6 @@ export default function OwnerOverview() {
               onPress={() => router.push('/(owner)/class-analytics')} />
           </View>
         </Section>
-
-
-        {/* ── trainer health board ───────────────────────────────────────── */}
-        {/* Before the pills, because a coach at the top of a list called "worst
-            first" is a conversation with a person, and an owner should know
-            what put them there before having it. The owner app carried no help
-            card at all until this one. */}
-        <ScreenHelp screen="owner-trainers" />
-        <Section>
-          <SectionHead title="Trainer Health" note="Worst first · 30 days" />
-          {loading ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
-          ) : trainersUnread ? (
-            // Ahead of the empty branch: an unread roster scores nobody, which
-            // is not the same as there being nobody to score.
-            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so none of them were scored — nobody here has been cleared.</Text>
-          ) : ranked.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No trainers to score yet.</Text>
-          ) : ranked.map(({ tr, h }, i) => {
-            // Delivered OF booked, over the same thirty days as every other
-            // figure on this console. The row used to print `sessions30` twice
-            // — once in the caption and again at the trailing edge — and
-            // neither was the figure the health score is computed from.
-            const work = `${num(tr.delivered30 ?? 0)} of ${num(tr.sessions30)} session${tr.sessions30 === 1 ? '' : 's'} delivered`;
-            const who = `${tr.clients} client${tr.clients === 1 ? '' : 's'}`;
-            return (
-              // The kit's AttentionRow: who, WHY, what state, and the count that
-              // sizes it. A dot and the word "Watch" used to send an owner into
-              // the sheet to find out what they were meant to be watching — the
-              // sentence was computed and shown only behind the row.
-              <AttentionRow key={tr.id} divider={i > 0}
-                avatar={<HealthPill score={h.score} tone={h.tone} />}
-                name={tr.name} reason={h.reason}
-                status={riskLabel(h.risk)}
-                tone={h.risk === 'high' ? t.crit : h.risk === 'watch' ? t.warn : h.risk === 'idle' ? t.ink3 : t.brand}
-                age={`${who} · ${work}`}
-                onPress={() => setSel(tr)} />
-            );
-          })}
-        </Section>
-
-
-
         {/* ── the shape of the platform ──────────────────────────────────── */}
         <Section>
           <SectionHead title="Your Gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
@@ -563,16 +809,13 @@ export default function OwnerOverview() {
           ) : byTrainer.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No trainers to show a client load for yet.</Text>
           ) : byTrainer.map((p) => (
-            <View key={p.id} style={{ marginBottom: sp.lg }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ ...ty.caption, color: t.ink2 }}>{p.name}</Text>
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{p.clients} client{p.clients === 1 ? '' : 's'}</Text>
-              </View>
-              <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-                <View style={{ height: 3, borderRadius: 2, width: `${Math.round((p.clients / maxLoad) * 100)}%`, backgroundColor: t.brand, opacity: p.clients > 0 ? 1 : 0.55 }} />
-              </View>
-            </View>
+            // The kit's Meter, against the busiest trainer: the same bar the
+            // rest of the app draws, 8pt rather than the 3pt hairline this had,
+            // and one spoken fact per trainer instead of two loose Texts.
+            <Meter key={p.id} label={p.name} val={p.clients} target={maxLoad} tone="blue"
+              note={`${num(p.clients)} client${p.clients === 1 ? '' : 's'}`} />
           ))}
+          <View style={{ height: sp.lg }} />
           {/* Load is who is carried today; retention is who stayed. The second
               is derived from the memberships on Growth, by the same module the
               web console uses, and is pointed at rather than re-read here — a
@@ -620,7 +863,7 @@ export default function OwnerOverview() {
                 sat above the wrong one. <Spark> now places each point and its
                 own label from the same index, and breaks the line across a
                 month nobody recorded instead of closing over it. */}
-            <Spark data={series} labels={labels} />
+            <Spark data={series} labels={labels} area tone="blue" />
           </ChartShell>
         </Section>
 
@@ -710,6 +953,92 @@ export default function OwnerOverview() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/* ── two shapes the kit does not have yet ───────────────────────────────────
+ *
+ * Built here from tokens because this lane may not edit src/ui/kit.tsx; both
+ * are candidates to move there (the Trainers screen carries the same row).
+ */
+
+/**
+ * A small trend on the NIGHT card. The kit's <Spark> is drawn for a white
+ * surface — an ink readout, a surface-coloured halo, ink3 axis labels — and on
+ * night all three disappear or glare. This is the line alone, in the bright
+ * accent, with Spark's two honest parts kept: a hole in the series breaks the
+ * line rather than being closed over, and fewer than two readings draw nothing.
+ * Decoration over figures stated elsewhere, so it is one spoken sentence.
+ */
+function NightSpark({ data, spoken }: { data: (number | null | undefined)[]; spoken: string }) {
+  const t = useTheme();
+  const W = 96, H = 44, PAD = 5;
+  const pts = data.map((v, i) => ({ i, v })).filter((p): p is { i: number; v: number } => typeof p.v === 'number' && Number.isFinite(p.v));
+  if (pts.length < 2 || data.length < 2) return null;
+  const min = Math.min(...pts.map((p) => p.v)), rng = (Math.max(...pts.map((p) => p.v)) - min) || 1;
+  const x = (i: number) => PAD + (i / (data.length - 1)) * (W - PAD * 2);
+  const y = (v: number) => PAD + (H - PAD * 2) * (1 - (v - min) / rng);
+  // Unbroken runs: consecutive indices only.
+  const runs: { i: number; v: number }[][] = [];
+  for (const p of pts) {
+    const run = runs[runs.length - 1];
+    if (run && run[run.length - 1].i === p.i - 1) run.push(p); else runs.push([p]);
+  }
+  const last = pts[pts.length - 1];
+  return (
+    // rtl-ok by construction: SVG user space does not mirror, and oldest is on
+    // the left in every locale, as Spark's is.
+    <View accessible accessibilityRole="image" accessibilityLabel={spoken} style={{ flexShrink: 0 }}>
+      <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+        {runs.map((run, ri) => run.length >= 2 ? (
+          <Polyline key={ri} points={run.map((p) => `${x(p.i)},${y(p.v)}`).join(' ')}
+            fill="none" stroke={t.brandBright} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
+          <Circle key={ri} cx={x(run[0].i)} cy={y(run[0].v)} r={2.5} fill={t.brandBright} />
+        ))}
+        <Circle cx={x(last.i)} cy={y(last.v)} r={3.5} fill={t.night} stroke={t.brandBright} strokeWidth={3} />
+      </Svg>
+    </View>
+  );
+}
+
+/**
+ * One trainer on the health board, the mockup's way: a monogram on the band's
+ * pale plate, the name, what they delivered, and the score in a pill of the
+ * same band.
+ *
+ * The bands are `trainerHealth`'s own — good from 70, moderate from 40, low
+ * under it (src/lib/ownerAnalytics.ts) — and NOT the mockup's 80 and 60, which
+ * nothing in this product computes. Good is the ACCENT, so under white-label
+ * it is the gym's colour; amber and red are the data palette and do not move.
+ * The colour never stands alone: the caption ends in the state in words, and
+ * the spoken label says the band.
+ */
+function HealthRow({ name, caption, score, band, divider, onPress }: {
+  name: string; caption: string; score: number; band: 'good' | 'moderate' | 'low'; divider?: boolean; onPress: () => void;
+}) {
+  const t = useTheme();
+  const tone = band === 'good' ? 'brand' as const : band === 'moderate' ? 'amber' as const : 'red' as const;
+  const plate = tone === 'brand' ? t.brandSoft : t.data[`${tone}Soft`];
+  const ink = tone === 'brand' ? t.brandText : t.data[`${tone}Ink`];
+  const D = grown(42);
+  // Array.from, not slice: a name that opens with an astral-plane letter is
+  // two UTF-16 units, and half of one is "\uFFFD".
+  const mono = name.split(' ').filter(Boolean).map((w) => Array.from(w)[0]).slice(0, 2).join('').toUpperCase();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button"
+      accessibilityLabel={`${name}. ${caption}. Health ${score} of 100, ${band === 'good' ? 'good' : band === 'moderate' ? 'moderate' : 'low'}`}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(64), paddingVertical: sp.sm, borderTopWidth: divider ? hairline : 0, borderTopColor: t.ring }}>
+      <View style={{ width: D, height: D, borderRadius: radius.pill, backgroundColor: plate, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ ...ty.label, ...font('700'), color: ink }}>{mono}</Text>
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={2} style={{ ...ty.head, color: t.ink }}>{name}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{caption}</Text>
+      </View>
+      <View><TonedChip label={String(score)} tone={tone} /></View>
+      <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+    </Pressable>
   );
 }
 

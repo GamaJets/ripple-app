@@ -20,9 +20,15 @@ import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
-import type { Theme } from '../../src/theme/tokens';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Flag, PageHead, Donut, Legend, TonedChip, fig, type Tone } from '../../src/ui/kit';
+// Joiners, leavers and churn, from the memberships this screen ALREADY holds.
+// The same module Growth's figures come from (through `useMemberChurn`), run
+// over `rows` rather than through the hook: the hook is a second read of
+// `memberships`, and two reads of one table on one screen is two places for
+// the register and its own churn to disagree.
+import { memberSpans, churnMonths, undatedExitCount, lastClosedMonth, churnHeadline } from '../../src/lib/memberChurn';
+import { PHONE_MONTHS } from '../../src/ui/memberChurn';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
@@ -85,8 +91,14 @@ import {
  * carrying `NO_ZONE_NOTE`, which the sheet below prints where it writes.
  */
 
-const STATUS_TONE = (t: Theme, s: MembershipStatus) =>
-  s === 'active' ? t.brand : s === 'frozen' ? t.s3 : t.ink3;
+/** A status by NAME, so the chip on a row and the slice in the mix are one
+ *  colour and the kit picks the ink that is readable on its plate. Active is
+ *  the accent — the gym's own under white-label. It was a hairline pill whose
+ *  label was drawn in the status colour itself, which is a mark colour doing a
+ *  text job. */
+const STATUS_TONE: Record<MembershipStatus, Tone> = {
+  active: 'brand', frozen: 'blue', expired: 'amber', cancelled: 'neutral',
+};
 
 const STATUS_LABEL: Record<MembershipStatus, string> = {
   active: 'Active', frozen: 'Frozen', cancelled: 'Cancelled', expired: 'Expired',
@@ -253,7 +265,8 @@ export default function OwnerMembers() {
    * from freezing. It is the same answer scripts/check-frozen-day.mjs prescribes
    * for the two render-body clocks still on its ratchet.
    */
-  const dayWindow = gymTodayWindow(zone, useNow().getTime());
+  const nowMs = useNow().getTime();
+  const dayWindow = gymTodayWindow(zone, nowMs);
   /* ── pausing a membership, with dates on it ──────────────────────────────
      `status = 'frozen'` has existed since part 29 and has never had dates, so
      a pause had to be lifted by hand and gave back none of the time it took.
@@ -434,6 +447,22 @@ export default function OwnerMembers() {
   }, [list, state, dayWindow.day]);
 
   const frozen = list.filter((m) => m.status === 'frozen').length;
+
+  /** Who joined, who left and the churn between them, month by month — only
+   *  over rows that landed. Null under a loading or failed read: `churnMonths`
+   *  over an empty list is six months of nobody leaving, which is a clean bill
+   *  of health a refused read must never print. `nowMs` is the screen's own
+   *  ticking clock, so the month that counts as finished moves with it. */
+  const churn = useMemo(() => {
+    if (!hasRows(state)) return null;
+    const spans = memberSpans(list);
+    const months = churnMonths(spans, undatedExitCount(spans), nowMs, PHONE_MONTHS);
+    const closed = lastClosedMonth(months);
+    // Oldest first for a trend, and finished months only: the running month's
+    // leavers have not finished leaving.
+    const done = months.filter((m) => !m.running).reverse();
+    return { closed, headline: churnHeadline(closed), done };
+  }, [list, state, nowMs]);
 
   /** Look up people in this gym who could be given a membership. */
   const runSearch = async (text: string) => {
@@ -749,9 +778,52 @@ export default function OwnerMembers() {
                   style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
               </View>
+              {/* The membership mix, under the money it explains: every
+                  membership on the register by the status the door reads.
+                  Slices only over rows that landed — under a loading or failed
+                  read it is the grey track and four dashes, never an even
+                  split and never four noughts. A stale register still draws:
+                  those rows are real, and the flag above says what is not. */}
+              {(() => {
+                const known = hasRows(state);
+                const slices = (['active', 'frozen', 'expired', 'cancelled'] as const).map((st) => {
+                  const n = known ? list.filter((m) => m.status === st).length : null;
+                  return { label: STATUS_LABEL[st], value: n, tone: STATUS_TONE[st], shown: n == null ? null : num(n) };
+                });
+                return (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, flexWrap: 'wrap', marginTop: sp.lg }}>
+                    <Donut slices={slices} centre={known ? num(list.length) : null} sub={list.length === 1 ? 'membership' : 'memberships'}
+                      spoken={known
+                        ? `Membership mix. ${slices.map((x) => `${x.label}, ${x.shown}`).join('. ')}`
+                        : 'Membership mix, not read'} />
+                    <Legend items={slices} />
+                  </View>
+                );
+              })()}
             </Section>
           );
         })()}
+
+        {/* ── who stayed: the last finished month, as tiles on the ground ───
+            Churn amber, joiners in the accent, leavers red, each over its own
+            finished months — real history, because a membership carries the
+            day it started and the day it ended. Withheld figures keep their
+            reason on the page: `churnHeadline` writes one for every month it
+            refuses a rate for, and it is printed under the tiles. */}
+        <KpiRow tiles items={[
+          { label: churn?.headline.label ? `Churn · ${churn.headline.label}` : 'Churn', tone: 'amber',
+            value: fig(churn?.headline.pct ?? null), unit: churn?.headline.pct == null ? undefined : '%',
+            trend: churn ? churn.done.map((m) => m.churn) : undefined },
+          { label: 'Joined', tone: 'brand', value: churn?.closed ? num(churn.closed.joined) : '—',
+            delta: churn?.closed?.label, trend: churn ? churn.done.map((m) => m.joined) : undefined },
+          { label: 'Left', tone: 'red', value: churn?.closed ? num(churn.closed.left) : '—',
+            delta: churn?.closed?.label, trend: churn ? churn.done.map((m) => m.left) : undefined },
+        ]} />
+        {churn && churn.headline.pct == null ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {`Churn: ${churn.headline.note}.`}
+          </Text>
+        ) : null}
 
         {/* When the register was read, whether this phone can reach us, and a
             way to ask again. An owner at a desk in a basement was reading a
@@ -819,7 +891,7 @@ export default function OwnerMembers() {
                     accessibilityHint={hint}
                     accessibilityState={{ selected: on }}
                     style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>
+                    <Text style={{ ...ty.label, ...font('600'), color: on ? t.brandInk : t.ink2 }}>
                       {label}{n == null ? '' : ` · ${num(n)}`}
                     </Text>
                   </Pressable>
@@ -893,7 +965,6 @@ export default function OwnerMembers() {
                 : `No membership here matches “${q.trim()}”. Tap Everyone to search the whole register.`}
             </Text>
           ) : shown.map((m, i) => {
-            const tone = STATUS_TONE(t, m.status);
             const live = m.status === 'active' || m.status === 'frozen';
             return (
               <View key={m.id}>
@@ -901,7 +972,7 @@ export default function OwnerMembers() {
                 <View style={{ paddingVertical: sp.md }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>
                         {m.memberName ?? 'Member'}
                       </Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -909,9 +980,7 @@ export default function OwnerMembers() {
                         {m.endsOn ? ` · ends ${m.endsOn}` : ''}
                       </Text>
                     </View>
-                    <View style={{ borderWidth: hairline, borderColor: tone, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 2 }}>
-                      <Text style={{ ...ty.micro, color: tone }}>{STATUS_LABEL[m.status]}</Text>
-                    </View>
+                    <View><TonedChip label={STATUS_LABEL[m.status]} tone={STATUS_TONE[m.status]} /></View>
                   </View>
                   {/* The pause, in words, on every row that has one. An
                       unreadable pause says so rather than saying nothing:
@@ -948,13 +1017,13 @@ export default function OwnerMembers() {
                     <Pressable onPress={() => { setPayFor(m); setAmount(''); }} hitSlop={6}
                       accessibilityRole="button" accessibilityLabel={`Take a payment from ${m.memberName ?? 'this member'}`}
                       style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Take payment</Text>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Take payment</Text>
                     </Pressable>
                     {m.status === 'active' ? (
                       <Pressable onPress={() => changeStatus(m, 'frozen')} hitSlop={6}
                         accessibilityRole="button" accessibilityLabel="Freeze membership"
                         style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Freeze</Text>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Freeze</Text>
                       </Pressable>
                     ) : null}
                     {/* Dates, which is the half the status flip never had. Kept
@@ -972,7 +1041,7 @@ export default function OwnerMembers() {
                       accessibilityRole="button"
                       accessibilityLabel={`Set pause dates for ${m.memberName ?? 'this membership'}`}
                       style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>
                         {m.frozenFrom ? 'Pause dates' : 'Pause dates…'}
                       </Text>
                     </Pressable>
@@ -990,13 +1059,13 @@ export default function OwnerMembers() {
                       accessibilityRole="button"
                       accessibilityLabel={`Correct the dates on ${m.memberName ?? 'this'} membership`}
                       style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Correct dates</Text>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Correct dates</Text>
                     </Pressable>
                     {m.status === 'frozen' ? (
                       <Pressable onPress={() => changeStatus(m, 'active')} hitSlop={6}
                         accessibilityRole="button" accessibilityLabel="Reactivate membership"
                         style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Reactivate</Text>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>Reactivate</Text>
                       </Pressable>
                     ) : null}
                     {live ? (
@@ -1009,7 +1078,7 @@ export default function OwnerMembers() {
                             needs 3:1 and clears it everywhere. Destructive intent is not lost
                             — the confirm step is what actually carries it. */}
                         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Cancel</Text>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>Cancel</Text>
                       </Pressable>
                     ) : null}
                   </View>
@@ -1154,7 +1223,7 @@ export default function OwnerMembers() {
                     return (
                       <Pressable key={p.id} onPress={() => setPlanId(on ? null : p.id)}
                         style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>
+                        <Text style={{ ...ty.label, ...font('600'), color: on ? t.brandInk : t.ink2 }}>
                           {p.name} · {money(p.priceCents, p.currency) ?? '—'}
                         </Text>
                       </Pressable>
@@ -1177,7 +1246,7 @@ export default function OwnerMembers() {
                   accessibilityState={{ disabled: !picked || busy, busy }}
                   accessibilityHint={!picked ? 'Search for a member and choose one first.' : undefined}
                   style={{ backgroundColor: picked && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: picked && !busy ? t.brandInk : t.ink3 }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: picked && !busy ? t.brandInk : t.ink3 }}>
                     {busy ? 'Opening…' : 'Open membership'}
                   </Text>
                 </Pressable>
@@ -1334,7 +1403,7 @@ export default function OwnerMembers() {
                   accessibilityRole="button" accessibilityLabel="Clear the end date, so this membership runs until somebody stops it"
                   accessibilityState={{ disabled: dtBusy }}
                   style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>No end date</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>No end date</Text>
                 </Pressable>
               ) : null}
 
@@ -1446,7 +1515,7 @@ export default function OwnerMembers() {
                     accessibilityLabel={`Record this as ${METHOD_LABEL[m]}`}
                     accessibilityState={{ selected: on }}
                     style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>{METHOD_LABEL[m]}</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: on ? t.brandInk : t.ink2 }}>{METHOD_LABEL[m]}</Text>
                   </Pressable>
                 );
               })}
@@ -1470,7 +1539,7 @@ export default function OwnerMembers() {
                   ? 'This gym has not set its currency, so a payment cannot be recorded yet. An owner sets it in Ops.'
                   : !amount.trim() ? 'Enter an amount first.' : undefined}
                 style={{ backgroundColor: payReady ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: payReady ? t.brandInk : t.ink3 }}>
+                <Text style={{ ...ty.label, ...font('600'), color: payReady ? t.brandInk : t.ink3 }}>
                   {busy ? 'Recording…' : 'Record payment'}
                 </Text>
               </Pressable>

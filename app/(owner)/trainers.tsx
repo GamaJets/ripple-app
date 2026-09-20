@@ -9,13 +9,15 @@
 // Inviting is kept because it is the one action here that was always real: it
 // writes a `trainer_invites` row the invitee accepts in their own app.
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { num } from '../../src/lib/format';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, AttentionRow, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, Donut, Legend, TonedChip, fig } from '../../src/ui/kit';
+import { Icon } from '../../src/ui/Icon';
+import { FORWARD_ICON } from '../../src/ui/direction';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, font, grown } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { Fetched } from '../../src/ui/fetched';
@@ -150,7 +152,6 @@ export default function OwnerTrainers() {
   const sheet = { backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: 30, ...elevation.e2 };
   const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
 
-  const riskDot: Record<string, string> = { ok: t.brand, watch: t.warn, high: t.crit, idle: t.ink3 };
   /**
    * A gym with nobody on its roster yet — a WHOLE read with no trainers in it.
    * Never an unread or a loading roster: those are empty arrays too, and the
@@ -192,7 +193,6 @@ export default function OwnerTrainers() {
           section, no count and no sentence: the disclosure was hidden by the
           very condition it exists to explain. */}
       {pending.length > 0 || invitesUnread || !invitesWhole ? (<>
-        <Rule />
         <Section>
           <SectionHead title="Pending Invites" note={invitesWhole && pending.length ? String(pending.length) : undefined} />
           {invitesUnread ? (
@@ -212,7 +212,7 @@ export default function OwnerTrainers() {
           {pending.map((i, ix) => (
             <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: ix === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{i.email}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{i.email}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Awaiting sign-up / accept</Text>
               </View>
               <Ghost label="Cancel" onPress={() => { void revoke(i.id, i.email); }} />
@@ -264,11 +264,33 @@ export default function OwnerTrainers() {
           {/* All three are counts over `trainers`, which is empty under a failed
               read as well as under an empty gym — hence fig() behind the same
               flag rather than String() behind `loading` alone. */}
-          <KpiRow items={[
-            { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers) },
-            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)) },
-            { label: 'Need a Look', value: trainersUnknown ? '—' : fig(roll.atRiskCount) },
-          ]} />
+          {/* The roster as a mix, since the approved look: how many of the
+              staff sit in each of `trainerHealth`'s four states, in the words
+              `riskLabel` gives them everywhere else. The trainer count is the
+              figure in the hole. Under an unread or loading roster the slices
+              are withheld — the grey track and dashes, never four noughts. */}
+          {(() => {
+            const count = (risk: string) => (trainersUnknown ? null : ranked.filter((r) => r.h.risk === risk).length);
+            const slices = ([['ok', 'brand'], ['watch', 'amber'], ['high', 'red'], ['idle', 'neutral']] as const).map(([risk, tone]) => {
+              const n = count(risk);
+              return { label: riskLabel(risk), value: n, tone, shown: n == null ? null : num(n) };
+            });
+            return (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, flexWrap: 'wrap' }}>
+                <Donut slices={slices} centre={trainersUnknown ? null : num(roll.trainers)} sub={roll.trainers === 1 ? 'trainer' : 'trainers'}
+                  spoken={trainersUnknown
+                    ? (loading ? 'Roster health, not read yet' : 'Roster health could not be read')
+                    : `${num(roll.trainers)} trainer${roll.trainers === 1 ? '' : 's'}. ${slices.map((x) => `${x.label}, ${x.shown}`).join('. ')}`} />
+                <Legend items={slices} />
+              </View>
+            );
+          })()}
+          <View style={{ marginTop: sp.lg }}>
+            <KpiRow items={[
+              { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)) },
+              { label: 'Need a Look', value: trainersUnknown ? '—' : fig(roll.atRiskCount) },
+            ]} />
+          </View>
           {/* The gym-wide exception, with its consequence beside it: payroll is
               withheld while ANY finished session has no outcome, and the rows
               below say whose they are. */}
@@ -310,17 +332,14 @@ export default function OwnerTrainers() {
             const work = `${num(tr.delivered30)} of ${num(tr.sessions30)} session${tr.sessions30 === 1 ? '' : 's'} delivered`;
             const who = `${tr.clients} client${tr.clients === 1 ? '' : 's'}`;
             return (
-              // The kit's AttentionRow: the state in WORDS beside its dot — the
-              // dot alone was the only thing on this row that said a trainer
-              // was flagged — and WHY on the row, so the sheet is for detail
-              // rather than for finding out what the warning meant. The health
-              // score keeps its noun: a bare "42" at the trailing edge was a
-              // number with nothing to say what it counted.
-              <AttentionRow key={tr.id} divider={ix > 0}
-                monogram={tr.name.split(' ').map((x) => x[0]).join('')}
-                name={tr.name} reason={h.reason}
-                status={riskLabel(h.risk)} tone={riskDot[h.risk]}
-                age={`Health ${h.score} of 100 · ${who} · ${work}${tr.unmarked30 > 0 ? ` · ${num(tr.unmarked30)} unmarked` : ''}`}
+              // Overview's health row, with the WHY kept on it: this is the
+              // screen an owner comes to for the detail, so the sentence that
+              // put a trainer where they are is on the row and the sheet is for
+              // the money. The state is in WORDS in the caption — the band's
+              // colour on the monogram and the pill never says it alone.
+              <HealthRow key={tr.id} divider={ix > 0} name={tr.name} score={h.score} band={h.tone}
+                reason={h.reason}
+                caption={`${riskLabel(h.risk)} · ${who} · ${work}${tr.unmarked30 > 0 ? ` · ${num(tr.unmarked30)} unmarked` : ''}`}
                 onPress={() => setSel(tr)} />
             );
           })}
@@ -465,5 +484,46 @@ export default function OwnerTrainers() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/**
+ * One trainer on the health board, the approved mockup's way: a monogram on
+ * the band's pale plate, the name, why, what they delivered, and the score in
+ * a pill of the same band. Overview carries the same row without the reason;
+ * it is here twice because this lane may not add to src/ui/kit.tsx, and it is
+ * a candidate to move there.
+ *
+ * The bands are `trainerHealth`'s own — good from 70, moderate from 40, low
+ * under it (src/lib/ownerAnalytics.ts) — and NOT the mockup's 80 and 60, which
+ * nothing in this product computes. Good is the ACCENT, so under white-label
+ * it is the gym's colour; amber and red are the data palette and do not move.
+ */
+function HealthRow({ name, reason, caption, score, band, divider, onPress }: {
+  name: string; reason: string; caption: string; score: number; band: 'good' | 'moderate' | 'low'; divider?: boolean; onPress: () => void;
+}) {
+  const t = useTheme();
+  const tone = band === 'good' ? 'brand' as const : band === 'moderate' ? 'amber' as const : 'red' as const;
+  const plate = tone === 'brand' ? t.brandSoft : t.data[`${tone}Soft`];
+  const ink = tone === 'brand' ? t.brandText : t.data[`${tone}Ink`];
+  const D = grown(42);
+  // Array.from, not x[0]: a name that opens with an astral-plane letter is two
+  // UTF-16 units, and half of one is a replacement character.
+  const mono = name.split(' ').filter(Boolean).map((w) => Array.from(w)[0]).slice(0, 2).join('').toUpperCase();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button"
+      accessibilityLabel={`${name}. ${reason} ${caption}. Health ${score} of 100, ${band}`}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(64), paddingVertical: sp.md, borderTopWidth: divider ? hairline : 0, borderTopColor: t.ring }}>
+      <View style={{ width: D, height: D, borderRadius: radius.pill, backgroundColor: plate, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ ...ty.label, ...font('700'), color: ink }}>{mono}</Text>
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={2} style={{ ...ty.head, color: t.ink }}>{name}</Text>
+        <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{reason}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{caption}</Text>
+      </View>
+      <View><TonedChip label={String(score)} tone={tone} /></View>
+      <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+    </Pressable>
   );
 }

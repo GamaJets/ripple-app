@@ -43,8 +43,9 @@ import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, KpiRow, Ghost, Flag, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, KpiRow, Ghost, Flag, fig, PageHead, Ring, Meter, Expandable } from '../../src/ui/kit';
+import { num } from '../../src/lib/format';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
@@ -130,23 +131,9 @@ function rollingFrom(now: Date, days: number): string {
   return from.toISOString();
 }
 
-/**
- * One bar of a ranked list. 3px on a dim track, same mark as <Meter/> — `dim`
- * separates the two ranked lists without reaching for a status colour.
- */
-function Bar({ t, label, note, pct, dim }: { t: Theme; label: string; note: string; pct: number; dim?: boolean }) {
-  return (
-    <View style={{ marginTop: sp.md }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: sp.md }}>
-        <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={1}>{label}</Text>
-        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{note}</Text>
-      </View>
-      <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-        <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: t.brand, opacity: dim ? 0.45 : 1 }} />
-      </View>
-    </View>
-  );
-}
+/* The local 3pt `Bar` that lived here is the kit's <Meter> now: the same label,
+ * note and proportion, on the 8pt bar the rest of the app draws, in a named
+ * tone, and spoken as one fact instead of two loose Texts. */
 
 /**
  * The inline rate editor for one coach.
@@ -804,7 +791,7 @@ export default function OwnerClassAnalytics() {
             return (
               <Pressable key={k} onPress={() => setRange(k)} accessibilityRole="tab" accessibilityState={{ selected: on }}
                 style={{ flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: on ? t.ink : 'transparent' }}>
-                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
+                <Text numberOfLines={1} style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{label}</Text>
               </Pressable>
             );
           })}
@@ -866,10 +853,11 @@ export default function OwnerClassAnalytics() {
               screen the board does not draw. */}
           {(() => {
             const figure = fig(money(totals.payrollCents, totals.payrollCurrency));
+            // The counts that used to open this note are the tiles under the
+            // card now. What stays beside the figure is what qualifies it: how
+            // much of the range is priced, or why none of it is.
             const note = [
-              `${totals.attended} check-ins`,
-              `${totals.classes} classes`,
-              `${totals.showPct ?? '—'}% turned up`,
+              `${num(totals.priced)} of ${num(totals.classes)} class${totals.classes === 1 ? '' : 'es'} priced`,
               !cur
                 ? "set your gym's currency to value them"
                 : pay === null
@@ -906,7 +894,17 @@ export default function OwnerClassAnalytics() {
             </Flag>
           ) : null}
 
-          <Rule />
+          {/* ── the range as tiles on the ground ─────────────────────────
+              Classes purple — the colour a class is everywhere in the app —
+              check-ins blue, and the classes no rate reaches in amber, because
+              an unpriced class is the one of the three an owner acts on. No
+              trend strips: this screen reads one range and holds no history of
+              the ranges before it. */}
+          <KpiRow tiles items={[
+            { label: 'Classes', tone: 'purple', value: fig(num(totals.classes)) },
+            { label: 'Check-ins', tone: 'blue', value: fig(num(totals.attended)), delta: `of ${num(totals.booked)} booked` },
+            { label: 'Unpriced', tone: 'amber', value: fig(pay === null ? null : num(totals.unpriced)), delta: pay === null ? 'the pay rates could not be read' : 'classes whose coach has no class rate' },
+          ]} />
 
           <Section>
             {/* Named, not "This Range". The console pays against August; this
@@ -914,20 +912,22 @@ export default function OwnerClassAnalytics() {
             {/* Fill and Show are over two different denominators and sit side
                 by side. The line that says which is which was a source comment
                 — "Fill is booked/capacity; show is attended/booked" — and a
-                comment is not on screen. */}
+                comment is not on screen. It is the `sub` inside each ring now,
+                and the help row keeps the longer account. */}
             <ScreenHelp screen="owner-classes" />
             <SectionHead title="This Range" note={periodLabel} />
-            <KpiRow items={[
-              { label: 'Classes', value: fig(totals.classes) },
-              { label: 'Check-ins', value: fig(totals.attended) },
-              // Fill is booked/capacity; show is attended/booked. Both are on
-              // screen now, so neither has to stand in for the other.
-              { label: 'Avg Fill', value: totals.fillPct == null ? '—' : String(totals.fillPct), unit: totals.fillPct == null ? undefined : '%' },
-              { label: 'Avg Show', value: totals.showPct == null ? '—' : String(totals.showPct), unit: totals.showPct == null ? undefined : '%' },
-            ]} />
+            {/* Null — a range where no class recorded its places, or nobody
+                booked — is the track and a dash, never an empty ring that
+                reads as "nobody came". */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around', flexWrap: 'wrap', gap: sp.lg }}>
+              <Ring size={120} tone="purple" value={totals.fill ?? null}
+                figure={totals.fillPct == null ? null : `${totals.fillPct}%`} sub="places booked"
+                spoken={totals.fillPct == null ? 'Average fill, not known' : `Average fill, ${totals.fillPct}% of places booked`} />
+              <Ring size={120} tone="brand" value={totals.show ?? null}
+                figure={totals.showPct == null ? null : `${totals.showPct}%`} sub="booked turned up"
+                spoken={totals.showPct == null ? 'Average show, not known' : `Average show, ${totals.showPct}% of those booked turned up`} />
+            </View>
           </Section>
-
-          <Rule />
 
           {/* ── payroll by trainer ───────────────────────────────────────── */}
           <Section>
@@ -967,7 +967,7 @@ export default function OwnerClassAnalytics() {
                 <View key={v.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{v.name}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{v.name}</Text>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                         {v.classes} classes · {v.attended} check-ins
                         {own?.classRateCents != null && own.classPayKind
@@ -980,7 +980,7 @@ export default function OwnerClassAnalytics() {
                         the same one the write below files a line with. This
                         line is one coach's rows and they are all in one
                         currency, so it is stated rather than withheld. */}
-                    <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{fig(money(cents, coachCurrency(own)))}</Text>
+                    <Text style={{ ...ty.body, ...font('600'), ...numeric, color: t.ink }}>{fig(money(cents, coachCurrency(own)))}</Text>
                   </View>
                   {cur ? (
                     editing === v.id
@@ -1009,26 +1009,20 @@ export default function OwnerClassAnalytics() {
             </Text>
           </Section>
 
-          <Rule />
-
           {/* ── where the check-ins are ──────────────────────────────────── */}
           <Section>
             <SectionHead title="Attendance by Branch" note={`${totals.attended} of ${totals.booked} booked`} />
             {byBranch.map(([b, v]) => (
-              <Bar key={b} t={t} label={b} note={`${v.attended} / ${v.booked}`} pct={Math.round((v.attended / maxBranch) * 100)} />
+              <Meter key={b} label={b} tone="blue" val={v.attended} target={maxBranch} note={`${num(v.attended)} of ${num(v.booked)} came`} />
             ))}
           </Section>
-
-          <Rule />
 
           <Section>
             <SectionHead title="Popularity by Class Type" />
             {byKind.map(([k, v]) => (
-              <Bar key={k} t={t} label={k} note={`${v.attended} · ${v.classes} run`} pct={Math.round((v.attended / maxKind) * 100)} dim />
+              <Meter key={k} label={k} tone="purple" val={v.attended} target={maxKind} note={`${num(v.attended)} check-ins · ${num(v.classes)} run`} />
             ))}
           </Section>
-
-          <Rule />
 
           {/* ── which hours of which days are working ──────────────────────
               The question this screen had every figure for and never asked. It
@@ -1074,28 +1068,37 @@ export default function OwnerClassAnalytics() {
             ) : (
               <>
                 {slots.slots.map((sl) => (
-                  <Bar
+                  // Amber under half full, the accent above it, grey where no
+                  // class in the slot recorded its places — and the words in
+                  // the note say the same thing, so the colour is never alone.
+                  <Meter
                     key={`${sl.weekday}:${sl.hour}`}
-                    t={t}
                     label={sl.label}
+                    tone={sl.fill == null ? 'neutral' : sl.fill < 0.5 ? 'amber' : 'brand'}
+                    val={sl.booked} target={maxSlotBooked}
                     // The fill rate is the figure, and a dash where no class in
                     // the slot recorded what it could hold. A 0% there would
                     // read as a slot nobody booked, which is the opposite of
                     // "nobody wrote down how many places it had".
-                    note={`${sl.fill == null ? '—' : Math.round(sl.fill * 100) + '% full'} · ${sl.booked} booked · ${sl.classes} run`}
                     // The BAR is booked-against-the-busiest-slot, not the fill
                     // rate, so a slot with no capacity on record still draws at
                     // its true size rather than at nothing. The fill rate is on
                     // the line beside it, where it can be withheld.
-                    pct={Math.round((sl.booked / maxSlotBooked) * 100)}
-                    dim={sl.fill == null}
+                    note={`${sl.fill == null ? '—' : Math.round(sl.fill * 100) + '% full'} · ${sl.booked} booked · ${sl.classes} run`}
                   />
                 ))}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                  Emptiest first, so the slot worth a decision is at the top. The bar is how many
-                  people booked, against your busiest slot; the percentage is how full it was, and
-                  is a dash for a slot where no class recorded how many places it had.
-                </Text>
+                {/* How to read the bars is reference, so it is behind a row
+                    rather than under every timetable. The sentence after it is
+                    NOT — it is a fact about this range's registers. */}
+                <View style={{ marginTop: sp.md }}>
+                  <Expandable title="How to Read This">
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      Emptiest first, so the slot worth a decision is at the top. The bar is how many
+                      people booked, against your busiest slot; the percentage is how full it was, and
+                      is a dash for a slot where no class recorded how many places it had.
+                    </Text>
+                  </Expandable>
+                </View>
                 {/* A separate fact and a separate sentence, because it is not a
                     fill rate and must never be read as one. "Nobody came" and
                     "nobody took the register" are indistinguishable in this
@@ -1113,8 +1116,6 @@ export default function OwnerClassAnalytics() {
             )}
           </Section>
 
-          <Rule />
-
           {/* ── the log the numbers came from ────────────────────────────── */}
           <Section>
             <SectionHead title="Classes" note={`${list.length} in range`} />
@@ -1125,14 +1126,18 @@ export default function OwnerClassAnalytics() {
               const blocker = classPayBlocker(own, r.attended, on);
               return (
                 <View key={r.classId} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.title}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.branch} · {r.trainerName}</Text>
-                    </View>
-                    {r.attended >= r.booked ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good }} /> : null}
-                    <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{r.attended}/{r.booked}</Text>
-                  </View>
+                  {/* Each class as its own fill bar: places booked against the
+                      places it was set up with, and who came in the note. A
+                      class that never recorded its places has no fill — no
+                      bar, and the note says so — because `capacity` is 0 for
+                      "never recorded" and a bar over nought is a full one. The
+                      figure the row used to end in is the note's last part. */}
+                  <Meter label={r.title} tone="purple"
+                    val={r.capacity > 0 ? r.booked : null} target={r.capacity > 0 ? r.capacity : 1}
+                    note={r.capacity > 0
+                      ? `${num(r.booked)} of ${num(r.capacity)} places · ${num(r.attended)} came`
+                      : `${num(r.booked)} booked · ${num(r.attended)} came · places not recorded`} />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{r.branch} · {r.trainerName}</Text>
                   {/* Withheld entirely while `paid` is null: offering "Add to
                       payroll" over a list that might already contain this class
                       is how a coach gets paid for the same Tuesday twice. The
