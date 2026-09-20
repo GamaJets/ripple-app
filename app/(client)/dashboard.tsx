@@ -1,5 +1,10 @@
-// Client · Home — the daily briefing: readiness, today's session, body stats,
-// weight trend, fuel, this week, and the things that need attention.
+// Client · Home — the daily briefing, in the order the approved mockup sets:
+// HERO (today's session, the week's ring, the one adaptive action) →
+// INFOGRAPHICS (Daily Snapshot's four rings, This Week's bars) → LISTS (what
+// is coming up, readiness, what the coach and the gym said, and the doors to
+// everything else). What is WRONG — offline, a write that lapsed, an injury,
+// an invitation — sits directly under the hero and draws nothing on an
+// ordinary day.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Every provider, conditional and route from the previous
@@ -20,14 +25,14 @@ import { offlineBanner } from '../../src/lib/reachability';
 import { useOutbox } from '../../src/ui/outbox';
 import { OUTBOX_KINDS, lapsedNote, outboxNote } from '../../src/lib/outbox';
 import { BRAND } from '../../src/lib/brands';
-import { weekIndexOf } from '../../src/lib/weekStart';
+import { WEEK_DAYS, isoDay, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, ScrollView, Pressable, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Cta, Ghost, QuickRow, Notice, Card, Flag, HeroCard, HeroRing, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric, hairline } from '../../src/theme/scale';
+import { Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, QuickRow, Notice, Card, Flag, HeroCard, HeroRing, Ring, MiniRing, DayBars, TonedChip, ChartShell, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, font, grown } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { num, fmtTime } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
@@ -54,7 +59,12 @@ import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
-import { shownStreak, thisWeekStats, streakRisk, freezeBudget } from '../../src/lib/streaks';
+import { shownStreak, longestStreak, thisWeekStats, streakRisk, freezeBudget } from '../../src/lib/streaks';
+// The one hydration rule: whether the glass count may be shown, whether it has
+// a goal to fill against, and the sentence for when it has not. Recovery and
+// Daily Habits read it; the Water ring here is the third and may not differ.
+import { hydrationNote } from '../../src/lib/hydrationHero';
+import { sharePercent } from '../../src/lib/sharePercent';
 import { severeSummary } from '../../src/lib/injuries';
 import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
@@ -65,7 +75,7 @@ import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { GUIDE_SEEN_KEY } from '../guide';
 import { isWhole } from '../../src/ui/loadStatus';
 import {
-  showFuel, showWeek,
+  showWeek,
   checklist, checklistDone, checklistLeft, everLoggedMeal, nextTodo, showChecklist,
 } from '../../src/lib/firstRun';
 import { FORWARD_ICON } from '../../src/ui/direction';
@@ -118,7 +128,7 @@ export default function Home() {
   // the rest live in app/(client)/notices.tsx, which is what stops a notice
   // being readable for one day and then nowhere.
   const { latest: ann, latestGym: gymAnn, reload: reloadAnnouncements } = useAnnouncements();
-  const { water, waterGoal, reload: reloadHabits } = useHabits();
+  const { water, waterGoal, waterStatus, reload: reloadHabits } = useHabits();
   // Readiness, its inputs and its caveats, from the one shared derivation.
   //
   // This screen used to assemble it here out of five providers, and so did
@@ -129,7 +139,6 @@ export default function Home() {
   // and three hand copies of one derivation is three chances to disagree about
   // the same number. See src/ui/readiness.ts for what moved and why.
   const { readiness, breakdown, direction } = useReadiness();
-  const readinessColor = readiness == null ? t.ink3 : readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
   // Two device-local marks. `null` on either is "we could not read it", which
   // the Getting Started list below draws as a dash rather than as undone —
   // see src/lib/firstRun.ts.
@@ -534,7 +543,14 @@ export default function Home() {
   // were fixed for: it ADDED the day's burn to a target that already assumed
   // movement, and clamped at zero so Home could never say a client was over.
   // One function now, the same one the Meals tab and the Food Log call.
-  const dayCal = macros ? caloriesLeft(macros.kcal, consumed.kcal, burn?.burned ?? 0, burn?.budgeted ?? 0, burn?.kind) : null;
+  //
+  // And only off a WHOLE food log. `consumed` is a floor under anything else,
+  // so a log that failed or came back capped did not make this sum blank, it
+  // made it generous: "Fuel Up · 1,900 kcal left" on the hero, over a Calories
+  // ring that is withholding its arc for exactly that reason. The Meals ring
+  // has carried this gate since it was drawn.
+  const foodWhole = isWhole(foodLog.status);
+  const dayCal = macros && foodWhole ? caloriesLeft(macros.kcal, consumed.kcal, burn?.burned ?? 0, burn?.budgeted ?? 0, burn?.kind) : null;
   // Only claim somebody is under-recovered when there is a score saying so.
   // Unknown readiness falls through to the ordinary prompts, which assert
   // nothing about their body.
@@ -573,6 +589,8 @@ export default function Home() {
         headline: 'Session Done',
         tip: targetInputsUnknown
           ? 'Nice work. We couldn’t work out today’s calorie target, so there is nothing to say about your eating yet.'
+          : macros != null
+          ? 'Nice work. Today’s food log couldn’t be read in full, so there is nothing to say about your eating yet.'
           : 'Nice work. Add your weight and a scan and your daily target appears here.',
         cta: 'View Plan', route: '/(client)/nutrition', tone: t.brand,
       }
@@ -618,6 +636,158 @@ export default function Home() {
   const d = now;
   const hi = d.getHours() < 12 ? 'Good Morning' : d.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
 
+  // ── the first viewport's three pictures, and what each may claim ─────────
+  //
+  // The approved mockup opens Home on a night hero, four small rings and a
+  // week of bars. Every one of them is a picture of a number, so every one of
+  // them answers to the same rule as the figure it replaced: a ring whose read
+  // is not whole, or that has nothing to be measured against, draws its track
+  // and a dash — never an empty arc, which is a drawn zero — and the reason is
+  // ONE line under the row, beside the ring it accounts for.
+  //
+  // "WEEK n OF N" only when the week was COUNTED from a start date the coach
+  // set. `useClientWeek` resolves every other phase to a real week so Train
+  // always has a session to show, but 'no-date', 'unreadable', 'not-started'
+  // and 'ended' are all "this number was not counted", and a one-week
+  // programme has no week to name. The eyebrow then says TODAY and no more.
+  const heroEyebrow = blk.week.reason === 'counted' && !programUnknown
+    ? `TODAY · WEEK ${num(blk.week.index + 1)} OF ${num(blk.week.count)}`
+    : 'TODAY';
+  const hasSession = workout.exercises.length > 0;
+  const heroTitle = hasSession || planDays.length > 0 ? (workout.focus || 'Rest Day') : 'No Sessions Planned';
+  /* ── what you are actually in for ─────────────────────────────────────────
+     Nike Training Club, Strava and TrueCoach all put the SHAPE of a session in
+     front of the button that starts it — how many movements, how much work.
+     A member deciding at 21:40 whether they have time for this had no way to
+     tell a four-exercise accessory day from an eleven-exercise one without
+     opening it.
+
+     Counted, never estimated. There is no duration model in this codebase and
+     inventing one here would be exactly the fabricated figure the rest of this
+     screen refuses: "about 45 min" over a session nobody has timed is a number
+     with nothing behind it. The exercise count and the set total ARE facts —
+     they are the plan, in hand, already being rendered on the Train tab. The
+     cardio line comes along when the day has one, since a 20-minute interval
+     finish is most of what somebody is deciding about. A day with no session
+     says so in words rather than as "0 exercises". */
+  const heroMeta = hasSession && workoutSetCount != null
+    ? `${workout.exercises.length === 1 ? '1 exercise' : `${num(workout.exercises.length)} exercises`}`
+      + (workoutSetCount > 0 ? ` · ${workoutSetCount === 1 ? '1 set' : `${num(workoutSetCount)} sets`}` : '')
+      + (workout.cardio ? ` · ${workout.cardio}` : '')
+    : planDays.length > 0 ? 'Nothing on your plan for today' : 'This week of your programme has no days in it';
+
+  // ── Daily Snapshot: four rings, four owners, four gates ──────────────────
+  //
+  // Calories and protein are `eaten / target`, so they need BOTH halves: the
+  // target (`macros`, withheld above when the profile or the coach's adjustment
+  // could not be read) and a whole read of today's food log — `eaten` is a
+  // floor under anything else, and a floor drawn as an arc reads as "you have
+  // barely eaten". The same gate the Meals ring carries.
+  const targetWhy = macros != null ? null
+    : c.profileStatus === 'loading' || coachNutrition.status === 'loading' ? 'Reading your targets…'
+    : !isWhole(c.profileStatus) ? 'We couldn’t read what you are training for, so no target is drawn from the defaults.'
+    : targetInputsUnknown ? 'We couldn’t read your coach’s adjustment, so the uncorrected target is not shown as yours.'
+    : 'Add your weight and a scan and your daily target appears.';
+  const fuelWhy = targetWhy ?? (foodWhole ? null
+    : foodLog.status === 'loading' ? 'Reading today’s food log…'
+    : 'Today’s food log could not be read in full, so what you have eaten is not counted.');
+  // Non-null exactly when both halves are in hand, so nothing below can read a
+  // target without the log that goes with it.
+  const fuel = macros != null && foodWhole ? { kcal: macros.kcal, protein: macros.protein } : null;
+  // Water is the hydration rule Recovery and Daily Habits already share: the
+  // count only off a read that answered, the arc only against a goal the
+  // member set. `waterGoal` is theirs or null — never the old platform "8".
+  const hyd = hydrationNote(waterStatus, c.profileStatus, water, waterGoal);
+  // Steps are today's count off a CONNECTED watch, against the member's own
+  // goal. The order is Daily Habits': no watch, then a read that has not
+  // answered, then a watch with no count yet, then no goal to fill against.
+  const stepsWhy = !wearableKnown ? 'Reading today’s steps from your device…'
+    : !wearableConnected ? 'Connect a watch and your steps are counted here.'
+    : !isWhole(wearables.todayStatus)
+      ? (wearables.todayStatus === 'loading'
+        ? 'Reading today’s steps from your device…'
+        : 'Your device could not be read just now — that is not a count of nought.')
+    : wToday.steps == null ? 'Your device has no step count for today yet.'
+    : c.stepGoal == null
+      ? (isWhole(c.profileStatus)
+        ? 'No step goal set — set one on Daily Habits and this fills against it.'
+        : 'Your step goal could not be read, so this is not filling against one.')
+    : null;
+  const stepsCounted = wearableConnected && isWhole(wearables.todayStatus) && wToday.steps != null;
+  const stepsGoal = c.stepGoal != null && c.stepGoal > 0 ? c.stepGoal : null;
+  // The figure inside a calorie, protein or step ring is a SHARE, so it is
+  // `sharePercent`'s to word ("under 1%", never a rounded-down nought); the
+  // arc is the raw ratio, which has no rounding to get wrong. Water keeps its
+  // count over its goal, the way its own screen reads.
+  const snapshot: { key: string; label: string; tone: Tone; value: number | null; figure: string | null; spoken: string; route: string }[] = [
+    {
+      key: 'kcal', label: 'Calories', tone: 'orange', route: '/(client)/nutrition',
+      value: fuel && fuel.kcal > 0 ? consumed.kcal / fuel.kcal : null,
+      figure: fuel ? sharePercent(consumed.kcal, fuel.kcal) : null,
+      spoken: fuel ? `${num(consumed.kcal)} of ${num(fuel.kcal)} calories eaten today` : `Calories not counted. ${fuelWhy}`,
+    },
+    {
+      key: 'protein', label: 'Protein', tone: 'blue', route: '/(client)/nutrition',
+      value: fuel && fuel.protein > 0 ? consumed.p / fuel.protein : null,
+      figure: fuel ? sharePercent(consumed.p, fuel.protein) : null,
+      spoken: fuel ? `${num(consumed.p)} of ${num(fuel.protein)} grams of protein eaten today` : `Protein not counted. ${fuelWhy}`,
+    },
+    {
+      key: 'water', label: 'Water', tone: 'teal', route: '/(client)/habits',
+      value: hyd.showRing && waterGoal != null && waterGoal > 0 ? water / waterGoal : null,
+      figure: !hyd.showCount ? null : hyd.showRing && waterGoal != null ? `${num(water)}/${num(waterGoal)}` : num(water),
+      spoken: !hyd.showCount ? `Water not counted. ${hyd.text}`
+        : hyd.showRing && waterGoal != null ? `${num(water)} of ${num(waterGoal)} glasses of water today`
+        : `${num(water)} ${water === 1 ? 'glass' : 'glasses'} of water today. ${hyd.text}`,
+    },
+    {
+      key: 'steps', label: 'Steps', tone: 'purple',
+      // A ring that says "connect a watch" opens the screen that connects one.
+      route: wearableKnown && !wearableConnected ? '/(client)/devices' : '/(client)/habits',
+      value: stepsCounted && stepsGoal != null ? (wToday.steps as number) / stepsGoal : null,
+      figure: !stepsCounted ? null : stepsGoal != null ? sharePercent(wToday.steps, stepsGoal) : num(wToday.steps),
+      // numbers-ok: stepsWhy is a sentence, not a count — the counts beside it go through num().
+      spoken: !stepsCounted ? `Steps not counted. ${stepsWhy}`
+        : stepsGoal != null ? `${num(wToday.steps)} of ${num(stepsGoal)} steps today`
+        : `${num(wToday.steps)} steps today. ${stepsWhy}`,
+    },
+  ];
+  // One line per reason, named for the ring it is about. Calories and protein
+  // share theirs — one target, one food log — so they share a line.
+  const snapshotNotes = [
+    fuelWhy ? `Calories and protein · ${fuelWhy}`
+      // Over is a fact about today and the ring cannot draw it: an arc stops at
+      // full. `dayCal.net` is the one calorie sum Meals and the Food Log read.
+      : dayCal != null && dayCal.net < 0 ? `Calories · ${num(Math.abs(dayCal.net))} kcal over today’s target` : null,
+    hyd.showRing ? null : `Water · ${hyd.text}`,
+    // numbers-ok: stepsWhy is a sentence, not a count.
+    stepsWhy ? `Steps · ${stepsWhy}` : null,
+  ].filter((line): line is string => line !== null);
+
+  // ── This Week: seven bars off the training log ───────────────────────────
+  //
+  // How many movements the log holds for each day of THIS week — the same
+  // count, keyed the same way, as the bars on This Week, which is where a tap
+  // lands, so the two cannot disagree. A day that has not happened yet is null
+  // and draws nothing; a day that has, with nothing logged, is a counted zero
+  // and draws the grey stub. Only ever built from a whole log: <ChartShell>
+  // below draws none of it otherwise and says which of the reads was short.
+  const weekOpened = startOfWeek(now);
+  const loggedOn = new Map<string, number>();
+  for (const l of log) { const k = isoDay(new Date(l.t || '')); loggedOn.set(k, (loggedOn.get(k) ?? 0) + 1); }
+  const weekBars = WEEK_DAYS.map((label, i) => {
+    if (i > todayIdx) return { label, value: null };
+    const date = new Date(weekOpened); date.setDate(weekOpened.getDate() + i);
+    return { label, value: loggedOn.get(isoDay(date)) ?? 0 };
+  });
+  const weekSpoken = weekBars.filter((b) => b.value != null)
+    .map((b) => `${b.label} ${b.value === 0 ? 'none' : num(b.value)}`).join(', ');
+  // The chip is the run they are ON; with none going, the best they have had,
+  // so the corner is not empty for somebody between runs. Both are totals over
+  // the whole log and both are withheld with it — see `freezes` above.
+  const bestRun = logKnown ? longestStreak(log) : 0;
+  const readinessTone: Tone = readiness == null ? 'neutral' : readiness.tone === 'good' ? 'brand' : readiness.tone === 'moderate' ? 'amber' : 'red';
+
   const firstName = (c.name || '').trim().split(' ')[0] || '';
   const G = layout.gutter;
 
@@ -634,7 +804,9 @@ export default function Home() {
           eyebrow={firstName ? `${hi},` : d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}
           title={firstName || hi}
           actions={<>
-            <Ghost icon="search" label={undefined} onPress={() => router.push('/(client)/explore')} />
+            {/* No search control up here any more: the mockup's header is the
+                bell and the face, and Explore is a row in the list at the
+                foot of the screen — the same route, one scroll away. */}
             {/* The bell opens the inbox now. It routed to '/(client)/messages'
                 for as long as it has existed, because `notifications` had a
                 writer and no reader — so "your session was cancelled" opened a
@@ -648,48 +820,41 @@ export default function Home() {
                 way to Me from the first screen. `avatarSource`, not `c.photo`:
                 a device path from before uploads existed draws as initials. */}
             <Pressable onPress={() => router.push('/(client)/profile')} accessibilityRole="button" accessibilityLabel="Your profile"
-              hitSlop={hitSlopFor(36)}
-              style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              hitSlop={hitSlopFor(44)}
+              // The pale accent plate under the accent's TEXT colour, 44pt, as
+              // the mockup draws the initials — not the solid fill, which made
+              // the avatar the loudest thing above a hero that should be.
+              style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
               {avatarSource(c.photo) ? (
-                <Image source={{ uri: avatarSource(c.photo)! }} style={{ width: 36, height: 36 }} accessibilityIgnoresInvertColors />
+                <Image source={{ uri: avatarSource(c.photo)! }} style={{ width: 44, height: 44 }} accessibilityIgnoresInvertColors />
               ) : c.init ? (
-                <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{c.init}</Text>
+                <Text style={{ ...ty.label, ...font('700'), color: t.brandText }}>{c.init}</Text>
               ) : (
-                <Icon name="me" size={16} color={t.brandInk} />
+                <Icon name="me" size={20} color={t.brandText} />
               )}
             </Pressable>
           </>}
         />
 
-        {/* ── the week's goal, and the one thing to do about it ────────────
-            The approved board opens Home on a single card: this week's goal as
-            a ring, the count beside it, and the day's primary action under
-            both. It replaces the readiness hero, the action card's own ring
-            and the This Week tiles that used to say the same number three
-            times down the screen.
+        {/* ── the hero: today's session, the week's ring, the one action ─────
+            The approved mockup opens Home on one night card — "TODAY · WEEK 1
+            OF 12 / Push Day / 5 exercises · 17 sets", the week's ring beside
+            it and the bright button under both. The words are the PLAN (what
+            today is), the ring is the LOG (how the week is going) and the
+            button is the adaptive call this screen has always made — Start
+            Workout, Recovery, Log a Meal, View Plan — with its label, route and
+            tone untouched.
 
-            Counted in DAYS against a goal counted in days — see the note on
-            `wk` above, and the one that was on the action card's ring: a
-            member who trained once and logged seven movements is one day in,
-            not seven. Withheld, ring and all, when the log is not whole: an
-            empty ring over "0 of 4" is a claim about the member's week that a
-            failed or capped read cannot make, and the two Notices further down
-            say which of the two it was. */}
-        {/* The night hero card, since the approved mockups: the same three
-            facts and the same button, on <HeroCard>. Nothing about WHAT is
-            shown moved — the count, the withheld state, the floor-not-quota
-            wording, the button's adaptive label, route and tone are the lines
-            that were here. */}
+            The ring is counted in DAYS against a goal counted in days — see
+            the note on `wk` above: a member who trained once and logged seven
+            movements is one day in, not seven. Withheld, arc and figure, when
+            the log is not whole: an empty ring over "0/4" is a claim about the
+            member's week that a failed or capped read cannot make, and the
+            This Week card under the snapshot says which of the two it was. */}
         <HeroCard
-          eyebrow="WEEKLY GOAL"
-          title={logKnown ? `${wk.days} of ${goalDays} training days` : 'This week could not be counted'}
-          meta={!logKnown
-            ? 'Your log could not be read in full, so nothing here is guessed.'
-            // A goal is a floor, not a quota — past it the count is
-            // still the member's own, and "6 of 3" reads as a fault.
-            : wk.days > goalDays ? `Past your goal by ${wk.days - goalDays} · keep it up`
-            : wk.days === goalDays ? 'Goal met · keep the momentum going'
-            : `${goalDays - wk.days} ${goalDays - wk.days === 1 ? 'day' : 'days'} left this week`}
+          eyebrow={heroEyebrow}
+          title={heroTitle}
+          meta={heroMeta}
           ring={
             // The ring is decoration over the figure inside it, so the
             // control is a button that says the figure and where it goes —
@@ -697,33 +862,61 @@ export default function Home() {
             // replaces the ring's own, which is why both are the same words.
             <Pressable onPress={() => router.push('/(client)/week')} accessibilityRole="button"
               accessibilityLabel={logKnown
-                ? `${wk.days} of ${goalDays} training days this week. Open This Week`
+                ? `${num(wk.days)} of ${num(goalDays)} training days this week. Open This Week`
                 : 'This week could not be counted. Open This Week'}
               hitSlop={8}>
               {/* `null` when the log is not whole: track only, and a dash. */}
               <HeroRing
                 value={logKnown ? wk.days / Math.max(1, goalDays) : null}
-                figure={logKnown ? `${wk.days}/${goalDays}` : null}
+                figure={logKnown ? `${num(wk.days)}/${num(goalDays)}` : null}
                 sub="this week"
-                spoken={logKnown ? `${wk.days} of ${goalDays} training days this week` : 'This week could not be counted'}
+                spoken={logKnown ? `${num(wk.days)} of ${num(goalDays)} training days this week` : 'This week could not be counted'}
               />
             </Pressable>
           }
           cta={{ label: today.cta, tone: today.tone, onPress: () => router.push(trainIntent(today.route) as any) }}
         >
           {/* ── why THIS button, said beside it ──────────────────────────────
-              The button is adaptive — Start Workout, Recovery, Log a Meal, View
-              Plan — and its reason used to live in the Today card, which sits
-              under however many notices the day has raised. An amber "Recovery"
-              under a training goal, with the sentence that explains it a screen
-              away, is an alert without its reason. One line, the call's own
-              headline and (for a session) what the session is; the Today card
-              keeps the full sentence. Nothing here is a new claim: both halves
-              are the `today` and `workout` the card below already draws. */}
+              The button is adaptive, and an amber "Recovery" under a training
+              headline with the sentence that explains it a screen away is an
+              alert without its reason. So the call's own headline and its one
+              sentence sit directly over it — this is the whole of what the
+              Today row under the fold used to say, which is why that row is
+              gone rather than repeated. */}
           <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.lg }}>
-            {today.headline}{today.route.includes('workouts') && workout.exercises.length ? ` · ${workout.focus}` : ''}
+            <Text style={{ ...ty.caption, ...font('700'), color: t.nightInk }}>{today.headline}</Text>
+            {` · ${today.tip}`}
           </Text>
+          {/* A booking is a fact about today's page, so it is on it: the full
+              row, with its unread and empty states, is under Coming Up. */}
+          {nextSession ? (
+            <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.xs }}>
+              {`Next session · ${new Date(nextSession.startsAt).toLocaleDateString(appLocale(), { weekday: 'short' })} ${fmtTime(nextSession.startsAt)}`}
+            </Text>
+          ) : null}
         </HeroCard>
+
+        {/* ── whose copy today's session was drawn from ────────────────────
+            Directly under the card whose headline it qualifies. `getProgram`
+            serves this device's copy when no read has landed, and keeps serving
+            it for THIRTY DAYS (src/lib/programCache.ts) — so the session on the
+            card can be last month's block with nothing here to doubt it, and
+            the line below it is suppressed exactly then, because the cache is
+            what made `coachProgram` non-null.
+
+            Non-null only while the copy is what is being served —
+            `mayServeCached` decides that — so no gate of its own, and it goes
+            the moment a live read lands. Same sentence as
+            app/(client)/week.tsx. */}
+        {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{cachedNote}</Flag> : null}
+        {/* One line now, not a titled notice: it is the reason beside a
+            headline, and the same two facts — whose programme this is, and that
+            the coach's takes over when it can be read. */}
+        {programUnknown ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+            {`We couldn’t check for a coach plan, so today’s session is from ${BRAND.label}’s automatic programme. Your coach’s takes over as soon as we can read it.`}
+          </Flag>
+        ) : null}
 
         {/* ── interrupts: what is wrong, before what is next ────────────────
             The data-layout review's fourth slot: an urgent injury, a write that
@@ -798,92 +991,100 @@ export default function Home() {
           ) : null}
         </View>
 
+        {/* ── daily snapshot ──────────────────────────────────────────────
+            Four small rings, as the approved mockup draws them: Calories in
+            orange, Protein in blue, Water in teal, Steps in purple — the same
+            hue each of those four wears on its own screen. A daily briefing,
+            still, and not four miniature dashboards: each ring is the lead
+            figure of another screen and is a BUTTON to it, so the macro meters,
+            the water controls and the step goal stay where they have room.
 
-        {/* ── whose copy today's focus was drawn from ──────────────────────
-            Said before the card, for the same reason the notice below it is:
-            the card is what the reader acts on. `getProgram` serves this
-            device's copy when no read has landed, and keeps serving it for
-            THIRTY DAYS (src/lib/programCache.ts) — so "Today · Push" and the
-            session on the card can be last month's block with nothing here to
-            doubt it, and the notice below is suppressed exactly then, because
-            the cache is what made `coachProgram` non-null.
-
-            Non-null only while the copy is what is being served —
-            `mayServeCached` decides that — so no gate of its own, and it goes
-            the moment a live read lands. Same sentence, same position, as
-            app/(client)/week.tsx :194. */}
-        {cachedNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{cachedNote}</Flag> : null}
-        {programUnknown ? (
-          <Notice tone={t.warn} kicker="Today" title="We couldn’t check for a coach plan"
-            note={`Today's focus below comes from ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it.`} />
-        ) : null}
-        {logStatus === 'error' ? (
-          <Notice tone={t.warn} kicker="Today" title="We couldn’t read your training log"
-            note="Your streak and this week's sessions are shown as dashes because we can't see them — not because they're zero. Nothing has been lost." />
-        ) : logStatus === 'partial' ? (
-          // A separate sentence, because it is a separate situation and the
-          // reader's question is different: nothing failed, there is simply
-          // more history than one read returns, and a streak or a total taken
-          // over the part that came back would be wrong by however much did
-          // not. Only the FIGURES are withheld — everything on this screen
-          // driven by the sessions themselves is unaffected.
-          <Notice tone={t.warn} kicker="Today" title="You have more training logged than we can read at once"
-            note="Your streak, this week's sessions, your tonnage and your PRs are shown as dashes because they would be counted over part of your history rather than all of it. Nothing is missing from your log." />
-        ) : null}
-
-        {/* ── the one card: today's action ────────────────────────────────── */}
+            All four are always drawn. A brand-new account used to get no fuel
+            tile at all (`showFuel`), because a row of dashes looked broken; a
+            ring with a dash in it and one line under the row saying what would
+            fill it is the opposite of broken — it is the prompt. The lines are
+            `snapshotNotes`, above, with the gate each ring answers to. */}
         <Section>
-          {/* The header follows the card. When the adaptive call is "fuel up" or
-              "recover", naming today's muscle group here made the header and the
-              card underneath talk about two different things. */}
-          {/* No week count on this line any more: the goal card at the top
-              says it, in days against a goal counted in days (`wk.days`, never
-              `wk.workouts`, which is one log entry per EXERCISE), and a second
-              copy three inches under the first is the clutter this redesign
-              exists to remove. */}
-          <SectionHead title={today.route.includes('workouts') ? `Today · ${workout.focus}` : 'Today'} />
-          {/* One row, not a second card: the ring and the button it used to
-              carry are on the goal card at the top of the screen now, and a
-              card here would be the same action offered twice. The row keeps
-              the adaptive headline — Ready to Train, Recover Today, Fuel Up —
-              and the sentence under it, which is what changes day to day. */}
-          <ListRow
-            icon={today.route.includes('nutrition') ? 'meals' : today.route.includes('recovery') ? 'heart' : 'train'}
-            title={today.headline}
-            note={today.tip}
-            tone={today.tone}
-            onPress={() => router.push(trainIntent(today.route) as any)}
-          />
-          {/* ── what you are actually in for ─────────────────────────────────
-              Nike Training Club, Strava and TrueCoach all put the SHAPE of a
-              session in front of the button that starts it — how many
-              movements, how much work — and this card said "Ready to Train"
-              over the word "Push" and nothing else. A member deciding at
-              21:40 whether they have time for this had no way to tell a
-              four-exercise accessory day from an eleven-exercise one without
-              opening it.
+          <SectionHead title="Daily Snapshot" note="Details" onPress={() => router.push('/(client)/habits')} />
+          {/* Wraps two and two at the largest text, where four grown rings no
+              longer share a card's width; `grown(70)` is the ring's own size. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+            {snapshot.map((r) => (
+              // The ring is a picture; the control is a button that says the
+              // figure and where it goes, as the hero's ring does. A row, so
+              // the ring's own `flex: 1` fills the cell's WIDTH.
+              <Pressable key={r.key} onPress={() => router.push(r.route as any)}
+                accessibilityRole="button"
+                // The reasons end in their own full stop; a figure does not.
+                accessibilityLabel={`${r.spoken.replace(/\.$/, '')}. Open ${r.route.includes('nutrition') ? 'Meals' : r.route.includes('devices') ? 'Devices' : 'Daily Habits'}`}
+                style={{ flexGrow: 1, flexBasis: grown(70), minWidth: 0, flexDirection: 'row' }}>
+                <MiniRing tone={r.tone} label={r.label} value={r.value} figure={r.figure} spoken={r.spoken} />
+              </Pressable>
+            ))}
+          </View>
+          {snapshotNotes.map((line, i) => (
+            <Text key={line} style={{ ...ty.micro, ...font('500'), color: t.ink3, marginTop: i === 0 ? sp.md : sp.xs }}>{line}</Text>
+          ))}
+        </Section>
 
-              Counted, never estimated. There is no duration model in this
-              codebase and inventing one here would be exactly the fabricated
-              figure the rest of this screen refuses: "about 45 min" over a
-              session nobody has timed is a number with nothing behind it.
-              The exercise count and the set total ARE facts — they are the
-              plan, in hand, already being rendered on the Train tab — and a
-              reader can price their own evening from them.
+        {/* ── this week ───────────────────────────────────────────────────
+            The mockup's third card: the week as seven bars, the run as a chip
+            in the corner. `showWeek` (src/lib/firstRun.ts) still decides
+            whether it is drawn at all — hidden on a brand-new account only when
+            a SETTLED read says they have never logged, because under a failed
+            read an empty log means unknown, and hiding the card would tell
+            somebody who has trained for a year that they never have.
 
-              Drawn only under the training card, because it describes the
-              thing that card starts; and only where there is a session, so the
-              Rest Day fallback and an empty coach block draw nothing. The
-              cardio line comes along when the day has one, since a 20-minute
-              interval finish is most of what somebody is deciding about. */}
-          {today.route.includes('workouts') && workoutSetCount != null ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {workout.exercises.length === 1 ? '1 exercise' : `${workout.exercises.length} exercises`}
-              {workoutSetCount > 0 ? ` · ${workoutSetCount === 1 ? '1 set' : `${workoutSetCount} sets`}` : ''}
-              {workout.cardio ? ` · ${workout.cardio}` : ''}
-            </Text>
-          ) : null}
+            The two titled notices that used to stand over the Today card — the
+            log could not be read; there is more log than one read returns —
+            are <ChartShell>'s two lines now, inside the card whose bars they
+            withhold. Same two situations, same two reassurances (it is not
+            zero; nothing is lost), beside the thing they qualify. */}
+        {showWeek(facts) ? (
+          <Section>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm, marginBottom: sp.md }}>
+              <Pressable onPress={() => router.push('/(client)/week')} accessibilityRole="button" accessibilityLabel="This Week. Open your week"
+                hitSlop={hitSlopFor(26)} style={{ flexShrink: 1 }}>
+                <Text style={{ ...ty.section, color: t.ink }}>This Week</Text>
+              </Pressable>
+              {/* `streak` is the frozen-aware run the banner below also prints
+                  — ONE number on this screen. Nothing when the log is not
+                  whole: both are 0 then, and a chip reading "0" would be the
+                  invented zero the ring beside it refuses. */}
+              {streak > 0 ? <TonedChip tone="orange" icon="flame" label={`${num(streak)}-Day Streak`} />
+                : bestRun > 0 ? <TonedChip tone="neutral" icon="trophy" label={`Best Run · ${num(bestRun)} ${bestRun === 1 ? 'Day' : 'Days'}`} />
+                : null}
+            </View>
+            {/* `points` is the seven slots, not a count of readings: these are
+                bars, and one bar on a Sunday is a drawing — the one-point
+                sentence is for a LINE, which needs two ends. */}
+            <ChartShell status={logStatus} points={weekBars.length}
+              emptyLine="Nothing logged yet this week."
+              loadingLine="Reading your training log…"
+              errorLine="We couldn’t read your training log, so this week and your streak are not shown — not because they’re zero. Nothing has been lost."
+              partialLine="You have more training logged than we can read at once, so this week and your streak are held back rather than counted over part of it. Nothing is missing from your log.">
+              <DayBars days={weekBars} spoken={`Movements logged each day this week. ${weekSpoken}.`} />
+              {/* A goal is a floor, not a quota — past it the count is still
+                  the member's own, and "6 of 3" reads as a fault. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {`${num(wk.days)} of ${num(goalDays)} training days · `}
+                {wk.days > goalDays ? `past your goal by ${num(wk.days - goalDays)}`
+                  : wk.days === goalDays ? 'goal met'
+                  : `${num(goalDays - wk.days)} ${goalDays - wk.days === 1 ? 'day' : 'days'} left this week`}
+              </Text>
+            </ChartShell>
+          </Section>
+        ) : null}
 
+        {/* ── coming up: the booking, then the check-in ─────────────────────
+            What is left of the Today card. Its adaptive row — Ready to Train,
+            Recover Today, Fuel Up — and the session’s exercise and set count are
+            the hero now, so repeating them here would be the same action offered
+            twice; these two rows are what the hero does not carry. The card is
+            absent when neither row applies, rather than a heading over nothing. */}
+        {(booksSessions || nextSession || remoteCoached) ? (
+        <Section>
+          <SectionHead title="Coming Up" />
           {/* ── the rest of today: the booking, then the check-in ─────────────
               Both rows used to sit under the snapshot, among History and
               Challenges, so a session booked for six o'clock this evening was
@@ -898,6 +1099,9 @@ export default function Home() {
               to book more is gated. */}
           {(booksSessions || nextSession) ? (
             <ListRow icon="calendar"
+              // PT green while the diary answered; the quiet circle with an amber
+              // icon when it did not, which is a status mark and not decoration.
+              tone={nextSession || sessionsKnown || sessionStatus === 'loading' ? 'brand' : t.warn}
               // "No Sessions Booked" is a statement about the member's calendar
               // and only a read that answered may make it. Under a failed or
               // in-flight read the row still appears — the way to the calendar
@@ -925,13 +1129,14 @@ export default function Home() {
           ) : null}
 
           {remoteCoached ? (
-            <ListRow icon="message" title="Weekly Check-in"
+            <ListRow icon="message" tone="blue" title="Weekly Check-in"
               note={booksSessions
                 ? 'How the weeks you train alone went — your coach reads it'
                 : 'How the week went — your coach only sees what you send'}
               onPress={() => router.push('/(client)/checkin')} />
           ) : null}
         </Section>
+        ) : null}
 
         {/* ── the nudge and the prompt, after the day itself ────────────────
             Motivation and setup, in that order, and under the Today card on
@@ -960,7 +1165,7 @@ export default function Home() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                   <Icon name="sparkle" size={20} color={t.brand} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Personalise your plan</Text>
+                    <Text style={{ ...ty.head, color: t.ink }}>Personalise your plan</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>One minute — tailors your workouts and meals to you.</Text>
                   </View>
                   <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
@@ -986,67 +1191,49 @@ export default function Home() {
             reader had seen one, which is why nobody remembered it. */}
         <ScreenHelp screen="home" />
 
-        {/* Beside the figure it explains. This stood above the Today card, a
-            screen away from the Fuel tile whose absence it accounts for; a
-            reader who met the gap in the row below had already scrolled past
-            the reason for it. */}
-        {/* Fuel Today is simply absent when its inputs could not be read, which
-            is right — a meter drawn from the defaults would be somebody else's
-            day — but absent on its own reads as "you have no targets". This
-            says which read is missing. Not shown while one is still in flight:
-            an apology for a request that is proceeding normally is a nag. */}
-        {targetInputsUnknown && c.profileStatus !== 'loading' && coachNutrition.status !== 'loading' ? (
-          !isWhole(c.profileStatus) ? (
-            <Notice tone={t.warn} kicker="Today" title="We couldn’t read what you are training for"
-              note="Your goal and how you eat are what split a day into protein, carbs and fat, so Fuel Today is left out rather than drawn from the defaults. Pull down to try again." />
-          ) : (
-            <Notice tone={t.warn} kicker="Today" title="We couldn’t read your coach’s adjustment"
-              note="Fuel Today is left out rather than showing the uncorrected figures as your plan. Pull down to try again." />
-          )
-        ) : null}
-
-        {/* ── daily snapshot ──────────────────────────────────────────────
-            A daily briefing, not four miniature dashboards. The body figures,
-            the weight chart, the macro meters, the water controls and the
-            week's tonnage each had a section here, and every one of them is
-            the lead figure of another tab — Progress, Meals, Habits, This
-            Week — where it is drawn with the room it needs. What stays is one
-            readiness row and one KPI row, each figure tappable to the screen
-            that owns it, so nothing became unreachable and nothing here
-            competes with the card at the top. Three figures at most — readiness,
-            fuel, water — each with what it is measured against and over what
-            period, because a bare number is not a reading.
-
-            The first-run rules still apply. `showWeek` and `showFuel` (see
-            src/lib/firstRun.ts) withhold a tile that would be a dash on a
-            brand-new account — and only on a SETTLED read, because a dash
-            under a failed read is the honest answer and hiding it would tell
-            somebody who has trained for a year that they never have. */}
+        {/* ── readiness ───────────────────────────────────────────────────
+            Off the snapshot, which is the mockup's four rings now, and drawn
+            as what it is — a score out of a hundred — in a ring of its own,
+            green, amber or red with the WORD beside it, opening Recovery. */}
         <Section>
-          <SectionHead title="Daily Snapshot" note="Your progress" onPress={() => router.push('/(client)/scans')} />
-          <ListRow
-            icon="heart"
-            title={readiness != null ? `Readiness · ${readiness.score}/100` : 'Readiness'}
-            // What the number is made of, said out loud, EVERY time — not only
-            // when a signal is missing. An 83 built from sleep and training
-            // alone and an 83 built from all three are different claims. The
-            // direction goes FIRST, and only in the 'scored' state: the other
-            // three states reach the reader as Flags below or are silent on
-            // purpose (see src/lib/readinessDirection.ts). Never render
-            // direction.delta as a number here — it is null in every state
-            // but 'scored', and `detail` is the figure.
-            //
-            // Six different reasons there is no score, and they ask the reader
-            // for six different things; which one it is, is decided in
-            // src/lib/readinessBreakdown.ts and tested there.
-            note={readiness != null
-              ? `${direction?.state === 'scored'
-                  ? direction.detail.charAt(0).toUpperCase() + direction.detail.slice(1) + '. '
-                  : ''}${readiness.tip} ${readinessMadeOf(readiness)}.`
-              : breakdown.absence ?? undefined}
-            tone={readinessColor}
-            onPress={() => router.push('/(client)/recovery')}
-          />
+          <Pressable onPress={() => router.push('/(client)/recovery')} accessibilityRole="button"
+            accessibilityLabel={readiness != null
+              ? `Readiness ${num(readiness.score)} out of 100, ${readiness.label}. ${readinessMadeOf(readiness)}. Open Recovery`
+              : `Readiness not scored. ${breakdown.absence ?? ''} Open Recovery`}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+            <Ring size={76} tone={readinessTone}
+              value={readiness != null ? readiness.score / 100 : null}
+              figure={readiness != null ? num(readiness.score) : null}
+              spoken={readiness != null ? `Readiness ${num(readiness.score)} out of 100` : 'Readiness not scored'} />
+            <View style={{ flex: 1, minWidth: 0, gap: sp.xs }}>
+              <Text style={{ ...ty.head, color: t.ink }}>Readiness</Text>
+              {readiness != null ? <TonedChip tone={readinessTone} label={readiness.label} /> : null}
+              {/* What the number is made of, said out loud, EVERY time — not
+                  only when a signal is missing. An 83 built from sleep and
+                  training alone and an 83 built from all three are different
+                  claims. The direction goes FIRST, and only in the 'scored'
+                  state: the other three states reach the reader as Flags below
+                  or are silent on purpose (see src/lib/readinessDirection.ts).
+                  Never render direction.delta as a number here — it is null in
+                  every state but 'scored', and `detail` is the figure.
+
+                  The TIP is not here any more: it is the hero's reason line on
+                  a day with a session still to do, and advice about a session
+                  already trained is prose.
+
+                  Six different reasons there is no score, and they ask the
+                  reader for six different things; which one it is, is decided
+                  in src/lib/readinessBreakdown.ts and tested there. */}
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                {readiness != null
+                  ? `${direction?.state === 'scored'
+                      ? direction.detail.charAt(0).toUpperCase() + direction.detail.slice(1) + '. '
+                      : ''}${readinessMadeOf(readiness)}.`
+                  : breakdown.absence ?? 'Not scored yet.'}
+              </Text>
+            </View>
+            <Icon name={FORWARD_ICON} size={18} color={t.ink3} />
+          </Pressable>
           {/* What the score could not see, before the reader acts on it. A
               source that did not answer can only ever have FLATTERED this
               number — every signal readiness scores counts against the member
@@ -1057,50 +1244,7 @@ export default function Home() {
           {breakdown.caveats.map((cv) => (
             <Flag key={cv} tone={t.warn} style={{ marginTop: sp.sm }}>{cv}</Flag>
           ))}
-          {(showWeek(facts) || showFuel(facts)) ? (
-            <View style={{ marginTop: sp.lg }}>
-              <KpiRow
-                onPress={(item) => { if (item.route) router.push(item.route as any); }}
-                items={[
-                  // No Training tile any more. It drew `wk.days` of
-                  // `goalDays` — the very pair the goal card at the top of the
-                  // screen is built around — so the week's count was the hero
-                  // AND a supporting figure, and the snapshot ran to four. The
-                  // review's cap is three supporting metrics: readiness above,
-                  // fuel and water here. Trends, where the tile went, is on
-                  // the Train and Progress tabs' own lists. `showWeek` still
-                  // gates the ROW, so a used account without a calorie target
-                  // keeps its water count exactly as before.
-                  // `dayCal.net`, the one calorie sum the Meals tab and the
-                  // Food Log also read — never a kcalLeft defaulted to zero.
-                  // Non-null exactly when `macros` is, which `showFuel` has
-                  // already checked.
-                  ...(showFuel(facts) && dayCal ? [{
-                    label: 'Fuel',
-                    value: num(Math.abs(dayCal.net)),
-                    unit: 'kcal',
-                    delta: dayCal.net >= 0 ? 'left today' : 'over today’s target',
-                    route: '/(client)/nutrition',
-                  }] : []),
-                  // "of 8 glasses" was a platform constant read as this
-                  // client's own target. With no goal set there is no
-                  // denominator to print — the count stands on its own and
-                  // the tap lands on the screen that sets one, which is also
-                  // where the add and remove controls now live.
-                  {
-                    label: 'Water',
-                    value: fig(water),
-                    unit: water === 1 ? 'glass' : 'glasses',
-                    delta: waterGoal != null ? `of ${waterGoal} a day` : 'set a daily goal',
-                    good: waterGoal != null && water >= waterGoal,
-                    route: '/(client)/habits',
-                  },
-                ]}
-              />
-            </View>
-          ) : null}
         </Section>
-
 
         {/* ── updates, before tools ────────────────────────────────────────
             What the coach and the gym have said comes ahead of History,
@@ -1108,7 +1252,6 @@ export default function Home() {
             under it are doors that are always there. */}
         {/* ── coach note ─────────────────────────────────────────────────── */}
         {(!solo && (coachNotes.length > 0 || !!ann)) ? (<>
-          <Rule />
           <Section>
             <SectionHead title="From Your Coach" />
             {/* ── when it was said ─────────────────────────────────────────
@@ -1155,7 +1298,6 @@ export default function Home() {
             because a dashboard that grows a noticeboard stops being a
             dashboard. */}
         {gymAnn ? (<>
-          <Rule />
           <Section>
             <SectionHead title="From Your Gym" note="All notices" onPress={() => router.push('/(client)/notices')} />
             <Text style={{ ...ty.body, color: t.ink2 }}>{gymAnn.body}</Text>
@@ -1192,7 +1334,7 @@ export default function Home() {
               the same errand — two prompts for one thing on the first screen a
               new member ever sees is the disease, not the cure. */}
           {showChecklist(started) && !needsOnboard ? (
-            <ListRow icon="sparkle" title="Getting Started"
+            <ListRow icon="sparkle" tone="amber" title="Getting Started"
               note={startedNext
                 ? `${checklistDone(started)} of ${started.length} done · next, ${startedNext.title.toLowerCase()}`
                 : startedLeft === 0
@@ -1201,16 +1343,16 @@ export default function Home() {
               onPress={() => router.push('/(client)/getting-started')} />
           ) : null}
 
-          <ListRow icon="clock" title="Your History" note="Every month you have trained, back to the start"
+          <ListRow icon="clock" tone="blue" title="Your History" note="Every month you have trained"
             onPress={() => router.push('/(client)/history')} />
 
           {/* Beside History because that is where its only other link lives, and
               one link three levels deep is how a feature ships and is never
               found. */}
-          <ListRow icon="dumbbell" title="Your Muscles" note="What you worked, on the body, and how long it has rested"
+          <ListRow icon="dumbbell" tone="brand" title="Your Muscles" note="What you worked and how long it has rested"
             onPress={() => router.push('/(client)/muscles')} />
 
-          <ListRow icon="trophy" title="Challenges" note="Track your progress against the goal"
+          <ListRow icon="trophy" tone="orange" title="Challenges" note="Your progress against the goal"
             onPress={() => router.push('/(client)/challenges')} />
 
           {/* Unconditional, and that is the point. The blocks above this list show
@@ -1220,17 +1362,22 @@ export default function Home() {
               and it is here whether or not there is a notice today — a screen
               you can only reach when it has something on it is a screen nobody
               learns exists. */}
-          <ListRow icon="info" title="Notices" note="Everything your gym and your coach have posted"
+          <ListRow icon="info" tone="purple" title="Notices" note="Everything your gym and coach have posted"
             onPress={() => router.push('/(client)/notices')} />
 
           {needsCoach ? (
-            <ListRow icon="people"
+            <ListRow icon="people" tone="teal"
               title={solo ? 'Work with a Coach' : 'Find Your Coach'}
               note={solo
                 ? "Enter your coach's code, or browse trainers"
-                : "You have not been linked to a coach yet — enter their code, accept an invitation, or browse trainers"}
+                : "Not linked yet — enter their code, accept an invitation, or browse"}
               onPress={() => router.push('/(client)/trainers')} />
           ) : null}
+
+          {/* The search control that was in the header, as a row: the mockup's
+              header is the bell and the face. Same route. */}
+          <ListRow icon="search" tone="neutral" title="Explore" note="Find anything in the app"
+            onPress={() => router.push('/(client)/explore')} />
         </Section>
 
 
