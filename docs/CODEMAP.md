@@ -831,7 +831,7 @@ Total: 46 files, 115,752 lines, ~1670k tokens if every one were read whole.
 1548-1562     fn         lowAdherence
 1563-1580     fn         driftNote
 1581-1584     fn         segN
-1585-1606     fn         noProgramme
+1585-1606     fn         noProgram
 1607-1660     §        who is waiting on a reply
 1661-1708     fn         matchSeg
 1709-1710     fn           pairs
