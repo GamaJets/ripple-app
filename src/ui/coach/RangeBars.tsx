@@ -73,6 +73,9 @@ export function RangeBars({ data, prior, labels, unit = '', max, what, priorNote
   const barW = Math.max(1, (slot - gap) / (pair ? 2 : 1));
   const x = (i: number) => 6 + i * slot + gap / 2;
   const height = (v: number) => Math.max(1.5, ((Math.min(v, top)) / top) * (base - padTop));
+  // The approved mockup's bars have a 4pt shoulder. Capped at half the bar so a
+  // 1Y window's narrow bars stay bars and do not become lozenges.
+  const rx = Math.min(4, barW / 2);
   const last = drawn[drawn.length - 1];
 
   // Viewbox units back from the measured width, then the slot under the finger
@@ -137,11 +140,11 @@ export function RangeBars({ data, prior, labels, unit = '', max, what, priorNote
               the slots it has a value for. Its own gaps are its own gaps. */}
           {priorPts.map((p) => (
             <Rect key={`p${p.i}`} x={x(p.i)} y={base - height(p.v)} width={barW} height={height(p.v)}
-              rx={1.5} fill={t.brand} fillOpacity={0.35} />
+              rx={rx} fill={t.brand} fillOpacity={0.35} />
           ))}
           {drawn.map((p) => (
             <Rect key={p.i} x={x(p.i) + (pair ? barW : 0)} y={base - height(p.v)} width={barW} height={height(p.v)}
-              rx={1.5} fill={shown != null && shown.i === p.i ? t.ink : t.brand} />
+              rx={rx} fill={shown != null && shown.i === p.i ? t.ink : t.brand} />
           ))}
         </Svg>
       </View>

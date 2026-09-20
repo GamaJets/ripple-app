@@ -85,8 +85,8 @@ import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityInd
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Ghost, Cta, Notice, Flag, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Cta, Notice, Flag, PartialRead, Meter, Donut, Legend, type Slice, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useLeads } from '../../src/ui/leads';
@@ -147,6 +147,16 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'contacted', label: 'Contacted' },
   { key: 'closed', label: 'Closed' },
 ];
+
+/** The funnel's stages, in the order an enquiry moves through them. Amber for
+ *  the ones waiting on the coach, blue once they have been spoken to, grey for
+ *  the ones put away. */
+const FUNNEL: { key: Exclude<Filter, 'all'>; label: string; tone: Tone }[] = [
+  { key: 'new', label: 'New', tone: 'amber' },
+  { key: 'contacted', label: 'Contacted', tone: 'blue' },
+  { key: 'closed', label: 'Closed', tone: 'neutral' },
+];
+const SOURCE_TONES: Tone[] = ['blue', 'purple', 'orange', 'teal', 'pink'];
 
 export default function TrainerLeads() {
   const t = useTheme();
@@ -227,6 +237,28 @@ export default function TrainerLeads() {
 
   /* ── the one figure, computed over the same rows the list draws ────────── */
   const conversion = enquiryConversion(book.rows, book.status);
+
+  /* ── where they came from, for the ring ──────────────────────────────────
+   * By the campaign the row's code resolved to. A row with no campaign is its
+   * own grey slice and is NAMED as that — dropping it would make the ring a
+   * whole of the attributed enquiries while its centre counts all of them.
+   * The five biggest keep a hue each and the rest share one slice: a ring of
+   * twelve colours is a ring nobody can read against its legend. Only
+   * rendered under a whole read; see the section that draws it. */
+  const sourceSlices: Slice[] = (() => {
+    const by = new Map<string, number>();
+    let unnamed = 0;
+    for (const r of book.rows) {
+      if (r.campaign) by.set(r.campaign, (by.get(r.campaign) ?? 0) + 1); else unnamed += 1;
+    }
+    const ranked = [...by.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const rest = ranked.slice(SOURCE_TONES.length).reduce((n, x) => n + x[1], 0);
+    return [
+      ...ranked.slice(0, SOURCE_TONES.length).map(([label, n], i): Slice => ({ label, value: n, tone: SOURCE_TONES[i], shown: num(n) })),
+      ...(rest ? [{ label: 'Other Campaigns', value: rest, tone: 'amber' as const, shown: num(rest) }] : []),
+      ...(unnamed ? [{ label: 'No Campaign Named', value: unnamed, tone: 'neutral' as const, shown: num(unnamed) }] : []),
+    ];
+  })();
 
   const mark = (lead: LeadRow, state: LeadState) => {
     void book.setState(lead.id, state).then((r) => {
@@ -448,6 +480,40 @@ export default function TrainerLeads() {
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <PageHead title="Enquiries" subtitle="Who asked and did not join" />
 
+        {/* ── the funnel, and where they came from ────────────────────────
+            Round five: the page opens on a picture of the list under it. The
+            stages as stacked meters, each a share of every enquiry on record,
+            and the campaigns as a ring. Both are COUNTS OVER THE WHOLE LIST,
+            so both are drawn only under `isWhole(book.status)` — the same
+            gate the filter's own counts sit behind, for the same reason: a
+            queue is worked to zero, and a bar over part of it is a promise
+            about a pile nobody has seen the bottom of. On any other read the
+            list below still draws, under its own notice, and this does not.
+
+            Became Clients is `enquiryConversion`'s own two numbers and
+            nothing else — matched OUT OF checked, with the denominator in the
+            bar's note every time, never a percentage. The section further
+            down still says what each half of that fraction counts. */}
+        {isWhole(book.status) && book.rows.length > 0 ? (
+          <Section>
+            <SectionHead title="The Funnel" note={`${num(book.rows.length)} on record`} />
+            {FUNNEL.map((f) => {
+              const n = book.rows.filter((r) => r.state === f.key).length;
+              return <Meter key={f.key} label={f.label} val={n} target={book.rows.length} tone={f.tone}
+                note={`${num(n)} of ${num(book.rows.length)}`} />;
+            })}
+            {conversion.kind === 'figure' ? (
+              <Meter label="Became Clients" val={conversion.matched} target={conversion.checked} tone="brand"
+                note={`${num(conversion.matched)} of ${num(conversion.checked)} checked`} />
+            ) : null}
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: sp.xl }}>
+              <Donut slices={sourceSlices} centre={num(book.rows.length)} sub={book.rows.length === 1 ? 'enquiry' : 'enquiries'}
+                spoken={`Where they came from: ${sourceSlices.map((x) => `${x.label} ${x.shown}`).join(', ')}`} />
+              <Legend items={sourceSlices} />
+            </View>
+          </Section>
+        ) : null}
+
         {/* Said first, and not softened. */}
         <View style={{ marginTop: sp.xl }}>
           <Notice tone={t.warn} kicker="Nothing is sent" title="Following these up is you, by hand" note={FOLLOW_UP_IS_MANUAL} />
@@ -605,7 +671,7 @@ export default function TrainerLeads() {
                         accessibilityLabel={`${f.label}, ${n == null ? 'not counted' : num(n)}`}
                         style={{ flex: 1, minHeight: 40, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
                         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
-                          style={{ ...ty.label, fontWeight: on ? '600' : '500', ...numeric, color: on ? t.bg : t.ink2 }}>
+                          style={{ ...ty.label, ...font(on ? '600' : '500'), ...numeric, color: on ? t.bg : t.ink2 }}>
                           {f.label} {num(n)}
                         </Text>
                       </Pressable>

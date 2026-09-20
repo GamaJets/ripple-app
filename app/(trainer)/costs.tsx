@@ -56,8 +56,10 @@ import { View, Text, ScrollView, TextInput, Pressable, Modal, Alert, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag, PartialRead, FigureCard, Donut, Legend, Expandable, type Tone, type Slice } from '../../src/ui/kit';
+import { sharePercent } from '../../src/lib/sharePercent';
+import { num } from '../../src/lib/format';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useToday } from '../../src/ui/today';
 import { minorMoney } from '../../src/lib/coachMoney';
 import { invoiceDayLabel, plusDays } from '../../src/lib/coachInvoice';
@@ -164,6 +166,22 @@ export default function Costs() {
   const byMonth = useMemo(() => linesByMonth(lines), [lines]);
   const biggest = useMemo(() => biggestLines(lines), [lines]);
 
+  /* ── the mix, one ring per currency ──────────────────────────────────────
+   * Off the same `byCategory` the rows under the ring are drawn from, and only
+   * ever rendered inside the whole-read branch those rows sit in. */
+  const CATEGORY_TONE: Record<string, Tone> = { rent: 'blue', insurance: 'purple', education: 'teal', equipment: 'orange', kit: 'pink', travel: 'amber', professional: 'brand', other: 'neutral' };
+  const categoryRings = taken.pots.map((pot) => {
+    const slices: Slice[] = byCategory.map((g) => {
+      const part = g.taken.pots.find((x) => x.currency === pot.currency)?.minorUnits ?? 0;
+      return { label: g.label, tone: CATEGORY_TONE[g.category] ?? 'neutral', value: part, shown: sharePercent(part, pot.minorUnits) };
+    }).filter((x) => (x.value ?? 0) > 0);
+    const centre = minorMoney(pot.minorUnits, pot.currency);
+    return {
+      currency: pot.currency, slices, centre,
+      spoken: `Where it went in ${pot.currency}, ${centre ?? 'no figure'}: ${slices.map((x) => `${x.label} ${x.shown ?? 'no figure'}`).join(', ')}`,
+    };
+  });
+
   const draft = (): CostDraft => ({
     description, amountText, currency: ccy.currency, category, paidOn,
     note: note.trim() || null,
@@ -251,14 +269,6 @@ export default function Costs() {
             still said by the first card below. */}
         <PageHead title="What It Costs You" />
 
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="What running your business costs"
-            note={COST_IS_YOUR_WORD}
-          />
-        </View>
-
         {status === 'error' ? (
           <Notice tone={t.crit} kicker="Not read" title="Your recorded costs could not be read"
             note="This list is empty because the read failed, not because you have recorded none. Nothing below is a statement about your records." />
@@ -270,34 +280,39 @@ export default function Costs() {
         ) : null}
 
 
-        <Section>
-          <SectionHead title="What You Have Recorded" note="Counted by the day you say you paid" />
-          {status !== 'ready' ? (
-            <Flag style={{ marginTop: sp.sm }}>{costsEmptyLine(status)}</Flag>
-          ) : taken.pots.length ? (
-            <View style={{ marginTop: sp.sm }}>
-              {taken.pots.map((p) => (
-                <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>
-                    {p.count} {p.count === 1 ? 'cost' : 'costs'} in {p.currency}
-                  </Text>
-                  <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>
-                    {minorMoney(p.minorUnits, p.currency) ?? DASH}
-                  </Text>
-                </View>
-              ))}
-              {/* Currencies are never added together, here or anywhere. */}
-              {taken.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{costsEmptyLine(status)}</Text>
-          )}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COSTS_ARE_NEVER_NETTED}</Text>
-        </Section>
+        {/* Round five: the screen opens on its figure. The kit's figure card,
+            one figure per currency and never one over both, with the amber
+            mark this side of the book carries everywhere. A dash and
+            `costsEmptyLine`'s sentence under any read that was not whole; the word
+            "Nothing" — not a dash, and not a money nought, which would need a
+            currency — where the read was whole and there is nothing in it.
+
+            The card of prose that opened the page and the paragraph that
+            closed this card are behind What This Is, below, word for word;
+            one line of the caveat stays beside the figure it qualifies. */}
+        <FigureCard title="What You Have Recorded" period="All you have recorded" source="Your own record"
+          figure={status === 'ready' && !taken.pots.length ? 'Nothing' : null}
+          detail={status === 'ready' && taken.pots.length ? undefined : costsEmptyLine(status)}
+          figures={status === 'ready' && taken.pots.length ? taken.pots.map((p) => ({
+            key: p.currency,
+            figure: minorMoney(p.minorUnits, p.currency),
+            comparison: `${num(p.count)} ${p.count === 1 ? 'cost' : 'costs'} in ${p.currency}`,
+            tone: t.data.amber,
+            spoken: `${minorMoney(p.minorUnits, p.currency) ?? 'no figure'}, ${num(p.count)} ${p.count === 1 ? 'cost' : 'costs'} in ${p.currency}`,
+          })) : undefined}>
+          {/* Currencies are never added together, here or anywhere. */}
+          {status === 'ready' && taken.pots.length > 1 ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+              These are separate amounts of money and are deliberately not added together.
+            </Flag>
+          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Never taken off what you were paid. There is no profit figure anywhere in this app.</Text>
+        </FigureCard>
+
+        <Expandable title="What This Is" note="Your own record of what went out, and why nothing is netted">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{COST_IS_YOUR_WORD}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{COSTS_ARE_NEVER_NETTED}</Text>
+        </Expandable>
 
         {/* ── where it went ───────────────────────────────────────────────
             Per category AND per currency. A category with nothing in it is
@@ -309,6 +324,16 @@ export default function Costs() {
             <Rule />
             <Section>
               <SectionHead title="Where It Went" note={`${byCategory.length} ${byCategory.length === 1 ? 'kind' : 'kinds'}`} />
+              {/* The mix as a ring, ONE PER CURRENCY: a ring is a whole, and
+                  two moneys are not one. Each slice is this category's pot in
+                  that currency and the share is of that currency's own total.
+                  The rows under it keep every amount and every count. */}
+              {categoryRings.map((d, i) => (
+                <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg, marginBottom: sp.md }}>
+                  <Donut slices={d.slices} centre={d.centre} sub="recorded" spoken={d.spoken} />
+                  <Legend items={d.slices} />
+                </View>
+              ))}
               {byCategory.map((c) => (
                 <View key={c.category} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <Text style={{ ...ty.label, color: t.ink2 }}>{c.label}</Text>
@@ -394,7 +419,7 @@ export default function Costs() {
                 <View key={b.currency} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
                     <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{b.line.label}</Text>
-                    <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>
+                    <Text style={{ ...ty.body, ...font('700'), ...numeric, color: t.ink }}>
                       {minorMoney(b.minorUnits, b.currency) ?? DASH}
                     </Text>
                   </View>
@@ -447,7 +472,7 @@ export default function Costs() {
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                 <Pressable onPress={() => onRemove(c)} hitSlop={8} accessibilityRole="button"
                   accessibilityLabel={`Remove the cost for ${c.description}`} style={{ paddingVertical: sp.xs }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Remove</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Remove</Text>
                 </Pressable>
               </View>
             </View>

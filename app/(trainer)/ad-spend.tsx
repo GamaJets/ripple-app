@@ -57,8 +57,9 @@ import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, Notice, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, Notice, Flag, PageHead, Donut, Legend, Meter, Expandable, type Slice, type Tone } from '../../src/ui/kit';
+import { sharePercent } from '../../src/lib/sharePercent';
+import { sp, layout, hairline, type as ty, font } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
 import { money } from '../../src/lib/gymRecord';
 import { UNMATCHED_NOTE, unmatchedReasonNote } from '../../src/lib/adMatch';
@@ -95,6 +96,8 @@ const EMPTY_READ: AdSpendRead = {
   combined: { ok: false, reason: 'no-channels', missing: [], currencies: [], channels: [] },
   unmatchedWhole: true,
 };
+
+const SPEND_TONES: Tone[] = ['orange', 'blue', 'purple', 'teal', 'pink'];
 
 export default function TrainerAdSpend() {
   const t = useTheme();
@@ -217,6 +220,18 @@ export default function TrainerAdSpend() {
   // is therefore as good under 'partial' as under 'ready', and blanking it all
   // would take working figures away to say nothing about the list.
   const settled = read.status === 'ready' || read.status === 'partial';
+  /** One slice per code for the ring. Empty unless `combined.ok`, which is the
+   *  one-currency, every-channel-read guarantee the ring depends on. The five
+   *  biggest keep a hue; the rest share the grey one. */
+  const spendSlices: Slice[] = !combined.ok ? [] : (() => {
+    const ranked = [...combined.codes].sort((a, b) => b.cents - a.cents);
+    const whole = ranked.reduce((n, x) => n + x.cents, 0);
+    const rest = ranked.slice(SPEND_TONES.length).reduce((n, x) => n + x.cents, 0);
+    return [
+      ...ranked.slice(0, SPEND_TONES.length).map((x, i): Slice => ({ label: x.code, value: x.cents, tone: SPEND_TONES[i], shown: sharePercent(x.cents, whole) })),
+      ...(rest ? [{ label: 'Other Codes', value: rest, tone: 'neutral' as const, shown: sharePercent(rest, whole) }] : []),
+    ];
+  })();
   /** How many ads could not be placed against a code, and whether that number
    *  is a count or a floor. See `unmatchedCount` at the foot of the file. */
   const unmatched = unmatchedCount(read);
@@ -232,6 +247,155 @@ export default function TrainerAdSpend() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <PageHead title="Ad Spend" subtitle="What your ads cost" />
+        {/* ── What it all came to, or why there is no such figure ────────── */}
+        {settled ? (
+          <Section>
+            <SectionHead
+              title="Spent, by code"
+              note={combined.ok ? `${num(combined.codes.length)} ${combined.codes.length === 1 ? 'code' : 'codes'}` : undefined}
+            />
+
+            {!combined.ok ? (
+              <View>
+                <Flag tone={combined.reason === 'no-channels' ? t.ink3 : t.warn}>
+                  {combineRefusalNote(combined)}
+                </Flag>
+                {combined.reason === 'channel-unread' || combined.reason === 'currency-clash' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{NO_TOTAL_NOTE}</Text>
+                ) : null}
+
+                {/* The figures that ARE known, shown apart. Withholding the
+                    total is not withholding the facts, and a coach can still
+                    act on the channel that answered. */}
+                {read.channels.filter((s) => s.run?.status === 'ok' && s.matched.length > 0).map((s) => (
+                  <View key={s.channel} style={{ marginTop: sp.lg }}>
+                    <Rule />
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>{channelLabel(s.channel)}</Text>
+                    {s.matched.map((m, i) => (
+                      <View key={`${m.code}-${i}`} style={{
+                        flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
+                        gap: sp.md, marginTop: sp.md,
+                      }}>
+                        <Text style={{ ...ty.body, color: t.ink }}>{m.code}</Text>
+                        <Text style={{ ...ty.body, color: t.ink }}>{money(m.cents, m.currency) ?? DASH}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ))}
+              </View>
+            ) : combined.codes.length === 0 ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                Every connected channel was checked and none of their ads points at one of your join links, so none of the
+                spend they found is credited to a code. What could not be placed is listed below.
+              </Text>
+            ) : (
+              <View>
+                {/* The matched spend as a ring, one slice per code. `combined.ok`
+                    is what makes this drawable at all: it is only true when
+                    every connected channel was read and they all bill in ONE
+                    currency, so the slices are amounts of the same money and
+                    may be added into the centre. 'ready' as well, because a
+                    ring looks final and a short read is not. It is the MATCHED
+                    spend — what could not be placed on a code is listed under
+                    this card and is in no slice. */}
+                {read.status === 'ready' ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginBottom: sp.md }}>
+                    <Donut slices={spendSlices} centre={money(spendSlices.reduce((n, x) => n + (x.value ?? 0), 0), combined.currency)} sub="matched"
+                      spoken={`Matched ad spend by code: ${spendSlices.map((x) => `${x.label} ${x.shown ?? 'no figure'}`).join(', ')}`} />
+                    <Legend items={spendSlices} />
+                  </View>
+                ) : null}
+                <Text style={{ ...ty.label, color: t.ink3 }}>{coverageNote(combined.channels)}</Text>
+                {combined.codes.map((m, i) => {
+                  const src = sourceFor(m.codeId);
+                  const overridden = src?.source === 'manual';
+                  const rev = revenueFor(m.codeId);
+                  const currencyClash = !!rev && rev.currency !== m.currency;
+                  return (
+                    <View key={`${m.code}-${i}`} style={{ marginTop: sp.lg }}>
+                      <Rule />
+                      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, marginTop: sp.lg }}>
+                        <Text style={{ ...ty.head, color: t.ink }}>{m.code}</Text>
+                        <Text style={{ ...ty.head, color: t.ink }}>{money(m.cents, m.currency) ?? DASH}</Text>
+                      </View>
+                      <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
+                        Across {num(m.ads)} {m.ads === 1 ? 'ad' : 'ads'} pointing at this code’s join link.
+                      </Text>
+
+                      {/* Which channels the figure is made of. A coach who can
+                          see that most of it is one channel can act on that;
+                          a single number only says the total is high. */}
+                      {m.parts.length > 1 ? (
+                        <View style={{ marginTop: sp.sm }}>
+                          {m.parts.map((p, k) => (
+                            <Meter key={p.channel} label={channelLabel(p.channel)} val={p.cents} target={m.cents}
+                              tone={SPEND_TONES[k % SPEND_TONES.length]} note={money(p.cents, m.currency) ?? DASH} />
+                          ))}
+                        </View>
+                      ) : null}
+
+                      {/* The precedence, made visible. Both numbers, and which
+                          one is in use — never a silent replacement. */}
+                      {overridden ? (
+                        <View style={{ marginTop: sp.md }}>
+                          {/* The unreadable figure gets its own sentence rather
+                              than a dash mid-clause. `src.cents` is
+                              `number | null` because the row can come back
+                              without an amount on it, and "You entered AED 0.00
+                              for this code" — which is what `?? 0` produced —
+                              is a specific, wrong claim about what the coach
+                              typed, made where it says that figure is the one
+                              being used. */}
+                          <Flag tone={t.warn}>
+                            {src!.cents == null ? (
+                              <>
+                                Your own figure for this code is the one being used, and we couldn’t read it back to show you
+                                here. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported and it
+                                has not replaced anything.
+                              </>
+                            ) : (
+                              <>
+                                You entered {money(src!.cents, src!.currency) ?? DASH} for this code, and yours is the figure
+                                being used. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported
+                                and it has not replaced anything.
+                              </>
+                            )}
+                          </Flag>
+                          <View style={{ marginTop: sp.md }}>
+                            <Ghost
+                              label={busy === `use:${m.codeId ?? 'default'}` ? 'Switching…' : 'Use the Collected Figure'}
+                              a11yLabel={`Use the collected figure for ${m.code} instead of the one you entered`}
+                              onPress={() => { if (!busy) takeSynced(m.codeId, m.code); }}
+                            />
+                          </View>
+                        </View>
+                      ) : (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                          This is the figure your return for {m.code} is worked out from. Type your own on the Clients screen
+                          and yours will be kept instead, including on the next check.
+                        </Text>
+                      )}
+
+                      {/* Two currencies do not divide. Named rather than
+                          converted: a converted figure carries a rate nobody
+                          chose. */}
+                      {currencyClash ? (
+                        <View style={{ marginTop: sp.md }}>
+                          <Flag tone={t.crit}>
+                            This spend is in {m.currency} and the clients off this code paid in {rev!.currency}. Repple will
+                            not divide one by the other, so there is no return shown for it — record this code’s spend in{' '}
+                            {rev!.currency} yourself if you want the comparison.
+                          </Flag>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </Section>
+        ) : null}
+
         {/* The opening sentence is an offer, and it is only made where the
             offer exists. With no app id supplied for any of the three, the
             original line invited a coach to connect an account that nothing on
@@ -239,12 +403,17 @@ export default function TrainerAdSpend() {
             connected" — which reads as something the coach has not got round
             to. Neither half is a promise about a future version, because none
             is owed: what is missing is configuration, not code. */}
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        {/* Behind a fold since round five, word for word: the page opens on
+            what was spent, and the offer is one tap under it. `READ_ONLY_NOTE`
+            stays on the page as the fold's own line — it is the one sentence
+            here that is a fact about the coach's ad account and not a manual. */}
+        <Expandable title="Collecting It Automatically" note={READ_ONLY_NOTE}>
+          <Text style={{ ...ty.label, color: t.ink3 }}>
           {anyChannelSetUp
             ? 'Connect Meta, Google Ads or TikTok and Repple reads what each campaign cost, matching ads to your join codes by the link they point at. Set a join link as the ad’s destination and there is nothing else to set up.'
             : 'Collecting ad spend automatically needs an ad account to sign in to, and none of Meta, Google Ads or TikTok is set up here — each card below says what is missing and who has to supply it. Typing what you spent into a code’s spend field works exactly as it always has, and every figure on this screen is built from those.'}
-        </Text>
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{READ_ONLY_NOTE}</Text>
+          </Text>
+        </Expandable>
 
         {/* Said first, and not softened. A coach who is refused by Meta after a
             successful sign-in must know why before it happens to them. It names
@@ -339,144 +508,6 @@ export default function TrainerAdSpend() {
                 </Card>
               </View>
             ))}
-          </Section>
-        ) : null}
-
-        {/* ── What it all came to, or why there is no such figure ────────── */}
-        {settled ? (
-          <Section>
-            <SectionHead
-              title="Spent, by code"
-              note={combined.ok ? `${num(combined.codes.length)} ${combined.codes.length === 1 ? 'code' : 'codes'}` : undefined}
-            />
-
-            {!combined.ok ? (
-              <View>
-                <Flag tone={combined.reason === 'no-channels' ? t.ink3 : t.warn}>
-                  {combineRefusalNote(combined)}
-                </Flag>
-                {combined.reason === 'channel-unread' || combined.reason === 'currency-clash' ? (
-                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{NO_TOTAL_NOTE}</Text>
-                ) : null}
-
-                {/* The figures that ARE known, shown apart. Withholding the
-                    total is not withholding the facts, and a coach can still
-                    act on the channel that answered. */}
-                {read.channels.filter((s) => s.run?.status === 'ok' && s.matched.length > 0).map((s) => (
-                  <View key={s.channel} style={{ marginTop: sp.lg }}>
-                    <Rule />
-                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>{channelLabel(s.channel)}</Text>
-                    {s.matched.map((m, i) => (
-                      <View key={`${m.code}-${i}`} style={{
-                        flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
-                        gap: sp.md, marginTop: sp.md,
-                      }}>
-                        <Text style={{ ...ty.body, color: t.ink }}>{m.code}</Text>
-                        <Text style={{ ...ty.body, color: t.ink }}>{money(m.cents, m.currency) ?? DASH}</Text>
-                      </View>
-                    ))}
-                  </View>
-                ))}
-              </View>
-            ) : combined.codes.length === 0 ? (
-              <Text style={{ ...ty.body, color: t.ink2 }}>
-                Every connected channel was checked and none of their ads points at one of your join links, so none of the
-                spend they found is credited to a code. What could not be placed is listed below.
-              </Text>
-            ) : (
-              <View>
-                <Text style={{ ...ty.label, color: t.ink3 }}>{coverageNote(combined.channels)}</Text>
-                {combined.codes.map((m, i) => {
-                  const src = sourceFor(m.codeId);
-                  const overridden = src?.source === 'manual';
-                  const rev = revenueFor(m.codeId);
-                  const currencyClash = !!rev && rev.currency !== m.currency;
-                  return (
-                    <View key={`${m.code}-${i}`} style={{ marginTop: sp.lg }}>
-                      <Rule />
-                      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, marginTop: sp.lg }}>
-                        <Text style={{ ...ty.head, color: t.ink }}>{m.code}</Text>
-                        <Text style={{ ...ty.head, color: t.ink }}>{money(m.cents, m.currency) ?? DASH}</Text>
-                      </View>
-                      <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
-                        Across {num(m.ads)} {m.ads === 1 ? 'ad' : 'ads'} pointing at this code’s join link.
-                      </Text>
-
-                      {/* Which channels the figure is made of. A coach who can
-                          see that most of it is one channel can act on that;
-                          a single number only says the total is high. */}
-                      {m.parts.length > 1 ? (
-                        <View style={{ marginTop: sp.sm }}>
-                          {m.parts.map((p) => (
-                            <View key={p.channel} style={{
-                              flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, marginTop: 2,
-                            }}>
-                              <Text style={{ ...ty.caption, color: t.ink3 }}>{channelLabel(p.channel)}</Text>
-                              <Text style={{ ...ty.caption, color: t.ink2 }}>{money(p.cents, m.currency) ?? DASH}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      ) : null}
-
-                      {/* The precedence, made visible. Both numbers, and which
-                          one is in use — never a silent replacement. */}
-                      {overridden ? (
-                        <View style={{ marginTop: sp.md }}>
-                          {/* The unreadable figure gets its own sentence rather
-                              than a dash mid-clause. `src.cents` is
-                              `number | null` because the row can come back
-                              without an amount on it, and "You entered AED 0.00
-                              for this code" — which is what `?? 0` produced —
-                              is a specific, wrong claim about what the coach
-                              typed, made where it says that figure is the one
-                              being used. */}
-                          <Flag tone={t.warn}>
-                            {src!.cents == null ? (
-                              <>
-                                Your own figure for this code is the one being used, and we couldn’t read it back to show you
-                                here. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported and it
-                                has not replaced anything.
-                              </>
-                            ) : (
-                              <>
-                                You entered {money(src!.cents, src!.currency) ?? DASH} for this code, and yours is the figure
-                                being used. The {money(m.cents, m.currency) ?? DASH} above is what your ad accounts reported
-                                and it has not replaced anything.
-                              </>
-                            )}
-                          </Flag>
-                          <View style={{ marginTop: sp.md }}>
-                            <Ghost
-                              label={busy === `use:${m.codeId ?? 'default'}` ? 'Switching…' : 'Use the Collected Figure'}
-                              a11yLabel={`Use the collected figure for ${m.code} instead of the one you entered`}
-                              onPress={() => { if (!busy) takeSynced(m.codeId, m.code); }}
-                            />
-                          </View>
-                        </View>
-                      ) : (
-                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                          This is the figure your return for {m.code} is worked out from. Type your own on the Clients screen
-                          and yours will be kept instead, including on the next check.
-                        </Text>
-                      )}
-
-                      {/* Two currencies do not divide. Named rather than
-                          converted: a converted figure carries a rate nobody
-                          chose. */}
-                      {currencyClash ? (
-                        <View style={{ marginTop: sp.md }}>
-                          <Flag tone={t.crit}>
-                            This spend is in {m.currency} and the clients off this code paid in {rev!.currency}. Repple will
-                            not divide one by the other, so there is no return shown for it — record this code’s spend in{' '}
-                            {rev!.currency} yourself if you want the comparison.
-                          </Flag>
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })}
-              </View>
-            )}
           </Section>
         ) : null}
 
@@ -609,7 +640,7 @@ export default function TrainerAdSpend() {
                       paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring,
                     }}>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{row.label}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{row.label}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                           {row.code}{on ? ' · marked free' : row.spend ? ' · you have entered a cost' : ' · cost unknown'}
                         </Text>

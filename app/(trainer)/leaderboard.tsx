@@ -60,8 +60,8 @@ import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, Notice, PageHead, KpiRow, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, value, font } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn } from '../../src/lib/units';
 import { deltaLabel } from '../../src/lib/deltaLabel';
@@ -73,10 +73,19 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
+/** The first three places: the word for each, and its medal's tone. */
+const PLACE = ['First', 'Second', 'Third'] as const;
+const MEDAL: Tone[] = ['amber', 'neutral', 'orange'];
+
 export default function Leaderboard() {
   // The COACH's unit, not the client's. This screen is read by the coach.
   const wu = useSettings().weightUnit;
   const t = useTheme();
+  /** A medal's plate and ink, from the same tokens the kit's tones resolve to. */
+  const medal = (i: number): { soft: string; ink: string } =>
+    i === 0 ? { soft: t.data.amberSoft, ink: t.data.amberInk }
+      : i === 1 ? { soft: t.surface3, ink: t.ink2 }
+        : { soft: t.data.orangeSoft, ink: t.data.orangeInk };
   const router = useRouter();
   const { roster, status, refresh } = useRoster();
   // The reader's own calendar day, re-settled at midnight by the provider
@@ -180,8 +189,20 @@ export default function Leaderboard() {
             this app does not put it — and without `a11yLabel` a screen reader
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
-        <PageHead title="Leaderboard" subtitle="Your roster" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Ordered by the last check-in rating each client gave themselves</Text>
+        <PageHead title="Leaderboard" subtitle="By each client’s last check-in rating" />
+
+        {/* ── the top of the board, as tiles ─────────────────────────────
+            Round five: the first three as the kit's tiles — gold, silver and
+            bronze in the amber, neutral and orange tones, each with the word
+            for its place, because a colour alone is not a rank. Only under a
+            WHOLE roster: on a short read the order is not final, and a podium
+            is the one drawing of it that looks final. The full list below is
+            still drawn on a short read, under its notice. */}
+        {isWhole(status) && scored.length ? (
+          <KpiRow tiles items={scored.slice(0, 3).map(({ c, rating }, i) => ({
+            label: `${PLACE[i]} · ${c.name.split(' ')[0]}`, value: `${rating}%`, tone: MEDAL[i],
+          }))} />
+        ) : null}
 
 
         <Section>
@@ -195,18 +216,6 @@ export default function Leaderboard() {
               by the app: it is what each client last said about themselves, and
               a coach ringing somebody at the bottom of it is entitled to know
               that is what they are ringing about. */}
-          {scored.length ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-              This is each client’s own rating from their most recent check-in, out of five and shown
-              as a percentage. It is what they said about one day rather than something this app
-              measured, and nothing else is folded into it. Weight movement is printed beside the
-              name and is deliberately not added to it. Nor is anything on the second line — how long
-              they have been with you, when they were last seen, their last scan score — or the
-              injury and unread marks under it. Those are what the rating is read against, and none
-              of them moves anybody’s place.
-            </Text>
-          ) : null}
-
           {/* An unread roster is not an empty one. Without this the screen tells
               a coach with a full book that they have no clients, which is the
               most expensive sentence it can say. */}
@@ -299,12 +308,21 @@ export default function Leaderboard() {
               // reworded there.
               accessibilityLabel={`${c.name}, rank ${i + 1}, last check-in rating ${rating} per cent. ${rowSpoken(c, today)}${discSpoken ? ` ${discSpoken}` : ''} Opens their messages.`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <Text style={{ ...value(15), color: i === 0 ? t.brand : t.ink3, width: 20, textAlign: 'center' }}>{i + 1}</Text>
+              {/* A medal for the first three — the place's number on a plate of
+                  its tone, in that tone's ink — and the bare number after. The
+                  rank is spoken in the row's label either way. */}
+              {i < 3 ? (
+                <View style={{ width: 28, height: 28, borderRadius: radius.pill, backgroundColor: medal(i).soft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ ...value(15), color: medal(i).ink }}>{i + 1}</Text>
+                </View>
+              ) : (
+                <Text style={{ ...value(15), color: t.ink3, width: 28, textAlign: 'center' }}>{i + 1}</Text>
+              )}
               <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
                 {/* The coach's own unit, not the client's — this row is read by
                     the coach, and app/(trainer)/client-training.tsx already
                     draws that distinction. The delta is stored in kilograms and
@@ -352,7 +370,7 @@ export default function Leaderboard() {
                         waiting — and a zero draws nothing at all, which is the
                         state this pair exists to keep distinct. */}
                     {unread ? (
-                      <Text style={{ ...ty.micro, color: unread.known ? t.brand : t.ink3 }}>{unread.text}</Text>
+                      <Text style={{ ...ty.micro, color: unread.known ? t.brandText : t.ink3 }}>{unread.text}</Text>
                     ) : null}
                   </View>
                 ) : null}
@@ -361,8 +379,8 @@ export default function Leaderboard() {
                     bar drawn as a fraction of whoever happens to lead reads as a
                     gap to close, and it moves for everybody the moment one
                     person's figure changes. */}
-                <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
-                  <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.max(0, Math.min(100, rating))}%` }} />
+                <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
+                  <View style={{ height: 8, borderRadius: 4, backgroundColor: t.brand, width: `${Math.max(0, Math.min(100, rating))}%` }} />
                 </View>
               </View>
               <Text style={{ ...value(18), color: t.ink }}>{rating}%</Text>
@@ -370,6 +388,24 @@ export default function Leaderboard() {
             );
           })}
         </Section>
+
+        {/* What the order is, word for word as it stood over the list — behind
+            a fold since round five, so the board opens on the board. One line
+            of it stays in the head: whose rating this is. */}
+        {scored.length ? (
+          <Expandable title="What This Order Is" note="Their own rating, and what is not folded into it">
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              This is each client’s own rating from their most recent check-in, out of five and shown
+              as a percentage. It is what they said about one day rather than something this app
+              measured, and nothing else is folded into it. Weight movement is printed beside the
+              name and is deliberately not added to it. Nor is anything on the second line — how long
+              they have been with you, when they were last seen, their last scan score — or the
+              injury and unread marks under it. Those are what the rating is read against, and none
+              of them moves anybody’s place.
+            </Text>
+          </Expandable>
+        ) : null}
+
 
         {unplaced.length > 0 ? (
           <View>
@@ -405,10 +441,10 @@ export default function Leaderboard() {
                   accessibilityRole="button" accessibilityLabel={`Message ${c.name}, who has not checked in. ${rowSpoken(c, today)}${discSpoken ? ` ${discSpoken}` : ''}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {c.goal} · no check-ins{c.weightDelta == null ? ' · no scans yet' : ''}
                     </Text>
@@ -431,7 +467,7 @@ export default function Leaderboard() {
                           </View>
                         ) : null}
                         {unread ? (
-                          <Text style={{ ...ty.micro, color: unread.known ? t.brand : t.ink3 }}>{unread.text}</Text>
+                          <Text style={{ ...ty.micro, color: unread.known ? t.brandText : t.ink3 }}>{unread.text}</Text>
                         ) : null}
                       </View>
                     ) : null}
@@ -488,10 +524,10 @@ export default function Leaderboard() {
                   accessibilityLabel={`${c.name}, added by hand and has no Repple account yet. Opens their client screen.`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
                     {/* The goal is the one thing on this row that IS known: the
                         coach typed it in themselves. Nothing else is said,
                         because nothing else was ever read. */}

@@ -111,6 +111,7 @@
 // prints as a hundredth of itself.
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
+import Svg, { Polyline } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -118,8 +119,8 @@ import { useTheme } from '../../src/ui/components';
 // The month window's instant, recomputed at midnight, on foreground and on
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow } from '../../src/ui/today';
-import { Rule, Section, SectionHead, PageHead, Notice, Flag, ListRow, PartialRead, fig, FigureCard } from '../../src/ui/kit';
-import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, ListRow, PartialRead, fig, HeroCard, KpiRow, Meter, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, hairline, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { minorMoney, wholeMoney, type Taken, type TakenRow } from '../../src/lib/coachMoney';
 import { takingsStrands, TAKINGS_IS_GROSS } from '../../src/lib/coachRevenue';
 // The hero's month is a STATEMENT PERIOD — the same type, the same half-open
@@ -208,6 +209,56 @@ interface RecentPayment {
   note: string;
   /** For ordering only. */
   atMs: number;
+  /** Which of the three strands it came from — the row's chip and the tone of
+   *  its monogram. `chip` is the word on it: the receipt's own method for a
+   *  payment the coach recorded, so "Cash" is never printed over a transfer. */
+  kind: PaymentKind;
+  chip: string;
+}
+
+type PaymentKind = 'package' | 'renewal' | 'recorded';
+/** Package green, renewal blue, recorded-by-you amber — the same three hues
+ *  Revenue by Source gives the same three strands on Analytics. */
+const KIND_TONE: Record<PaymentKind, Tone> = { package: 'brand', renewal: 'blue', recorded: 'amber' };
+
+/** The three takings strands by `Strand.key`, named and toned as the rows are. */
+const STRAND_NAME: Record<string, string> = { sales: 'Packages', renewals: 'Renewals', receipts: 'Recorded by You' };
+const STRAND_TONE: Record<string, Tone> = { sales: 'brand', renewals: 'blue', receipts: 'amber' };
+
+/** How many whole calendar months the hero's trend looks back over. */
+const TREND_MONTHS = 6;
+
+/**
+ * The hero's trend, drawn on night.
+ *
+ * Inline rather than the kit's `Spark`, and for one reason: Spark's axis and
+ * readout are `t.ink3` and `t.ring`, which are near-black on the night card in
+ * the light theme, and it has no night mode to ask for. This is the smallest
+ * honest version — a line from a ZERO baseline over months that were each read
+ * whole, the first and last month named under it, one spoken sentence carrying
+ * every value. It draws nothing unless there are two points and something
+ * above nought to draw: six counted zeroes are a flat line along the bottom of
+ * a card, which says less than the absence of one.
+ */
+function NightSpark({ values, from, to, spoken }: { values: number[]; from: string; to: string; spoken: string }) {
+  const t = useTheme();
+  const W = 300, H = 44, pad = 4;
+  const top = Math.max(0, ...values);
+  if (values.length < 2 || top <= 0) return null;
+  const pts = values.map((v, i) => `${pad + (i / (values.length - 1)) * (W - pad * 2)},${H - pad - (v / top) * (H - pad * 2)}`).join(' ');
+  return (
+    // rtl-ok: pinned LTR because the <Svg> above the labels does not mirror —
+    // mirror the two month names alone and each sits under the wrong end.
+    <View accessible accessibilityRole="image" accessibilityLabel={spoken} style={{ marginTop: sp.md, direction: 'ltr' }}>
+      <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        <Polyline points={pts} fill="none" stroke={t.brandBright} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+      </Svg>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+        <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.nightInk3 }}>{from}</Text>
+        <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.nightInk3 }}>{to}</Text>
+      </View>
+    </View>
+  );
 }
 
 /**
@@ -238,9 +289,9 @@ function recentPayments(
 ): { rows: RecentPayment[]; undated: number } {
   const out: RecentPayment[] = [];
   let undated = 0;
-  const push = (key: string, name: string | null, amount: string | null, note: string, at: number | null) => {
+  const push = (key: string, name: string | null, amount: string | null, note: string, at: number | null, kind: PaymentKind, chip: string) => {
     if (at == null || !Number.isFinite(at)) { undated += 1; return; }
-    out.push({ key, name, amount, note, atMs: at });
+    out.push({ key, name, amount, note, atMs: at, kind, chip });
   };
   for (const r of sales) {
     // Gross, as every takings line in this app has always meant it. What has
@@ -252,6 +303,7 @@ function recentPayments(
       minorMoney(r.amount_cents, r.currency ?? null),
       [r.package_name ?? 'Package', fmtDay(r.created_at), back ? `${back} refunded` : null].filter(Boolean).join(' · '),
       Date.parse(r.created_at),
+      'package', 'Package',
     );
   }
   for (const r of renewals) {
@@ -261,6 +313,7 @@ function recentPayments(
       minorMoney(r.amount_cents, r.currency),
       [r.billing_reason === 'subscription_create' ? 'Subscription started' : 'Renewal', r.paid_at ? fmtDay(r.paid_at) : null].filter(Boolean).join(' · '),
       r.paid_at ? Date.parse(r.paid_at) : null,
+      'renewal', 'Renewal',
     );
   }
   for (const r of receipts) {
@@ -268,8 +321,9 @@ function recentPayments(
       `receipt:${r.id}`,
       r.paidBy || nameOf(r.clientId),
       minorMoney(r.amountCents, r.currency),
-      `${methodLabel(r.method)}, recorded by you · ${dayLabel(r.receivedOn)}`,
+      `Recorded by you · ${dayLabel(r.receivedOn)}`,
       localDate(r.receivedOn)?.getTime() ?? null,
+      'recorded', methodLabel(r.method),
     );
   }
   out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
@@ -583,11 +637,34 @@ export default function CoachMoney() {
     if (cur == null || before == null || before <= 0) return null;
     return ((cur - before) / before) * 100;
   }, [monthIn, priorIn]);
-  const allIn = useMemo(
-    () => ledger(strandsFor({ sale: saleRows, renewal: renewalRows, receipt: receiptRows })),
+  /* ── the hero's trend: the six WHOLE months before this one ──────────────
+   *
+   * This month is left out on purpose — on the 3rd it is three days, and a
+   * line that ends on three days of takings ends on a cliff. Each month goes
+   * through the same `inPeriod` and the same `ledger()` as the hero, so a
+   * month is a point only when all three reads were whole; one withheld month
+   * withholds the line, because a trend with a hole in it is drawn through
+   * the hole. Null is "no trend", and the hero already says why. */
+  const trend = useMemo(() => {
+    const months = Array.from({ length: TREND_MONTHS }, (_, k) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (TREND_MONTHS - k), 1);
+      return calendarMonth(d.getFullYear(), d.getMonth() + 1);
+    });
+    const totals = months.map((m) => { const r = periodRange(m); return r ? ledger(inPeriod(r)).total : null; });
+    if (totals.some((x) => x == null)) return null;
+    return { months, totals: totals as Taken[] };
+  }, [now, inPeriod]);
+  /** One currency's six months, in minor units. A month with nothing in this
+   *  currency under a whole read is a counted nought, not a gap. */
+  const trendFor = (currency: string): number[] | null =>
+    trend ? trend.totals.map((x) => x.pots.find((p) => p.currency === currency)?.minorUnits ?? 0) : null;
+
+  const allStrands = useMemo(
+    () => strandsFor({ sale: saleRows, renewal: renewalRows, receipt: receiptRows }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [saleRows, renewalRows, receiptRows, sales.status, renewals.status, receipts.status],
   );
+  const allIn = useMemo(() => ledger(allStrands), [allStrands]);
 
   const recordedByHand = useMemo(() => receiptsTaken(receipts.rows), [receipts.rows]);
   const landed = useMemo(() => payoutSummary(payouts.rows, payouts.status), [payouts.rows, payouts.status]);
@@ -652,6 +729,24 @@ export default function CoachMoney() {
       <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{amount ?? 'not denominated'}</Text>
     </View>
   );
+
+  /** A payment kind's plate and the ink that clears contrast on it. The kit's
+   *  `toneOf` is private, and these are the same three tokens it would give. */
+  const plate = (k: PaymentKind): { soft: string; ink: string } =>
+    k === 'package' ? { soft: t.brandSoft, ink: t.brandText }
+      : k === 'renewal' ? { soft: t.data.blueSoft, ink: t.data.blueInk }
+        : { soft: t.data.amberSoft, ink: t.data.amberInk };
+
+  /** A tile's figure for one side of the book: the money where there is ONE
+   *  currency, the count of currencies where there are several — a tile holds
+   *  one figure and two currencies are not one — "None" for a whole read with
+   *  nothing in it, and null, which is the dash, for a read that was not
+   *  whole. The section under the tiles has every pot and every reason. */
+  const tileOf = (tk: Taken | null): { value: string | null; unit?: string } =>
+    !tk ? { value: null }
+      : tk.pots.length === 1 ? { value: minorMoney(tk.pots[0].minorUnits, tk.pots[0].currency) }
+        : tk.pots.length === 0 ? { value: 'None' }
+          : { value: String(tk.pots.length), unit: 'currencies' };
 
   /** One ledger drawn: its pots, or the reason there is no figure. */
   const drawIn = (l: ReturnType<typeof ledger>, side: 'in' | 'out') => {
@@ -721,55 +816,71 @@ export default function CoachMoney() {
             One figure per currency, never one figure over all of them; a dash
             and the reason where `ledger()` withholds the total; and the
             delta only where both months are whole — see `deltaFor`. */}
-        {/* The kit's FigureCard, which is the review's "metric summary": the
-            head, the figure, its movement, the period. Three things moved
-            with it. The truncation notice sits OVER the card instead of inside
-            it — it is a card itself, and it is about every figure below. The
-            movement is UNDER its figure rather than to its right, so neither
-            "AED 12,480.00" nor "+12% against August" gives up width to the
-            other at any text size. And the green is the 6pt mark beside the
-            movement, not the ink of it: scale.ts keeps colour off text, and
-            the sign already says which way the month went. */}
+        {/* Round five: the approved look's night hero in place of the white
+            figure card. Eyebrow, the Sora figure, the movement as a chip, and
+            the six whole months before this one as a line on night. The money
+            rules did not move with it: ONE FIGURE PER CURRENCY, each on its
+            own line of the headline and each with its own chip and its own
+            line, never one figure over all of them; a dash and `ledger()`'s
+            reason where the total is withheld; the chip only where both
+            months are whole — see `deltaFor`. The truncation notice sits OVER
+            the card: it is about every figure below it.
+
+            What came OFF the card: the two paragraphs on what "taken" counts
+            and how a payment is dated. They are behind How to Read This, under
+            the list, word for word. "Gross" stays on the card as one word,
+            because that one is a caveat about the figure and not a manual. */}
         {sales.status === 'partial' || renewals.status === 'partial' || receipts.status === 'partial' ? (
           <View style={{ marginTop: sp.md }}>
             <PartialRead what="payments" onPress={load} />
           </View>
         ) : null}
-        <FigureCard title="Total Taken" period="This Month"
-          /* One figure per currency, each its own spoken sentence. With no
-             pots there is no `figures`, and the card draws the one dash. */
-          figures={range && monthIn.total && monthIn.total.pots.length ? monthIn.total.pots.map((p) => {
-            const pct = deltaFor(p.currency);
-            // `since: null` is a decision, not an omission: the sentence
-            // names the month it is measured from itself.
-            const moved = pct == null ? null : deltaLabel(pct, { since: null, unit: '%', decimals: 0 });
-            return {
-              key: p.currency,
-              figure: minorMoney(p.minorUnits, p.currency),
-              comparison: moved ? `${moved} against ${prior.label}` : undefined,
-              // Marked for up, as the board draws it. Down takes the quiet
-              // mark and not the alarm colour: a quieter month is a fact
-              // about the month, not a fault on the screen.
-              tone: deltaSign(pct, 0) === '+' ? t.brand : undefined,
-              spoken: `${minorMoney(p.minorUnits, p.currency) ?? 'not denominated'}, ${p.count} ${plural(p.count, 'payment', 'payments')} in ${p.currency} in ${period.label}${moved ? `. ${moved} against ${prior.label}` : ''}`,
-            };
-          }) : undefined}
-          figure={null}
-          detail={range && monthIn.total && !monthIn.total.pots.length ? ledgerEmptyLine('in', monthIn.status) : undefined}>
-          {!range ? (
-            <Flag style={{ marginTop: sp.sm }}>This month could not be read as two dates, so no figure is stated. That is not a statement that nothing was taken.</Flag>
-          ) : !monthIn.total ? (
-            <Flag style={{ marginTop: sp.sm }}>{monthIn.reason}</Flag>
-          ) : null}
-          {monthIn.total && monthIn.total.pots.length > 1 ? (
-            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-              These are separate amounts of money and are deliberately not added together.
-            </Flag>
-          ) : null}
-          {monthIn.total ? missingNote(monthIn.total) : null}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{TAKINGS_IS_GROSS}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PERIOD_NOTE}</Text>
-        </FigureCard>
+        {(() => {
+          const pots = range && monthIn.total ? monthIn.total.pots : [];
+          const paid = pots.reduce((n, x) => n + x.count, 0);
+          return (
+            <HeroCard
+              eyebrow={`TOTAL TAKEN · ${period.label.toUpperCase()}`}
+              // One line per currency. They share a headline and are not a sum.
+              title={pots.length ? pots.map((x) => minorMoney(x.minorUnits, x.currency) ?? `${x.currency} not denominated`).join('\n') : fig(null)}
+              meta={!range
+                ? 'This month could not be read as two dates, so no figure is stated.'
+                : !monthIn.total
+                  ? monthIn.reason ?? undefined
+                  : !pots.length
+                    ? ledgerEmptyLine('in', monthIn.status)
+                    : `Gross · ${paid} ${plural(paid, 'payment', 'payments')}${pots.length > 1 ? ` · ${pots.length} currencies, never added` : ''}`}>
+              {pots.map((x) => {
+                const pct = deltaFor(x.currency);
+                // `since: null` is a decision, not an omission: the words
+                // beside the chip name the month it is measured from.
+                const moved = pct == null ? null : deltaLabel(pct, { since: null, unit: '%', decimals: 0 });
+                const series = trendFor(x.currency);
+                return (
+                  <View key={x.currency} style={{ marginTop: sp.md }}>
+                    {moved ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm }}>
+                        {/* Green for up. Down takes the neutral plate and not
+                            the alarm colour: a quieter month is a fact about
+                            the month, not a fault on the screen. */}
+                        <TonedChip label={moved} tone={deltaSign(pct, 0) === '+' ? 'brand' : 'neutral'} />
+                        <Text style={{ ...ty.caption, color: t.nightInk2 }}>
+                          {pots.length > 1 ? `${x.currency} against ${prior.label}` : `against ${prior.label}`}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {series && trend ? (
+                      <NightSpark values={series}
+                        from={trend.months[0].label} to={trend.months[trend.months.length - 1].label}
+                        spoken={`Taken in ${x.currency} over the ${TREND_MONTHS} months before this one: ${trend.months.map((m, k) => `${m.label} ${minorMoney(series[k], x.currency) ?? 'no figure'}`).join(', ')}`} />
+                    ) : null}
+                  </View>
+                );
+              })}
+            </HeroCard>
+          );
+        })()}
+        {monthIn.total ? missingNote(monthIn.total) : null}
 
         {/* ── RECENT PAYMENTS ────────────────────────────────────────────
             The board's list: a round avatar, the client, the amount at the
@@ -797,16 +908,21 @@ export default function CoachMoney() {
               ) : null}
               {recent.rows.map((p, i) => (
                 <View key={p.key} accessible
-                  accessibilityLabel={`${p.name ?? 'Name not read'}, ${p.amount ?? 'amount not stated'}. ${p.note}`}
+                  accessibilityLabel={`${p.name ?? 'Name not read'}, ${p.amount ?? 'amount not stated'}. ${p.chip}. ${p.note}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ ...ty.micro, color: t.brand }}>{monogram(p.name)}</Text>
+                  {/* The monogram on its kind's plate, in that hue's INK — the
+                      mark colour as 13pt text does not clear contrast. */}
+                  <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: plate(p.kind).soft, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ ...ty.micro, color: plate(p.kind).ink }}>{monogram(p.name)}</Text>
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: p.name ? 'capitalize' : 'none' }}>{p.name ?? NO_NAME}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: p.name ? 'capitalize' : 'none' }}>{p.name ?? NO_NAME}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.note}</Text>
                   </View>
-                  <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{fig(p.amount)}</Text>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    <Text style={{ ...ty.body, ...font('700'), ...numeric, color: t.ink }}>{fig(p.amount)}</Text>
+                    <TonedChip label={p.chip} tone={KIND_TONE[p.kind]} />
+                  </View>
                 </View>
               ))}
               {!recent.rows.length && !failed.length && !short.length ? (
@@ -829,14 +945,47 @@ export default function CoachMoney() {
             missing feature and is a statistical refusal. */}
         <ScreenHelp screen="coach-money" />
 
-        {/* How the screen is SHAPED — two ledgers, never one net number. */}
-        <View style={{ marginTop: sp.lg }}>
-          <Notice kicker="How to read this" title="Two ledgers, kept apart" note={NO_NET_NOTE} />
-        </View>
+        {/* ── the three sides of the book, as tiles ───────────────────────
+            Coming in, what landed, going out: the three sections below, each
+            as one figure on the ground between the cards. They are three
+            DIFFERENT figures from three sources and the tiles sit apart for
+            that reason — nothing here subtracts one from another, which is
+            what How to Read This says. All time, like the sections they
+            summarise; the hero above is the month. */}
+        <KpiRow tiles items={([
+          { label: 'Coming In', tone: 'brand', tk: allIn.total },
+          { label: 'Landed', tone: 'blue', tk: landed.arrived },
+          { label: 'Going Out', tone: 'amber', tk: isWhole(costs.status) ? costTaken : null },
+        ] as { label: string; tone: Tone; tk: Taken | null }[]).map(({ tk, ...k }) => ({ ...k, value: fig(tileOf(tk).value), unit: tileOf(tk).unit }))} />
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>All time, from three separate records. Never subtracted from each other.</Text>
+
+        {/* How the screen is SHAPED, and what "taken" counts — the three
+            paragraphs that used to stand on the page, behind one fold. */}
+        <Expandable title="How to Read This" note="Two ledgers kept apart, and gross rather than earnings">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{NO_NET_NOTE}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{TAKINGS_IS_GROSS}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PERIOD_NOTE}</Text>
+        </Expandable>
 
         <Section>
           <SectionHead title="All Recorded" note="Every payment Repple has a record of" />
           {drawIn(allIn, 'in')}
+          {/* Where it came from, per currency: each strand's pot as a share of
+              that currency's own total. Only under a stated total — `ledger()`
+              gives one only when all three reads were whole — so a bar is
+              never a share of part of the book. */}
+          {allIn.total ? allIn.total.pots.map((pot) => (
+            <View key={pot.currency} style={{ marginTop: sp.sm }}>
+              {allIn.total!.pots.length > 1 ? <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{pot.currency}</Text> : null}
+              {allStrands.map((st) => {
+                const part = st.taken.pots.find((x) => x.currency === pot.currency)?.minorUnits ?? 0;
+                return (
+                  <Meter key={st.key} label={STRAND_NAME[st.key] ?? st.label} val={part} target={pot.minorUnits}
+                    tone={STRAND_TONE[st.key] ?? 'neutral'} note={minorMoney(part, pot.currency) ?? 'not denominated'} />
+                );
+              })}
+            </View>
+          )) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{STRIPE_AUTHORITY_NOTE}</Text>
         </Section>
 
@@ -1297,7 +1446,7 @@ export default function CoachMoney() {
                 const line = returnLine(codes.status, c);
                 return (
                   <View key={c.id ?? c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(codes.status, c)}</Text>
                     <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                       {codeFig('Spent', fgs.spent)}
@@ -1380,7 +1529,7 @@ export default function CoachMoney() {
                   borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
                 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1, textTransform: 'capitalize' }} numberOfLines={1}>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1, textTransform: 'capitalize' }} numberOfLines={1}>
                       {r.name ?? '—'}
                     </Text>
                     <Text style={{ ...ty.body, ...numeric, color: t.ink }}>

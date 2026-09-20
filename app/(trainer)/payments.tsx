@@ -235,8 +235,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, PartialRead, fig, Meter } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, value, numeric, font } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 // Which clients the figure at the top of this screen is made of. A BREAKDOWN
 // of a total already here, and deliberately not a lifetime value — that figure
@@ -1284,7 +1284,7 @@ export default function TrainerPayments() {
                 paddingHorizontal: sp.md, paddingVertical: 9, borderRadius: radius.pill,
                 backgroundColor: on ? t.brand : t.surface2,
               }}>
-              <Text style={{ ...ty.caption, fontWeight: '600', color: on ? t.bg : t.ink2 }}>{o.label}</Text>
+              <Text style={{ ...ty.caption, ...font('600'), color: on ? t.bg : t.ink2 }}>{o.label}</Text>
             </Pressable>
           );
         })}
@@ -1544,10 +1544,10 @@ export default function TrainerPayments() {
     <View style={{ flex: 1 }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>{label}</Text>
       {pots.length === 0 ? (
-        <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(null)}</Text>
+        <Text style={{ ...value(26), color: t.ink, marginTop: 4 }}>{fig(null)}</Text>
       ) : pots.map((p) => (
         <View key={p.currency} style={{ marginTop: 4 }}>
-          <Text style={{ ...value(22), color: t.ink }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={{ ...value(26), color: t.ink }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
           {/* "payments", not "sales": a pot now holds one-off purchases and
               subscription renewals together, and a renewal is not a sale. */}
           <Text style={{ ...ty.caption, color: t.ink3 }}>{p.count === 1 ? 'from 1 payment' : 'from ' + p.count + ' payments'}</Text>
@@ -1577,8 +1577,31 @@ export default function TrainerPayments() {
   const made = (label: string, taken: { pots: Pot[] }) => (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: 4 }}>
       <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{label}</Text>
-      <Text style={{ ...ty.caption, color: t.ink2, fontWeight: '500' }}>{fig(potLine(taken.pots))}</Text>
+      <Text style={{ ...ty.caption, color: t.ink2, ...font('500') }}>{fig(potLine(taken.pots))}</Text>
     </View>
+  );
+
+  /** What a total is made of, as meters: one-off green and renewals blue, the
+   *  hues those two strands have on Payments and Analytics. ONE CURRENCY AT A
+   *  TIME — each bar is a strand's pot out of the same currency's pot in the
+   *  total, so nothing here is a share of two moneys. A total with no pots
+   *  keeps the old dashed lines: there is no whole to be a share of. */
+  const madeMeters = (total: { pots: Pot[] }, oneOff: { pots: Pot[] }, renew: { pots: Pot[] }) => (
+    total.pots.length === 0 ? (<>
+      {made('One-off sales and packs', oneOff)}
+      {made('Subscription renewals', renew)}
+    </>) : total.pots.map((pot) => {
+      const part = (x: { pots: Pot[] }) => x.pots.find((q) => q.currency === pot.currency)?.minorUnits ?? 0;
+      const tag = total.pots.length > 1 ? ` · ${pot.currency}` : '';
+      return (
+        <View key={pot.currency}>
+          <Meter label={`One-off Sales and Packs${tag}`} val={part(oneOff)} target={pot.minorUnits} tone="brand"
+            note={fig(minorMoney(part(oneOff), pot.currency))} />
+          <Meter label={`Subscription Renewals${tag}`} val={part(renew)} target={pot.minorUnits} tone="blue"
+            note={fig(minorMoney(part(renew), pot.currency))} />
+        </View>
+      );
+    })
   );
   // The typed price read back in the gym's currency, or null when either half
   // is missing. Never a number with a unit put on it for the look of the thing.
@@ -1628,9 +1651,6 @@ export default function TrainerPayments() {
             ("Getting paid") was a line of prose above the title; what it said is
             still said by the first card below. */}
         <PageHead title="Payments & Packages" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Get paid by your clients — memberships &amp; session packs.
-        </Text>
 
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading how you get paid…" /> : (
           <>
@@ -1693,7 +1713,7 @@ export default function TrainerPayments() {
                       color={reach === 'held' ? t.warn : reach === 'reaching' ? t.brand : t.ink3} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{payoutHeading(reach)}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{payoutHeading(reach)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{payoutNote(reach)}</Text>
                   </View>
                 </View>
@@ -1805,11 +1825,9 @@ export default function TrainerPayments() {
                     completely different positions next month. */}
                 <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 2 }}>This month, made up of</Text>
-                  {made('One-off sales and packs', oneOffMonth)}
-                  {made('Subscription renewals', renewMonth)}
+                  {madeMeters(takenMonth, oneOffMonth, renewMonth)}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, marginBottom: 2 }}>All time, made up of</Text>
-                  {made('One-off sales and packs', oneOffAll)}
-                  {made('Subscription renewals', renewAll)}
+                  {madeMeters(takenAll, oneOffAll, renewAll)}
                 </View>
 
                 {/* An amount we cannot put a unit on is missing from the totals
@@ -1903,7 +1921,7 @@ export default function TrainerPayments() {
                         <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
                           {p.count === 1 ? 'On 1 payment' : 'On ' + p.count + ' payments'}
                         </Text>
-                        <Text style={{ ...ty.caption, color: t.ink2, fontWeight: '500' }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink2, ...font('500') }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
                       </View>
                     ))}
                     {givenBack.unlabelled ? (
@@ -2004,7 +2022,7 @@ export default function TrainerPayments() {
                         Everything else about a chargeback can wait until the
                         coach has read the deadline; the deadline cannot. */}
                     {due ? (
-                      <Text style={{ ...ty.body, fontWeight: '500', color: tone === 'urgent' ? t.ink : t.ink2 }}>{due}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: tone === 'urgent' ? t.ink : t.ink2 }}>{due}</Text>
                     ) : null}
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: due ? 4 : 0 }}>
                       {/* A name we could not read is a dash, and so is a
@@ -2012,11 +2030,11 @@ export default function TrainerPayments() {
                           whenever the charge it is against was never recorded
                           here. That is a real state, and it is the case with
                           the least other warning attached to it. */}
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(d.client_name)}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink, flex: 1 }}>{fig(d.client_name)}</Text>
                       {/* Dashed rather than dollared when Stripe stated no
                           currency. There is no default currency in this
                           product and this screen invents nothing. */}
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(d.amount_cents, d.currency))}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{fig(minorMoney(d.amount_cents, d.currency))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: over ? t.ink3 : tone === 'urgent' ? t.crit : t.warn }} />
@@ -2102,7 +2120,7 @@ export default function TrainerPayments() {
                           the person is real, and the failure is ours to state.
                           Same wording as the Memberships Sold list below. */}
                       <Text
-                        style={{ ...ty.body, fontWeight: '500', color: r.name ? t.ink : t.ink3, flex: 1 }}
+                        style={{ ...ty.body, ...font('500'), color: r.name ? t.ink : t.ink3, flex: 1 }}
                         numberOfLines={1}
                       >
                         {r.name || PAYER_NAMELESS}
@@ -2294,11 +2312,11 @@ export default function TrainerPayments() {
                   <View key={b.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
                       {/* A name we could not read is a dash, never 'Client'. */}
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(b.client_name)}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{fig(b.client_name)}</Text>
                       {/* Dashed rather than dollared when the package it was
                           sold from is gone: that row held the only record of
                           what this amount is denominated in. */}
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(b.amount_cents, b.currency))}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{fig(minorMoney(b.amount_cents, b.currency))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: out || (gone && lost > 0) ? t.warn : t.brand }} />
@@ -2377,7 +2395,7 @@ export default function TrainerPayments() {
                           accessibilityState={{ disabled: refundBusy === b.id, busy: refundBusy === b.id }}
                           accessibilityLabel={`Refund the sale to ${b.client_name || 'this client'}`}
                           style={{ paddingVertical: sp.xs }}>
-                          <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === b.id ? t.ink3 : t.brand }}>
+                          <Text style={{ ...ty.label, ...font('500'), color: refundBusy === b.id ? t.ink3 : t.brandText }}>
                             {refundBusy === b.id ? 'Refunding…' : 'Refund'}
                           </Text>
                         </Pressable>
@@ -2404,7 +2422,7 @@ export default function TrainerPayments() {
                           accessibilityState={{ disabled: creditBusy === b.id, busy: creditBusy === b.id }}
                           accessibilityLabel={`Put a session credit back on the pack for ${b.client_name || 'this client'}`}
                           style={{ paddingVertical: sp.xs }}>
-                          <Text style={{ ...ty.label, fontWeight: '500', color: creditBusy === b.id ? t.ink3 : t.brand }}>
+                          <Text style={{ ...ty.label, ...font('500'), color: creditBusy === b.id ? t.ink3 : t.brandText }}>
                             {creditBusy === b.id ? 'Working…' : 'Give a credit back'}
                           </Text>
                         </Pressable>
@@ -2424,7 +2442,7 @@ export default function TrainerPayments() {
                               label carries the state now, the same way its
                               sibling does; the colour cannot, because this one
                               is drawn in the quiet ink to begin with. */}
-                          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>
+                          <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>
                             {creditBusy === b.id ? 'Working…' : 'Take one off'}
                           </Text>
                         </Pressable>
@@ -2481,7 +2499,7 @@ export default function TrainerPayments() {
                           only ever on a deleted package is a dash rather than a
                           bare number in a unit nobody chose — the same rule the
                           takings pots keep. */}
-                      <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('600'), ...numeric, color: t.ink }}>
                         {fig(minorMoney(b.amount_cents, b.currency))}
                       </Text>
                     </View>
@@ -2502,7 +2520,7 @@ export default function TrainerPayments() {
                           accessibilityState={{ disabled: refundBusy === b.id, busy: refundBusy === b.id }}
                           accessibilityLabel={`Refund the membership sold to ${b.client_name || 'this client'}`}
                           style={{ paddingVertical: sp.xs }}>
-                          <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === b.id ? t.ink3 : t.brand }}>
+                          <Text style={{ ...ty.label, ...font('500'), color: refundBusy === b.id ? t.ink3 : t.brandText }}>
                             {refundBusy === b.id ? 'Refunding…' : 'Refund'}
                           </Text>
                         </Pressable>
@@ -2542,7 +2560,7 @@ export default function TrainerPayments() {
                   borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
                 }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{p.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{billingWords(p)}</Text>
                   </View>
                   {/* Edit before remove, and to the left of it: a coach whose
@@ -2601,8 +2619,8 @@ export default function TrainerPayments() {
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
                       {/* A name we could not read is a dash, never 'Client' —
                           the money beside it is real either way. */}
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(s.client_name)}</Text>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(pkgPriceLine(s.amount_cents, s.currency, s.billing_interval))}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{fig(s.client_name)}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{fig(pkgPriceLine(s.amount_cents, s.currency, s.billing_interval))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'past_due' ? t.crit : stopping ? t.warn : t.brand }} />
@@ -2654,7 +2672,7 @@ export default function TrainerPayments() {
                   {unsettledSubs.map((s) => (
                     <View key={s.id} style={{ marginTop: sp.md }}>
                       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, flex: 1 }}>{fig(s.client_name)}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink2, flex: 1 }}>{fig(s.client_name)}</Text>
                         <Text style={{ ...ty.label, color: t.ink3 }}>{statusLabel(s.status)}</Text>
                       </View>
                       <Flag tone={t.warn} style={{ marginTop: 4 }}>{unsettledNote(s.status)}</Flag>
@@ -2786,8 +2804,8 @@ export default function TrainerPayments() {
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
                       {/* A name we could not read is a dash, never 'Client'.
                           The money beside it is real either way. */}
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(target.who)}</Text>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(p.amount_cents, p.currency))}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{fig(target.who)}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{fig(minorMoney(p.amount_cents, p.currency))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: p.paid_at ? t.brand : t.warn }} />
@@ -2814,7 +2832,7 @@ export default function TrainerPayments() {
                         accessibilityState={{ disabled: refundBusy === p.id, busy: refundBusy === p.id }}
                         accessibilityLabel={`Refund the renewal paid by ${target.who || 'this client'}`}
                         style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === p.id ? t.ink3 : t.brand }}>
+                        <Text style={{ ...ty.label, ...font('500'), color: refundBusy === p.id ? t.ink3 : t.brandText }}>
                           {refundBusy === p.id ? 'Refunding…' : 'Refund'}
                         </Text>
                       </Pressable>
@@ -2874,7 +2892,7 @@ export default function TrainerPayments() {
                     return (
                       <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
-                          <Text style={{ ...ty.body, fontWeight: '600', color: state === 'live' ? t.ink : t.ink3, flex: 1 }}>
+                          <Text style={{ ...ty.body, ...font('600'), color: state === 'live' ? t.ink : t.ink3, flex: 1 }}>
                             {p.code}
                           </Text>
                           <Text style={{ ...ty.label, ...numeric, color: state === 'live' ? t.ink2 : t.ink3 }}>
@@ -2900,7 +2918,7 @@ export default function TrainerPayments() {
                             disabled={promoBusy} accessibilityLabel={`Withdraw the code ${p.code}`}
                             accessibilityState={{ disabled: promoBusy, busy: promoBusy }}
                             style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
-                            <Text style={{ ...ty.label, fontWeight: '500', color: promoBusy ? t.ink3 : t.brand }}>Withdraw</Text>
+                            <Text style={{ ...ty.label, ...font('500'), color: promoBusy ? t.ink3 : t.brandText }}>Withdraw</Text>
                           </Pressable>
                         ) : null}
                       </View>

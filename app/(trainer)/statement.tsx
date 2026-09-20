@@ -48,8 +48,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, KpiRow, Expandable, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { signedInUid } from '../../src/lib/signedInUid';
@@ -165,6 +165,13 @@ const YEAR_START_PREFIX = 'repple.coach.statementYearStart:';
  * over a stranger's fiscal year.
  */
 const LEGACY_YEAR_START_KEY = 'repple.coach.statementYearStart';
+
+/** The statement's tiles, by `StatementSection.key`. In, then out and landed.
+ *  The three takings strands keep the hues they have on Payments and Analytics. */
+const TILE_ROWS: { key: string; label: string; tone: Tone }[][] = [
+  [{ key: 'packs', label: 'Packs Sold', tone: 'brand' }, { key: 'subscriptions', label: 'Renewals', tone: 'blue' }, { key: 'receipts', label: 'Recorded by You', tone: 'amber' }],
+  [{ key: 'payoutsPaid', label: 'Reached Your Bank', tone: 'teal' }, { key: 'refunds', label: 'Given Back', tone: 'pink' }, { key: 'costs', label: 'Costs', tone: 'orange' }],
+];
 
 export default function StatementOfRecord() {
   const t = useTheme();
@@ -441,6 +448,16 @@ export default function StatementOfRecord() {
   };
 
   const G = layout.gutter;
+  /** One section as a tile's figure. Reads the section's finished lines; it
+   *  adds nothing and formats nothing. */
+  const periodTile = (key: string): { value: string; unit?: string } => {
+    const sec = statement?.sections.find((x) => x.key === key);
+    if (!sec || sec.withheld) return { value: fig(null) };
+    if (sec.lines.length === 1) return { value: sec.lines[0].amount };
+    if (sec.lines.length === 0) return { value: 'None' };
+    return { value: String(sec.lines.length), unit: 'currencies' };
+  };
+
   const pill = (active: boolean) => ({
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -475,15 +492,6 @@ export default function StatementOfRecord() {
             still said by the first card below. */}
         <PageHead title="Statement of Record" />
 
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="What this app recorded, and only that"
-            note="It calculates no tax and it is not a tax document — it says so on its own face, so nobody has to take your word for what it is. Where Stripe took the payment, Stripe's own record is the one that proves it."
-          />
-        </View>
-
-
         {/* ── the period, which the coach chooses ───────────────────────── */}
         <Section>
           <SectionHead title="Period" note={periodSentence(period)} />
@@ -492,7 +500,7 @@ export default function StatementOfRecord() {
               {years.map((y) => (
                 <Pressable key={y} onPress={() => setYear(y)} accessibilityRole="button"
                   accessibilityLabel={`Show ${y}`} style={pill(y === year)}>
-                  <Text style={{ ...ty.label, ...numeric, color: y === year ? '#fff' : t.ink2 }}>{y}</Text>
+                  <Text style={{ ...ty.label, ...numeric, color: y === year ? t.brandInk : t.ink2 }}>{y}</Text>
                 </Pressable>
               ))}
             </View>
@@ -502,7 +510,7 @@ export default function StatementOfRecord() {
               {SPANS.map((s) => (
                 <Pressable key={String(s.key)} onPress={() => setSpan(s.key)} accessibilityRole="button"
                   accessibilityLabel={`Show ${s.label}`} style={pill(s.key === span)}>
-                  <Text style={{ ...ty.label, color: s.key === span ? '#fff' : t.ink2 }}>{s.label}</Text>
+                  <Text style={{ ...ty.label, color: s.key === span ? t.brandInk : t.ink2 }}>{s.label}</Text>
                 </Pressable>
               ))}
             </View>
@@ -534,7 +542,7 @@ export default function StatementOfRecord() {
                       accessibilityRole="button" accessibilityLabel={`Show ${m} ${year}`}
                       accessibilityState={{ selected: month === i + 1 }}
                       style={pill(month === i + 1)}>
-                      <Text style={{ ...ty.label, color: month === i + 1 ? '#fff' : t.ink2 }}>{m}</Text>
+                      <Text style={{ ...ty.label, color: month === i + 1 ? t.brandInk : t.ink2 }}>{m}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -556,7 +564,7 @@ export default function StatementOfRecord() {
                       accessibilityRole="button" accessibilityLabel={`Start the year in ${m}`}
                       accessibilityState={{ selected: start.month === i + 1 }}
                       style={pill(start.month === i + 1)}>
-                      <Text style={{ ...ty.label, color: start.month === i + 1 ? '#fff' : t.ink2 }}>{m}</Text>
+                      <Text style={{ ...ty.label, color: start.month === i + 1 ? t.brandInk : t.ink2 }}>{m}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -642,6 +650,27 @@ export default function StatementOfRecord() {
           </Section>
         ) : (
           <>
+            {/* ── the period at a glance ─────────────────────────────────
+                Round five: six of the statement's sections as tiles, on the
+                ground under the period that chose them — what came in on the
+                first row, what reached the bank and what went back or out on
+                the second. Each tile is that section's OWN line and nothing
+                is computed here: the money where the section has one
+                currency, the number of currencies where it has several
+                (a tile holds one figure, and two moneys are not one), "None"
+                under a whole read with nothing in it, and the dash where the
+                section was withheld — its card below says why. */}
+            {TILE_ROWS.map((row) => (
+              <KpiRow key={row[0].key} tiles items={row.map((k) => ({ label: k.label, tone: k.tone, ...periodTile(k.key) }))} />
+            ))}
+
+            {/* The card of prose that opened the page, behind a fold. */}
+            <Expandable title="What This Is" note="What this app recorded, and only that">
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                It calculates no tax and it is not a tax document — it says so on its own face, so nobody has to take your word for what it is. Where Stripe took the payment, Stripe's own record is the one that proves it.
+              </Text>
+            </Expandable>
+
             {/* ── what could not be read, above every figure ────────────── */}
             {!statement.complete ? (
               <>
@@ -682,7 +711,7 @@ export default function StatementOfRecord() {
                     <Flag style={{ marginTop: sp.sm }}>{sec.withheld}</Flag>
                   ) : (
                     <>
-                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: sp.sm }}>
+                      <Text style={{ ...ty.body, ...font('600'), color: t.ink, marginTop: sp.sm }}>
                         {sec.count} {sec.countLabel}
                       </Text>
                       {sec.lines.map((l) => (
@@ -713,7 +742,7 @@ export default function StatementOfRecord() {
                     statement.salesTotal.lines.map((l) => (
                       <View key={l.label} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
                         <Text style={{ ...ty.label, color: t.ink2 }}>{l.label}</Text>
-                        <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>{l.amount}</Text>
+                        <Text style={{ ...ty.body, ...font('700'), ...numeric, color: t.ink }}>{l.amount}</Text>
                       </View>
                     ))
                   ) : (

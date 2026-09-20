@@ -20,12 +20,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag, Ring, TonedChip, type Tone } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { PLANS } from '../../src/lib/ownerMock';
 import { planOffer } from '../../src/lib/planOffer';
 import { subscribeToPlan, openBillingPortal, fetchMySubscription, money, PRICE_IDS, type Invoice, type Subscription } from '../../src/lib/billing';
-import { trialDisagreement, TRIAL_NOT_YET_ENFORCED } from '../../src/lib/trialGate';
+import { trialDisagreement, TRIAL_NOT_YET_ENFORCED, TRIAL_DAYS } from '../../src/lib/trialGate';
 import { useTrialReading } from '../../src/ui/trialReading';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // The billing history this screen promised in its own subtitle and never had.
@@ -191,7 +191,7 @@ export default function TrainerBilling() {
     if (!r.ok) Alert.alert('Billing portal', r.error || 'No active subscription to manage yet.');
   };
 
-  const statusTone = (s: string | null) => (s === 'active' || s === 'trialing' ? t.brand : s === 'past_due' || s === 'unpaid' ? t.crit : t.ink3);
+  const statusTone = (s: string | null): Tone => (s === 'active' || s === 'trialing' ? 'brand' : s === 'past_due' || s === 'unpaid' ? 'red' : 'neutral');
 
   const G = layout.gutter;
 
@@ -204,9 +204,6 @@ export default function TrainerBilling() {
             ("Your Repple plan") was a line of prose above the title; what it said is
             still said by the first card below. */}
         <PageHead title="Billing" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Your Repple plan, payment method and invoices.
-        </Text>
 
         {!available ? (
           <View style={{ marginTop: sp.xl }}>
@@ -236,12 +233,28 @@ export default function TrainerBilling() {
               flight is neither. `readTrial` returns no state for either and
               the note says WHICH silence it is — a paywall raised on a refused
               query is this app's worst defect wearing a billing hat. */}
-          {trial.state ? (
-            <Text style={{ ...ty.body, color: t.ink }}>
-              {trial.state.expired ? 'Your free days are used up' : `${trial.state.daysLeft} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`}
-            </Text>
-          ) : null}
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{trial.note}</Text>
+          {/* Round five: the days as a ring out of the fourteen, beside the
+              words. Under a null `state` the ring is its track and a dash —
+              no arc, because an arc at nought would be the expired trial this
+              comment exists to not claim — and the note beside it says which
+              silence it is. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg }}>
+            <Ring size={104} tone={trial.state?.expired ? 'neutral' : 'brand'}
+              value={trial.state ? trial.state.daysLeft / TRIAL_DAYS : null}
+              figure={trial.state ? String(trial.state.daysLeft) : null}
+              sub={trial.state?.daysLeft === 1 ? 'day left' : 'days left'}
+              spoken={trial.state
+                ? (trial.state.expired ? 'Your free days are used up' : `${trial.state.daysLeft} of ${TRIAL_DAYS} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`)
+                : 'Free trial days not read'} />
+            <View style={{ flex: 1, minWidth: 160 }}>
+              {trial.state ? (
+                <Text style={{ ...ty.head, color: t.ink }}>
+                  {trial.state.expired ? 'Your free days are used up' : `${trial.state.daysLeft} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`}
+                </Text>
+              ) : null}
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{trial.note}</Text>
+            </View>
+          </View>
           {/* The whole reading, not just its state. Passing `trial.state`
               meant this line was silent for BOTH kinds of null — the account
               that did not answer and the account that answered with nothing —
@@ -269,9 +282,11 @@ export default function TrainerBilling() {
           <Section>
             <SectionHead title="Current Plan" />
             <Text style={{ ...ty.title, color: t.ink }}>{sub.plan || 'Subscription'}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusTone(sub.status) }} />
-              <Text style={{ ...ty.label, color: t.ink2 }}>{STATUS_LABEL[sub.status] || sub.status}</Text>
+            {/* The state as words on a plate, where a 6pt dot and a word were:
+                green for a plan that is running, red for a payment that did
+                not go through, grey for anything else Stripe calls it. */}
+            <View style={{ marginTop: sp.sm }}>
+              <TonedChip label={STATUS_LABEL[sub.status] || sub.status} tone={statusTone(sub.status)} />
             </View>
             {sub.current_period_end ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>

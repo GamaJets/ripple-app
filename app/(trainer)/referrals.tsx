@@ -32,8 +32,9 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead, KpiRow, Meter } from '../../src/ui/kit';
+import { num } from '../../src/lib/format';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachReferrals } from '../../src/ui/coachReferrals';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -87,6 +88,21 @@ export default function CoachReferrals() {
         <PageHead title="Who Brings You Clients" subtitle="Your book" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>{summary}</Text>
 
+        {/* ── the funnel, as three tiles ──────────────────────────────────
+            Round five. Who referred, how many joined on their codes, how many
+            of those started training — counts of people, which may be added.
+            ONLY under 'ready': on a short read these would be sums over
+            whoever came back, stated as the book's, and under a failed one
+            they would be three noughts about a read that never happened. The
+            list below is still drawn on a short read, under its notice. */}
+        {status === 'ready' && rows && rows.length ? (
+          <KpiRow tiles items={[
+            { label: 'Referrers', value: num(rows.length), tone: 'purple' },
+            { label: 'Joined', value: num(rows.reduce((n, x) => n + x.joined, 0)), tone: 'blue' },
+            { label: 'Started Training', value: num(rows.reduce((n, x) => n + x.converted, 0)), tone: 'brand' },
+          ]} />
+        ) : null}
+
         {status === 'error' ? (
           <Section>
             <Notice tone={t.crit} kicker="Not read" title="We couldn’t check who has been referring"
@@ -126,16 +142,23 @@ export default function CoachReferrals() {
                   accessible accessibilityRole="text"
                   accessibilityLabel={`${name}. ${referrerLine(row)}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>
+                  <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.data.purpleSoft, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.data.purpleInk }}>
                       {name.split(' ').map((x) => x[0]).join('')}
                     </Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{name}</Text>
                     {/* Both counts, always. Neither is derived from the other and
                         neither is a score. */}
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{referrerLine(row)}</Text>
+                    {/* The same two counts as a bar: of the people this client
+                        brought in, how many have started. It is a share of
+                        THEIR referrals and of nobody else's, so a client who
+                        brought one person who trains reads as full, which is
+                        true of them. The row's spoken label already says both. */}
+                    <Meter label="Started Training" val={row.converted} target={row.joined} tone="brand"
+                      note={`${num(row.converted)} of ${num(row.joined)}`} />
                   </View>
                   {/* The count they brought in, and no second figure beside it
                       pretending to be what it was worth. */}

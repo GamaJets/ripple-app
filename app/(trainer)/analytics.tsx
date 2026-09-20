@@ -26,7 +26,7 @@
 // month that really was that quiet.
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
@@ -37,14 +37,14 @@ import { useNow } from '../../src/ui/today';
 // the app does — 1,248 sessions, not 1248.
 import { num } from '../../src/lib/format';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ScreenHeader, FigureCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, FigureCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead, TonedChip, Donut, Legend, Meter, Expandable, type Slice } from '../../src/ui/kit';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
+import { sharePercent } from '../../src/lib/sharePercent';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { STATUS_LABEL } from '../../src/lib/status';
 import { useRoster } from '../../src/ui/roster';
 import { type RosterClient } from '../../src/lib/trainerMock';
-import { DistBar } from '../../src/ui/charts';
 import { askAboutMyBusiness } from '../../src/lib/coach';
 import { useCoachingSpans } from '../../src/ui/coachCohorts';
 import {
@@ -89,6 +89,58 @@ import { fetchMyReceipts } from '../../src/ui/coachReceipts';
 import { receiptTakenRows, type CoachReceipt } from '../../src/lib/coachReceipts';
 import { END_ALIGN } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+
+/**
+ * The mockup's windowed figure card: a quiet label, the Sora figure at hero
+ * size with its movement as a chip BESIDE it, one line of period and
+ * population, then the chart.
+ *
+ * Not the kit's `FigureCard`, which puts the comparison under the figure as a
+ * sentence — right for money, where the comparison is long. Here it is "+12
+ * points", and the approved screen has it on the figure's own line. The row
+ * wraps, so at large text the chip drops under the figure by itself rather
+ * than the figure shrinking to make room for it.
+ *
+ * The words are one spoken sentence, as FigureCard's are; the chart is outside
+ * that group because it has its own gestures and its own label.
+ */
+function WindowFigure({ title, figure, unit, chip, up, chipNote, line, tail, spoken, children }: {
+  title: string;
+  /** Spelled by the caller, or null for the dash. */
+  figure: string | null;
+  unit?: string;
+  /** A finished `deltaLabel`, or null when there is nothing to compare with. */
+  chip: string | null;
+  /** Green only for movement upward; anything else is the neutral plate. */
+  up: boolean;
+  chipNote: string;
+  /** Why there is no chip — said as a line, never as a chip. */
+  line?: string;
+  tail: string;
+  spoken: string;
+  children: ReactNode;
+}) {
+  const t = useTheme();
+  return (
+    <Section>
+      <View accessible accessibilityLabel={spoken}>
+        <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>{title}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: sp.sm }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', flexShrink: 1 }}>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
+              style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(figure)}</Text>
+            {unit ? <Text style={{ ...ty.head, color: t.ink3, marginStart: 6 }}>{unit}</Text> : null}
+          </View>
+          {chip ? <TonedChip label={chip} tone={up ? 'brand' : 'neutral'} /> : null}
+          {chip ? <Text style={{ ...ty.caption, color: t.ink3 }}>{chipNote}</Text> : null}
+        </View>
+        {line ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line}</Text> : null}
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{tail}</Text>
+      </View>
+      <View style={{ marginTop: sp.md }}>{children}</View>
+    </Section>
+  );
+}
 
 export default function TrainerAnalytics() {
   const t = useTheme();
@@ -536,11 +588,15 @@ export default function TrainerAnalytics() {
     [sales.status, renewals.status, receipts.status],
   );
   /** What was taken this calendar month, or withheld with the reason. */
-  const takenMonth = useMemo(() => ledger(takingsStrands(takingsReads, {
+  // The strands are kept as well as their ledger: Revenue by Source draws each
+  // one's pot as a slice, and reads them only once `ledger()` has stated a
+  // total — which it does only when all three reads were whole.
+  const takenStrands = useMemo(() => takingsStrands(takingsReads, {
     sale: since(takenRows.sale, monthFrom),
     renewal: since(takenRows.renewal, monthFrom),
     receipt: since(takenRows.receipt, monthFrom),
-  })), [takingsReads, takenRows, monthFrom]);
+  }), [takingsReads, takenRows, monthFrom]);
+  const takenMonth = useMemo(() => ledger(takenStrands), [takenStrands]);
 
   /* ── how this coach works ───────────────────────────────────────────────
    *
@@ -578,6 +634,31 @@ export default function TrainerAnalytics() {
       : takenPots.length > 1
         ? `Taken in ${takenPots.length} currencies this month, which are never added into one figure: ${takenPots.map((pt) => minorMoney(pt.minorUnits, pt.currency)).filter(Boolean).join(', ')}.`
         : TAKINGS_IS_GROSS;
+
+  /* ── revenue by source: one ring per currency ────────────────────────────
+   *
+   * Built off `takenMonth.total`, which is null unless all three reads were
+   * whole, so there is no ring over part of the month. Each slice is ONE
+   * strand's pot in ONE currency; the ring's whole is that currency's pot in
+   * the ledger's own total, so the shares are of money that may be added. */
+  const SOURCE_TONE = { sales: 'brand', renewals: 'blue', receipts: 'amber' } as const;
+  const SOURCE_NAME = { sales: 'Packages', renewals: 'Subscriptions', receipts: 'Recorded by You' } as const;
+  const sourceDonuts = takenPots.map((pot) => {
+    const slices: Slice[] = takenStrands.map((st) => {
+      const part = st.taken.pots.find((x) => x.currency === pot.currency)?.minorUnits ?? 0;
+      return {
+        label: SOURCE_NAME[st.key as keyof typeof SOURCE_NAME] ?? st.label,
+        tone: SOURCE_TONE[st.key as keyof typeof SOURCE_TONE] ?? 'neutral',
+        value: part,
+        shown: sharePercent(part, pot.minorUnits),
+      };
+    });
+    const centre = minorMoney(pot.minorUnits, pot.currency);
+    return {
+      currency: pot.currency, slices, centre,
+      spoken: `Revenue by source this month, ${centre ?? 'no figure'}: ${slices.map((x) => `${x.label} ${x.shown ?? 'no figure'}`).join(', ')}`,
+    };
+  });
 
   const { goals, setGoals, status: goalsStatus, reload: reloadGoals } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
@@ -886,6 +967,14 @@ export default function TrainerAnalytics() {
     ? Math.abs(Math.round(curFigures.adherence - prevFigures.adherence)) : null;
   const adhDeltaLine = rangeDeltaLine(curFigures?.adherence ?? null, prevFigures?.adherence ?? null, adhMoved === 1 ? 'point' : 'points');
   const doneDeltaLine = rangeDeltaLine(curFigures?.completions ?? null, prevFigures?.completions ?? null, '');
+  /** The movement alone — "+12 points" — for the chip beside the figure, and
+   *  only when there IS a comparison. Every no-baseline arm stays a sentence
+   *  (`rangeDeltaLine`), because a chip reading "Not compared" is a state with
+   *  its reason cut off. */
+  const rangeChip = (cur: number | null, prev: number | null, unit: string): string | null =>
+    cur == null || prev == null || prevWindowGap != null ? null : deltaLabel(cur - prev, { since: null, unit, decimals: 0 });
+  const adhChip = rangeChip(curFigures?.adherence ?? null, prevFigures?.adherence ?? null, adhMoved === 1 ? 'point' : 'points');
+  const doneChip = rangeChip(curFigures?.completions ?? null, prevFigures?.completions ?? null, '');
   /** Green only for movement upward; a fall, or no change, sits in ink. Read
    *  off `deltaSign` rather than the raw difference so the two never disagree
    *  about whether something moved. */
@@ -967,6 +1056,14 @@ export default function TrainerAnalytics() {
     .filter((g): g is typeof g & { cur: number } => g.goal > 0 && g.cur != null);
   // Null once there is a target to draw — the bars then speak for themselves.
   const goalsLine = goalsEmptyLine(goalsStatus, goals.revenue, goals.clients);
+  // Null-safe by construction: the ring is only rendered inside the branch
+  // where all three counts are known.
+  const healthSlices: Slice[] = [
+    { label: STATUS_LABEL.on_track, value: onTrack, tone: 'brand', shown: onTrack == null ? null : num(onTrack) },
+    { label: STATUS_LABEL.watch, value: watch, tone: 'amber', shown: watch == null ? null : num(watch) },
+    { label: STATUS_LABEL.at_risk, value: riskCount, tone: 'red', shown: riskCount == null ? null : num(riskCount) },
+    ...(noRecord ? [{ label: STATUS_LABEL.idle, value: noRecord, tone: 'neutral' as const, shown: num(noRecord) }] : []),
+  ];
   const G = layout.gutter;
 
   return (
@@ -994,107 +1091,126 @@ export default function TrainerAnalytics() {
         />
 
         {/* ── client adherence over the window ─────────────────────────────
-            The board's first block: the figure, its movement against the
-            window before, and a bar per period. Drawn by the kit's FigureCard
-            since round four, which is the data-layout review's rule 2 as a
-            component — label, value and unit, comparison, period, source — so
-            the dates the window covers and WHOSE check-ins it averages are on
-            the card rather than three lines down in a caption. The movement
-            sits under the figure with a mark, not beside it in green type:
-            the kit's reasoning (a status colour is not an ink) over the
-            board's, for every figure card in the app at once. The figure is a
-            dash and the chart is not drawn under any read that was not whole —
-            the sentence in the chart's place says which read, and that a dash
-            is unknown rather than nought. */}
-        <FigureCard
+            The mockup's first block: the Sora figure, its movement against
+            the window before as a chip beside it, and a bar per period in two
+            greens. `WindowFigure` above draws it; the dates the window covers
+            and WHOSE check-ins it averages are the card's one quiet line. The
+            figure is a dash and the chart is not drawn under any read that was
+            not whole — the sentence in the chart's place says which read, and
+            that a dash is unknown rather than nought. */}
+        <WindowFigure
           title="Client Adherence"
-          note={rangeDef.spoken}
           figure={curFigures?.adherence == null ? null : String(curFigures.adherence)}
           unit={curFigures?.adherence == null ? undefined : '%'}
-          comparison={adhDeltaLine ?? undefined}
-          tone={upward(curFigures?.adherence ?? null, prevFigures?.adherence ?? null) ? t.brand : undefined}
-          period={winSpan}
-          source={curFigures?.adherence == null ? undefined : `${countOf(curFigures.checkIns, 'check-in')}, across ${countOf(curRead.asked, 'client')} with an account`}
+          chip={adhChip}
+          up={upward(curFigures?.adherence ?? null, prevFigures?.adherence ?? null)}
+          chipNote={`vs ${beforeNote}`}
+          line={adhChip ? undefined : adhDeltaLine ?? undefined}
+          tail={[winSpan, curFigures?.adherence == null ? null : `${countOf(curFigures.checkIns, 'check-in')}, across ${countOf(curRead.asked, 'client')} with an account`].filter(Boolean).join(' · ')}
           spoken={`Client adherence, ${rangeDef.spoken.toLowerCase()}, ${winSpan}: ${curFigures?.adherence == null ? 'not drawn' : `${curFigures.adherence} percent`}. ${adhDeltaLine ?? windowGap ?? ''}`}
         >
-          <View style={{ marginTop: sp.md }}>
-            {curFigures == null ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>{windowGap}</Text>
-            ) : curFigures.adherence == null ? (
-              // A whole read with nothing in it. Said rather than drawn as a
-              // row of empty slots, which reads as a chart that failed.
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                No check-ins from {winSpan}, so there is no adherence to average. Clients rate their own adherence each time they check in.
-              </Text>
-            ) : (
-              <RangeBars data={curFigures.adherenceByBucket} prior={prevFigures?.adherenceByBucket ?? null}
-                labels={rangeLabels} unit="%" max={100} what="Client adherence" priorNote={beforeNote} />
-            )}
-          </View>
-          {curFigures?.adherence != null ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Each client's own rating at check-in, as a percentage, averaged over the {curFigures.checkIns} check-in{curFigures.checkIns === 1 ? '' : 's'} from {winSpan}. Each bar is {rangeDef.bucketDays === 1 ? 'a day' : 'a week, starting on the date under it'}; a gap is a {rangeDef.bucketDays === 1 ? 'day' : 'week'} nobody checked in on, not a zero.
-              {prevFigures?.adherenceByBucket.some((v) => v != null) ? ` The fainter bar beside each is the same ${rangeDef.bucketDays === 1 ? 'day' : 'week'} of ${beforeNote}.` : ''}
-            </Text>
-          ) : null}
-        </FigureCard>
+          {curFigures == null ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{windowGap}</Text>
+          ) : curFigures.adherence == null ? (
+            // A whole read with nothing in it. Said rather than drawn as a
+            // row of empty slots, which reads as a chart that failed.
+            <Text style={{ ...ty.label, color: t.ink3 }}>No check-ins from {winSpan}, so there is no adherence to average.</Text>
+          ) : (
+            <RangeBars data={curFigures.adherenceByBucket} prior={prevFigures?.adherenceByBucket ?? null}
+              labels={rangeLabels} unit="%" max={100} what="Client adherence" priorNote={beforeNote} />
+          )}
+        </WindowFigure>
 
         {/* ── programme completions over the window ────────────────────────
-            The board's second block, as a line. One completion is one session
-            a client logged — a programme day done — and the caption says so,
-            because "completions" under a count of sessions would otherwise be
-            read as programmes finished, which nothing in the record marks. */}
-        <FigureCard
+            The mockup's second block, as its blue area chart. One completion
+            is one session a client logged — a programme day done — and the
+            unit says "sessions", because "completions" under a bare count
+            would otherwise be read as programmes finished, which nothing in
+            the record marks. The longer account is in How These Are Counted. */}
+        <WindowFigure
           title="Program Completions"
-          note={rangeDef.spoken}
           figure={curFigures == null ? null : num(curFigures.completions)}
           unit={curFigures == null ? undefined : (curFigures.completions === 1 ? 'session' : 'sessions')}
-          comparison={doneDeltaLine ?? undefined}
-          tone={upward(curFigures?.completions ?? null, prevFigures?.completions ?? null) ? t.brand : undefined}
-          period={winSpan}
-          source={curFigures == null ? undefined : `Across ${countOf(curRead.asked, 'client')} with an account`}
+          chip={doneChip}
+          up={upward(curFigures?.completions ?? null, prevFigures?.completions ?? null)}
+          chipNote={`vs ${beforeNote}`}
+          line={doneChip ? undefined : doneDeltaLine ?? undefined}
+          tail={[winSpan, curFigures == null ? null : `Across ${countOf(curRead.asked, 'client')} with an account`].filter(Boolean).join(' · ')}
           spoken={`Program completions, ${rangeDef.spoken.toLowerCase()}, ${winSpan}: ${curFigures == null ? 'not drawn' : `${curFigures.completions} session${curFigures.completions === 1 ? '' : 's'} logged`}. ${doneDeltaLine ?? windowGap ?? ''}`}
         >
-          <View style={{ marginTop: sp.md }}>
-            {curFigures == null ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>{windowGap}</Text>
-            ) : (
-              // Spark takes the counts as they are: a period with no session
-              // under a whole read is a counted zero and is drawn at the
-              // baseline, not left as a hole.
-              <Spark data={curFigures.completionsByBucket} labels={rangeLabels} />
-            )}
-          </View>
-          {curFigures != null ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Workout sessions your clients logged from {winSpan}, by the day they trained. Each point is {rangeDef.bucketDays === 1 ? 'a day' : 'a week, starting on the date under it'}. A session logged is a programme day done, not a whole programme finished — nothing in the record marks that.
-            </Text>
-          ) : null}
-        </FigureCard>
+          {curFigures == null ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{windowGap}</Text>
+          ) : (
+            // Spark takes the counts as they are: a period with no session
+            // under a whole read is a counted zero and is drawn at the
+            // baseline, not left as a hole.
+            <Spark data={curFigures.completionsByBucket} labels={rangeLabels} area tone="blue" />
+          )}
+        </WindowFigure>
 
-        {/* ── outcomes before turnover ─────────────────────────────────────
-            The board opens Analytics on the book's adherence, its size and
-            who is at risk — client outcomes, and only then the money. All
-            three are already computed below under a whole roster read and
-            are dashes otherwise; the notice under this strip says why. */}
-        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
-          <KpiRow items={[
-            { label: 'Adherence', value: avgAdh == null ? fig(null) : String(avgAdh), unit: avgAdh == null ? undefined : '%' },
-            { label: 'Clients', value: fig(clients) },
-            { label: 'At Risk', value: fig(riskCount), unit: riskCount == null ? undefined : (riskCount === 1 ? 'client' : 'clients') },
-          ]} />
-          {/* Rule 2: three figures with no period and no population are three
-              numbers. These are NOT over the window chosen above — they are
-              the roster as it stands — and a strip sitting directly under a
-              "Last 30 days" card would otherwise borrow its dates. Said only
-              under a whole roster; without one all three are dashes and the
-              notice below says why. */}
-          {rosterWhole ? (
+        {/* ── revenue by source ────────────────────────────────────────────
+            The mockup's third card. ONE DONUT PER CURRENCY and never one for
+            the month: a ring is a whole, and AED 6,000 beside GBP 400 is not
+            a whole of anything. `sourceDonuts` is empty unless `ledger()`
+            stated a total, which it does only when all three reads were whole
+            — a ring over two strands of three would draw the missing one as
+            nought per cent, in colour. The mockup's Classes slice is not
+            drawn: class takings are not a strand this app records apart from
+            packages, and a slice nobody measured is a made-up one. */}
+        <Section>
+          <SectionHead title="Revenue by Source" note="Money" onPress={() => router.push('/(trainer)/money')} />
+          {takenMonth.reason ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{takenMonth.reason}</Text>
+          ) : sourceDonuts.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing is recorded as taken this month, so there is no split to draw.</Text>
+          ) : sourceDonuts.map((d, i) => (
+            <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg }}>
+              <Donut slices={d.slices} centre={d.centre} sub="this month" spoken={d.spoken} />
+              <Legend items={d.slices} />
+            </View>
+          ))}
+          {sourceDonuts.length > 1 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>One ring per currency. They are never added together.</Text>
+          ) : null}
+          {takenHoles > 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Your roster as it stands today, not the window above. Adherence is the average of each client’s own check-in rating{avgAdh == null ? '' : `, over the ${_adhKnown.length} who have one`}; At Risk is anyone under 70% on it.
+              {num(takenHoles)} payment{takenHoles === 1 ? '' : 's'} with no currency or no amount {takenHoles === 1 ? 'is' : 'are'} in no ring.
             </Text>
           ) : null}
-        </View>
+        </Section>
+
+        {/* ── the roster, as tiles ─────────────────────────────────────────
+            On the ground between the cards, the way the kit means tiles to
+            sit. All three are already computed below under a whole roster
+            read and are dashes otherwise; the notice under this strip says
+            why. They are the roster AS IT STANDS and not the window chosen
+            above — the one line under them says so, because a strip directly
+            under a "Last 30 days" card would otherwise borrow its dates. */}
+        <KpiRow tiles items={[
+          { label: 'Adherence', value: avgAdh == null ? fig(null) : String(avgAdh), unit: avgAdh == null ? undefined : '%', tone: 'brand' },
+          { label: 'Clients', value: fig(clients), tone: 'blue' },
+          { label: 'At Risk', value: fig(riskCount), tone: 'red' },
+        ]} />
+        {rosterWhole ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Your roster as it stands today, not the window above.</Text>
+        ) : null}
+
+        {/* The explaining that sat under each chart, word for word, behind one
+            fold. The owner's note on this screen was that it read as prose
+            with charts in it; the definitions are still one tap away, and the
+            sentences that state WHY a figure is withheld stayed on the cards. */}
+        <Expandable title="How These Are Counted" note="Adherence, completions and the roster strip">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            Adherence is each client's own rating at check-in, as a percentage, averaged over the check-ins from {winSpan}. Each bar is {rangeDef.bucketDays === 1 ? 'a day' : 'a week, starting on the date under it'}; a gap is a {rangeDef.bucketDays === 1 ? 'day' : 'week'} nobody checked in on, not a zero.
+            {prevFigures?.adherenceByBucket.some((v) => v != null) ? ` The fainter bar beside each is the same ${rangeDef.bucketDays === 1 ? 'day' : 'week'} of ${beforeNote}.` : ''}
+          </Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            Completions are workout sessions your clients logged from {winSpan}, by the day they trained. A session logged is a programme day done, not a whole programme finished. Nothing in the record marks that.
+          </Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            In the roster strip, Adherence is the average of each client’s own check-in rating{avgAdh == null ? '' : `, over the ${_adhKnown.length} who have one`}; At Risk is anyone under 70% on it.
+          </Text>
+        </Expandable>
 
         {/* The densest figures screen in either app. Two of the things this
             file already explains to itself in prose — delivered is marked, and
@@ -1193,12 +1309,12 @@ export default function TrainerAnalytics() {
         <Section>
           <SectionHead title="Roster Health"
             note={!rosterWhole ? undefined : avgAdh == null ? 'No check-ins yet' : `${avgAdh}% avg adherence`} />
-          {/* The bar is withheld rather than drawn from what loaded. A DistBar
-              always fills its width, so a split computed over a short roster is
+          {/* The ring is withheld rather than drawn from what loaded. A ring
+              always closes, so a split computed over a short roster is
               rendered as the whole book at whatever proportions the fragment
               happened to have — the one chart on this screen that cannot show
               its own incompleteness. Three zeroes would be worse still: an
-              empty bar under "Roster health" reads as a roster in trouble. */}
+              empty ring under "Roster health" reads as a roster in trouble. */}
           {onTrack == null || watch == null || riskCount == null ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {rosterStatus === 'loading'
@@ -1212,29 +1328,22 @@ export default function TrainerAnalytics() {
                 `noRecord` above: without it this bar was drawn over the
                 clients who have check-ins and read as though it were drawn
                 over the book. */}
-            <DistBar segments={[
-              { label: STATUS_LABEL.on_track, value: onTrack, color: t.brand },
-              { label: STATUS_LABEL.watch, value: watch, color: t.warn },
-              { label: STATUS_LABEL.at_risk, value: riskCount, color: t.crit },
-              ...(noRecord ? [{ label: STATUS_LABEL.idle, value: noRecord, color: t.ink3 }] : []),
-            ]} />
-            <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md, flexWrap: 'wrap' }}>
-              {([[STATUS_LABEL.on_track, onTrack, t.brand], [STATUS_LABEL.watch, watch, t.warn], [STATUS_LABEL.at_risk, riskCount, t.crit],
-                 ...(noRecord ? [[STATUS_LABEL.idle, noRecord, t.ink3] as const] : [])] as const).map(([l, v, col]) => (
-                <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {v}</Text>
-                </View>
-              ))}
+            {/* A ring and its legend since round five, the same drawing
+                coach Home uses for the same four bands, so the two screens
+                read as one picture of one roster. The legend carries every
+                count in words; the colours repeat it. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg }}>
+              <Donut slices={healthSlices} centre={fig(clients)} sub={clients === 1 ? 'client' : 'clients'}
+                spoken={`Roster health: ${healthSlices.map((x) => `${x.label} ${x.shown}`).join(', ')}`} />
+              <Legend items={healthSlices} />
             </View>
-            {/* Which measure these four bands are, said out loud, because the
-                At-risk list further down this same screen is a different one.
-                Two measures on one screen is fine; two measures on one screen
-                with nothing saying so is how a coach comes to distrust both. */}
+            {/* Which measure these bands are, in one line, because the At-risk
+                list below is a different one. Two measures on one screen is
+                fine; two with nothing saying so is how a coach comes to
+                distrust both. The idle band's longer account is behind How
+                These Are Counted. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {noRecord
-                ? `Measured on check-in adherence. ${noRecord === 1 ? 'One client has' : `${noRecord} clients have`} no check-ins at all, so ${noRecord === 1 ? 'they are' : 'they are'} counted as ${STATUS_LABEL.idle.toLowerCase()} rather than as on track — an absence is not a pass. At-risk Clients below is a different measure — each client against their own pattern — and does have something to say about them.`
-                : 'Measured on check-in adherence. At-risk Clients below is a different measure: each client against their own pattern.'}
+              Measured on check-in adherence{noRecord ? `; ${noRecord === 1 ? 'one client has' : `${num(noRecord)} clients have`} no check-ins and ${noRecord === 1 ? 'is' : 'are'} ${STATUS_LABEL.idle.toLowerCase()}, not on track` : ''}. At-risk Clients below measures each client against their own pattern.
             </Text>
           </>)}
         </Section>
@@ -1296,7 +1405,7 @@ export default function TrainerAnalytics() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Everyone is holding their own pattern.</Text>
           ) : atRisk.map((c, i) => (
             <View key={c.id} style={{
-              flexDirection: 'row', alignItems: 'center', paddingVertical: sp.md,
+              flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
               borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
               {/* The dot, the label and the line under the name all used to be
@@ -1305,13 +1414,15 @@ export default function TrainerAnalytics() {
                   row cannot say something different from the band it was put
                   in. `idle` is drawn in the quieter tone on purpose: it is not
                   a judgement about the client, it is the absence of one. */}
-              <View style={{ width: 6, height: 6, borderRadius: 3, marginEnd: sp.md, backgroundColor: dr.driftFor(c.id)?.status === 'at_risk' ? t.crit : t.warn }} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                  {DRIFT_LABEL[dr.driftFor(c.id)!.status]} · {dr.driftFor(c.id)!.reason}
-                </Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dr.driftFor(c.id)!.reason}</Text>
               </View>
+              {/* The band as words on a plate, where a 6pt dot was: red for
+                  at risk, amber for the quieter band. The words are the
+                  state; the colour finds the row. */}
+              <TonedChip label={DRIFT_LABEL[dr.driftFor(c.id)!.status]}
+                tone={dr.driftFor(c.id)?.status === 'at_risk' ? 'red' : dr.driftFor(c.id)?.status === 'idle' ? 'neutral' : 'amber'} />
             </View>
           ))}
 
@@ -1336,7 +1447,7 @@ export default function TrainerAnalytics() {
               would hide the screen precisely when the coach cannot see who has
               gone quiet from here either. */}
           <View style={{ marginTop: sp.md }}>
-            <ListRow icon="bell" title="Quiet Clients"
+            <ListRow icon="bell" tone="amber" title="Quiet Clients"
               note="Who is breaking their own pattern, and a draft you read and send yourself"
               onPress={() => router.push('/(trainer)/nudges')} />
           </View>
@@ -1363,31 +1474,27 @@ export default function TrainerAnalytics() {
               Nobody has started with you yet, so there is no cohort to follow. This fills in on its own as people join and as time passes.
             </Text>
           ) : (<>
-            <View style={{ flexDirection: 'row', paddingBottom: sp.sm }}>
-              <Text style={{ ...ty.micro, color: t.ink3, flex: 1.4 }}>Started</Text>
-              {MILESTONES.map((m) => (
-                <Text key={m} style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>{m}m</Text>
-              ))}
-            </View>
+            {/* Each cohort as its own short stack of meters since round
+                five: how many of the people who started that month were still
+                with the coach at one, three, six and twelve months, as a bar
+                out of the cohort's size. The count is the bar's own note, so
+                it is printed and spoken; the percentage joins it only where
+                the cohort clears the floor. A milestone the cohort has not
+                REACHED draws no fill and says so — a zero there would draw as
+                a collapse, and "not read" would be the wrong reason. */}
             {cohortRows.map((row, i) => (
               <View key={row.month} style={{
-                flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm,
+                paddingTop: i === 0 ? 0 : sp.md, marginTop: i === 0 ? 0 : sp.md,
                 borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
               }}>
-                <View style={{ flex: 1.4 }}>
-                  <Text style={{ ...ty.label, color: t.ink }}>{monthLabelOf(row.month)}</Text>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>{row.size} joined</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.sm }}>
+                  <Text style={{ ...ty.label, ...font('700'), color: t.ink, flexShrink: 1 }}>{monthLabelOf(row.month)}</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(row.size)} joined</Text>
                 </View>
                 {row.held.map((h, k) => (
-                  <View key={MILESTONES[k]} style={{ flex: 1, alignItems: 'flex-end' }}>
-                    {/* A dash where the cohort has not reached this milestone.
-                        A zero there would draw as a collapse on the right-hand
-                        side of the table, which is where the eye lands. */}
-                    <Text style={{ ...value(15), color: t.ink }}>{h == null ? '—' : `${h}/${row.size}`}</Text>
-                    {row.retained[k] != null ? (
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>{row.retained[k]}%</Text>
-                    ) : null}
-                  </View>
+                  <Meter key={MILESTONES[k]} label={`${MILESTONES[k]} Month${MILESTONES[k] === 1 ? '' : 's'}`}
+                    val={h} target={row.size} tone="teal"
+                    note={h == null ? 'Not reached yet' : `${num(h)} of ${num(row.size)}${row.retained[k] != null ? ` · ${row.retained[k]}%` : ''}`} />
                 ))}
               </View>
             ))}
@@ -1580,19 +1687,16 @@ export default function TrainerAnalytics() {
             const pc = goalPct(g.cur, g.goal);
             const hit = pc >= 1;
             return (
+              // The kit's Meter since round five, in place of a hand-built
+              // 3pt bar: the same two numbers at the trailing edge, an 8pt
+              // bar that can be seen, and a progressbar role with its value.
               <View key={g.label} style={{ marginBottom: sp.lg }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>{g.label}</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-                    {g.money ? fig(priced(g.cur)) : g.cur} / {g.money ? fig(priced(g.goal)) : g.goal}
-                  </Text>
-                </View>
-                <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-                  <View style={{ height: 3, borderRadius: 2, width: `${pc * 100}%`, backgroundColor: t.brand, opacity: hit ? 1 : 0.55 }} />
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 }}>
-                  {hit ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} /> : null}
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{hit ? 'Goal reached' : Math.round(pc * 100) + '% there'}</Text>
+                <Meter label={g.label} val={g.cur} target={g.goal} tone={g.money ? 'brand' : 'blue'}
+                  note={`${g.money ? fig(priced(g.cur)) : num(g.cur)} / ${g.money ? fig(priced(g.goal)) : num(g.goal)}`} />
+                <View style={{ marginTop: sp.sm }}>
+                  {hit
+                    ? <TonedChip label="Goal Reached" icon="check" />
+                    : <Text style={{ ...ty.caption, color: t.ink3 }}>{Math.round(pc * 100) + '% there'}</Text>}
                 </View>
               </View>
             );
@@ -1660,7 +1764,7 @@ export default function TrainerAnalytics() {
               reason to doubt it. Spark takes the holes now and keeps each
               reading in its own slot. */}
           {chartMonths >= 2 ? (
-          <Spark data={chartSeries} labels={chartLabels} />
+          <Spark data={chartSeries} labels={chartLabels} area />
           ) : revHist.status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading the months you have recorded…</Text>
           ) : revHist.status === 'error' ? (
@@ -1743,13 +1847,13 @@ export default function TrainerAnalytics() {
             else. */}
         <Section>
           <SectionHead title="Where Clients Come From" />
-          <ListRow icon="people" title="Who Brings You Clients"
+          <ListRow icon="people" tone="purple" title="Who Brings You Clients"
             note="Clients whose code brought somebody in, and how many started training"
             onPress={() => router.push('/(trainer)/referrals')} />
-          <ListRow icon="message" title="Enquiries"
+          <ListRow icon="message" tone="blue" title="Enquiries"
             note="People who asked about coaching without joining, and who has waited longest"
             onPress={() => router.push('/(trainer)/leads')} />
-          <ListRow icon="trending" title="Ad Spend"
+          <ListRow icon="trending" tone="orange" title="Ad Spend"
             note="What your ads cost, and what they brought in"
             onPress={() => router.push('/(trainer)/ad-spend')} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -1797,7 +1901,7 @@ export default function TrainerAnalytics() {
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm,
                      backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: digestBusy || !figuresWhole ? 0.4 : 1 }}>
             {digestBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>
               {digestBusy ? 'Writing…' : !figuresWhole ? 'Needs figures it could not read' : digest ? 'Regenerate' : 'Generate digest'}
             </Text>
           </Pressable>
@@ -1810,7 +1914,7 @@ export default function TrainerAnalytics() {
               never had anywhere to go. It sends the same figures through the
               same filter — see app/(trainer)/assistant.tsx for why it will not
               name a client. */}
-          <ListRow icon="sparkle" title="Ask The Assistant"
+          <ListRow icon="sparkle" tone="purple" title="Ask The Assistant"
             note="A conversation about your own figures, with no client named to it"
             onPress={() => router.push('/(trainer)/assistant')} />
           {/* Out of the app. The statement already does this for the money and
@@ -1819,10 +1923,10 @@ export default function TrainerAnalytics() {
               they could only photograph. Every unknown figure leaves as an
               EMPTY cell — see src/lib/analyticsExport.ts for why a zero in a
               spreadsheet is worse than a dash on a screen. */}
-          <ListRow icon="share" title={exportBusy ? 'Exporting…' : 'Export These Figures'}
+          <ListRow icon="share" tone="teal" title={exportBusy ? 'Exporting…' : 'Export These Figures'}
             note="A CSV of the figures above and every month you have recorded"
             onPress={() => { void exportAnalytics(); }} />
-          <ListRow icon="chart" title="Payments"
+          <ListRow icon="chart" tone="brand" title="Payments"
             note="Who bought what, and the price list they buy from"
             onPress={() => router.push('/(trainer)/payments')} />
         </Section>
@@ -1834,7 +1938,7 @@ export default function TrainerAnalytics() {
             rather than heading the Roster section, where it used to be the
             first way onward a coach met. */}
         <Section>
-          <ListRow icon="trophy" title="Leaderboard"
+          <ListRow icon="trophy" tone="amber" title="Leaderboard"
             note="Your clients ranked by consistency — a comparison, not an outcome"
             onPress={() => router.push('/(trainer)/leaderboard')} />
         </Section>

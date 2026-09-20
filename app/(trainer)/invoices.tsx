@@ -42,10 +42,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, PartialRead, FigureCard, Meter, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
 import { useRoster } from '../../src/ui/roster';
+import { num } from '../../src/lib/format';
 import { useToday } from '../../src/ui/today';
 import { isQueryableId } from '../../src/lib/clientDrift';
 import { shareDoc, shareText, pdfExportAvailable } from '../../src/lib/exportShare';
@@ -227,6 +228,23 @@ export default function Invoices() {
    * this screen rather than two that can disagree. See src/lib/chaseList.ts.
    */
   const chase = useMemo(() => chaseGroups(ageing, status), [ageing, status]);
+
+  /* ── the ageing strip ────────────────────────────────────────────────────
+   * Counts of documents per band, off the same `ageing` the lists below are
+   * drawn from, so the strip and the lists cannot disagree. Longest overdue
+   * first and in red, the way the bands below are ordered; not yet due is the
+   * accent, and an invoice with no due date is the grey of "nothing to say". */
+  const owedPots = !ageing.withheld && ageing.outstanding ? ageing.outstanding.pots : [];
+  const owedDocs = ageing.overdue.length + ageing.upcoming.length + ageing.undated.length;
+  const inBand = (b: AgeBucket) => ageing.overdue.filter((x) => x.age.bucket === b).length;
+  const AGE_BANDS: { label: string; n: number; tone: Tone }[] = [
+    { label: BUCKET_TITLE['61+'], n: inBand('61+'), tone: 'red' },
+    { label: BUCKET_TITLE['31-60'], n: inBand('31-60'), tone: 'red' },
+    { label: BUCKET_TITLE['8-30'], n: inBand('8-30'), tone: 'amber' },
+    { label: BUCKET_TITLE['1-7'], n: inBand('1-7'), tone: 'amber' },
+    { label: 'Not Yet Due', n: ageing.upcoming.length, tone: 'brand' },
+    { label: 'No Due Date', n: ageing.undated.length, tone: 'neutral' },
+  ];
 
   /**
    * What this coach last stated about tax, from their own book.
@@ -612,7 +630,7 @@ export default function Invoices() {
     return (
       <View key={inv.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
-          <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{invoiceNumber(inv.seq)}</Text>
+          <Text style={{ ...ty.body, ...font('600'), ...numeric, color: t.ink }}>{invoiceNumber(inv.seq)}</Text>
           <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{inv.billTo}</Text>
           <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{amount ?? DASH}</Text>
         </View>
@@ -645,7 +663,7 @@ export default function Invoices() {
               accessibilityLabel={`Chase invoice ${invoiceNumber(inv.seq)}`} disabled={busy}
               accessibilityState={{ disabled: busy, busy }}
               style={{ paddingVertical: sp.xs }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>Chase it</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: busy ? t.ink3 : t.brandText }}>Chase it</Text>
             </Pressable>
           ) : null}
           {/* The action this list existed without. Everything on it is
@@ -662,12 +680,12 @@ export default function Invoices() {
               accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
               accessibilityState={{ disabled: busy, busy }}
               style={{ paddingVertical: sp.xs }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: busy ? t.ink3 : t.brandText }}>They paid it</Text>
             </Pressable>
           ) : null}
           <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
             accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)} again`} style={{ paddingVertical: sp.xs }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Send again</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Send again</Text>
           </Pressable>
         </View>
         {blocked ? (
@@ -691,7 +709,7 @@ export default function Invoices() {
     return (
       <View key={inv.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
-          <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{invoiceNumber(inv.seq)}</Text>
+          <Text style={{ ...ty.body, ...font('600'), ...numeric, color: t.ink }}>{invoiceNumber(inv.seq)}</Text>
           <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{inv.billTo}</Text>
           <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{amount ?? DASH}</Text>
         </View>
@@ -701,17 +719,17 @@ export default function Invoices() {
             accessibilityLabel={`Set a day to chase invoice ${invoiceNumber(inv.seq)} from`} disabled={busy}
             accessibilityState={{ disabled: busy, busy }}
             style={{ paddingVertical: sp.xs }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>Chase it from…</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: busy ? t.ink3 : t.brandText }}>Chase it from…</Text>
           </Pressable>
           <Pressable onPress={() => openSettle(inv)} hitSlop={8} accessibilityRole="button"
             accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
             accessibilityState={{ disabled: busy, busy }}
             style={{ paddingVertical: sp.xs }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: busy ? t.ink3 : t.brandText }}>They paid it</Text>
           </Pressable>
           <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
             accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)} again`} style={{ paddingVertical: sp.xs }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Send again</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Send again</Text>
           </Pressable>
         </View>
       </View>
@@ -756,14 +774,6 @@ export default function Invoices() {
             still said by the first card below. */}
         <PageHead title="Invoices" />
 
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="A record of a charge you made"
-            note="Numbered in your own sequence inside this app. It states no tax and it is not a payment receipt — both are printed on the document itself, so nobody has to take your word for what it is."
-          />
-        </View>
-
         {status === 'error' ? (
           <Notice tone={t.crit} kicker="Not read" title="Your invoices could not be read"
             note="This list is empty because the read failed, not because you have issued none. Nothing below is a statement about your records." />
@@ -775,6 +785,98 @@ export default function Invoices() {
         {currencyBlocker ? (
           <Notice tone={t.crit} kicker="Nothing can be issued yet" title="No currency" note={currencyBlocker} />
         ) : null}
+
+        {/* ── WHO OWES YOU ────────────────────────────────────────────────
+            "Who owes me money" was the most common unanswered question in this
+            app, and every part of the answer here is something the coach
+            themselves recorded: a kind they chose, a due date they typed, a
+            void they performed. Nothing is inferred from a payment processor,
+            because nothing about a payment processor reaches this table — which
+            is also why an invoice stays on this list until the coach says
+            otherwise rather than until somebody pays. */}
+        {/* Round five: the screen OPENS on this, as the kit's figure card with
+            the amber mark — owed is the slipping colour, not the alarm one —
+            one figure per currency and never one over both, and under it the
+            ageing strip: each band's share of the invoices still being asked
+            for, as a meter. The strip counts DOCUMENTS, which may be added
+            across currencies where money may not. It is not drawn under a
+            withheld read; the Flag in its place says which read.
+
+            `AGEING_IS_YOUR_OWN_RECORD` moved behind What These Are, below. */}
+        <FigureCard title="Owed to You" source="From your own record"
+          // A word and not a dash where the read was whole and nothing is being
+          // asked for: the dash is "unknown", and this is known. Not a money
+          // nought either — a nought needs a currency, and nothing owed has none.
+          figure={!ageing.withheld && owedDocs === 0 ? 'Nothing' : null}
+          figures={owedPots.length ? owedPots.map((p) => ({
+            key: p.currency,
+            figure: minorMoney(p.minorUnits, p.currency),
+            comparison: `${num(p.count)} outstanding in ${p.currency}`,
+            tone: t.data.amber,
+            spoken: `${minorMoney(p.minorUnits, p.currency) ?? 'no figure'}, ${num(p.count)} outstanding in ${p.currency}`,
+          })) : undefined}>
+          {ageing.withheld ? (
+            <Flag>{ageing.withheld}</Flag>
+          ) : ageing.outstanding && ageing.outstanding.pots.length ? (
+            <View>
+              {/* Currencies never merge. Said, because two rows of figures is
+                  exactly the shape somebody adds up in their head. */}
+              {ageing.outstanding.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+              {ageing.outstanding.unlabelled > 0 ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {ageing.outstanding.unlabelled} outstanding invoice{ageing.outstanding.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so {ageing.outstanding.unlabelled === 1 ? 'it is' : 'they are'} in no figure above.
+                </Flag>
+              ) : null}
+            </View>
+          ) : ageing.overdue.length || ageing.upcoming.length ? (
+            /* Outstanding invoices exist and NOT ONE of them could be
+               denominated.
+
+               The branch below used to be the only alternative to a pot, so a
+               coach whose outstanding invoices all carry no currency was told
+               "nothing you have issued is still being asked for" directly above
+               the list of them, banded by how late each one is. `sumTaken`
+               builds a pot per currency and an invoice with none goes to
+               `unlabelled` instead — which is a real state, because part 138's
+               currency column is NOT NULL but `toInvoice` reads a blank one as
+               null, and a coach with a single unlabelled invoice has an empty
+               `pots` array and something very much outstanding.
+
+               A count of the invoices, and no figure, because there is no
+               figure: an amount with no currency beside it is not an amount of
+               money. The two lists below say which ones they are. */
+            <View>
+              <Text style={{ ...ty.label, color: t.ink }}>
+                {ageing.overdue.length + ageing.upcoming.length} invoice{ageing.overdue.length + ageing.upcoming.length === 1 ? ' is' : 's are'} still being asked for, and no total can be stated for {ageing.overdue.length + ageing.upcoming.length === 1 ? 'it' : 'them'}.
+              </Text>
+              <Flag style={{ marginTop: sp.sm }}>
+                {ageing.overdue.length + ageing.upcoming.length === 1 ? 'It has' : 'They have'} no currency recorded, so {ageing.overdue.length + ageing.upcoming.length === 1 ? 'the amount on it is' : 'the amounts on them are'} not an amount of any money and nothing here adds up. {ageing.overdue.length + ageing.upcoming.length === 1 ? 'It is' : 'They are'} listed below, and the document {ageing.overdue.length + ageing.upcoming.length === 1 ? 'itself carries' : 'themselves carry'} no figure either.
+              </Flag>
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Nothing you have issued is still being asked for. Every read came back in full, so this is your record rather than a failure.
+            </Text>
+          )}
+
+          {/* The invoices with no due date, said out loud and kept out of every
+              figure above. This is the bucket every invoice issued before the
+              due-date column existed lands in, and calling it "not due" would
+              put a coach's whole back catalogue into the reassuring pile. */}
+          {ageing.undatedNote ? <Flag style={{ marginTop: sp.sm }}>{ageing.undatedNote}</Flag> : null}
+
+          {!ageing.withheld && owedDocs > 0 ? AGE_BANDS.map((band) => (
+            band.n > 0 ? (
+              <Meter key={band.label} label={band.label} val={band.n} target={owedDocs} tone={band.tone}
+                note={`${num(band.n)} of ${num(owedDocs)}`} />
+            ) : null
+          )) : null}
+        </FigureCard>
+
 
         {/* ── one empty state, not two ────────────────────────────────────
             Seen on an iPhone: "WHAT YOU HAVE ISSUED — You have not issued any
@@ -858,82 +960,15 @@ export default function Invoices() {
           ) : null}
         </View>
 
-        {/* ── WHO OWES YOU ────────────────────────────────────────────────
-            "Who owes me money" was the most common unanswered question in this
-            app, and every part of the answer here is something the coach
-            themselves recorded: a kind they chose, a due date they typed, a
-            void they performed. Nothing is inferred from a payment processor,
-            because nothing about a payment processor reaches this table — which
-            is also why an invoice stays on this list until the coach says
-            otherwise rather than until somebody pays. */}
-        <Section>
-          <SectionHead title="Owed to You" note="Invoices you are still asking for" />
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{AGEING_IS_YOUR_OWN_RECORD}</Text>
-
-          {ageing.withheld ? (
-            <Flag>{ageing.withheld}</Flag>
-          ) : ageing.outstanding && ageing.outstanding.pots.length ? (
-            <View>
-              {ageing.outstanding.pots.map((p) => (
-                <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>
-                    {p.count} outstanding in {p.currency}
-                  </Text>
-                  <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>
-                    {minorMoney(p.minorUnits, p.currency) ?? DASH}
-                  </Text>
-                </View>
-              ))}
-              {/* Currencies never merge. Said, because two rows of figures is
-                  exactly the shape somebody adds up in their head. */}
-              {ageing.outstanding.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-              {ageing.outstanding.unlabelled > 0 ? (
-                <Flag style={{ marginTop: sp.sm }}>
-                  {ageing.outstanding.unlabelled} outstanding invoice{ageing.outstanding.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so {ageing.outstanding.unlabelled === 1 ? 'it is' : 'they are'} in no figure above.
-                </Flag>
-              ) : null}
-            </View>
-          ) : ageing.overdue.length || ageing.upcoming.length ? (
-            /* Outstanding invoices exist and NOT ONE of them could be
-               denominated.
-
-               The branch below used to be the only alternative to a pot, so a
-               coach whose outstanding invoices all carry no currency was told
-               "nothing you have issued is still being asked for" directly above
-               the list of them, banded by how late each one is. `sumTaken`
-               builds a pot per currency and an invoice with none goes to
-               `unlabelled` instead — which is a real state, because part 138's
-               currency column is NOT NULL but `toInvoice` reads a blank one as
-               null, and a coach with a single unlabelled invoice has an empty
-               `pots` array and something very much outstanding.
-
-               A count of the invoices, and no figure, because there is no
-               figure: an amount with no currency beside it is not an amount of
-               money. The two lists below say which ones they are. */
-            <View>
-              <Text style={{ ...ty.label, color: t.ink }}>
-                {ageing.overdue.length + ageing.upcoming.length} invoice{ageing.overdue.length + ageing.upcoming.length === 1 ? ' is' : 's are'} still being asked for, and no total can be stated for {ageing.overdue.length + ageing.upcoming.length === 1 ? 'it' : 'them'}.
-              </Text>
-              <Flag style={{ marginTop: sp.sm }}>
-                {ageing.overdue.length + ageing.upcoming.length === 1 ? 'It has' : 'They have'} no currency recorded, so {ageing.overdue.length + ageing.upcoming.length === 1 ? 'the amount on it is' : 'the amounts on them are'} not an amount of any money and nothing here adds up. {ageing.overdue.length + ageing.upcoming.length === 1 ? 'It is' : 'They are'} listed below, and the document {ageing.overdue.length + ageing.upcoming.length === 1 ? 'itself carries' : 'themselves carry'} no figure either.
-              </Flag>
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing you have issued is still being asked for. Every read came back in full, so this is your record rather than a failure.
-            </Text>
-          )}
-
-          {/* The invoices with no due date, said out loud and kept out of every
-              figure above. This is the bucket every invoice issued before the
-              due-date column existed lands in, and calling it "not due" would
-              put a coach's whole back catalogue into the reassuring pile. */}
-          {ageing.undatedNote ? <Flag style={{ marginTop: sp.sm }}>{ageing.undatedNote}</Flag> : null}
-        </Section>
+        {/* What stood at the top of the page as a card of prose, and the
+            sentence that headed Owed to You — behind one fold, word for word,
+            so the screen opens on the figure. */}
+        <Expandable title="What These Are" note="A record of a charge you made, in your own sequence">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            Numbered in your own sequence inside this app. It states no tax and it is not a payment receipt — both are printed on the document itself, so nobody has to take your word for what it is.
+          </Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{AGEING_IS_YOUR_OWN_RECORD}</Text>
+        </Expandable>
 
         {/* ── THE SAME MONEY, BY WHO OWES IT ──────────────────────────────
             Above this line the answer is a list of documents banded by
@@ -956,7 +991,7 @@ export default function Invoices() {
               {chase.groups.map((g) => (
                 <View key={g.key} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
-                    <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }} numberOfLines={1}>{g.billTo}</Text>
+                    <Text style={{ ...ty.body, ...font('600'), color: t.ink, flex: 1 }} numberOfLines={1}>{g.billTo}</Text>
                     {/* A floor when the read was not whole, and said as one.
                         `chaseGroups` nulls `pots` under anything but 'ready'
                         and leaves every COUNT populated, so this line, the
@@ -1027,7 +1062,7 @@ export default function Invoices() {
                       <Pressable onPress={() => sendChase(g)} hitSlop={8} accessibilityRole="button"
                         accessibilityLabel={`Write a note to ${g.billTo} about ${g.invoices.length} outstanding invoice${g.invoices.length === 1 ? '' : 's'}`}
                         style={{ paddingVertical: sp.xs }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Write the note</Text>
+                        <Text style={{ ...ty.label, ...font('500'), color: t.brandText }}>Write the note</Text>
                       </Pressable>
                     </View>
                   ) : null}
@@ -1101,7 +1136,7 @@ export default function Invoices() {
             return (
               <View key={inv.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
-                  <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: inv.voidedAt ? t.ink3 : t.ink }}>
+                  <Text style={{ ...ty.body, ...font('600'), ...numeric, color: inv.voidedAt ? t.ink3 : t.ink }}>
                     {invoiceNumber(inv.seq)}
                   </Text>
                   <Text style={{ ...ty.body, color: inv.voidedAt ? t.ink3 : t.ink, flex: 1 }} numberOfLines={1}>
@@ -1135,7 +1170,7 @@ export default function Invoices() {
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
                   <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
                     accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)}`} style={{ paddingVertical: sp.xs }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Send</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: t.brandText }}>Send</Text>
                   </Pressable>
                   {/* Offered on every row that can take it, not only on the
                       ageing lists: a coach scrolling their whole book is the
@@ -1148,7 +1183,7 @@ export default function Invoices() {
                       accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
                       accessibilityState={{ disabled: busy, busy }}
                       style={{ paddingVertical: sp.xs }}>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: busy ? t.ink3 : t.brandText }}>They paid it</Text>
                     </Pressable>
                   ) : null}
                   {/* `voidBlocker`, not `!inv.voidedAt`. An invoice the coach
@@ -1176,13 +1211,13 @@ export default function Invoices() {
                     <Pressable onPress={() => billAgain(inv)} hitSlop={8} accessibilityRole="button"
                       accessibilityLabel={`Start a new invoice from invoice ${invoiceNumber(inv.seq)}`}
                       style={{ paddingVertical: sp.xs }}>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Bill it again</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Bill it again</Text>
                     </Pressable>
                   ) : null}
                   {!voidBlocker(inv) ? (
                     <Pressable onPress={() => { setVoidTarget(inv); setVoidReason(''); }} hitSlop={8} accessibilityRole="button"
                       accessibilityLabel={`Void invoice ${invoiceNumber(inv.seq)}`} style={{ paddingVertical: sp.xs }}>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Void</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Void</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -1593,7 +1628,7 @@ export default function Invoices() {
                 accessibilityRole="button" accessibilityLabel="Clear the day to chase this invoice from"
                 accessibilityState={{ disabled: busy, busy }}
                 style={{ paddingVertical: sp.md, alignItems: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.ink2 }}>
+                <Text style={{ ...ty.label, ...font('500'), color: busy ? t.ink3 : t.ink2 }}>
                   Clear it — put this one back on the undated list
                 </Text>
               </Pressable>

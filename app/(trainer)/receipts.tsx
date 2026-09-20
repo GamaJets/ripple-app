@@ -49,8 +49,10 @@ import { View, Text, ScrollView, TextInput, Pressable, Modal, Alert, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, PageHead, Notice, Flag, PartialRead, FigureCard, Donut, Legend, Expandable, type Tone, type Slice } from '../../src/ui/kit';
+import { sharePercent } from '../../src/lib/sharePercent';
+import { num } from '../../src/lib/format';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useToday } from '../../src/ui/today';
@@ -173,6 +175,22 @@ export default function Receipts() {
   }, (k) => methodLabel(k)), [lines, rows]);
 
   const byMonth = useMemo(() => linesByMonth(lines), [lines]);
+
+  /* ── the mix, one ring per currency ──────────────────────────────────────
+   * Off the same `byMethod` the rows under the ring are drawn from, and only
+   * ever rendered inside the whole-read branch those rows sit in. */
+  const METHOD_TONE: Record<string, Tone> = { cash: 'amber', transfer: 'blue', card_at_gym: 'purple', other: 'neutral' };
+  const methodRings = taken.pots.map((pot) => {
+    const slices: Slice[] = byMethod.map((g) => {
+      const part = g.taken.pots.find((x) => x.currency === pot.currency)?.minorUnits ?? 0;
+      return { label: g.label, tone: METHOD_TONE[g.key] ?? 'neutral', value: part, shown: sharePercent(part, pot.minorUnits) };
+    }).filter((x) => (x.value ?? 0) > 0);
+    const centre = minorMoney(pot.minorUnits, pot.currency);
+    return {
+      currency: pot.currency, slices, centre,
+      spoken: `How it reached you in ${pot.currency}, ${centre ?? 'no figure'}: ${slices.map((x) => `${x.label} ${x.shown ?? 'no figure'}`).join(', ')}`,
+    };
+  });
 
   /* Grouped by the NAME on the line and not by `client_id`.
      Most of the people who pay a coach in cash were never given an account —
@@ -316,14 +334,6 @@ export default function Receipts() {
             still said by the first card below. */}
         <PageHead title="Cash and Transfers" />
 
-        <View style={{ marginTop: sp.lg }}>
-          <Notice
-            kicker="What this is"
-            title="Money you were paid outside this app"
-            note={RECEIPT_IS_YOUR_WORD}
-          />
-        </View>
-
         {status === 'error' ? (
           <Notice tone={t.crit} kicker="Not read" title="Your recorded payments could not be read"
             note="This list is empty because the read failed, not because you have recorded none. Nothing below is a statement about your records." />
@@ -335,34 +345,39 @@ export default function Receipts() {
         ) : null}
 
 
-        <Section>
-          <SectionHead title="What You Have Recorded" note="Counted by the day you say you were paid" />
-          {status !== 'ready' ? (
-            <Flag style={{ marginTop: sp.sm }}>{receiptsEmptyLine(status)}</Flag>
-          ) : taken.pots.length ? (
-            <View style={{ marginTop: sp.sm }}>
-              {taken.pots.map((p) => (
-                <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>
-                    {p.count} {p.count === 1 ? 'payment' : 'payments'} in {p.currency}
-                  </Text>
-                  <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>
-                    {minorMoney(p.minorUnits, p.currency) ?? DASH}
-                  </Text>
-                </View>
-              ))}
-              {/* Currencies are never added together, here or anywhere. */}
-              {taken.pots.length > 1 ? (
-                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  These are separate amounts of money and are deliberately not added together.
-                </Flag>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{receiptsEmptyLine(status)}</Text>
-          )}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
-        </Section>
+        {/* Round five: the screen opens on its figure. The kit's figure card,
+            one figure per currency and never one over both, with the green
+            mark this side of the book carries everywhere. A dash and
+            `receiptsEmptyLine`'s sentence under any read that was not whole; the word
+            "Nothing" — not a dash, and not a money nought, which would need a
+            currency — where the read was whole and there is nothing in it.
+
+            The card of prose that opened the page and the paragraph that
+            closed this card are behind What This Is, below, word for word;
+            one line of the caveat stays beside the figure it qualifies. */}
+        <FigureCard title="What You Have Recorded" period="All you have recorded" source="Your own record"
+          figure={status === 'ready' && !taken.pots.length ? 'Nothing' : null}
+          detail={status === 'ready' && taken.pots.length ? undefined : receiptsEmptyLine(status)}
+          figures={status === 'ready' && taken.pots.length ? taken.pots.map((p) => ({
+            key: p.currency,
+            figure: minorMoney(p.minorUnits, p.currency),
+            comparison: `${num(p.count)} ${p.count === 1 ? 'payment' : 'payments'} in ${p.currency}`,
+            tone: t.brand,
+            spoken: `${minorMoney(p.minorUnits, p.currency) ?? 'no figure'}, ${num(p.count)} ${p.count === 1 ? 'payment' : 'payments'} in ${p.currency}`,
+          })) : undefined}>
+          {/* Currencies are never added together, here or anywhere. */}
+          {status === 'ready' && taken.pots.length > 1 ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+              These are separate amounts of money and are deliberately not added together.
+            </Flag>
+          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Record only what did not go through this app, or the same money is counted twice.</Text>
+        </FigureCard>
+
+        <Expandable title="What This Is" note="Your own record of what you were handed, and the double-count rule">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{RECEIPT_IS_YOUR_WORD}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
+        </Expandable>
 
         {/* ── the three breakdowns ────────────────────────────────────────
             Every one of them is a figure over a set, so every one of them is
@@ -376,6 +391,16 @@ export default function Receipts() {
             <Rule />
             <Section>
               <SectionHead title="How It Reached You" note={`${byMethod.length} ${byMethod.length === 1 ? 'way' : 'ways'}`} />
+              {/* The mix as a ring, ONE PER CURRENCY: a ring is a whole, and
+                  two moneys are not one. Each slice is this method's pot in
+                  that currency and the share is of that currency's own total.
+                  The rows under it keep every amount and every count. */}
+              {methodRings.map((d, i) => (
+                <View key={d.currency} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.lg, marginTop: i === 0 ? 0 : sp.lg, marginBottom: sp.md }}>
+                  <Donut slices={d.slices} centre={d.centre} sub="recorded" spoken={d.spoken} />
+                  <Legend items={d.slices} />
+                </View>
+              ))}
               {byMethod.map((g) => slice(g, 'payment'))}
             </Section>
           </>
@@ -445,7 +470,7 @@ export default function Receipts() {
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                 <Pressable onPress={() => onRemove(r)} hitSlop={8} accessibilityRole="button"
                   accessibilityLabel={`Remove the payment from ${r.paidBy}`} style={{ paddingVertical: sp.xs }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Remove</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Remove</Text>
                 </Pressable>
               </View>
             </View>
