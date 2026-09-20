@@ -52,9 +52,9 @@ import { View, Text, ScrollView, TextInput, Alert, Modal, Pressable } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Flag, PartialRead, fig, PageHead, SyncBadge } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Flag, PartialRead, PageHead, SyncBadge, Ring, TonedChip, type Tone } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, fontScale, type as ty, numeric, font } from '../../src/theme/scale';
 import {
   verdictOf, actionsFor, disputeConfirm, disputeFiledLine, disputedSummary,
   DISPUTE_OPTIONS, DISPUTE_MONEY_NOTE, type DisputeKind,
@@ -104,7 +104,6 @@ import { useMyCancellations } from '../../src/ui/cancellations';
 import { useAuth } from '../../src/ui/auth';
 import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
-import type { Theme } from '../../src/theme/tokens';
 
 /**
  * The date and time beside Approve and Dispute.
@@ -140,22 +139,24 @@ const dayLabel = (iso: string) => {
 };
 
 /**
- * The mark beside a past session, never the colour of its text.
+ * What the record says about a past session, as the approved look's chip: the
+ * words on a pale plate of their own hue, in that hue's measured ink.
  *
- * House rule: `t.crit`/`t.warn`/`t.good` are marks, so each of these is a 6pt
- * dot with the label rendered in ink beside it. 'unmarked' takes `warn` because
- * it is the state that asks somebody to look — the same state that blocks a
- * payroll settlement in src/lib/gymSessions.ts — and a plain cancellation takes
- * the neutral ink3, because it is a thing that happened rather than a problem.
+ * It replaces a 6pt status dot beside grey words. The house rule that made the
+ * dot — `t.crit`/`t.warn`/`t.good` are marks and never text — still holds: a
+ * chip's label is the tone's INK, which the kit measures, not the mark.
+ * 'unmarked' is amber because it is the state that asks somebody to look — the
+ * same state that blocks a payroll settlement in src/lib/gymSessions.ts — and
+ * a plain cancellation is neutral, because it is a thing that happened rather
+ * than a problem. The labels are PAST_STATE_LABEL's words in Title Case: that
+ * map is sentence case because it is spliced into prose, and still is below.
  */
-const stateTone = (t: Theme, s: PastState): string => {
-  switch (s) {
-    case 'delivered': return t.good;
-    case 'missed': return t.crit;
-    case 'late_cancelled': return t.warn;
-    case 'cancelled': return t.ink3;
-    case 'unmarked': return t.warn;
-  }
+const STATE_CHIP: Record<PastState, { label: string; tone: Tone }> = {
+  delivered: { label: 'Delivered', tone: 'brand' },
+  missed: { label: 'Not Attended', tone: 'red' },
+  late_cancelled: { label: 'Cancelled Late', tone: 'amber' },
+  cancelled: { label: 'Cancelled', tone: 'neutral' },
+  unmarked: { label: 'Not Yet Marked', tone: 'amber' },
 };
 
 export default function PtSessions() {
@@ -261,6 +262,8 @@ export default function PtSessions() {
   const leftRead = packs !== undefined && passes !== undefined;
   const left = book.left;
   const heroNote = creditsHeroNote(book);
+  // What the paying lines were sold as — the ring's whole.
+  const soldTotal = (book.lines ?? []).reduce((n, l) => n + l.sessions_total, 0);
   const emptyLine = creditsEmptyLine(book);
 
   // Two reads: the sessions themselves — including which of them a coach has
@@ -422,8 +425,7 @@ export default function PtSessions() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <PageHead title="Personal Training" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Sessions your trainer has delivered. Approving confirms it with them, and any comment you add goes with it.</Text>
+        <PageHead title="Personal Training" subtitle="Sessions your trainer delivered — approve them, or say what is wrong" />
 
         {/* ── what is left, and where it comes from ───────────────────────
             Loading, unread, empty and a real figure are four states and four
@@ -447,10 +449,16 @@ export default function PtSessions() {
                  One spoken sentence for the three, as the Hero grouped them:
                  three stops over one fact is what that grouping avoided. */
               <Section>
-                <SectionHead title="Sessions Remaining" />
-                <View accessible accessibilityLabel={`Sessions remaining, ${num(left)}, ${heroNote}`}>
-                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(left)}</Text>
-                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{heroNote}</Text>
+                <SectionHead title="Sessions Remaining" onPress={() => router.push('/(client)/session-credits')} />
+                {/* As a ring against what was SOLD on the lines that pay —
+                    the set `left` is itself summed from, so the arc and the
+                    figure are one fact. Sessions are one unit; nothing here
+                    adds money. A total of nothing draws the bare track. */}
+                <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+                  <Ring size={124} tone="brand" value={soldTotal > 0 ? left / soldTotal : null}
+                    figure={num(left)} sub={soldTotal > 0 ? `of ${num(soldTotal)}` : undefined}
+                    spoken={`Sessions remaining, ${num(left)}${soldTotal > 0 ? ` of ${num(soldTotal)}` : ''}. ${heroNote}`} />
+                  <Text style={{ ...ty.label, color: t.ink2, flex: fontScale >= 1.35 ? undefined : 1, minWidth: 0 }}>{heroNote}</Text>
                 </View>
               </Section>
             ) : null}
@@ -486,7 +494,7 @@ export default function PtSessions() {
             says why it is not naming a time — never "nothing booked" over a
             read that did not land. */}
         <Section>
-          <ListRow icon="calendar"
+          <ListRow icon="calendar" tone="brand"
             title={nextUp ? `Next: ${fmtRelativeDay(nextUp.startsAt)} · ${fmtTime(nextUp.startsAt)}` : 'Your Calendar'}
             note={nextUp ? `${nextUp.durationMin} min · confirmed with your coach. Change or cancel it on your calendar`
               : sessionStatus === 'loading' ? 'Reading what you have booked…'
@@ -520,11 +528,11 @@ export default function PtSessions() {
             const rec = pastVerdict(s);
             return (
             <Card key={s.id} style={{ marginBottom: sp.md }}>
-              <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fmt(s.startsAt)}</Text>
+              <Text style={{ ...ty.body, ...numeric, ...font('500'), color: t.ink }}>{fmt(s.startsAt)}</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.durationMin} min personal training session</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateTone(t, rec.state) }} />
-                <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+              <View style={{ marginTop: sp.sm, gap: 6 }}>
+                <TonedChip {...STATE_CHIP[rec.state]} />
+                <Text style={{ ...ty.caption, color: t.ink2 }}>
                   Your trainer recorded this as {PAST_STATE_LABEL[rec.state]}{rec.at ? ` on ${fmt(rec.at)}` : ''}.
                 </Text>
               </View>
@@ -607,7 +615,7 @@ export default function PtSessions() {
             coach-sold pack the same way, so a member assigned a coach by their
             gym gets the same answer as one who buys direct. */}
         <Section>
-          <ListRow icon="calendar" title="Session Credits"
+          <ListRow icon="calendar" tone="blue" title="Session Credits"
             note="Which sessions used a credit, and what your bookings are due to draw"
             onPress={() => router.push('/(client)/session-credits')} />
 
@@ -617,7 +625,7 @@ export default function PtSessions() {
             note says what it is not, in the row itself, because a row headed
             "Ask for a Time" sitting under a list of credits is otherwise read
             as another way to spend one. */}
-          <ListRow icon="clock" title="Ask for a Time"
+          <ListRow icon="clock" tone="teal" title="Ask for a Time"
             note="Ask your coach for an hour they haven’t opened. It asks — it doesn’t book"
             onPress={() => router.push('/(client)/request-session')} />
         </Section>
@@ -626,7 +634,6 @@ export default function PtSessions() {
         {/* ── history ────────────────────────────────────────────────────── */}
         {done.length > 0 ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Approved" note={sessionsWhole ? String(done.length) : undefined} />
               {done.map((s, i) => (
@@ -635,8 +642,7 @@ export default function PtSessions() {
                   <View style={{ paddingVertical: sp.md }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                       <Text style={{ ...ty.body, ...numeric, color: t.ink2, flex: 1 }}>{fmt(s.startsAt)}</Text>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good }} />
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>Approved</Text>
+                      <TonedChip label="Approved" tone="brand" icon="check" />
                     </View>
                     {s.approvalNote ? (
                       <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>“{s.approvalNote}”</Text>
@@ -667,7 +673,6 @@ export default function PtSessions() {
             used, from the same module. */}
         {disputed.length > 0 ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Disputed" note={sessionsWhole ? String(disputed.length) : undefined} />
               {disputed.map((s, i) => (
@@ -676,9 +681,9 @@ export default function PtSessions() {
                   <View style={{ paddingVertical: sp.md }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                       <Text style={{ ...ty.body, ...numeric, color: t.ink2, flex: 1 }}>{fmt(s.startsAt)}</Text>
-                      {/* The mark carries the status colour; the text does not. */}
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>Disputed</Text>
+                      {/* Red is "needs you" — and the label is the tone's
+                          measured ink, never the status colour as text. */}
+                      <TonedChip label="Disputed" tone="red" />
                     </View>
                     <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
                       {disputedSummary((s.disputeKind as DisputeKind) ?? 'other', s.disputedAt ? fmt(s.disputedAt) : null)}
@@ -754,9 +759,7 @@ export default function PtSessions() {
                 <View style={{ paddingVertical: sp.md }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                     <Text style={{ ...ty.body, ...numeric, color: t.ink2, flex: 1 }}>{fmt(s.startsAt)}</Text>
-                    {/* The tone is the dot. The words stay in ink. */}
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateTone(t, v.state) }} />
-                    <Text style={{ ...ty.caption, color: t.ink2 }}>{PAST_STATE_LABEL[v.state]}</Text>
+                    <TonedChip {...STATE_CHIP[v.state]} />
                   </View>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
                     {PAST_STATE_NOTE[v.state]}
@@ -787,9 +790,8 @@ export default function PtSessions() {
                       {disputedSummary((s.disputeKind as DisputeKind) ?? 'other', v.disputedAt ? fmt(v.disputedAt) : null)}
                     </Flag>
                   ) : verdict(s) === 'approved' ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good }} />
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>You approved this</Text>
+                    <View style={{ marginTop: sp.sm }}>
+                      <TonedChip label="You Approved This" tone="brand" icon="check" />
                     </View>
                   ) : null}
                 </View>
@@ -903,7 +905,7 @@ export default function PtSessions() {
                     ...a.rows.map((row) => `${fmt(row.startsAt)}. ${noticeLine(row)}`)].filter(Boolean).join(' ')}
                   style={{ paddingVertical: sp.md }}>
                   <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>{fmt(a.cancelledAt)}</Text>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{said}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink, marginTop: 3 }}>{said}</Text>
                   {together ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{together}</Text>
                   ) : null}
@@ -951,7 +953,7 @@ export default function PtSessions() {
                 <Pressable onPress={() => { if (disputeFor) dispute(disputeFor, o.id); }}
                   accessibilityRole="button" accessibilityLabel={o.label} accessibilityHint={o.note}
                   style={{ paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{o.label}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{o.label}</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{o.note}</Text>
                 </Pressable>
               </View>
@@ -961,7 +963,7 @@ export default function PtSessions() {
             <Pressable onPress={() => setDisputeFor(null)} accessibilityRole="button"
               accessibilityLabel="Close without disputing anything"
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
             </Pressable>
           </ScrollView>
         </View>

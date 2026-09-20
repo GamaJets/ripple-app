@@ -52,8 +52,9 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { isWhole } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead, PageHead, DayBars, IconPlate, TonedChip, Expandable, ListRow } from '../../src/ui/kit';
+import { weekdayNamesShort } from '../../src/lib/calendarNames';
+import { sp, layout, radius, elevation, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import {
@@ -659,8 +660,7 @@ export default function StandingAppointments() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <PageHead title="Standing Appointments" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>The same hour every week, booked for you without either of you asking again.</Text>
+        <PageHead title="Standing Appointments" subtitle="The same hour every week, booked without asking again" />
 
 
         {/* ── your arrangements ──────────────────────────────────────────── */}
@@ -689,6 +689,24 @@ export default function StandingAppointments() {
                   : 'You have no standing appointment. Ask your coach for one below and, if they agree, the same hour is booked for you every week — neither of you has to book it again.'}
             </Text>
           ) : (<>
+            {/* ── your week, as a picture ───────────────────────────────────
+                Which days carry a standing hour, as seven bars in the accent —
+                the session colour of an hour with your coach. Only off a
+                WHOLE read: under 'partial' a bare Thursday might be a row that
+                did not come back, so nothing is drawn and PartialRead below
+                says why. Under 'ready' a day with none is a fact, and draws
+                the grey stub. Sunday first, as the series' own `dow` and this
+                app's weekday names both are. */}
+            {seriesStatus === 'ready' ? (
+              <View style={{ marginBottom: sp.md }}>
+                <DayBars h={40}
+                  days={weekdayNamesShort().map((label, d) => ({
+                    label, tone: 'brand' as const,
+                    value: standing.filter((s) => ((s.dow % 7) + 7) % 7 === d).length,
+                  }))}
+                  spoken={`Your standing hours by weekday: ${standing.map((s) => seriesLabel(s)).join(', ')}`} />
+              </View>
+            ) : null}
             {/* The rows are real; there are more of them than came back. They
                 may be listed. Their number may not be reported as a total. */}
             {seriesStatus === 'partial'
@@ -697,10 +715,10 @@ export default function StandingAppointments() {
             {standing.map((s, i) => (
               <View key={s.id}>
                 {i > 0 ? <Rule /> : null}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{seriesLabel(s)}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                  <IconPlate icon="clock" tone="brand" />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.head, ...numeric, color: t.ink }}>{seriesLabel(s)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {withWhom} · {s.durationMin} min · {s.upcoming
                         ? `${s.upcoming} booked ahead`
@@ -748,9 +766,12 @@ export default function StandingAppointments() {
                 {pauseStatus === 'ready'
                   ? pauses.filter((k) => k.seriesId === s.id).map((k) => (
                     <View key={k.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.sm }}>
-                      {/* The mark carries the status colour; the text does not. */}
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
-                      <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{pausedRangeLine(k.fromOn, k.toOn, k.reason)}</Text>
+                      {/* Amber, in words on a chip: a pause is yours to keep an
+                          eye on, not a fault. The dates stay in ink beside it. */}
+                      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                        <TonedChip label="Paused" tone="amber" />
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>{pausedRangeLine(k.fromOn, k.toOn, k.reason)}</Text>
+                      </View>
                       <Ghost label="Start Again" a11yLabel={`Start ${seriesLabel(s)} again from ${k.fromOn}`}
                         onPress={() => doResume(k.id, k.fromOn, k.toOn)} />
                     </View>
@@ -799,9 +820,12 @@ export default function StandingAppointments() {
         </Section>
 
 
-        {/* ── what a standing appointment is, and is not ──────────────────── */}
-        <Section>
-          <SectionHead title="How This Works" />
+        {/* ── what a standing appointment is, and is not ────────────────────
+            Folded: it is the explanation of the feature, read once, and the
+            approved look keeps paragraphs behind a control. The policy flag is
+            NOT folded with it — a cancellation policy that could not be read
+            is a fact about money and stays on the page, under the fold. */}
+        <Expandable title="How This Works" note={`Booked about ${Math.round(SERIES_HORIZON_DAYS / 7)} weeks ahead · a credit only as each is delivered`}>
           <Text style={{ ...ty.label, color: t.ink2 }}>
             Your coach agrees the slot once. Sessions are then booked for you about {Math.round(SERIES_HORIZON_DAYS / 7)} weeks
             ahead and keep going from there on their own — they appear on your calendar like any other booking, and you
@@ -811,6 +835,8 @@ export default function StandingAppointments() {
               pack. Held in src/lib/recurring.ts so the apps and the database
               cannot come to say different things about the member's credits. */}
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>{RECURRING_CREDIT_NOTE}</Text>
+        </Expandable>
+        <Section>
           {/* The policy is what the "cancel this one" button will hold them to,
               so a policy that could not be read is worth saying before they get
               as far as tapping it. Deliberately not softened into "no fee":
@@ -821,9 +847,7 @@ export default function StandingAppointments() {
               We couldn’t read your coach’s cancellation policy, so we can’t tell you whether cancelling a single session would cost you anything. Ending the standing appointment costs nothing either way. Check with your coach what their notice period and fee are.
             </Flag>
           ) : null}
-          <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
-            <Ghost icon="calendar" label="See My Calendar" onPress={() => router.push('/(client)/calendar')} />
-          </View>
+          <ListRow icon="calendar" tone="brand" title="See My Calendar" note="Each booked hour, and where one is cancelled" onPress={() => router.push('/(client)/calendar')} />
         </Section>
       </ScrollView>
 
@@ -863,7 +887,7 @@ export default function StandingAppointments() {
                 <View key={o.scope}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ paddingVertical: sp.md }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{o.label}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{o.label}</Text>
                     {/* Printed exactly as src/lib/recurring writes it, for both
                         options. The series sentence names no amount and no
                         currency in any branch, and every branch of it says what
@@ -962,7 +986,7 @@ export default function StandingAppointments() {
                     accessibilityRole="button" accessibilityLabel={`Pause for ${o.label}`}
                     accessibilityState={{ disabled: busy }}
                     style={{ paddingVertical: sp.md, opacity: busy ? 0.5 : 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                       {o.days === 7 ? 'Pause for a Week' : o.days === 14 ? 'Pause for a Fortnight' : 'Pause for Four Weeks'}
                     </Text>
                     <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
@@ -980,7 +1004,7 @@ export default function StandingAppointments() {
                   this app — see its header for why it is not a native picker
                   and why typing lives inside it. */}
               <View style={{ paddingTop: sp.md }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Pause Particular Dates</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Pause Particular Dates</Text>
                 <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
                   For a holiday you already know the dates of. Your usual time starts again by itself the day after the last one.
                 </Text>
@@ -1064,7 +1088,7 @@ export default function StandingAppointments() {
                       backgroundColor: on ? t.brand : t.surface2,
                       borderWidth: on ? 0 : hairline, borderColor: t.ring,
                     }}>
-                    <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>
+                    <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>
                       {weekdayNameShort(d)}
                     </Text>
                   </Pressable>
@@ -1087,7 +1111,7 @@ export default function StandingAppointments() {
                       backgroundColor: on ? t.brand : t.surface2,
                       borderWidth: on ? 0 : hairline, borderColor: t.ring,
                     }}>
-                    <Text style={{ ...ty.body, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>
+                    <Text style={{ ...ty.body, ...numeric, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>
                       {fmtClock(h, 0)}
                     </Text>
                   </Pressable>

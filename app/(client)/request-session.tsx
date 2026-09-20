@@ -51,8 +51,8 @@ import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, Card, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead, KpiRow, TonedChip, Expandable, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { appLocale } from '../../src/lib/locale';
@@ -70,7 +70,7 @@ import { fetchMyRequests, askForSession, withdrawRequest, type MySessionRequest 
 import {
   EXPIRY_RULE, NOT_A_BOOKING, NO_COACH_TO_ASK, OUTCOME_LABEL, REQUEST_NOTE_MAX,
   askBlocker, askRefusalNote, askedConfirmation, myRequests, outcomeLine, outcomeOf,
-  ownDiaryNote, isLive,
+  ownDiaryNote, isLive, type RequestOutcome,
 } from '../../src/lib/sessionRequests';
 // Who settled this request, and when. `answered_by` has been written by all
 // three paths in supabase/parts/740 since the feature existed and read by
@@ -107,6 +107,11 @@ const instantAt = (day: Date, hour: number, minute = 0): string =>
  *  grid and the slots a range generates. A client who can only ask on the hour
  *  cannot ask for the 07:15 their coach actually offers. */
 const REQUEST_MINUTES = [0, 15, 30, 45];
+
+// One tone per outcome, for the chip on each request row. See the row.
+const OUTCOME_TONE: Record<RequestOutcome, Tone> = {
+  asked: 'amber', accepted: 'brand', declined: 'red', withdrawn: 'neutral', expired: 'neutral',
+};
 
 export default function RequestSessionScreen() {
   const t = useTheme();
@@ -381,13 +386,26 @@ export default function RequestSessionScreen() {
           </>
         ) : (
           <>
+            {/* ── the page's figures, before the form ──────────────────────
+                What has become of what was already asked, as two tiles on the
+                ground: amber for what is still waiting on the coach, the accent
+                for what ended up in the calendar. It is the count the card at
+                the foot of this screen used to say in a sentence. Only over a
+                whole read — a count off a truncated or failed one is a figure
+                about an unknown fraction of the set (see isWhole) — and a dash
+                rather than a nought otherwise. */}
+            <KpiRow tiles items={[
+              { label: 'Waiting on Your Coach', tone: 'amber', value: isWhole(status) ? fig(live.length) : fig(null) },
+              { label: 'In Your Calendar', tone: 'brand', value: isWhole(status) ? fig(listed.filter((r) => outcomeOf(r) === 'accepted').length) : fig(null) },
+            ]} />
+
             <Section>
               <Notice kicker="WHAT THIS DOES" title="It asks — it doesn’t book" note={NOT_A_BOOKING} />
             </Section>
 
             {/* ── the day ─────────────────────────────────────────────── */}
             <Section>
-              <SectionHead title="DAY" />
+              <SectionHead title="Day" />
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.sm }}>
                 {days.map((d, i) => {
                   const on = i === dayIdx;
@@ -404,11 +422,10 @@ export default function RequestSessionScreen() {
                         paddingHorizontal: sp.md, paddingVertical: sp.sm,
                         borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
                         backgroundColor: on ? t.brand : t.surface2,
-                        borderWidth: on ? 0 : hairline, borderColor: t.ring,
                       }}
                     >
                       <Text style={{ ...ty.micro, color: on ? t.brandInk : t.ink3 }}>{dayLabel(d)}</Text>
-                      <Text style={{ ...ty.body, fontWeight: '600', color: on ? t.brandInk : t.ink }}>{dateLabel(d)}</Text>
+                      <Text style={{ ...ty.body, ...font('600'), color: on ? t.brandInk : t.ink }}>{dateLabel(d)}</Text>
                     </Pressable>
                   );
                 })}
@@ -417,7 +434,7 @@ export default function RequestSessionScreen() {
 
             {/* ── the hour ────────────────────────────────────────────── */}
             <Section>
-              <SectionHead title="TIME" />
+              <SectionHead title="Time" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, paddingVertical: sp.sm }}>
                 {HOURS.map((h) => {
                   const on = h === hour;
@@ -434,10 +451,9 @@ export default function RequestSessionScreen() {
                         alignItems: 'center', justifyContent: 'center',
                         paddingHorizontal: sp.sm, borderRadius: radius.sm,
                         backgroundColor: on ? t.brand : t.surface2,
-                        borderWidth: on ? 0 : hairline, borderColor: t.ring,
                       }}
                     >
-                      <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>{hourLabel(h)}</Text>
+                      <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>{hourLabel(h)}</Text>
                     </Pressable>
                   );
                 })}
@@ -468,10 +484,9 @@ export default function RequestSessionScreen() {
                         alignItems: 'center', justifyContent: 'center',
                         borderRadius: radius.sm,
                         backgroundColor: on ? t.brand : t.surface2,
-                        borderWidth: on ? 0 : hairline, borderColor: t.ring,
                       }}
                     >
-                      <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>
+                      <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>
                         :{String(m).padStart(2, '0')}
                       </Text>
                     </Pressable>
@@ -482,7 +497,7 @@ export default function RequestSessionScreen() {
 
             {/* ── how long ────────────────────────────────────────────── */}
             <Section>
-              <SectionHead title="HOW LONG" />
+              <SectionHead title="How Long" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, paddingVertical: sp.sm }}>
                 {LENGTHS.map((m) => {
                   const on = m === length;
@@ -499,10 +514,9 @@ export default function RequestSessionScreen() {
                         alignItems: 'center', justifyContent: 'center',
                         paddingHorizontal: sp.sm, borderRadius: radius.sm,
                         backgroundColor: on ? t.brand : t.surface2,
-                        borderWidth: on ? 0 : hairline, borderColor: t.ring,
                       }}
                     >
-                      <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>{m} min</Text>
+                      <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>{m} min</Text>
                     </Pressable>
                   );
                 })}
@@ -511,7 +525,7 @@ export default function RequestSessionScreen() {
 
             {/* ── their own words ─────────────────────────────────────── */}
             <Section>
-              <SectionHead title="ANYTHING TO ADD" note="Optional" />
+              <SectionHead title="Anything to Add" note="Optional" />
               <TextInput
                 value={note}
                 onChangeText={setNote}
@@ -522,7 +536,7 @@ export default function RequestSessionScreen() {
                 accessibilityLabel="A note for your coach"
                 style={{
                   ...ty.body, color: t.ink, backgroundColor: t.surface2,
-                  borderRadius: radius.sm, borderWidth: hairline, borderColor: t.ring,
+                  borderRadius: radius.sm,
                   padding: sp.md, minHeight: 88, textAlignVertical: 'top',
                 }}
               />
@@ -549,13 +563,15 @@ export default function RequestSessionScreen() {
               />
             </Section>
 
-            <Section>
-              <Notice kicker="IF NOBODY ANSWERS" title="It lapses on its own" note={EXPIRY_RULE} />
-            </Section>
+            {/* Folded: the rule is read once, and its one-line answer is the
+                fold's own note. Every word of it is still here. */}
+            <Expandable title="If Nobody Answers" note="It lapses on its own">
+              <Text style={{ ...ty.label, color: t.ink2 }}>{EXPIRY_RULE}</Text>
+            </Expandable>
 
             {/* ── what has become of the ones already asked ───────────── */}
             <Section>
-              <SectionHead title="YOUR REQUESTS" />
+              <SectionHead title="Your Requests" />
 
               {/* A request on this phone that the server has not taken. It has
                   to be SAID, because the list below cannot show it: a row there
@@ -606,8 +622,12 @@ export default function RequestSessionScreen() {
                       <View key={r.id}>
                         {i ? <Rule /> : null}
                         <View style={{ paddingVertical: sp.md }}>
-                          <Text style={{ ...ty.micro, color: t.ink3 }}>{OUTCOME_LABEL[o]}</Text>
-                          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: 2 }}>{when}</Text>
+                          {/* The outcome as a chip: amber is waiting, the
+                              accent is booked, red is a no, and the two that
+                              are nobody's verdict — taken back, lapsed — are
+                              neutral. The words are OUTCOME_LABEL's. */}
+                          <TonedChip label={OUTCOME_LABEL[o]} tone={OUTCOME_TONE[o]} />
+                          <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 6 }}>{when}</Text>
                           <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>{outcomeLine(r, when)}</Text>
                           {/* A refusal has to say who made it and when, and this
                               record has both. Without it "Your Coach Said No"
@@ -637,21 +657,6 @@ export default function RequestSessionScreen() {
               )}
             </Section>
 
-            {/* Only over a whole read. A count off a truncated or failed one is
-                a figure about an unknown fraction of the set — see isWhole. */}
-            {isWhole(status) && listed.length ? (
-              <Section>
-                <Card>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>
-                    {live.length === 0
-                      ? 'Nothing is waiting on your coach.'
-                      : live.length === 1
-                        ? '1 request is waiting on your coach.'
-                        : `${live.length} requests are waiting on your coach.`}
-                  </Text>
-                </Card>
-              </Section>
-            ) : null}
           </>
         )}
       </ScrollView>

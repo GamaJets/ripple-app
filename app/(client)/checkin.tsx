@@ -45,8 +45,8 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { useSubmitOnce } from '../../src/ui/submitOnce';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Cta, PageHead, Spark, PartialRead, SyncBadge, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, Cta, PageHead, Spark, PartialRead, SyncBadge, MiniRing, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { useClientData } from '../../src/ui/clientData';
 import { fmtFullDay } from '../../src/lib/format';
@@ -59,13 +59,13 @@ import { useCheckIns } from '../../src/ui/checkins';
 // question a weekly rating exists to answer — is this going up or down — could
 // not be asked by the person answering it every Sunday. Their coach has read
 // the same rows since src/lib/coachCheckins.ts was written.
-import { checkinTrend, seriesNote, trendLine } from '../../src/lib/checkinTrend';
+import { checkinTrend, seriesNote, trendLine, type RatingKey } from '../../src/lib/checkinTrend';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isPending } from '../../src/lib/wellnessSync';
 import { unsentNote } from '../../src/lib/offlineQueue';
 // The age of the last check-in the server holds, in the same words the coach's
 // console uses for it — one wording for one fact on both sides of the thread.
-import { checkInAge, ratingLabel } from '../../src/lib/coachCheckins';
+import { checkInAge, rating, ratingLabel, RATING_MAX } from '../../src/lib/coachCheckins';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useToday } from '../../src/ui/today';
 import { isRTL } from '../../src/ui/direction';
@@ -85,6 +85,30 @@ const MAX_KG = 400;
  */
 const MOOD_WORDS = ['Rough', 'Low', 'Okay', 'Good', 'Great'] as const;
 
+/**
+ * One hue per rating, the same on the slider's fill, on the ring in Last
+ * Check-in and on the line in the trend under the form — so "the orange one"
+ * is energy wherever a member meets it. Mood is the check-in's own blue;
+ * adherence is the accent, because it is the one of the four that is a verdict
+ * on the plan. These NAME a metric; none of them is a judgement of the score.
+ */
+const RATING_TONE: Record<RatingKey, Tone> = { mood: 'blue', energy: 'orange', sleep: 'purple', adherence: 'brand' };
+
+/**
+ * The five faces in tones, worst to best: red, orange, amber, teal, accent.
+ * Here colour IS the judgement — a rough week is red and a great one is the
+ * accent — and it never stands alone: the face is drawn, the word for it is at
+ * the end of the label line, and each button speaks its word and its score.
+ */
+const FACE_TONE = ['red', 'orange', 'amber', 'teal', 'brand'] as const;
+
+/** A tone's plate, mark and ink off the theme — what the kit's own parts read. */
+function toneOf(t: Theme, tone: Tone): { mark: string; soft: string; ink: string } {
+  if (tone === 'brand') return { mark: t.brand, soft: t.brandSoft, ink: t.brandText };
+  if (tone === 'neutral') return { mark: t.ink3, soft: t.surface3, ink: t.ink2 };
+  return { mark: t.data[tone], soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+}
+
 /** The mouth for one score: a frown that flattens at 3 and lifts to a grin. */
 function mouth(n: number): string {
   switch (n) {
@@ -97,14 +121,16 @@ function mouth(n: number): string {
 }
 
 /**
- * The board's mood row: five faces, the chosen one filled in the accent.
+ * The mood row: five faces, each on the pale plate of its own tone, the chosen
+ * one ringed in that tone's mark.
  *
  * Drawn, not typed. An emoji would render in whatever face the handset's font
- * gives it and could not take the theme's ink, so the board's filled circle
- * with a face inside it is two SVG dots and one path per score. The circle
- * itself is the Pressable's fill, which is what makes the selected one read as
- * the board's chip — `t.brand` with `t.brandInk` strokes — under every accent
- * a gym white-labels this to.
+ * gives it and could not take the theme's ink, so each face is two SVG dots
+ * and one path per score, in the tone's INK on the tone's plate — the pairing
+ * the kit's chips use, measured in both themes. Selection is a 3pt ring and
+ * not a fill: a face filled with the mark would need a second measured ink on
+ * seven hues, and the ring reads as "this one" without one. Once a face is
+ * chosen the other four step back to the grey plate, so the row says one thing.
  */
 function Faces({ t, label, value: val, onChange }: { t: Theme; label: string; value: number; onChange: (v: number) => void }) {
   return (
@@ -113,11 +139,17 @@ function Faces({ t, label, value: val, onChange }: { t: Theme; label: string; va
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.md }}>
         {[1, 2, 3, 4, 5].map((n) => {
           const on = val === n;
-          const ink = on ? t.brandInk : t.ink2;
+          const c = toneOf(t, FACE_TONE[n - 1]);
+          // In colour until one is picked, then only the pick keeps its hue.
+          const lit = on || !val;
+          const ink = lit ? c.ink : t.ink3;
           return (
             <Pressable key={n} onPress={() => onChange(n)} accessibilityRole="button"
               accessibilityLabel={`${label}: ${MOOD_WORDS[n - 1]}, ${n} of 5`} accessibilityState={{ selected: on }}
-              style={{ width: 52, height: 52, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+              style={{
+                width: 52, height: 52, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: lit ? c.soft : t.surface2, borderWidth: on ? 3 : 0, borderColor: c.mark,
+              }}>
               <Svg width={30} height={30} viewBox="0 0 24 24">
                 <Circle cx="8.5" cy="9.5" r="1.5" fill={ink} />
                 <Circle cx="15.5" cy="9.5" r="1.5" fill={ink} />
@@ -139,7 +171,7 @@ function Faces({ t, label, value: val, onChange }: { t: Theme; label: string; va
 function FieldLabel({ t, label, note }: { t: Theme; label: string; note?: string }) {
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flexShrink: 1 }}>{label}</Text>
+      <Text style={{ ...ty.body, ...font('600'), color: t.ink, flexShrink: 1 }}>{label}</Text>
       {note ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{note}</Text> : null}
     </View>
   );
@@ -170,7 +202,7 @@ function FieldLabel({ t, label, note }: { t: Theme; label: string; note?: string
  * left layout `start` is the right edge, so the fraction is mirrored there —
  * otherwise a drag to the right would shrink the fill it was growing.
  */
-function Slider({ t, label, value: val, onChange }: { t: Theme; label: string; value: number; onChange: (v: number) => void }) {
+function Slider({ t, label, value: val, onChange, tone = 'brand' }: { t: Theme; label: string; value: number; onChange: (v: number) => void; tone?: Tone }) {
   const [w, setW] = useState(0);
   const THUMB = 22;
   const pick = (x: number) => {
@@ -199,16 +231,16 @@ function Slider({ t, label, value: val, onChange }: { t: Theme; label: string; v
         onResponderGrant={(e) => pick(e.nativeEvent.locationX)}
         onResponderMove={(e) => pick(e.nativeEvent.locationX)}
         style={{ height: MIN_TARGET, justifyContent: 'center' }}>
-        <View style={{ height: 4, borderRadius: radius.pill, backgroundColor: t.surface3 }} />
+        <View style={{ height: 6, borderRadius: radius.pill, backgroundColor: t.surface3 }} />
         {val ? (
           <View>
-            <View style={{ position: 'absolute', start: 0, top: -2, height: 4, width: `${pct}%`, borderRadius: radius.pill, backgroundColor: t.brand }} />
+            <View style={{ position: 'absolute', start: 0, top: -6, height: 6, width: `${pct}%`, borderRadius: radius.pill, backgroundColor: toneOf(t, tone).mark }} />
             {/* The thumb is the board's: near-black on the green, lifted off
                 the track by a ring of the canvas. `start` is a percentage of
                 the track less half the thumb, so score 1 and score 5 sit
                 centred on the two ends rather than hanging past them. */}
             <View style={{
-              position: 'absolute', top: -THUMB / 2, start: `${pct}%`, marginStart: -THUMB / 2,
+              position: 'absolute', top: -THUMB / 2 - 3, start: `${pct}%`, marginStart: -THUMB / 2,
               width: THUMB, height: THUMB, borderRadius: radius.pill,
               backgroundColor: t.ink, borderWidth: 3, borderColor: t.bg,
             }} />
@@ -347,7 +379,9 @@ export default function CheckIn() {
   };
 
   const field = {
-    ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline,
+    // No hairline: the field is a grey well in a white card now, and the
+    // step between the two is the edge.
+    ...ty.body, color: t.ink, backgroundColor: t.surface2,
     borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginTop: sp.md,
   } as const;
 
@@ -392,11 +426,14 @@ export default function CheckIn() {
           </View>
         ) : null}
 
-        {/* ── the board's four, in the board's order ──────────────────────── */}
-        <View style={{ marginTop: sp.xxl }}>
+        {/* ── the board's four, in the board's order ────────────────────────
+            On a card, as every form in the approved look is: the ground is
+            grey now and a run of controls straight on it reads as unfinished.
+            Each slider fills in its rating's own hue — see RATING_TONE. */}
+        <Section>
           <Faces t={t} label="How Are You Feeling?" value={mood} onChange={setMood} />
-          <Slider t={t} label="Energy Level" value={energy} onChange={setEnergy} />
-          <Slider t={t} label="Sleep Quality" value={sleep} onChange={setSleep} />
+          <Slider t={t} tone={RATING_TONE.energy} label="Energy Level" value={energy} onChange={setEnergy} />
+          <Slider t={t} tone={RATING_TONE.sleep} label="Sleep Quality" value={sleep} onChange={setSleep} />
           <View style={{ marginBottom: sp.xl }}>
             <FieldLabel t={t} label="Notes" />
             <TextInput value={note} onChangeText={setNote} placeholder="Add a note…" placeholderTextColor={t.ink3} multiline accessibilityLabel="Note for your coach"
@@ -408,7 +445,7 @@ export default function CheckIn() {
               fourth score the coach's console and the weekly report read;
               weight is what the macro target and the goal are worked out
               from. Neither can be dropped to match a picture. */}
-          <Slider t={t} label="Plan Adherence" value={adherence} onChange={setAdherence} />
+          <Slider t={t} tone={RATING_TONE.adherence} label="Plan Adherence" value={adherence} onChange={setAdherence} />
           <View style={{ marginBottom: sp.xl }}>
             <FieldLabel t={t} label="Current Weight" note={wu} />
             <TextInput value={weight} onChangeText={setTyped} keyboardType="decimal-pad" placeholder={wu} placeholderTextColor={t.ink3}
@@ -416,7 +453,6 @@ export default function CheckIn() {
               style={{ ...field, ...numeric }} />
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text> : null}
           </View>
-        </View>
 
         {/* Guarded, and the label says why. `submit` awaits two network
             writes before it says anything, and on a gym's wifi that window is
@@ -428,12 +464,12 @@ export default function CheckIn() {
             useState alone would not have stopped it: the handler reads the flag
             out of the closure it was made in, and two taps in one frame both
             see false. See src/lib/submitOnce.ts. */}
-        <Cta label={send.busy ? 'Sending…' : 'Submit Check-in'} disabled={send.busy}
-          onPress={() => send.run(submit)} wide />
+          <Cta label={send.busy ? 'Sending…' : 'Submit Check-in'} disabled={send.busy}
+            onPress={() => send.run(submit)} wide />
+        </Section>
 
         {ci.latest ? (
           <View>
-            <Rule />
             <Section>
               {/* Which copy this is. A pending check-in is real and is the
                   client's own, but their coach has not read it — and under
@@ -455,8 +491,25 @@ export default function CheckIn() {
                   "Energy 0/5" is a rating nobody gave on a scale that starts at
                   1. The trend below has always refused to plot those; this line
                   printed them. Unknown draws the dash (rule 5). */}
-              <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{fig(weightLabel(ci.latest.weightKg > 0 ? ci.latest.weightKg : null, wu))} · Energy {fig(ratingLabel(ci.latest.energy))} · Sleep {fig(ratingLabel(ci.latest.sleep))}</Text>
-              {ci.latest.note ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, fontStyle: 'italic' }}>“{ci.latest.note}”</Text> : null}
+              {/* As a picture: the weight as the card's figure and the four
+                  scores as four small rings in their own hues, where this was
+                  one grey line that named two of the four. `rating` is the same
+                  reader `ratingLabel` is built on, so a ring's arc and the
+                  words inside it cannot disagree — and a score that is not on
+                  the scale is a null to both: a bare track and a dash, never
+                  an empty ring that reads as "0 of 5". */}
+              <Text style={{ ...value(26), ...numeric, color: t.ink }}>{fig(weightLabel(ci.latest.weightKg > 0 ? ci.latest.weightKg : null, wu))}</Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
+                {([['mood', 'Mood'], ['energy', 'Energy'], ['sleep', 'Sleep'], ['adherence', 'Adherence']] as const).map(([k, word]) => {
+                  const n = rating(ci.latest?.[k]);
+                  return (
+                    <MiniRing key={k} tone={RATING_TONE[k]} label={word}
+                      value={n == null ? null : n / RATING_MAX} figure={ratingLabel(n)}
+                      spoken={n == null ? `${word}, not rated` : `${word}, ${n} out of ${RATING_MAX}`} />
+                  );
+                })}
+              </View>
+              {ci.latest.note ? <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.lg, fontStyle: 'italic' }}>“{ci.latest.note}”</Text> : null}
             </Section>
           </View>
         ) : null}
@@ -479,7 +532,6 @@ export default function CheckIn() {
             an unknown fraction of the set, which src/ui/loadStatus.ts rules out
             outright. */}
         <View>
-          <Rule />
           <Section>
             <SectionHead title="How the Weeks Have Gone"
               note={trend.charted == null ? undefined : `${trend.charted}`} />
@@ -488,12 +540,16 @@ export default function CheckIn() {
               const note = seriesNote(s, trend.labels.length);
               return (
                 <View key={s.key} style={{ marginTop: sp.lg }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, marginBottom: sp.xs }}>{s.label}</Text>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink, marginBottom: sp.xs }}>{s.label}</Text>
                   {/* `Spark` draws nothing under two readable points, which is
                       correct — a line needs two — and `seriesNote` is what says
                       so where that happens, rather than leaving a heading over
                       empty space. */}
-                  <Spark data={s.values} labels={trend.labels} unit="/5" />
+                  {/* The mockups' area chart, in the rating's own hue — the
+                      same one its slider fills in and its ring is drawn in.
+                      `area` is still `Spark`: the gaps across an unrated week
+                      and the touch readout are untouched. */}
+                  <Spark data={s.values} labels={trend.labels} unit="/5" area tone={RATING_TONE[s.key]} />
                   {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{note}</Text> : null}
                 </View>
               );

@@ -42,8 +42,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ActionCard, ListRow, Ghost, PageHead, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, ActionCard, ListRow, Ghost, PageHead, Flag, FigureCard, Meter, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import type { IconName } from '../../src/ui/Icon';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useClientData } from '../../src/ui/clientData';
@@ -355,22 +355,37 @@ export default function Membership() {
   const ordersRead = oStatus === 'ready';
   const order = ordersRead && primary ? orderForMembership(orders, primary.id) : null;
 
-  const actions: { label: string; note: string; icon: IconName; route: string; hero?: boolean }[] = [
+  // How far through its term the membership is, for the meter under the
+  // status — only where the gym recorded BOTH ends and the term is running.
+  // `daysLeft` is `standingOf`'s own figure, so the bar and the "runs to" line
+  // above it are one calculation; the length is two recorded dates apart, read
+  // as local calendar days. An open-ended membership has no bar, because it
+  // has no whole to be part of.
+  const term = useMemo(() => {
+    if (!primary || !standing || (standing.kind !== 'current' && standing.kind !== 'expiring')) return null;
+    const a = localDate(primary.startedOn), b = localDate(standing.endsOn);
+    if (!a || !b) return null;
+    const total = Math.round((b.getTime() - a.getTime()) / 86_400_000);
+    if (!(total > 0)) return null;
+    return { total, used: Math.max(0, Math.min(total, total - standing.daysLeft)), left: standing.daysLeft };
+  }, [primary, standing]);
+
+  const actions: { label: string; note: string; icon: IconName; route: string; tone?: Tone; hero?: boolean }[] = [
     { label: 'Entry Barcode', note: `Your ${appName} ID — link it at reception`, icon: 'grid', route: '/(client)/access', hero: true },
-    { label: 'Classes', note: 'Book a group class at your branch', icon: 'calendar', route: '/(client)/classes' },
-    { label: 'Personal Training', note: 'Approve sessions your trainer delivered', icon: 'people', route: '/(client)/pt-sessions' },
-    { label: 'My Bookings', note: 'Everything you have booked', icon: 'check', route: '/(client)/bookings' },
+    { label: 'Classes', note: 'Book a group class at your branch', icon: 'calendar', tone: 'purple', route: '/(client)/classes' },
+    { label: 'Personal Training', note: 'Approve sessions your trainer delivered', icon: 'people', tone: 'brand', route: '/(client)/pt-sessions' },
+    { label: 'My Bookings', note: 'Everything you have booked', icon: 'check', tone: 'blue', route: '/(client)/bookings' },
     // The screen this one could not reach for as long as it existed. Every
     // figure above is read-only: a member could see the plan they were on and
     // its price and could not buy it, renew it or move off it, and the gym's
     // own price book has been readable since part 29 with nothing to do about
     // it. src/lib/memberBuy.ts is the rules; that screen is the act.
-    { label: 'Plans & Passes', note: 'Buy, renew or change what you are on', icon: 'target', route: '/(client)/gym-plans' },
-    { label: 'Memberships & Packs', note: 'What you have bought and what is left', icon: 'trophy', route: '/(client)/packages' },
+    { label: 'Plans & Passes', note: 'Buy, renew or change what you are on', icon: 'target', tone: 'teal', route: '/(client)/gym-plans' },
+    { label: 'Memberships & Packs', note: 'What you have bought and what is left', icon: 'trophy', tone: 'orange', route: '/(client)/packages' },
     // Pointed at Explore — "what else the app can do" — which is not an offer.
     // There is a real offers screen now, where a gym code is redeemed.
-    { label: 'Payments', note: 'What your gym has recorded taking from you', icon: 'clock', route: '/(client)/receipts' },
-    { label: 'Offers', note: 'Redeem a code from your gym', icon: 'sparkle', route: '/(client)/offers' },
+    { label: 'Payments', note: 'What your gym has recorded taking from you', icon: 'clock', tone: 'amber', route: '/(client)/receipts' },
+    { label: 'Offers', note: 'Redeem a code from your gym', icon: 'sparkle', tone: 'pink', route: '/(client)/offers' },
     { label: 'Refer a Friend', note: `Share ${appName} with someone`, icon: 'share', route: '/(client)/referral' },
   ];
   const heroAction = actions.find((a) => a.hero);
@@ -419,51 +434,79 @@ export default function Membership() {
               plan      — the real thing, off real rows
               unreadable— a plan is attached and did not come back. Said out
                           loud rather than rendered as an empty plan name */}
-        <Section>
-          <SectionHead title="Your Membership"
-            note={mStatus === 'ready' && mships.length > 1 ? `${mships.length} on record` : undefined} />
+        {/* ── the failure, said ABOVE what it qualifies ────────────────
+            This used to be an exclusive branch, and that quietly threw away
+            the whole point of the cache read forty lines up. The device's
+            copy was loaded into `mships` and then never drawn, because the
+            'error' arm returned instead of falling through to the plan, the
+            standing and the dates — so a member standing inside the
+            building their membership is for saw two banners and nothing
+            else, one of which said "Saved on this phone 3 days ago" about
+            data that was not on the screen. The cache's own note names the
+            case it was written for: "on a cold launch in a basement there
+            was nothing on screen to keep."
+            The banners lead, so the qualification arrives before the thing
+            it qualifies rather than after it. */}
+        {mStatus === 'error' ? (
+          <Section>
+            <View style={{ gap: sp.md }}>
+              <Flag tone={t.crit}>
+              We couldn’t read your membership. That is a read that failed, not an answer — it does not mean your gym has no record of you.
+            </Flag>
+            {/* …and when there IS something below, say where it came from and
+                how old it is. A member reading a cached membership as a live
+                one goes to reception believing they are in good standing. */}
+            {mCachedAt && mships.length ? <Flag tone={t.warn}>{cachedAtLine(mCachedAt)}</Flag> : null}
+            <View style={{ flexDirection: 'row' }}>
+              <Ghost label="Try Again" onPress={() => { void loadMembership(); }} />
+            </View>
+          </View>
+          </Section>
+        ) : null}
 
-          {mStatus === 'loading' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your membership…</Text>
-          ) : (<>
-            {/* ── the failure, said ABOVE what it qualifies ────────────────
-                This used to be an exclusive branch, and that quietly threw away
-                the whole point of the cache read forty lines up. The device's
-                copy was loaded into `mships` and then never drawn, because the
-                'error' arm returned instead of falling through to the plan, the
-                standing and the dates — so a member standing inside the
-                building their membership is for saw two banners and nothing
-                else, one of which said "Saved on this phone 3 days ago" about
-                data that was not on the screen. The cache's own note names the
-                case it was written for: "on a cold launch in a basement there
-                was nothing on screen to keep."
-                The banners lead, so the qualification arrives before the thing
-                it qualifies rather than after it. */}
-            {mStatus === 'error' ? (
-              <View style={{ gap: sp.md, marginBottom: sp.md }}>
-                <Flag tone={t.crit}>
-                  We couldn’t read your membership. That is a read that failed, not an answer — it does not mean your gym has no record of you.
-                </Flag>
-                {/* …and when there IS something below, say where it came from and
-                    how old it is. A member reading a cached membership as a live
-                    one goes to reception believing they are in good standing. */}
-                {mCachedAt && mships.length ? <Flag tone={t.warn}>{cachedAtLine(mCachedAt)}</Flag> : null}
-                <View style={{ flexDirection: 'row' }}>
-                  <Ghost label="Try Again" onPress={() => { void loadMembership(); }} />
-                </View>
-              </View>
-            ) : null}
-            {!primary || !standing || !planState ? (
+        {/* ── and it opens on its figure ──────────────────────────────────
+            The approved look leads a pushed page with its state, and this
+            page's state is one word: Active, Ending Soon, Frozen, Expired. So
+            the standing is the card's FIGURE now — it was the third of five
+            grey lines — with the sentence about when it runs to as the marked
+            line under it, the plan and its price as the quiet tail, and the
+            term as a meter. When there is no membership to state, the figure
+            is the dash and `detail` is the reason, never a blank card. */}
+        <FigureCard title="Your Membership"
+          note={mStatus === 'ready' && mships.length > 1 ? `${mships.length} on record` : undefined}
+          figure={primary && standing && planState ? standingLabel(standing) : null}
+          tone={standing ? (isCurrent(standing) ? t.brand : t.warn) : undefined}
+          comparison={!primary || !standing || !planState ? undefined
+            /* renewalNote refuses to compute a date the gym has not recorded —
+               the exact thing "Valid until <today + 1 year>" used to do here. */
+            : standing.kind === 'current' || standing.kind === 'expiring'
+              ? `Runs to ${day(standing.endsOn)}`
+              /* With dates on the pause there IS an answer, so the line that
+                 used to send a paused member to reception to ask when it
+                 restarts says when it restarts instead. Without them
+                 `renewalNote` is still right: a status of Frozen and no dates
+                 is a pause only a person can explain. */
+              : standing.kind === 'frozen' && freeze
+                ? `${freeze.line}${freeze.clash}`
+                : renewalNote(standing, planState)}
+          period={planState?.kind === 'plan' && planState.plan.name ? planState.plan.name : undefined}
+          detail={mStatus === 'loading' ? 'Reading your membership…'
             // Under 'error' with nothing cached, the banner above has already
             // said what happened. "Your gym has not recorded a membership" is a
             // claim about somebody's standing at their own gym and may only be
             // made about a read that landed.
-            mStatus === 'error' ? null : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              Your gym has not recorded a membership against your account. Plenty of gyms run on day passes and packs instead — if you believe you are on a plan, reception can add it.
-            </Text>
-            )) : (
+            : (!primary || !standing || !planState) && mStatus !== 'error'
+              ? 'Your gym has not recorded a membership against your account. Plenty of gyms run on day passes and packs instead — if you believe you are on a plan, reception can add it.'
+              : undefined}>
+          {mStatus === 'loading' ? null : (<>
+            {!primary || !standing || !planState ? null : (
             <>
+              {term ? (
+                <Meter label="Term" val={term.used} target={term.total} unit="days"
+                  tone={standing.kind === 'expiring' ? 'amber' : 'brand'}
+                  note={term.left === 1 ? '1 day left' : `${term.left} days left`} />
+              ) : null}
+              <View style={{ height: sp.md }} />
               {/* Plan. Three sentences for three states, never one blank. */}
               {planState.kind === 'plan' ? (
                 <>
@@ -484,28 +527,10 @@ export default function Membership() {
                 <Line t={t} first label="Plan" value="On your account, but we couldn’t read it" />
               )}
 
-              <Line t={t} label="Standing" value={standingLabel(standing)} />
+              {/* The standing itself is the card's figure now, and its
+                  sentence the marked line under it — see the FigureCard. */}
               <Line t={t} label="Started" value={day(primary.startedOn)} />
               {primary.endsOn ? <Line t={t} label="Runs to" value={day(primary.endsOn)} /> : null}
-
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isCurrent(standing) ? t.brand : t.warn }} />
-                <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
-                  {/* renewalNote refuses to compute a date the gym has not
-                      recorded — the exact thing "Valid until <today + 1 year>"
-                      used to do here. */}
-                  {standing.kind === 'current' || standing.kind === 'expiring'
-                    ? `${standingLabel(standing)} · runs to ${day(standing.endsOn)}`
-                    /* With dates on the pause there IS an answer, so the line
-                       that used to send a paused member to reception to ask
-                       when it restarts says when it restarts instead. Without
-                       them `renewalNote` is still right: a status of Frozen and
-                       no dates is a pause only a person can explain. */
-                    : standing.kind === 'frozen' && freeze
-                      ? `${freeze.line}${freeze.clash}`
-                      : renewalNote(standing, planState)}
-                </Text>
-              </View>
 
               {/* The pause the status column has not caught up with — or has
                   got ahead of. Drawn only where the line above is not already
@@ -605,7 +630,7 @@ export default function Membership() {
             </>
           )}
           </>)}
-        </Section>
+        </FigureCard>
 
 
         {/* ── the hero: the only live number this screen has ────────────────
@@ -632,13 +657,7 @@ export default function Membership() {
             /* The board's figure card in place of the retired Hero: the
                section's name, the figure at hero size, the note under it,
                spoken as one sentence. */
-            <Section>
-              <SectionHead title="Sessions Logged This Month" />
-              <View accessible accessibilityLabel={`Sessions logged this month, ${figure}, ${note}`}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
-              </View>
-            </Section>
+            <FigureCard title="Sessions Logged This Month" figure={logKnown ? figure : null} detail={note} />
           );
         })()}
 
@@ -660,7 +679,7 @@ export default function Membership() {
         <Section>
           <SectionHead title="At the Gym" />
           {actions.filter((a) => !a.hero).map((a) => (
-            <ListRow key={a.label} icon={a.icon} title={a.label} note={a.note}
+            <ListRow key={a.label} icon={a.icon} tone={a.tone} title={a.label} note={a.note}
               onPress={() => router.push(a.route as any)} />
           ))}
         </Section>

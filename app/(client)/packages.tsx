@@ -28,8 +28,8 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Meter, Ghost, Cta, Flag, ListRow, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Meter, Ghost, Cta, Flag, ListRow, Ring, TonedChip, fig, PageHead } from '../../src/ui/kit';
+import { sp, layout, hairline, radius, fontScale, type as ty, numeric, font } from '../../src/theme/scale';
 import { normaliseCode, checkoutCodeBlocker, type PromoTarget } from '../../src/lib/packagePromo';
 import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, openPurchasePortal, portalPurchase, myPtPasses, type Purchase, type TrainerPackage, type PtPassRow } from '../../src/lib/connect';
 // The routed balance, shared with app/(client)/pt-sessions.tsx and
@@ -51,6 +51,32 @@ import {
   openSubscriptionPortal, pkgMoney, pkgPriceLine, statusLabel, isLive, type ClientSubscription,
 } from '../../src/lib/subscriptions';
 import { useScrollPad } from '../../src/ui/keyboardPad';
+
+/**
+ * The page's figure: sessions left, as a ring against what was sold.
+ *
+ * Both routes to a balance on this screen — a coach's packs, a gym's PT pass —
+ * draw it through here so they cannot drift into two pictures of one fact.
+ * `left` is always a number by the time this is reached (both callers gate on
+ * the read), and `sold` of nothing draws the bare track rather than dividing
+ * by it. Sessions are one unit, so a sum across lines is honest; money on this
+ * screen is never summed. At large text the note drops under the ring.
+ */
+function RemainingCard({ left, sold, note }: { left: number; sold: number; note: string }) {
+  const t = useTheme();
+  const stacked = fontScale >= 1.35;
+  return (
+    <Section>
+      <SectionHead title="Sessions Remaining" />
+      <View style={{ flexDirection: stacked ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+        <Ring size={124} tone="brand" value={sold > 0 ? left / sold : null}
+          figure={num(left)} sub={sold > 0 ? `of ${num(sold)}` : undefined}
+          spoken={`Sessions remaining, ${num(left)}${sold > 0 ? ` of ${num(sold)}` : ''}. ${note}`} />
+        <Text style={{ ...ty.label, color: t.ink2, flex: stacked ? undefined : 1, minWidth: 0, textAlign: stacked ? 'center' : 'auto' }}>{note}</Text>
+      </View>
+    </Section>
+  );
+}
 
 export default function ClientPackages() {
   const t = useTheme();
@@ -483,8 +509,7 @@ export default function ClientPackages() {
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <PageHead title="Memberships & Packs" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>What you've bought from your coach and what's left.</Text>
+        <PageHead title="Memberships & Packs" subtitle="What you’ve bought from your coach and what’s left" />
 
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading what you have bought…" /> : (
           <>
@@ -517,13 +542,8 @@ export default function ClientPackages() {
               /* The board's figure card in place of the retired Hero: the
                  section's name, the figure at hero size, the note under it,
                  spoken as one sentence. */
-              <Section>
-                <SectionHead title="Sessions Remaining" />
-                <View accessible accessibilityLabel={`Sessions remaining, ${num(book.left)}, ${creditsHeroNote(book) ?? ''}`}>
-                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(book.left)}</Text>
-                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{creditsHeroNote(book) ?? ''}</Text>
-                </View>
-              </Section>
+              <RemainingCard left={book.left} note={creditsHeroNote(book) ?? ''}
+                sold={(book.lines ?? []).reduce((n, l) => n + l.sessions_total, 0)} />
             ) : balance.lines.length > 0 && remaining != null ? (() => {
               const note = balance.live > 0
                 ? `Across ${balance.live} active pack${balance.live === 1 ? '' : 's'}${balance.exhausted ? ` · ${balance.exhausted} used up` : ''}${balance.stranded ? ` · ${balance.stranded} ran out of time` : ''}`
@@ -534,15 +554,12 @@ export default function ClientPackages() {
                 : balance.stranded
                   ? `${balance.stranded} session${balance.stranded === 1 ? '' : 's'} you paid for ran out of time before ${balance.stranded === 1 ? 'it was' : 'they were'} used`
                   : `Every pack you have bought is used up`;
-              return (
-                <Section>
-                  <SectionHead title="Sessions Remaining" />
-                  <View accessible accessibilityLabel={`Sessions remaining, ${num(remaining)}, ${note}`}>
-                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(remaining)}</Text>
-                    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
-                  </View>
-                </Section>
-              );
+              // The ring's whole is the packs the balance is actually HELD in
+              // — the lines with something left. A used-up ten-pack in the
+              // denominator would draw "4 of 20" for somebody with four left of
+              // their current ten.
+              const sold = balance.lines.reduce((n, l) => n + (l.left > 0 ? l.sessions_total : 0), 0);
+              return <RemainingCard left={remaining} sold={sold} note={note} />;
             })() : null}
 
             {/* Their next booking is not covered by anything they have paid
@@ -566,11 +583,10 @@ export default function ClientPackages() {
                 ones in my diary are going to use these". Both live on the
                 ledger, which reads a gym-sold PT pass and a coach-sold pack
                 the same way. */}
-            <ListRow icon="calendar" title="Session Credits"
+            <ListRow icon="calendar" tone="blue" title="Session Credits"
               note="Which sessions used a credit, and what your bookings are due to draw"
               onPress={() => router.push('/(client)/session-credits')} />
 
-            <Rule />
 
             {/* ── what recurs ────────────────────────────────────────────── */}
             <Section>
@@ -602,11 +618,11 @@ export default function ClientPackages() {
               {(subs === null ? [] : liveSubs).map((s, i) => (
                 <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>Coaching subscription</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>Coaching subscription</Text>
                     {/* The amount Stripe bills, in the currency Stripe bills it
                         in. Unknown is a dash — never a zero, and never a figure
                         with a currency guessed onto it. */}
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>
+                    <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>
                       {fig(pkgPriceLine(s.amount_cents, s.currency || (s.package_id ? cur.get(s.package_id) : null), s.billing_interval))}
                     </Text>
                   </View>
@@ -615,20 +631,21 @@ export default function ClientPackages() {
                       spoken rather than only seen. */}
                   <View accessible accessibilityRole="text"
                     accessibilityLabel={`${statusLabel(s.status)}${s.cancel_at_period_end ? ', ending at the end of the period' : ''}`}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 5 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'past_due' ? t.crit : s.cancel_at_period_end ? t.warn : t.brand }} />
-                    <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-                      {statusLabel(s.status)}
+                    style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7, marginTop: 6 }}>
+                    {/* The state as a chip — red needs you, amber is ending,
+                        the accent is running — with the date in ink beside it. */}
+                    <TonedChip label={statusLabel(s.status)} tone={s.status === 'past_due' ? 'red' : s.cancel_at_period_end ? 'amber' : 'brand'} />
+                    <Text style={{ ...ty.caption, color: t.ink3, flexShrink: 1 }}>
                       {/* No date rather than a date we do not have. A renewal
                           day is the thing somebody plans around — and a date
                           off an unconfirmed copy is one this screen cannot
                           stand behind, so under a failed read it is withheld
                           exactly as a missing one is. */}
                       {subsFailed
-                        ? ' · not confirmed just now'
+                        ? 'Not confirmed just now'
                         : s.current_period_end
-                        ? ` · ${s.cancel_at_period_end ? 'ends' : 'renews'} ${fmtFullDay(s.current_period_end)}`
-                        : ' · renewal date not known'}
+                        ? `${s.cancel_at_period_end ? 'Ends' : 'Renews'} ${fmtFullDay(s.current_period_end)}`
+                        : 'Renewal date not known'}
                     </Text>
                   </View>
                   {s.status === 'past_due' ? (
@@ -650,7 +667,6 @@ export default function ClientPackages() {
               ))}
             </Section>
 
-            <Rule />
 
             {/* ── your card, your invoices, your money back ────────────────
                 This button used to live INSIDE the loop above, and that was not
@@ -713,7 +729,6 @@ export default function ClientPackages() {
               )}
             </Section>
 
-            <Rule />
 
             {failed && !(rows ?? []).length ? (
               <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
@@ -753,7 +768,7 @@ export default function ClientPackages() {
                       {i > 0 ? <Rule /> : null}
                       <View style={{ paddingVertical: sp.md }}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>
+                          <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>
                             {line ? line.label : 'Membership'}
                           </Text>
                           {/* Was money(r.amount_cents), which rendered an unknown
@@ -780,7 +795,7 @@ export default function ClientPackages() {
                               well. The subscription line above already reads
                               `s.currency || (lookup)` — this was the one that
                               never got the same fix. */}
-                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>
+                          <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>
                             {fig(pkgMoney(r.amount_cents, r.currency || (r.package_id ? cur.get(r.package_id) : null)))}
                           </Text>
                         </View>
@@ -815,7 +830,8 @@ export default function ClientPackages() {
                                   ? `${line.left} of ${line.sessions_total} came back after it ran out`
                                   : `All ${line.sessions_total} used before it ran out`)
                               : line.exhausted ? `None left of ${line.sessions_total}` : `${line.left} of ${line.sessions_total} left`}
-                              val={line.left} target={line.sessions_total} unit="" />
+                              val={line.left} target={line.sessions_total} unit=""
+                              tone={line.expired ? 'neutral' : 'brand'} dim={line.exhausted} />
                             {/* The date, because "ran out of time" without one
                                 is a thing that happened to them at no
                                 particular moment. Null for the packs with no
@@ -848,7 +864,6 @@ export default function ClientPackages() {
               </Section>
             )}
 
-            <Rule />
 
             {/* ── what your coach sells ──────────────────────────────────── */}
             <Section>
@@ -868,8 +883,8 @@ export default function ClientPackages() {
               {(offers === null ? [] : buyable).map((p, i) => (
                 <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{p.name}</Text>
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(pkgPriceLine(p.price_cents, p.currency, p.billing_interval))}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{p.name}</Text>
+                    <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>{fig(pkgPriceLine(p.price_cents, p.currency, p.billing_interval))}</Text>
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
                     {p.billing_interval

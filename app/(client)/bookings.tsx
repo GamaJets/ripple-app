@@ -7,6 +7,12 @@
 // beside ink text where "Waitlist" used to be status-coloured type. Every
 // provider, conditional and route is unchanged.
 //
+// Round five (the look the owner approved): the page opens on three tiles —
+// PT sessions, classes, class waitlists, each in its session type's colour and
+// each a dash unless both reads were whole — and every row has a toned plate,
+// its state as a chip and its actions under the words. Still no invented
+// figure: the tiles count exactly what the list below them shows.
+//
 // ── TF-32: "PT with <the reader's own name>" ───────────────────────────────
 //
 // The personal-training rows were titled from `useCoachProfile().name`. That
@@ -29,7 +35,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PageHead, KpiRow, IconPlate, TonedChip, fig } from '../../src/ui/kit';
 // What pays for each of these, read once for the whole list. See
 // supabase/parts/370 and src/lib/sessionCredits.ts: the choice of entitlement
 // is made in one place, so this screen and the ledger cannot describe the same
@@ -55,7 +61,7 @@ import { useToday, useNow } from '../../src/ui/today';
 // control simply disappeared at the boundary with nothing saying why. See
 // src/lib/cancelDeadline.ts.
 import { cancelDeadline, freeUntil } from '../../src/lib/cancelDeadline';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 // A class the gym called off. This screen listed one under Upcoming as a
 // confirmed booking and wrote it into the member's own phone calendar, where
@@ -731,9 +737,21 @@ export default function Bookings() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <PageHead title="My Bookings" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Your upcoming classes and personal-training sessions, all in one place.</Text>
+        <PageHead title="My Bookings" subtitle="Your upcoming classes and personal-training sessions" />
 
+        {/* ── the page's figures, before its rows ──────────────────────────
+            What the list below adds up to, by session type and in each type's
+            own colour — the accent for an hour with your coach, purple for a
+            class, amber for a place in a queue, which is NOT a booking and is
+            counted apart for that reason (see the note on the heading below).
+            Same gate as that heading: a figure only when both reads answered
+            in full, and a dash — never a nought — when they did not. A class
+            the gym called off is in none of the three. */}
+        <KpiRow tiles items={[
+          { label: 'PT Sessions', tone: 'brand', value: bookingsWhole ? fig(items.filter((it) => it.kind === 'pt' && !it.waitlist && !it.cancelled).length) : fig(null) },
+          { label: 'Classes', tone: 'purple', value: bookingsWhole ? fig(items.filter((it) => it.kind !== 'pt' && !it.waitlist && !it.cancelled).length) : fig(null) },
+          { label: 'Class Waitlists', tone: 'amber', value: bookingsWhole ? fig(items.filter((it) => it.waitlist && !it.cancelled).length) : fig(null) },
+        ]} />
 
         {/* ── what you have booked ───────────────────────────────────────── */}
         <Section>
@@ -799,25 +817,28 @@ export default function Bookings() {
           {items.map((it, i) => (
             <View key={it.id}>
               {i > 0 ? <Rule /> : null}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>{it.kind === 'pt' ? 'Personal training' : 'Class'}</Text>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{it.title}</Text>
+              {/* The approved row: a plate in the session type's colour, the
+                  words, the STATE as a chip, and the row's actions under the
+                  words rather than squeezed beside them — two buttons at the
+                  trailing edge left a long class title a third of the width,
+                  and at large text none. */}
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                <IconPlate icon={it.kind === 'pt' ? 'dumbbell' : 'calendar'} tone={it.kind === 'pt' ? 'brand' : 'purple'} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>{it.kind === 'pt' ? 'Personal Training' : 'Class'}</Text>
+                  <Text style={{ ...ty.head, color: t.ink, marginTop: 3 }}>{it.title}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{dayLabel(it.startsAt)} · {timeLabel(it.startsAt)} · {it.sub}</Text>
                   {/* The gym called it off. Said on the row, in the list the
                       member opens to decide where to be this evening — this
-                      screen used to show it under Upcoming as confirmed. */}
-                  {it.cancelled ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>Cancelled by the gym — this class is not running</Text>
-                    </View>
-                  ) : it.waitlist ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>On the waitlist</Text>
-                    </View>
-                  ) : null}
+                      screen used to show it under Upcoming as confirmed. Red,
+                      amber and the accent are the three states, each in words
+                      on its chip. */}
+                  <View style={{ marginTop: 6, gap: 4 }}>
+                    <TonedChip
+                      label={it.cancelled ? 'Cancelled by the Gym' : it.waitlist ? 'On the Waitlist' : 'Booked'}
+                      tone={it.cancelled ? 'red' : it.waitlist ? 'amber' : 'brand'} />
+                    {it.cancelled ? <Text style={{ ...ty.caption, color: t.ink2 }}>This class is not running.</Text> : null}
+                  </View>
                   {/* What pays for this hour, said on the row rather than left
                       to be inferred from a balance on another screen. Worded
                       as an expectation where it is one: nothing comes off a
@@ -860,7 +881,7 @@ export default function Bookings() {
                       ? <Flag tone={t.warn} style={{ marginTop: 6 }}>{d.note}</Flag>
                       : <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{d.note}</Text>;
                   })() : null}
-                </View>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
                 {/* "Cancel, button" told a screen reader nothing about WHICH
                     booking, on a screen that is a list of them. The visible
                     label can lean on the row above it; the spoken one is read
@@ -882,6 +903,8 @@ export default function Bookings() {
                 <Ghost label={it.waitlist ? 'Leave' : 'Cancel'}
                   a11yLabel={`${it.waitlist ? 'Leave the waitlist for' : 'Cancel'} ${it.title}, ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)}`}
                   onPress={() => confirmCancel(it)} />
+                </View>
+                </View>
               </View>
             </View>
           ))}
@@ -931,7 +954,6 @@ export default function Bookings() {
             nobody can be beaten to it by a faster phone. */}
         {waitStatus === 'error' || myQueue.length > 0 ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not read' : waitStatus === 'ready' && myQueue.length > 0 ? `${myQueue.length} slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
               {waitStatus === 'error' ? (
@@ -943,9 +965,10 @@ export default function Bookings() {
                   <View key={q.sessionId}>
                     {i > 0 ? <Rule /> : null}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Personal training</Text>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{dayLabel(q.startsAt)} · {timeLabel(q.startsAt)}</Text>
+                      <IconPlate icon="clock" tone="amber" />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Personal Training</Text>
+                        <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 3 }}>{dayLabel(q.startsAt)} · {timeLabel(q.startsAt)}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                           {/* A slot that is no longer taken and did not come to
                               this member is worth saying plainly: the queue
@@ -1015,7 +1038,7 @@ export default function Bookings() {
                         accessibilityLabel={`Move to ${dayLabel(sl.startsAt)} at ${timeLabel(sl.startsAt)}`}
                         accessibilityState={{ disabled: moveBusy }}
                         style={{ paddingVertical: sp.md, opacity: moveBusy ? 0.5 : 1 }}>
-                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>
+                        <Text style={{ ...ty.body, ...numeric, ...font('500'), color: t.ink }}>
                           {dayLabel(sl.startsAt)} at {timeLabel(sl.startsAt)}
                         </Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sl.durationMin} min</Text>
@@ -1027,7 +1050,7 @@ export default function Bookings() {
               <Pressable onPress={() => setMoveFor(null)} accessibilityRole="button"
                 accessibilityLabel="Close without moving anything"
                 style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
               </Pressable>
             </ScrollView>
           </>) : null}

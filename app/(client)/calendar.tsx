@@ -8,6 +8,17 @@
 // competing tiles, hairline-separated sections instead of stacked bordered
 // boxes, and the one card spent on the coach you're booking with.
 //
+// ── Round five: the approved look ───────────────────────────────────────────
+//
+// The notes below describe the round-four board. What changed on top of them:
+// the screen opens on a night `HeroCard` for the NEXT confirmed session (only
+// off a whole read, and only when there is one); the marks under a date are
+// one dot per SESSION TYPE in that type's tone — accent for your session,
+// neutral for an open hour, blue for training you logged — with a four-entry
+// legend; every agenda row is `AgendaRow` (toned bar, time, title, state chip,
+// the row's action); and the three figures under the day are tiles on the
+// ground. No read, gate, alert or route moved.
+//
 // ── Against the board (client page 11, "Calendar") ──────────────────────────
 //
 // The board opens on the month: chevrons either side of the month name, the
@@ -73,15 +84,15 @@
 // screen (tagline, bio, specialties, offers, fee) come from the `trainers`
 // table, which a client has no row in, so those arrive empty rather than
 // borrowed from the reader.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Card, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Card, ListRow, Cta, Ghost, Flag, Notice, HeroCard, TonedChip, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, useLateCancelCharges, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
 // Moving costs nothing and cancelling can cost a credit and a fee, so the
 // cheaper answer is offered first. See src/lib/reschedule.ts.
@@ -121,7 +132,7 @@ import { dateParts } from '../../src/lib/localDate';
 // Paging back into a month the read never reached must not draw an empty grid.
 // See the note beside `monthNote` below for the two months that are not empty
 // and look it.
-import { readBoundary, monthCoverage, monthCoverageNote, hasEnded, pastVerdict, PAST_STATE_NOTE } from '../../src/lib/sessionHistory';
+import { readBoundary, monthCoverage, monthCoverageNote, hasEnded, pastVerdict, PAST_STATE_NOTE, type PastState } from '../../src/lib/sessionHistory';
 import { appLocale } from '../../src/lib/locale';
 // The names down the side of a month grid, in the reader's language. Only
 // the words move: the Sunday-first order is this app's and every grid below
@@ -257,6 +268,68 @@ function planDayLabel(iso: string): string {
 const KIND_ICON: Record<WorkoutKind, IconName> = {
   strength: 'dumbbell', cardio: 'heart', hiit: 'flame', mobility: 'sparkle', recovery: 'moon',
 };
+
+// What became of a session that has been, as a chip. The words are
+// PAST_STATE_LABEL's in Title Case (that map is sentence case because it sits
+// inside prose); the tone is a verdict only where there is one — delivered is
+// good, not attended needs a word with the coach, and 'unmarked' is NEUTRAL
+// because nothing is established about it yet and amber would be a judgement.
+const PAST_CHIP: Record<PastState, { label: string; tone: Tone }> = {
+  delivered: { label: 'Delivered', tone: 'brand' },
+  missed: { label: 'Not Attended', tone: 'red' },
+  late_cancelled: { label: 'Cancelled Late', tone: 'amber' },
+  cancelled: { label: 'Cancelled', tone: 'neutral' },
+  unmarked: { label: 'Not Yet Marked', tone: 'neutral' },
+};
+
+/**
+ * One line of the day's agenda, as the approved Calendar mockup draws it: a
+ * 4pt bar in the session type's tone, the time, the title, the state as a chip
+ * and — where the row has one — its action.
+ *
+ * The bar is the same colour as the dot under the date on the grid, so the two
+ * halves of this screen name a session type the same way: accent for an hour
+ * with your coach, neutral for an hour that is only open or is somebody
+ * else's, blue for a workout you logged. It is decoration — the title and the
+ * chip say the same thing in words.
+ *
+ * The action is a SIBLING of the pressable words, never a child: a button
+ * inside an element that carries its own label is unreachable by VoiceOver
+ * (rule 3 of scripts/check-a11y.mjs). When there is an action the chip drops
+ * under the title so "Book" keeps the trailing edge; without one the chip
+ * takes it, as the mockup has it. At large text the time stacks over the title
+ * rather than holding a 74pt column the title needs.
+ */
+function AgendaRow({ tone, time, title, caption, note, chip, action, onPress, a11yLabel, dim }: {
+  tone: Tone; time: string; title: string; caption?: string; note?: string;
+  chip: { label: string; tone: Tone; icon?: IconName };
+  action?: ReactNode; onPress?: () => void; a11yLabel?: string; dim?: boolean;
+}) {
+  const t = useTheme();
+  const mark = tone === 'brand' ? t.brand : tone === 'neutral' ? t.ink3 : t.data[tone];
+  const stacked = fontScale >= 1.35;
+  const state = <TonedChip label={chip.label} tone={chip.tone} icon={chip.icon} />;
+  const words = (
+    <View style={{ flex: 1, minWidth: 0, flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'flex-start' : 'center', gap: stacked ? 2 : sp.md }}>
+      <Text style={{ ...ty.label, ...numeric, ...font('600'), color: t.ink2, width: stacked ? undefined : grown(74) }}>{time}</Text>
+      <View style={{ flex: stacked ? undefined : 1, minWidth: 0 }}>
+        <Text style={{ ...ty.head, color: dim ? t.ink2 : t.ink }}>{title}</Text>
+        {caption ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{caption}</Text> : null}
+        {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text> : null}
+        {action ? <View style={{ marginTop: 6 }}>{state}</View> : null}
+      </View>
+    </View>
+  );
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, minHeight: grown(56) }}>
+      <View style={{ width: 4, alignSelf: 'stretch', minHeight: 34, borderRadius: 2, backgroundColor: mark }} />
+      {onPress ? (
+        <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={a11yLabel} style={{ flex: 1, minWidth: 0 }}>{words}</Pressable>
+      ) : words}
+      {action ?? state}
+    </View>
+  );
+}
 
 // The one-line summary under a logged workout, built the way Activity builds it
 // (`app/(client)/activity.tsx`). TF-18 is a report that the two screens disagree
@@ -512,6 +585,8 @@ export default function Calendar() {
     : nextMine
       ? `Next: ${fmtRelativeDay(nextMine.startsAt)} · ${timeLabel(nextMine.startsAt)} · ${nextMine.durationMin} min${coachName ? ` with ${coachName}` : ''}`
       : 'Nothing booked yet.';
+  // The night card's session: `nextMine`, and only where "next" may be said.
+  const heroSession = sessionsCountable ? nextMine : null;
 
   // Days visible to the client: their booked sessions + any open slots.
   const visible = sessions.filter((s) => s.status === 'available' || (s.status === 'booked' && s.clientId === cd.id));
@@ -557,15 +632,16 @@ export default function Calendar() {
     kindsByDay.set(k, WORKOUT_KINDS.filter((kind) => seen.has(kind)));
   }
 
-  // The series palette (s1/s2/s3/s5/s6), not the status palette. good, warn,
-  // serious and crit each carry a judgement — something is fine, something needs
-  // attention — and the kind of training somebody did is not a status: a HIIT
-  // day is not a warning. These five are the tokens that exist to be told apart
-  // from one another, and they also stay clear of the two colours already spoken
-  // for on this grid (brand for your session, ink3 for an open slot).
-  const KIND_DOT: Record<WorkoutKind, string> = {
-    strength: t.s1, cardio: t.s6, hiit: t.s3, mobility: t.s2, recovery: t.s5,
-  };
+  // ONE colour for a logged workout, and it is the data palette's blue. The
+  // approved look gives each SESSION TYPE a colour that means the same thing on
+  // every screen — accent for an hour with your coach, neutral for an open one,
+  // blue for training you logged yourself — and five more hues for the five
+  // kinds of training put purple (a class, everywhere else) and orange (a
+  // review) under dates where neither had happened. TF-16's complaint was five
+  // marks for five sets of one session; one mark per day answers it. The KIND is
+  // not lost: it is spoken in each cell's label and named, with its own icon, on
+  // the day's agenda row — in words, which a 4pt dot never was.
+  const LOGGED_DOT = t.data.blue;
 
   // One neutral colour for every planned day, and deliberately NOT a sixth
   // series colour. The five above are already spoken for by the five kinds of
@@ -1043,24 +1119,58 @@ export default function Calendar() {
             the grid and now sit under the day's agenda, so the first
             viewport is the month and the day, as the board draws it. */}
         {/* The next confirmed booking leads, as the data-layout review asks of
-            every scheduling screen — and as ONE line under the title, because
-            the board gives this screen's first viewport to the month and the
-            day and a card over the grid is what the last round took away. Tap
-            a day to act on it; this line only says what is next. Gated like
-            every other figure here: under a read that is not whole it does not
-            say "nothing booked". */}
+            every scheduling screen. Round four made it ONE line under the
+            title, because the old board gave the first viewport to the month;
+            the look the owner approved in round five opens every screen on a
+            hero, so where there IS a next session it is the night card below
+            and this line stands down. The line remains for every other state
+            — loading, unread, partial, nothing booked — because those are
+            sentences, not headlines. Gated like every other figure here:
+            under a read that is not whole it does not say "nothing booked". */}
         <ScreenHeader
           eyebrow="Personal Training"
           title="Calendar"
-          subtitle={nextLine}
+          subtitle={heroSession ? undefined : nextLine}
           leading={<Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.push('/(client)/dashboard')} />}
         />
+
+        {/* ── the next confirmed session, on night ────────────────────────
+            The approved look opens every screen on its state and its one
+            action, and on a booking screen the state is "when am I next
+            in". It is the SAME fact the subtitle line carried and it is held
+            to the same gate: `heroSession` exists only off a whole read, so
+            a partial diary never crowns the earliest row that happened to
+            come back. With nothing booked — or nothing knowable — there is no
+            card and the line above says which, because an empty night card is
+            a headline about nothing.
+
+            The words open that day on the grid. The button is `cancel`, which
+            is this screen's review-then-decide path and NOT a cancellation:
+            it states the coach's notice terms first and offers Move It
+            Instead wherever moving is still free. It is labelled for what it
+            will actually offer, and it is absent once the hour has ended —
+            `hasEnded`, the moment the agenda row drops its Cancel too. */}
+        {heroSession ? (
+          <HeroCard
+            eyebrow="NEXT SESSION"
+            title={`${fmtRelativeDay(heroSession.startsAt)} · ${timeLabel(heroSession.startsAt)}`}
+            meta={`${heroSession.durationMin} min · ${coachName ? `With ${coachName}` : 'With your coach'}`}
+            onPress={() => {
+              const p = dateParts(heroSession.startsAt);
+              if (p) { setViewYear(p[0]); setViewMonth(p[1]); setSelKey(`${p[0]}-${p[1]}-${p[2]}`); }
+            }}
+            cta={hasEnded(heroSession) ? undefined : {
+              label: canOfferMove(heroSession.startsAt, cancelPolicy) ? 'Move or Cancel' : 'Cancel Session',
+              onPress: () => cancel(heroSession),
+            }}
+          />
+        ) : null}
 
         {/* ── month ──────────────────────────────────────────────────────── */}
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.lg }}>
             <Ghost icon={BACK_ICON} a11yLabel="Previous month" onPress={() => shiftMonth(-1)} />
-            <Text style={{ ...ty.head, color: t.ink }}>{monthNamesLong()[viewMonth]} {viewYear}</Text>
+            <Text style={{ ...ty.page, color: t.ink }}>{monthNamesLong()[viewMonth]} {viewYear}</Text>
             <Ghost icon={FORWARD_ICON} a11yLabel="Next month" onPress={() => shiftMonth(1)} />
           </View>
           <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>
@@ -1070,7 +1180,7 @@ export default function Calendar() {
                 is why each cell below carries a spoken label naming its date
                 rather than leaning on this row. Keyed by index, because the
                 narrow names are not unique. */}
-            {weekdayNamesNarrow().map((d, i) => <Text key={i} style={{ ...ty.micro, flex: 1, textAlign: 'center', color: t.ink3 }}>{d}</Text>)}
+            {weekdayNamesNarrow().map((d, i) => <Text key={i} style={{ ...ty.micro, flex: 1, textAlign: 'center', color: t.ink2 }}>{d}</Text>)}
           </View>
           {Array.from({ length: cells.length / 7 }).map((_, row) => (
             <View key={row} style={{ flexDirection: 'row' }}>
@@ -1116,32 +1226,28 @@ export default function Calendar() {
                     {dayPlan ? (
                       <View style={{ position: 'absolute', top: 3, end: 5, width: 8, height: 8, borderRadius: 4, borderWidth: hairline * 3, borderColor: PLAN_RING, backgroundColor: 'transparent' }} />
                     ) : null}
-                    {/* A circle, as the board and the coach's grid draw it.
-                        The board marks a booked day in green: here the day
-                        with your session is a green RING round the date and
-                        the selected day is the green FILL, so the two read
-                        apart when they coincide; today is accent ink and
-                        weight, no border pretending to be a state. All three
-                        are spoken in the label above, none is colour alone. */}
-                    <View style={{ width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? t.brand : 'transparent', borderWidth: hasMine && !isSel ? hairline * 2 : 0, borderColor: t.brand }}>
+                    {/* The approved Calendar's cell: the date in a circle,
+                        the selected day the accent FILL, today the accent as
+                        text and weight, and what is ON the day as dots under
+                        it — one per session type, in that type's tone. The
+                        ring that used to mark "your session" is a dot now, so
+                        all three types are said the same way and the legend
+                        below is one row of like things. Every mark is spoken
+                        in the label above; none is colour alone. */}
+                    <View style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? t.brand : 'transparent' }}>
                       <Text style={{
                         ...ty.body, ...numeric,
-                        fontWeight: isSel || isToday || hasMine ? '600' : '400',
-                        color: isSel ? t.brandInk : isToday || hasMine ? t.brand : t.ink2,
+                        ...font(isSel || isToday ? '700' : '500'),
+                        color: isSel ? t.brandInk : isToday ? t.brandText : t.ink,
                       }}>{d}</Text>
                     </View>
-                    {/* The two session marks first, then one per kind logged.
-                        Dropped from 5pt to 4pt with a 2pt gap because a day can
-                        now carry seven of them: 7x4 + 6x2 = 40pt, inside the
-                        ~47pt cell a 7-column grid leaves on the narrowest phone,
-                        so they never wrap into the row beneath. */}
-                    {/* The session mark moved up into the ring round the date;
-                        the open-slot dot and one per kind logged stay here. */}
-                    <View style={{ flexDirection: 'row', gap: 2, height: 6, marginTop: 2 }}>
-                      {hasOpen && <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: t.ink3 }} />}
-                      {dayKinds.map((kind) => (
-                        <View key={kind} style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: KIND_DOT[kind] }} />
-                      ))}
+                    {/* At most three, in the legend's order: your session,
+                        an open hour, training you logged. 3x5 + 2x3 = 21pt,
+                        well inside the ~47pt cell of the narrowest phone. */}
+                    <View style={{ flexDirection: 'row', gap: 3, height: 6, marginTop: 2 }}>
+                      {hasMine && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.brand }} />}
+                      {hasOpen && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.ink3 }} />}
+                      {dayKinds.length > 0 && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: LOGGED_DOT }} />}
                     </View>
                   </Pressable>
                 );
@@ -1149,8 +1255,10 @@ export default function Calendar() {
             </View>
           ))}
           {/* The legend is the only thing that turns a coloured dot into a fact.
-              Seven entries no longer fit on one line, so it wraps rather than
-              truncating — a legend with an item missing is worse than a tall one.
+              Four entries, one per mark the grid can draw — and no entry for a
+              class, because this screen does not read class bookings and a
+              legend naming a dot that can never appear is a small lie. It
+              wraps rather than truncating at large text.
 
               The ring leads, and it is the one entry whose label says what the
               mark is NOT: "planned, not logged". Everything after it happened or
@@ -1160,9 +1268,9 @@ export default function Calendar() {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.md, justifyContent: 'center' }}>
             {[
               { dot: PLAN_RING, label: 'Planned, Not Logged', hollow: true },
-              { dot: t.brand, label: 'Your Session', hollow: true },
+              { dot: t.brand, label: 'Your Session', hollow: false },
               { dot: t.ink3, label: 'Open Slot', hollow: false },
-              ...WORKOUT_KINDS.map((kind) => ({ dot: KIND_DOT[kind], label: KIND_LABEL[kind], hollow: false })),
+              { dot: LOGGED_DOT, label: 'Logged Workout', hollow: false },
             ].map((it) => (
               <View key={it.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <View style={{
@@ -1170,7 +1278,7 @@ export default function Calendar() {
                   backgroundColor: it.hollow ? 'transparent' : it.dot,
                   borderWidth: it.hollow ? hairline * 3 : 0, borderColor: it.dot,
                 }} />
-                <Text style={{ ...ty.caption, color: t.ink3 }}>{it.label}</Text>
+                <Text style={{ ...ty.micro, color: t.ink2 }}>{it.label}</Text>
               </View>
             ))}
           </View>
@@ -1223,7 +1331,7 @@ export default function Calendar() {
                 <View style={{ width: 10, height: 10, borderRadius: 5, borderWidth: hairline * 3, borderColor: PLAN_RING, backgroundColor: 'transparent' }} />
                 <Text style={{ ...ty.micro, color: t.ink3 }}>Planned</Text>
               </View>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: sp.sm }}>{DAY_TYPE_LABEL[selPlan.type]}</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink, marginTop: sp.sm }}>{DAY_TYPE_LABEL[selPlan.type]}</Text>
               {/* The client's own words, when they wrote any. A dash is not used
                   here: an absent note is not a missing figure, it is a client who
                   had nothing to add, so the line is simply not drawn. */}
@@ -1304,7 +1412,8 @@ export default function Calendar() {
           {logWhole && sessionsCountable && takenWhole && planWhole && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Icon name="calendar" size={24} color={t.ink3} />
-              <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Nothing on this day. Days with a grey dot have open slots you can book; a coloured dot is a workout you logged, and a hollow ring is a day you planned.</Text>
+              {/* What each dot means is the legend's job now, directly above. */}
+              <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Nothing on this day.</Text>
             </View>
           ) : null}
 
@@ -1393,38 +1502,38 @@ export default function Calendar() {
             return (
               <View key={s.id}>
                 {si > 0 ? <Rule /> : null}
-                {/* The board's agenda row: a coloured dot, the time, the
-                    title, and something at the trailing edge. The dot is the
-                    same mark the grid uses (accent for your session, neutral
-                    for an open hour), the title says whose hour it is, and the
-                    length moved down to the caption with the status. */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isMine ? t.brand : t.surface3 }} />
-                  <View style={{ flex: 1 }}>
-                    {/* The coach's name only where one came back for the
-                        coach's own id — see the TF-32 note at the top of this
-                        file — and "your coach" otherwise, which is true either
-                        way. Never a dash in the middle of a title. */}
-                    <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>
-                      {timeLabel(s.startsAt)} · {isMine ? (coachName ? `Session with ${coachName}` : 'Session with Your Coach') : 'Open Slot'}
-                    </Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                      {/* "Available" is a claim about a slot somebody can take.
-                          An hour that has already been is not available and
-                          never was going to be — it is an hour the coach had
-                          open and nobody booked. */}
-                      {s.durationMin} min · {v ? PAST_STATE_NOTE[v.state]
-                        : isMine ? 'Confirmed with your coach'
-                        : gone ? 'Nobody booked this hour'
-                        : (s.released ? 'Just opened up' : 'Available')}
-                    </Text>
-                  </View>
-                  {ended || gone ? null : isMine ? (
-                    <Ghost label="Cancel" onPress={() => cancel(s)} />
-                  ) : (
-                    <Cta label="Book" onPress={() => book(s)} />
-                  )}
-                </View>
+                {/* The approved agenda row — see AgendaRow. The bar is the
+                    grid's own mark (accent for your session, neutral for an
+                    open hour) and the STATE is a chip now rather than the tail
+                    of a caption, so "Confirmed" and "Open" are found by eye.
+
+                    The coach's name only where one came back for the coach's
+                    own id — see the TF-32 note at the top of this file — and
+                    "your coach" otherwise, which is true either way. Never a
+                    dash in the middle of a title.
+
+                    "Open" is a claim about a slot somebody can take. An hour
+                    that has already been is not open and never was going to
+                    be — it is an hour the coach had free and nobody booked.
+                    A past session of yours keeps its full sentence under the
+                    chip, because 'unmarked' is a withheld verdict and the
+                    sentence is its reason. */}
+                <AgendaRow
+                  tone={isMine ? 'brand' : 'neutral'}
+                  time={timeLabel(s.startsAt)}
+                  title={isMine ? (coachName ? `Session with ${coachName}` : 'Session with Your Coach') : 'Open Slot'}
+                  caption={`${s.durationMin} min`}
+                  note={v ? PAST_STATE_NOTE[v.state] : !isMine && gone ? 'Nobody booked this hour' : undefined}
+                  dim={gone}
+                  chip={v ? PAST_CHIP[v.state]
+                    : isMine ? { label: 'Confirmed', tone: 'brand' }
+                    : gone ? { label: 'Not Booked', tone: 'neutral' }
+                    : s.released ? { label: 'Just Opened', tone: 'brand' }
+                    : { label: 'Open', tone: 'neutral' }}
+                  action={ended || gone ? undefined : isMine
+                    ? <Ghost label="Cancel" onPress={() => cancel(s)} />
+                    : <Cta label="Book" onPress={() => book(s)} />}
+                />
               </View>
             );
           })}
@@ -1484,22 +1593,25 @@ export default function Calendar() {
                 return (
                   <View key={k.sessionId}>
                     {ki > 0 ? <Rule /> : null}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mine ? t.warn : t.surface3 }} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink2 }}>{timeLabel(k.startsAt)} · {mine ? 'On the Waitlist' : 'Taken'}</Text>
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{k.durationMin} min</Text>
-                        {/* The sentence is the same one `waitlistLine` writes
-                            everywhere else, and it never promises the slot to
-                            anybody who is not actually at the front. */}
-                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{k.myPosition == null
-                          ? 'We couldn’t read your place in the queue for this hour, so we can’t say whether you are in it. Anything you joined still stands.'
-                          : waitlistLine(k.myPosition, k.waiting)}</Text>
-                      </View>
-                      {mine
+                    {/* The sentence is the same one `waitlistLine` writes
+                        everywhere else, and it never promises the slot to
+                        anybody who is not actually at the front. Amber only
+                        where this member is in the queue: waiting is theirs
+                        to keep an eye on, somebody else's hour is not. */}
+                    <AgendaRow
+                      tone={mine ? 'amber' : 'neutral'}
+                      time={timeLabel(k.startsAt)}
+                      title="Coaching Hour"
+                      caption={`${k.durationMin} min`}
+                      note={k.myPosition == null
+                        ? 'We couldn’t read your place in the queue for this hour, so we can’t say whether you are in it. Anything you joined still stands.'
+                        : waitlistLine(k.myPosition, k.waiting)}
+                      dim
+                      chip={mine ? { label: 'On the Waitlist', tone: 'amber' } : { label: 'Taken', tone: 'neutral' }}
+                      action={mine
                         ? <Ghost label="Leave" onPress={() => leaveWaitlist(k)} />
                         : <Ghost label="Wait For It" icon="plus" onPress={() => joinWaitlist(k)} />}
-                    </View>
+                    />
                   </View>
                 );
               })}
@@ -1520,21 +1632,21 @@ export default function Calendar() {
                 return (
                   <View key={e.id ?? `${e.t}-${e.exercise}-${ei}`}>
                     {ei > 0 ? <Rule /> : null}
-                    {/* The same row shape as the sessions above it — the
-                        kind's dot, the time, the movement, a chevron — so the
-                        day reads as one agenda and not as two lists. The row
-                        opens Activity, where the entry can be edited; the
-                        kind is still named in words beside the detail. */}
-                    <Pressable onPress={() => router.push('/(client)/activity')} accessibilityRole="button"
-                      accessibilityLabel={`${timeLabel(e.t)}, logged ${movement(e.exercise)}, ${KIND_LABEL[kind]}. Opens Activity`}
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: KIND_DOT[kind] }} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(e.t)} · Logged {movement(e.exercise)}</Text>
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{KIND_LABEL[kind]} · {logDetail(e, wu)}</Text>
-                      </View>
-                      <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
-                    </Pressable>
+                    {/* The same row shape as the sessions above it, so the
+                        day reads as one agenda and not as two lists. Blue is
+                        "you logged this"; the KIND is the chip, in words and
+                        with its own icon, which is where the grid's five
+                        coloured dots went. The row opens Activity, where the
+                        entry can be edited. */}
+                    <AgendaRow
+                      tone="blue"
+                      time={timeLabel(e.t)}
+                      title={movement(e.exercise)}
+                      caption={logDetail(e, wu)}
+                      chip={{ label: KIND_LABEL[kind], tone: 'blue', icon: KIND_ICON[kind] }}
+                      onPress={() => router.push('/(client)/activity')}
+                      a11yLabel={`${timeLabel(e.t)}, logged ${movement(e.exercise)}, ${KIND_LABEL[kind]}, ${logDetail(e, wu)}. Opens Activity`}
+                    />
                   </View>
                 );
               })}
@@ -1551,8 +1663,15 @@ export default function Calendar() {
             board draws it. Everything in here is what used to stand above
             the month: the count, the open slots, the way to ask for an hour
             that is not on the grid, and the export. */}
+        {/* As the mockups' row of tiles ON THE GROUND, each figure in its
+            session type's tone — accent for what is yours, neutral for what is
+            merely open, blue for the pack. The gates did not move. */}
+        <KpiRow tiles items={[
+          { label: 'Booked', tone: 'brand', value: sessionsCountable ? fig(mine.length) : fig(null), unit: sessionsCountable ? (mine.length === 1 ? 'session' : 'sessions') : undefined },
+          { label: 'Open Slots', tone: 'neutral', value: sessionsCountable ? fig(open.length) : fig(null) },
+          ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack Credits', tone: 'blue' as const, value: fig(packLeft) }] : []),
+        ]} />
         <Section>
-          <SectionHead title="Your Sessions" />
           {/* A dash rather than a zero when the read failed or was cut short.
               "Open Slots 0" is a statement about the coach's diary, and under
               'error' this screen has not seen it. */}
@@ -1560,12 +1679,7 @@ export default function Calendar() {
               Coach · 3 sessions" — is the first column now, under the grid
               rather than over it, as the board draws page 11. Same figure,
               same bound (`mine` is what is still to come), same gate. */}
-          <KpiRow items={[
-            { label: 'Booked', value: sessionsCountable ? fig(mine.length) : fig(null), unit: sessionsCountable ? (mine.length === 1 ? 'session' : 'sessions') : undefined },
-            { label: 'Open Slots', value: sessionsCountable ? fig(open.length) : fig(null) },
-            ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack Credits', value: fig(packLeft) }] : []),
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
             {!sessionsKnown
               ? 'Your sessions could not be read, so these are dashes rather than counts. Nothing has been cancelled — pull down to refresh.'
               : sessionsStatus === 'loading'
@@ -1657,7 +1771,7 @@ export default function Calendar() {
           <>
             <Section>
               <SectionHead title="Standing Appointments" />
-              <ListRow icon="clock" title="Your Weekly Slots"
+              <ListRow icon="clock" tone="brand" title="Your Weekly Slots"
                 note={standingStatus === 'error'
                   ? 'Could not be read — this is not a statement that you have none'
                   : standingStatus === 'loading'
@@ -1669,7 +1783,6 @@ export default function Calendar() {
                         : `${standingCount} hours booked for you every week`}
                 onPress={() => router.push('/(client)/standing')} />
             </Section>
-            <Rule />
           </>
         ) : null}
 
@@ -1702,7 +1815,7 @@ export default function Calendar() {
             // under 'partial' is therefore evidence of nothing at all.
             <Text style={{ ...ty.label, color: t.ink3 }}>You have more days marked than we can read in one go, so what is coming up can’t be listed here. Nothing you planned has been lost — tap a day above to see what is on it.</Text>
           ) : coming.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing planned from today onwards. Tap a day above and mark it — a training day, a rest day, a deload — and it appears here and on the grid as a hollow ring.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing planned from today onwards. Tap a day above to mark one.</Text>
           ) : (
             coming.map((p, pi) => (
               <View key={p.dateISO}>
@@ -1714,7 +1827,7 @@ export default function Calendar() {
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <View style={{ width: 10, height: 10, borderRadius: 5, borderWidth: hairline * 3, borderColor: PLAN_RING, backgroundColor: 'transparent' }} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{planDayLabel(p.dateISO)}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{planDayLabel(p.dateISO)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{DAY_TYPE_LABEL[p.type]}{p.note ? ` · ${p.note}` : ''}</Text>
                   </View>
                   <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
@@ -1759,13 +1872,12 @@ export default function Calendar() {
                   return (
                     <View key={c.id}>
                       {ci > 0 ? <Rule /> : null}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.waivedAt ? t.surface3 : t.warn }} />
-                        <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                        <View style={{ flex: 1, minWidth: 0 }}>
                           {/* What it was for leads. The figure without it was
                               readable only because the heading named the one
                               reason the query allowed. */}
-                          <Text style={{ ...ty.body, fontWeight: '500', color: c.waivedAt ? t.ink3 : t.ink }}>
+                          <Text style={{ ...ty.body, ...font('500'), color: c.waivedAt ? t.ink3 : t.ink }}>
                             {chargeReasonLabel(c.reason)}
                           </Text>
                           {/* A dash, never a zero: the fee exists and its figure
@@ -1773,12 +1885,18 @@ export default function Calendar() {
                               nothing. In the row's OWN currency — never the
                               gym's, which is what it is set to today rather than
                               what this was raised in. */}
-                          <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: c.waivedAt ? t.ink3 : t.ink, marginTop: 2 }}>
+                          <Text style={{ ...ty.body, ...numeric, ...font('500'), color: c.waivedAt ? t.ink3 : t.ink, marginTop: 2 }}>
                             {c.amount == null ? fig(null) : feeAmountLine(c.amount, c.currency)}
                           </Text>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                             {fmtFullDay(c.createdAt)}{c.waivedAt ? ' · your coach waived this — nothing to pay' : ' · outstanding with your coach'}
                           </Text>
+                          {/* The state as a chip as well as in the sentence:
+                              amber is "yours to settle", neutral is "nothing
+                              to do", and the words say so either way. */}
+                          <View style={{ marginTop: 6 }}>
+                            <TonedChip label={c.waivedAt ? 'Waived' : 'Outstanding'} tone={c.waivedAt ? 'neutral' : 'amber'} />
+                          </View>
                           {/* Only where this app actually knows how the row came
                               to exist, which is the late-cancellation one and
                               nothing else. A generic "your coach recorded this"
@@ -1809,8 +1927,6 @@ export default function Calendar() {
                 </Text>
               </>)}
             </Section>
-
-            <Rule />
           </>
         ) : null}
 
@@ -1827,11 +1943,11 @@ export default function Calendar() {
                   tile carries the same dash this app draws for any value it
                   cannot state, in muted ink so it cannot be mistaken for
                   somebody whose initials happen to be a dash. */}
-              <View style={{ width: 46, height: 46, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...value(16), color: coachName ? t.brand : t.ink3 }}>{coachName ? initialsOf(coachName) : head.text}</Text>
+              <View style={{ width: 46, height: 46, borderRadius: radius.pill, backgroundColor: coachName ? t.brandSoft : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...value(16), color: coachName ? t.brandText : t.ink3 }}>{coachName ? initialsOf(coachName) : head.text}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: coachName ? t.ink : t.ink3 }} numberOfLines={1}>{head.text}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: coachName ? t.ink : t.ink3 }} numberOfLines={1}>{head.text}</Text>
                 {/* The reason for the dash takes the line the tagline had. It is
                     the better use of it: the tagline is a `trainers` field the
                     client cannot read either, so it was always going to be the
@@ -1844,9 +1960,9 @@ export default function Calendar() {
           </Card>
 
           <View style={{ marginTop: sp.md }}>
-            <ListRow icon="calendar" title="Gym Classes" note="Book HIIT, spin, yoga & more"
+            <ListRow icon="calendar" tone="purple" title="Gym Classes" note="Book HIIT, spin, yoga & more"
               onPress={() => router.push('/(client)/classes')} />
-            <ListRow icon="grid" title="Membership & Entry Pass" note="Card, barcode & visits"
+            <ListRow icon="grid" tone="teal" title="Membership & Entry Pass" note="Card, barcode & visits"
               onPress={() => router.push('/(client)/membership')} />
           </View>
         </Section>
@@ -1889,7 +2005,7 @@ export default function Calendar() {
                         {on ? <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.brand }} /> : null}
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{DAY_TYPE_LABEL[k]}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{DAY_TYPE_LABEL[k]}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{DAY_TYPE_BLURB[k]}</Text>
                       </View>
                     </Pressable>
@@ -1939,8 +2055,8 @@ export default function Calendar() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
               {/* The same avatar rule as the card that opens this sheet, for the
                   same reason — see the comment there. */}
-              <View style={{ width: 60, height: 60, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...value(20), color: coachName ? t.brand : t.ink3 }}>{coachName ? initialsOf(coachName) : head.text}</Text>
+              <View style={{ width: 60, height: 60, borderRadius: radius.pill, backgroundColor: coachName ? t.brandSoft : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...value(20), color: coachName ? t.brandText : t.ink3 }}>{coachName ? initialsOf(coachName) : head.text}</Text>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.head, color: coachName ? t.ink : t.ink3 }} numberOfLines={1}>{head.text}</Text>

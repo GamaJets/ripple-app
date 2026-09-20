@@ -6,6 +6,12 @@
 // hairline-separated sections instead of a stack of bordered cards, and a
 // coloured dot beside ink text where "Class full" used to be status-coloured
 // type. The schedule itself is the gym's own — nothing is scheduled here.
+//
+// Round five (the look the owner approved) changed that paragraph's picture and
+// none of its rules: the screen now opens on a night hero card for the next
+// class the member HOLDS, when there is one; days are cards on the grey ground;
+// each class carries a purple plate, its state as a toned chip and — only where
+// the count was read — how full it is as a meter. Same reads, same gates.
 import { useMemo, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -33,8 +39,8 @@ import {
 import { classCancelBody, fetchClassCancelPolicy, CLASS_POLICY_UNKNOWN_NOTE, type ClassPolicyRead } from '../../src/lib/classCancel';
 // The zone every hour on this timetable is drawn in — see `zoneLine` below.
 import { deviceZone } from '../../src/lib/quietHours';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, PageHead, HeroCard, IconPlate, TonedChip, Meter, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 import { Fetched } from '../../src/ui/fetched';
 import { useReadStamp } from '../../src/ui/readStamp';
 import { useClasses } from '../../src/ui/classes';
@@ -45,6 +51,7 @@ import { useSettings } from '../../src/ui/settings';
 import { scheduleLocal } from '../../src/ui/pushNotifications';
 import type { GymClass } from '../../src/lib/classesMock';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
+import type { IconName } from '../../src/ui/Icon';
 import { useNow } from '../../src/ui/today';
 
 // The weekday name and the date order were this file's own. `DOW` was a
@@ -127,13 +134,12 @@ export default function Classes() {
   // a tab that never unmounts, and a memo that read its own clock would keep
   // naming a class that started an hour ago as the next one.
   const nowAt = useNow();
-  const nextHeldLine = useMemo(() => {
+  const nextHeld = useMemo(() => {
     if (classStatus !== 'ready') return null;
     const now = nowAt.getTime();
-    const next = classes
+    return classes
       .filter((c) => myStanding[c.id] === 'held' && !isCancelled(c) && Date.parse(c.startsAt) > now)
-      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
-    return next ? `Next: ${next.title} · ${dayLabel(next.startsAt)} · ${timeLabel(next.startsAt)}` : null;
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0] ?? null;
   }, [classes, myStanding, classStatus, nowAt]);
 
   const byDay = useMemo(() => {
@@ -309,7 +315,15 @@ export default function Classes() {
       accessibilityState={{ selected: active }}
       style={{ minHeight: 44, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill,
         justifyContent: 'center', backgroundColor: active ? t.brand : t.surface2 }}>
-      <Text style={{ ...ty.label, fontWeight: active ? '600' : '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font(active ? '600' : '500'), color: active ? t.brandInk : t.ink2 }}>{label}</Text>
+    </Pressable>
+  );
+
+  const tile = (label: string, icon: IconName, tone: Tone, route: string) => (
+    <Pressable key={label} onPress={() => router.push(route as never)} accessibilityRole="button" accessibilityLabel={label}
+      style={{ flex: 1, minWidth: 0, alignItems: 'center', gap: 7, paddingVertical: sp.md, paddingHorizontal: sp.xs, borderRadius: radius.md, backgroundColor: t.surface, ...elevation.card }}>
+      <IconPlate icon={icon} tone={tone} size={36} />
+      <Text style={{ ...ty.micro, color: t.ink2, textAlign: 'center' }}>{label}</Text>
     </Pressable>
   );
 
@@ -328,8 +342,21 @@ export default function Classes() {
             be the earliest there is. Absent rather than "nothing booked" the
             rest of the time; My Bookings, one tap below, is where that is said
             with both reads behind it. */}
-        <PageHead title="Classes" subtitle={nextHeldLine ?? undefined} />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Pick your location and book a spot. Full classes have a waitlist.</Text>
+        <PageHead title="Classes" subtitle="Pick your location and book a spot" />
+
+        {/* The same fact the subtitle used to carry, as the approved look's
+            night card: what you are next booked into, and the one action —
+            My Bookings, which is where a held place is reviewed and cancelled
+            against the gym's terms. No class held (or no whole read) means no
+            card: an empty night card is a headline about nothing. */}
+        {nextHeld ? (
+          <HeroCard
+            eyebrow="NEXT CLASS"
+            title={nextHeld.title}
+            meta={[`${dayLabel(nextHeld.startsAt)} · ${timeLabel(nextHeld.startsAt)}`, nextHeld.instructor, nextHeld.branch].filter(Boolean).join(' · ')}
+            cta={{ label: 'My Bookings', onPress: () => router.push('/(client)/bookings') }}
+          />
+        ) : null}
 
         {/* The other half of the same subject, and the half the member has never
             had: this screen is what is COMING, and app/(client)/attendance.tsx
@@ -338,13 +365,16 @@ export default function Classes() {
             until now only the gym could read it. Put here rather than only on a
             tab because a member wondering whether to book a class is the same
             member wondering how often they have actually been coming. */}
-        <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginTop: sp.lg }}>
+        {/* Three tiles with toned plates, where these were three grey text
+            buttons on a grey ground. The kit's QuickRow is this shape without
+            a tone, so it is built here from IconPlate and the card tokens. */}
+        <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
           {/* What is already booked, before what already happened: upcoming
               first, history second. This screen had no way to the list of what
               the member holds, which is the first thing the scheduling flow
               asks for. */}
-          <Ghost label="My Bookings" onPress={() => router.push('/(client)/bookings')} />
-          <Ghost label="My Attendance" onPress={() => router.push('/(client)/attendance')} />
+          {tile('My Bookings', 'check', 'blue', '/(client)/bookings')}
+          {tile('My Attendance', 'chart', 'teal', '/(client)/attendance')}
           {/* Money and seats, kept apart on purpose.
               A place in a class is scarce and a payment is a second act that
               can fail on its own, so nothing on this screen charges anybody:
@@ -354,7 +384,7 @@ export default function Classes() {
               take while a card is being typed. The full argument is at the top
               of src/lib/memberBuy.ts, and src/lib/outbox.ts refuses to queue a
               booking for the same family of reasons. */}
-          <Ghost label="Buy a Pass" onPress={() => router.push('/(client)/gym-plans')} />
+          {tile('Buy a Pass', 'target', 'orange', '/(client)/gym-plans')}
         </View>
 
         {branches.length > 1 ? (
@@ -390,7 +420,6 @@ export default function Classes() {
 
         {byDay.map((g) => (
           <View key={g.key}>
-            <Rule />
             <Section>
               {/* A count of what came back, printed as a count of what is on.
                   Under 'partial' the timetable stops at the row cap without
@@ -442,19 +471,27 @@ export default function Classes() {
                 return (
                   <View key={c.id}>
                     {i > 0 ? <Rule /> : null}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                      <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                      <IconPlate icon="calendar" tone="purple" />
+                      <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={{ ...ty.micro, color: t.ink3 }}>{c.kind}</Text>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{c.title}</Text>
+                        <Text style={{ ...ty.head, color: t.ink, marginTop: 3 }}>{c.title}</Text>
                         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{timeLabel(c.startsAt)} · {c.durationMin}m · {c.instructor} · {c.branch}{c.room ? ' · ' + c.room : ''}</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                          {/* The mark carries the urgency; the words keep the
-                              exact count. A class with two spots left and one
-                              with twelve were the same grey dot, so the one
-                              about to go looked like the one nobody wants. */}
-                          <View style={{ width: 6, height: 6, borderRadius: 3,
-                            backgroundColor: off ? t.crit : holds ? t.brand : full === true ? t.s3 : fill === 'nearly' ? t.warn : t.ink3 }} />
-                          <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{off
+                        {/* The state as a chip, in the tone that says how
+                            urgent it is — red called off, the accent yours,
+                            orange full, amber nearly — and the exact words in
+                            ink under it, unchanged. A class with two spots left
+                            and one with twelve were once the same grey dot, so
+                            the one about to go looked like the one nobody
+                            wants. */}
+                        <View style={{ marginTop: 6, gap: 4 }}>
+                          <TonedChip
+                            label={off ? 'Cancelled' : seat === 'held' ? 'Booked' : seat === 'queued' ? 'On the Waitlist'
+                              : seat === 'cancelled' || seat === 'late_cancelled' ? 'You Cancelled' : seat === 'unknown' ? 'Ask Reception'
+                              : spotsLeft == null ? 'Spaces Unknown' : full === true ? 'Class Full' : fill === 'nearly' ? 'Nearly Full' : 'Spaces'}
+                            tone={off ? 'red' : holds ? 'brand' : seat === 'queued' ? 'amber' : seat !== 'none' ? 'neutral'
+                              : full === true ? 'orange' : fill === 'nearly' ? 'amber' : 'neutral'} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>{off
                             // `holds`, not the truthiness of a status: a member
                             // who cancelled and then had the class called off
                             // was being told they were booked in on it.
@@ -468,6 +505,15 @@ export default function Classes() {
                               : full === true ? 'Class full'
                               : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`)}</Text>
                         </View>
+                        {/* How full, as a bar — only where the count was READ
+                            and the class has a size (`spotsLeft` is null
+                            otherwise, and so is this). Never on a class that
+                            is not running. */}
+                        {!off && spotsLeft != null ? (
+                          <Meter label="Places" val={c.booked} target={c.capacity} unit=""
+                            tone={full === true ? 'orange' : fill === 'nearly' ? 'amber' : 'purple'}
+                            note={`${c.booked} of ${c.capacity} taken`} />
+                        ) : null}
                         {/* How deep the queue is. Never drawn as a zero over an
                             unread count — `waitlistNote` returns the sentence
                             for each of the three nothings and null where there

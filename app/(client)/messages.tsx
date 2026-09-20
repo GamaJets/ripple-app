@@ -83,7 +83,7 @@ import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import {
   HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE, HAS_NATIVE_CLIPBOARD, copyToClipboard,
 } from '../../src/ui/nativeModules';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
@@ -588,10 +588,10 @@ export default function Messages() {
               it used to be. With no picture it falls back to their initials, and
               with no name to take initials from it falls back to the same dash
               the header shows, in the same muted ink. */}
-          <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <View style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: head.isName ? t.brandSoft : t.surface3, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             {peer.avatar
-              ? <Image source={{ uri: peer.avatar }} style={{ width: 40, height: 40 }} accessibilityIgnoresInvertColors />
-              : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? t.brand : t.ink3 }}>{peerMonogram(head)}</Text>}
+              ? <Image source={{ uri: peer.avatar }} style={{ width: 44, height: 44 }} accessibilityIgnoresInvertColors />
+              : <Text style={{ ...ty.label, ...font('700', 'display'), color: head.isName ? t.brandText : t.ink3 }}>{peerMonogram(head)}</Text>}
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             {/* `capitalize` is applied only to a real name. A dash needs no
@@ -614,13 +614,13 @@ export default function Messages() {
           accessibilityRole="button" hitSlop={8}
           accessibilityState={{ selected: searching }}
           accessibilityLabel={searching ? 'Stop searching this conversation' : 'Search this conversation'}
-          style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: searching ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+          style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: searching ? t.brand : t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
           <Icon name="search" size={16} color={searching ? t.brandInk : t.ink2} />
         </Pressable>
         <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
           accessibilityLabel={blockActionLabel(safety.state, OTHER)}
           accessibilityHint="Block this conversation, or report a message in it"
-          style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+          style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
           <Icon name="lock" size={16} color={t.ink2} />
         </Pressable>
       </View>
@@ -631,7 +631,7 @@ export default function Messages() {
           prefix is a claim about the whole thread. */}
       {searching ? (
         <View style={{ paddingHorizontal: G, paddingTop: sp.md }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface, borderRadius: radius.md, paddingHorizontal: sp.md, ...elevation.card }}>
             <Icon name="search" size={16} color={t.ink3} />
             <TextInput
               value={query} onChangeText={setQuery} autoFocus
@@ -809,9 +809,17 @@ export default function Messages() {
                   // every line. `start`/`end`, not left/right — the sides swap
                   // under a right-to-left layout and the tails must swap with
                   // them.
+                  //
+                  // On the approved look's surfaces: the ground is grey now, so
+                  // the coach's bubble is a WHITE card lifted by the card
+                  // shadow — `surface2` on the grey ground was grey on grey and
+                  // the incoming voice all but vanished. The member's stays the
+                  // accent under its measured ink, and takes no shadow: a
+                  // saturated fill already stands off the ground on its own.
                   <View style={{
-                    backgroundColor: mine ? t.brand : t.surface2, borderRadius: radius.md,
-                    borderBottomEndRadius: mine ? 4 : radius.md, borderBottomStartRadius: mine ? radius.md : 4,
+                    backgroundColor: mine ? t.brand : t.surface, borderRadius: radius.lg,
+                    ...(mine ? null : elevation.card),
+                    borderBottomEndRadius: mine ? 4 : radius.lg, borderBottomStartRadius: mine ? radius.lg : 4,
                     paddingHorizontal: sp.lg, paddingVertical: sp.md,
                   }}>
                     <Text style={{ ...ty.body, color: mine ? t.brandInk : t.ink }}>{m.body}</Text>
@@ -925,8 +933,12 @@ export default function Messages() {
             layout by `FORWARD_ICON`, and the button keeps its spoken name and
             its busy/disabled state — a spinner replaces the glyph while a send
             is in flight, which is what "Sending…" used to say. */}
+        {/* The field is a white pill floating on the grey ground and the
+            send button the accent at 48pt, both under the card shadow — the
+            approved look's "bright" action, where this was a grey pill on a
+            grey bar with a button that read as part of it. */}
         <View ref={barRef} style={{ flexDirection: 'row', gap: sp.sm, paddingHorizontal: G, paddingVertical: sp.md, backgroundColor: t.bg, alignItems: 'center' }}>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.pill, paddingStart: sp.lg, paddingEnd: sp.xs, opacity: canSend ? 1 : 0.6 }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface, borderRadius: radius.pill, paddingStart: sp.lg, paddingEnd: sp.xs, opacity: canSend ? 1 : 0.6, ...elevation.card }}>
             <TextInput value={text} onChangeText={setText} editable={canSend}
               placeholder={canSend ? 'Type a message…' : 'This conversation is closed'} placeholderTextColor={t.ink3}
               accessibilityLabel={canSend ? 'Message your coach' : 'This conversation is closed'}
@@ -943,7 +955,7 @@ export default function Messages() {
               taps Send, and reads an alert instead of a bubble. */}
           <Pressable onPress={onSend} disabled={busy || !canSend} accessibilityRole="button" accessibilityLabel="Send message"
             accessibilityState={{ disabled: busy || !canSend, busy }}
-            style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center', opacity: busy || !canSend ? 0.5 : 1 }}>
+            style={{ width: 48, height: 48, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center', opacity: busy || !canSend ? 0.5 : 1, ...elevation.card }}>
             {busy
               ? <ActivityIndicator size="small" color={t.brandInk} />
               : <Icon name={FORWARD_ICON} size={20} color={t.brandInk} strokeWidth={2.5} />}
@@ -979,7 +991,7 @@ export default function Messages() {
                   accessibilityRole="button" accessibilityLabel="Copy this message"
                   accessibilityHint="Puts the words of this message on your clipboard"
                   style={{ paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Copy this message</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Copy this message</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
                     Puts the words on your clipboard. Nothing is reported and nobody is told.
                   </Text>
@@ -999,7 +1011,7 @@ export default function Messages() {
                   accessibilityRole="button" accessibilityLabel={o.label} accessibilityHint={o.note}
                   accessibilityState={{ disabled: reportBusy }}
                   style={{ paddingVertical: sp.md, opacity: reportBusy ? 0.5 : 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{o.label}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{o.label}</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{o.note}</Text>
                 </Pressable>
               </View>
@@ -1014,7 +1026,7 @@ export default function Messages() {
             <Pressable onPress={() => setReportFor(null)} accessibilityRole="button"
               accessibilityLabel="Close without reporting anything"
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
             </Pressable>
           </ScrollView>
         </View>

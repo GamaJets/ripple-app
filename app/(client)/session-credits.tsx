@@ -37,8 +37,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Card, Ghost, Flag, Notice, PageHead, fig } from '../../src/ui/kit';
-import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, Card, Ghost, Flag, Notice, PageHead, Ring, Meter, ListRow, TonedChip, fig } from '../../src/ui/kit';
+import { sp, layout, fontScale, type as ty, font } from '../../src/theme/scale';
 import { appLocale } from '../../src/lib/locale';
 import { fmtFullDay, num } from '../../src/lib/format';
 import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
@@ -142,6 +142,8 @@ export default function SessionCredits() {
                           passes === undefined ? null : passes, today),
     [packs, passes, today]);
   const route: CreditRoute = book.route;
+  // What the paying lines were SOLD as, for the ring's denominator.
+  const soldTotal = (book.lines ?? []).reduce((n, l) => n + l.sessions_total, 0);
   const lines = book.lines;
   const left = book.left;
   /* The instant the ledger is split on, and it is IN the dependency list.
@@ -300,7 +302,7 @@ export default function SessionCredits() {
    */
   const row = (r: LedgerRow) => (
     <View key={r.sessionId} style={{ paddingVertical: sp.md }}>
-      <Text style={{ ...ty.label, color: t.ink }}>{when(r.startsAt)}</Text>
+      <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{when(r.startsAt)}</Text>
       <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{clientLedgerLine(r, labelFor(r))}</Text>
     </View>
   );
@@ -328,9 +330,26 @@ export default function SessionCredits() {
              and the wording now names the business whose credit it is. */
           <Section>
             <SectionHead title="Sessions Remaining" />
-            <View accessible accessibilityLabel={`Sessions remaining, ${num(left)}, ${creditsHeroNote(book, expected) ?? ''}`}>
-              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(left)}</Text>
-              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{creditsHeroNote(book, expected) ?? ''}</Text>
+            {/* The figure as a ring: what is left against what was SOLD, over
+                the lines that actually pay (`lines` — the same set `left` is
+                summed from, so the arc and the number cannot disagree). These
+                are sessions, one unit, so adding the lines is honest; it is
+                never done across money. A total of nothing draws no arc. At
+                large text the words drop under the ring rather than squeeze
+                beside it. */}
+            <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+              <Ring size={124} tone="brand"
+                value={soldTotal > 0 ? left / soldTotal : null}
+                figure={num(left)} sub={soldTotal > 0 ? `of ${num(soldTotal)}` : undefined}
+                spoken={`Sessions remaining, ${num(left)}${soldTotal > 0 ? ` of ${num(soldTotal)}` : ''}`} />
+              <View style={{ flex: fontScale >= 1.35 ? undefined : 1, minWidth: 0, alignSelf: fontScale >= 1.35 ? 'stretch' : 'auto' }}>
+                <Text style={{ ...ty.label, color: t.ink2 }}>{creditsHeroNote(book, expected) ?? ''}</Text>
+                {expected != null && expected > 0 ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <TonedChip tone="blue" icon="calendar" label={`${num(expected)} Booked to Draw`} />
+                  </View>
+                ) : null}
+              </View>
             </View>
           </Section>
         ) : null}
@@ -402,15 +421,18 @@ export default function SessionCredits() {
         ) : null}
 
         {lines && lines.length > 0 ? (<>
-          <Rule />
           <Section>
             <SectionHead title="What Is Left" />
+            {/* One meter per pack or pass: the part of a whole the approved
+                look draws as a bar. "3 of 10" is the meter's own trailing note
+                and what it speaks, so the quantity is still words. */}
             {lines.map((l) => (
-              <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.md }}>
-                <View style={{ flex: 1, paddingEnd: sp.md }}>
-                  <Text style={{ ...ty.label, color: t.ink }}>{l.label}</Text>
+              <View key={l.id} style={{ paddingBottom: sp.sm }}>
+                <Meter label={l.label} val={l.left} target={l.sessions_total} tone="brand"
+                  note={`${num(l.left)} of ${num(l.sessions_total)}`} />
+                <View>
                   {l.expiresOn ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
                       {/* `fmtFullDay`, which reads through src/lib/localDate.ts.
                           `gym_passes.expires_on` and a pack's expiry are both
                           bare `YYYY-MM-DD`, and `new Date('2026-08-01')` is UTC
@@ -422,14 +444,12 @@ export default function SessionCredits() {
                     </Text>
                   ) : null}
                 </View>
-                <Text style={{ ...ty.label, color: t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
               </View>
             ))}
           </Section>
         </>) : null}
 
         {ledger && ledger.upcoming.length > 0 ? (<>
-          <Rule />
           <Section>
             <SectionHead title="Booked" note="What these are expected to draw" />
             {ledger.upcoming.map((r) => row(r))}
@@ -437,7 +457,6 @@ export default function SessionCredits() {
         </>) : null}
 
         {ledger && ledger.past.length > 0 ? (<>
-          <Rule />
           <Section>
             <SectionHead title="Already Had" note="What each one actually cost you" />
             {ledger.past.map((r) => row(r))}
@@ -453,10 +472,12 @@ export default function SessionCredits() {
           </Text>
         ) : null}
 
+        {/* The two ways onward as rows with toned plates — orange for what
+            was bought, the accent for a session — where these were two bare
+            text buttons stacked in a card. Same destinations. */}
         <Section>
-          <Ghost label="Memberships & Packs" onPress={() => router.push('/(client)/packages')} />
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Book a Session" onPress={() => router.push('/(client)/calendar')} />
+          <ListRow icon="trophy" tone="orange" title="Memberships & Packs" note="What you have bought" onPress={() => router.push('/(client)/packages')} />
+          <ListRow icon="calendar" tone="brand" title="Book a Session" note="Your coach’s open times" onPress={() => router.push('/(client)/calendar')} />
         </Section>
       </ScrollView>
     </SafeAreaView>

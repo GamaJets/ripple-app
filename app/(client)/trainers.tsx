@@ -51,12 +51,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag, PageHead, TonedChip } from '../../src/ui/kit';
 import { capLimit, capped } from '../../src/lib/rowCap';
 // The reader's locale, resolved once with a fallback — never a literal tag.
 // See scripts/check-locale.mjs for the 2,860 kcal day that read as 2.86.
 import { appLocale } from '../../src/lib/locale';
-import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, value, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
 // The GYM's invitation, which is a different record from the coach's and had no
@@ -186,7 +186,9 @@ function CoachFace({ photo, name, size, mono }: { photo: string | null; name: st
   const t = useTheme();
   const [brokenUri, setBrokenUri] = useState<string | null>(null);
   const uri = avatarSource(photo);
-  const box = { width: size, height: size, borderRadius: radius.pill, backgroundColor: t.surface2 };
+  // The mockups' monogram plate: the accent's pale plate under its measured
+  // text colour, where this was the accent on grey.
+  const box = { width: size, height: size, borderRadius: radius.pill, backgroundColor: t.brandSoft };
   if (uri && brokenUri !== uri) {
     return (
       <Image
@@ -200,7 +202,7 @@ function CoachFace({ photo, name, size, mono }: { photo: string | null; name: st
   }
   return (
     <View style={{ ...box, alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ ...value(mono), color: t.brand }}>{initials(name)}</Text>
+      <Text style={{ ...value(mono), color: t.brandText }}>{initials(name)}</Text>
     </View>
   );
 }
@@ -1062,8 +1064,7 @@ export default function FindTrainer() {
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <PageHead title="Find a Trainer" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Enter your coach's code, or browse everyone coaching on {BRAND.label}.</Text>
+        <PageHead title="Find a Trainer" subtitle={`Enter your coach’s code, or browse everyone coaching on ${BRAND.label}`} />
 
         {/* ── your coach, and the way out ─────────────────────────────────
             Above the invitations and the directory because it is the fact the
@@ -1091,15 +1092,15 @@ export default function FindTrainer() {
           <Section>
             <SectionHead title="Your Coach" />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-              <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 46, height: 46, borderRadius: radius.pill, backgroundColor: coach.name?.trim() ? t.brandSoft : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                 {/* A coach who has not set a name is a real state — part 67
                     returns a row with a null name for exactly that — and a dash
                     is what the record supports. Never a placeholder that reads
                     like a name. */}
-                <Text style={{ ...value(13), color: t.brand }}>{coach.name?.trim() ? initials(coach.name) : '—'}</Text>
+                <Text style={{ ...value(16), color: coach.name?.trim() ? t.brandText : t.ink3 }}>{coach.name?.trim() ? initials(coach.name) : '—'}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{coach.name?.trim() || '—'}</Text>
+                <Text style={{ ...ty.head, color: t.ink }}>{coach.name?.trim() || '—'}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                   Sees your workouts, measurements, check-ins, scans and anything you send them.
                 </Text>
@@ -1208,7 +1209,6 @@ export default function FindTrainer() {
             the one case where silence is a true answer. */}
         {USE_SUPABASE && (myReqStatus !== 'ready' || myReqs.length > 0) ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Coaches You’ve Asked" />
               {myReqStatus === 'error' ? (
@@ -1241,11 +1241,15 @@ export default function FindTrainer() {
                       <View key={r.id}>
                         {i ? <Rule /> : null}
                         <View style={{ paddingVertical: sp.md }}>
-                          <Text style={{ ...ty.micro, color: t.ink3 }}>{COACH_REQUEST_LABEL[r.status]}</Text>
+                          {/* The answer as a chip: amber is still waiting, the
+                              accent is a yes, red is a no, and one the member
+                              took back themselves is nobody's verdict. */}
+                          <TonedChip label={COACH_REQUEST_LABEL[r.status]}
+                            tone={r.status === 'pending' ? 'amber' : r.status === 'accepted' ? 'brand' : r.status === 'declined' ? 'red' : 'neutral'} />
                           {/* Never a dash as the subject of the row. A coach who
                               has left the directory cannot be named here at all
                               and this is still true of them. */}
-                          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: 2 }}>
+                          <Text style={{ ...ty.head, color: t.ink, marginTop: 6 }}>
                             {r.coachName ?? 'A coach you asked'}
                           </Text>
                           <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>{coachRequestLine(r, r.coachName)}</Text>
@@ -1362,7 +1366,7 @@ export default function FindTrainer() {
             </View>
           ) : coaches.map((c, i) => (
             <View key={c.id}>
-              {i > 0 ? <Rule inset={46} /> : null}
+              {i > 0 ? <Rule inset={58} /> : null}
               {/* Everything the row draws, in the order it draws it.
                   A Pressable is ONE accessibility element — it renders
                   `accessible={true}` — so an `accessibilityLabel` on it does
@@ -1379,7 +1383,7 @@ export default function FindTrainer() {
                   c.name,
                   c.tagline?.trim() || null,
                   [rateLine(c.id), credentialsSummaryLine(credsFor(c.id), today)].filter(Boolean).join(' · ') || null,
-                  sent[c.id] ? 'Request pending' : null,
+                  sent[c.id] ? 'Request Pending' : null,
                   c.specialties.slice(0, 3).join(', ') || null,
                   // The same figure the row prints, said the same way: the
                   // priced arm never acquires a currency nobody chose, and the
@@ -1389,9 +1393,9 @@ export default function FindTrainer() {
                     : sessionFeeShort(c.sessionFee),
                 ].filter(Boolean).join('. ')}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <CoachFace photo={c.photo} name={c.name} size={34} mono={13} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
+                <CoachFace photo={c.photo} name={c.name} size={46} mono={16} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{c.name}</Text>
                   {c.tagline ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>{c.tagline}</Text> : null}
                   {/* The two lines a person actually decides on. Each is null
                       when the read behind it did not complete — a rating that
@@ -1405,17 +1409,12 @@ export default function FindTrainer() {
                   ) : null}
                   {c.specialties.length > 0 || sent[c.id] ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 7, flexWrap: 'wrap' }}>
-                      {sent[c.id] ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>Request pending</Text>
-                        </View>
-                      ) : null}
-                      {c.specialties.slice(0, 3).map((sx) => (
-                        <View key={sx} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 3 }}>
-                          <Text style={{ ...ty.caption, color: t.ink3 }}>{sx}</Text>
-                        </View>
-                      ))}
+                      {/* Amber — it is waiting on somebody — and in words.
+                          The specialities are the coach's own, on the accent's
+                          plate as they are under a name on Your Coach. All of
+                          it is already in the row's spoken label above. */}
+                      {sent[c.id] ? <TonedChip label="Request Pending" tone="amber" icon="clock" /> : null}
+                      {c.specialties.slice(0, 3).map((sx) => <TonedChip key={sx} label={sx} tone="brand" />)}
                     </View>
                   ) : null}
                 </View>
@@ -1538,7 +1537,7 @@ export default function FindTrainer() {
                 <View style={{ marginBottom: sp.xl }}>
                   {sortCredentials(credsFor(sel.id)!, today).map((c) => (
                     <View key={c.id} style={{ marginBottom: sp.md }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{c.title}</Text>
                       {credentialLine(c) ? (
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{credentialLine(c)}</Text>
                       ) : null}
@@ -1564,11 +1563,7 @@ export default function FindTrainer() {
               {sel.specialties.length > 0 ? (<>
                 <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Specialties</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: sp.xl }}>
-                  {sel.specialties.map((sx) => (
-                    <View key={sx} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>{sx}</Text>
-                    </View>
-                  ))}
+                  {sel.specialties.map((sx) => <TonedChip key={sx} label={sx} tone="brand" />)}
                 </View>
               </>) : null}
 
@@ -1636,10 +1631,7 @@ export default function FindTrainer() {
 
               {sent[sel.id] ? (
                 <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.lg, marginBottom: sp.md }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Request pending</Text>
-                  </View>
+                  <TonedChip label="Request Pending" tone="amber" icon="clock" />
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{sel.name} has your request. You'll be connected when they accept.</Text>
                 </View>
               ) : (<>

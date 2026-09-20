@@ -31,8 +31,8 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, Flag, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, Flag, PageHead, FigureCard, IconPlate, TonedChip, Expandable, fig } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 // `numUpTo`, because `perWeek` is a ONE-DECIMAL mean — `Math.round(x * 10) / 10`
 // in src/lib/attendance.ts — and a bare `${perWeek}` writes a full stop in every
 // locale. "2.7 a week" is read as twenty-seven by a reader whose language makes
@@ -252,7 +252,11 @@ export default function Attendance() {
   const row = (e: AttendanceEvent, first: boolean) => {
     const o = outcomeWords(e.outcome);
     const mins = dwellMinutes(e.visit);
-    const tone = o.tone === 'good' ? t.good : o.tone === 'ahead' ? t.brand : t.ink3;
+    // The outcome as a chip: the accent for "you were there", blue for one
+    // still ahead, neutral for everything that is merely a fact (cancelled,
+    // unmarked). Nothing here is red — a missed class is the gym's register
+    // and not this screen's verdict.
+    const tone = o.tone === 'good' ? 'brand' : o.tone === 'ahead' ? 'blue' : 'neutral';
     const title = e.source === 'floor'
       ? 'Gym visit'
       : e.klass
@@ -270,21 +274,22 @@ export default function Attendance() {
     return (
       <View key={e.key}>
         {!first ? <Rule /> : null}
-        {/* Grouped and spoken whole. The dot is the outcome said in colour —
-            attended, missed, cancelled — and colour is the one thing a screen
-            reader cannot read; without this the row arrived as four fragments
-            led by an unnamed shape. */}
+        {/* Grouped and spoken whole. The plate names the KIND of row in the
+            app's session colours — purple for a class, teal for a walk through
+            the door — and the chip is the outcome; colour is the one thing a
+            screen reader cannot read, so without this label the row arrived as
+            fragments led by an unnamed shape. */}
         <View accessible accessibilityRole="text"
           accessibilityLabel={[dayLabel(e.at), title, where, o.label].filter(Boolean).join('. ')}
           style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
-          <View style={{ width: 7, height: 7, borderRadius: 4, marginTop: 6, backgroundColor: tone }} />
-          <View style={{ flex: 1 }}>
+          <IconPlate icon={e.source === 'floor' ? 'grid' : 'calendar'} tone={e.source === 'floor' ? 'teal' : 'purple'} />
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>
               {dayLabel(e.at)}{e.at && e.source === 'class' ? ` · ${timeLabel(e.at)}` : ''}
             </Text>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{title}</Text>
+            <Text style={{ ...ty.head, color: t.ink, marginTop: 3 }}>{title}</Text>
             {where ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{where}</Text> : null}
-            <Text style={{ ...ty.caption, color: o.tone === 'good' ? t.ink2 : t.ink3, marginTop: 4 }}>{o.label}</Text>
+            <View style={{ marginTop: 6 }}><TonedChip label={o.label} tone={tone} /></View>
             {e.source === 'class' && mins != null ? (
               <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{mins} min in the building</Text>
             ) : null}
@@ -301,10 +306,7 @@ export default function Attendance() {
         showsVerticalScrollIndicator={false}
         refreshControl={pull}
       >
-        <PageHead title="Attendance" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
-          Your classes and every time your gym recorded you coming through the door.
-        </Text>
+        <PageHead title="Attendance" subtitle="Your classes and every door scan your gym recorded" />
 
 
         {status === 'error' ? (
@@ -333,22 +335,39 @@ export default function Attendance() {
         ) : null}
 
         {/* ── how often, and only where the record supports saying ────────── */}
-        <Section>
-          <SectionHead
-            title="How often you come"
-            note={countable && rhythm.perWeek != null ? `${numUpTo(rhythm.perWeek, 1)} a week` : undefined}
-          />
-
-          {status === 'loading' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your attendance…</Text>
-          ) : (
+        {/* The page opens on its figure — days a week — with the reason
+            beside the dash when there is no figure, and the weeks it was
+            worked out from as bars directly under it. `FigureCard` is the
+            kit's card for exactly that; nothing about WHEN a rate may be
+            shown changed. */}
+        <FigureCard
+          title="How Often You Come"
+          figure={countable && rhythm.perWeek != null ? numUpTo(rhythm.perWeek, 1) : null}
+          unit="days a week"
+          period={`Last ${RHYTHM_WEEKS} weeks`}
+          source={countable ? `${num(days.length)} days on record` : undefined}
+          detail={status === 'loading' ? 'Reading your attendance…'
+            : !countable
+              ? 'No average while the record is incomplete — a rate over part of it would be a number about a gym you do not go to.'
+              : rhythm.perWeek == null
+                ? (rhythm.firstDay
+                  ? `Your record starts ${shortDay(rhythm.firstDay)}. There is not yet a finished week inside it to average, so no rate is shown.`
+                  : 'Nothing recorded yet, so there is no average to show. A zero here would be a claim, not a blank.')
+                : `Averaged over the ${rhythm.countedWeeks} finished week${rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(rhythm.firstDay!)}. This week is left out of it — it is not over.`}>
+          {status === 'loading' ? null : (
             <>
-              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 76, marginTop: sp.sm }}>
+              {/* The kit's DayBars, drawn by hand: same 18pt rounded bars and
+                  grey stub, but DayBars has two states for a bar and this strip
+                  has four — a week with days, a week with none, a week BEFORE
+                  the record starts (hollow, dashed: not a zero) and the week
+                  that is not over (half strength) — and each column keeps its
+                  own spoken sentence, which one chart-wide label would lose. */}
+              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 84, marginTop: sp.lg }}>
                 {strip.map((w) => {
                   // An uncovered week is drawn as a hollow slot, not a zero bar.
                   // A bar of height zero is the claim "you came in no times that
                   // week"; before the first row on record we have no idea.
-                  const h = w.covered && busiest > 0 ? Math.max(3, Math.round((w.days / busiest) * 64)) : 3;
+                  const h = w.covered && w.days > 0 && busiest > 0 ? Math.max(6, Math.round((w.days / busiest) * 64)) : 6;
                   return (
                     // Grouped and spoken whole, like the visit rows below.
                     // Every fact this column carries is drawn as a shape — fill
@@ -362,8 +381,8 @@ export default function Attendance() {
                       accessibilityLabel={rhythmWeekLabel(w, shortDay(w.start))}
                       style={{ flex: 1, alignItems: 'center', gap: 4 }}>
                       <View style={{
-                        width: '100%', height: h, borderRadius: radius.sm / 2,
-                        backgroundColor: !w.covered ? 'transparent' : w.days ? t.brand : t.surface2,
+                        width: 18, maxWidth: '100%', height: h, borderRadius: 6,
+                        backgroundColor: !w.covered ? 'transparent' : w.days ? t.brand : t.surface3,
                         borderWidth: w.covered ? 0 : hairline,
                         borderColor: t.ring,
                         borderStyle: 'dashed',
@@ -377,36 +396,11 @@ export default function Attendance() {
                 })}
               </View>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {`Days you were recorded at a gym, week by week, over the last ${RHYTHM_WEEKS} weeks. The last bar is this week and is not finished.`}
-              </Text>
-
-              {/* The figure, and the reason there isn't one. Never a zero. */}
-              <View style={{ flexDirection: 'row', gap: sp.xl, marginTop: sp.lg }}>
-                <View>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Days on record</Text>
-                  <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                    {countable ? num(days.length) : fig(null)}
-                  </Text>
-                </View>
-                <View>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Days a week</Text>
-                  <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                    {countable && rhythm.perWeek != null ? numUpTo(rhythm.perWeek, 1) : fig(null)}
-                  </Text>
-                </View>
-              </View>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {!countable
-                  ? 'No average while the record is incomplete — a rate over part of it would be a number about a gym you do not go to.'
-                  : rhythm.perWeek == null
-                    ? (rhythm.firstDay
-                      ? `Your record starts ${shortDay(rhythm.firstDay)}. There is not yet a finished week inside it to average, so no rate is shown.`
-                      : 'Nothing recorded yet, so there is no average to show. A zero here would be a claim, not a blank.')
-                    : `Averaged over the ${rhythm.countedWeeks} finished week${rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(rhythm.firstDay!)}. This week is left out of it — it is not over.`}
+                Days at a gym, week by week. The last bar is this week and is not finished.
               </Text>
             </>
           )}
-        </Section>
+        </FigureCard>
 
 
         {/* ── the record itself ───────────────────────────────────────────── */}
@@ -424,7 +418,7 @@ export default function Attendance() {
               home and a correct source — "Days on record" above, off
               `attendedDays`, which counts DAYS and not rows for its own
               reasons. So the heading is made to say what the number counts. */}
-          <SectionHead title="Everything on record" note={countable && events.length ? num(events.length) : undefined} />
+          <SectionHead title="Everything on Record" note={countable && events.length ? num(events.length) : undefined} />
 
           {/* Why a class would not open, CHECKED rather than guessed.
               This said "usually because they were run by a gym you are no
@@ -475,11 +469,10 @@ export default function Attendance() {
 
         {undated.length ? (
           <>
-            <Rule />
             <Section>
               {/* Every other figure on this screen goes through `countable`
                   (`status === 'ready'`); this one did not. */}
-              <SectionHead title="On record, date unknown" note={countable ? `${undated.length}` : undefined} />
+              <SectionHead title="On Record, Date Unknown" note={countable ? `${undated.length}` : undefined} />
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
                 Classes you booked whose details this app cannot read, so there is no date to put them on. They are listed here rather than dropped or guessed onto a day, and they are not counted above.
               </Text>
@@ -499,11 +492,13 @@ export default function Attendance() {
         ) : null}
 
 
-        <Section>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>
+        {/* Folded: whose record this is and how to have it corrected is read
+            once, and the approved look keeps paragraphs behind a control. */}
+        <Expandable title="About This Record" note="Your gym’s own register — reception can correct it">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
             This is your gym’s own record. A class with nothing marked against it means nobody took the register — it does not mean you were not there. If something here looks wrong, reception can correct it.
           </Text>
-        </Section>
+        </Expandable>
       </ScrollView>
     </SafeAreaView>
   );

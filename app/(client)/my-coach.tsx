@@ -51,8 +51,8 @@ import { View, Text, ScrollView, Image, TextInput, Pressable, Alert, Modal } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ListRow, Ghost, Cta, Flag, PageHead, AttentionRow } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, ListRow, Ghost, Cta, Flag, PageHead, AttentionRow, TonedChip, Ring, DayBars, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, grown, fontScale, type as ty, value, numeric, font } from '../../src/theme/scale';
 // 44pt, and the one place the number lives. See the rating row below.
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
@@ -106,14 +106,16 @@ import { CoachAdvice } from '../../src/ui/CoachAdvice';
 // instance and the same rows — nothing is read twice by asking for it here.
 // It is imported for its `reload` alone: see the pull handler below.
 import { useCoachFeedback } from '../../src/ui/feedback';
-import { useToday } from '../../src/ui/today';
+import { useToday, useNow } from '../../src/ui/today';
 // The "Right Now" block: what is open between this member and their coach.
 // All three are reads the app already holds — see `checkinAsk` below.
 import { useCheckIns } from '../../src/ui/checkins';
 import { useOutbox } from '../../src/ui/outbox';
 import { unsentNote } from '../../src/lib/offlineQueue';
-import { daysAgo, checkInAge } from '../../src/lib/coachCheckins';
-import { fmtFullDay } from '../../src/lib/format';
+import { daysAgo, checkInAge, rating as scoreOf, ratingLabel, RATING_MAX } from '../../src/lib/coachCheckins';
+import { isPending } from '../../src/lib/wellnessSync';
+import { dateParts } from '../../src/lib/localDate';
+import { fmtFullDay, fmtAxisDay } from '../../src/lib/format';
 import { coachedRemotely } from '../../src/lib/types';
 import {
   credentialBadge, credentialLine, expiryLine, sortCredentials, insuranceClaim, insuranceLine,
@@ -535,6 +537,52 @@ export default function MyCoach() {
   // outbox itself, as app/(trainer)/messages.tsx counts its own, and drawn only
   // when there are some: an outbox that could not be read is not an empty one,
   // and this says nothing at all rather than "everything has been sent".
+  // ── the rhythm of it, as a picture ───────────────────────────────────────
+  //
+  // The approved look wants evidence under the state, and the one series this
+  // screen already holds about the two of them is the check-ins: how many
+  // reached the coach in each of the last six weeks. No new read — it is
+  // `ci.checkins`, the list the row above already ages.
+  //
+  // SENT ones only, for `latestSent`'s reason: a pending check-in is on this
+  // phone, and a bar for it would show the coach holding a week they have never
+  // seen. And only off a WHOLE read — under 'partial' a week with no bar might
+  // be a week whose row was cut, so nothing is drawn and the card says why
+  // (null here). A zero under a whole read IS a fact, and draws the grey stub.
+  //
+  // Weeks are seven-day windows ending today, the same measure "Check-in Due"
+  // uses, counted in LOCAL calendar days so a check-in sent late on Sunday is
+  // not filed under Monday by UTC. `Math.round` on the day difference absorbs
+  // the hour a daylight-saving change adds or removes.
+  const WEEKS = 6;
+  const nowDate = useNow();
+  const rhythm = useMemo(() => {
+    if (!isWhole(ci.status)) return null;
+    const start = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
+    const counts = Array.from({ length: WEEKS }, () => 0);
+    for (const c of ci.checkins) {
+      if (isPending(c.id)) continue;
+      const p = dateParts(c.at);
+      if (!p) continue;
+      const days = Math.round((start.getTime() - new Date(p[0], p[1], p[2]).getTime()) / 86_400_000);
+      const w = Math.floor(days / 7);
+      if (days >= 0 && w < WEEKS) counts[WEEKS - 1 - w] += 1;
+    }
+    const days = counts.map((n, i) => {
+      // The first day of the window, in the reader's own date order.
+      const from = new Date(start.getFullYear(), start.getMonth(), start.getDate() - 7 * (WEEKS - 1 - i) - 6);
+      return { label: fmtAxisDay(from.getFullYear(), from.getMonth(), from.getDate()), value: n, tone: 'blue' as const };
+    });
+    return { days, weeksWith: counts.filter((n) => n > 0).length };
+  }, [ci.status, ci.checkins, nowDate]);
+  // The plan score on the last check-in the COACH holds, for the ring beside
+  // the bars. `scoreOf` (coachCheckins' `rating`, renamed here because this
+  // screen's review form already has a `rating`) refuses anything off the 1–5 scale — the 0 `rowToCI`
+  // coerces a missing score into included — so an unrated week is a bare track
+  // and a dash, not an empty ring.
+  const lastAdherence = isWhole(ci.status) && ci.latestSent ? scoreOf(ci.latestSent.adherence) : null;
+  const showRhythm = coachedRemotely(cd.coachingMode) || ci.checkins.length > 0;
+
   const outbox = useOutbox();
   const queuedWords = outbox ? outbox.countOf('message') : 0;
   const queuedWordsNote = unsentNote(queuedWords, 'message', 'messages');
@@ -593,13 +641,15 @@ export default function MyCoach() {
                   carry a readable label, whoever wrote it and by whatever
                   route — so nothing downstream needs to check it again. */}
               <View style={{
-                width: 64, height: 64, borderRadius: 32, backgroundColor: t.surface2,
+                width: 84, height: 84, borderRadius: 42, backgroundColor: t.brandSoft,
                 alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                 borderWidth: applied.color ? 2 : 0, borderColor: applied.color ?? undefined,
               }}>
+                {/* The mockups' monogram: Sora initials in the accent's text
+                    colour on its pale plate, where this was grey on grey. */}
                 {coach.avatar
-                  ? <Image source={{ uri: coach.avatar }} style={{ width: 64, height: 64 }} />
-                  : <Text style={{ ...ty.head, color: t.ink3 }}>{monogram(coach.name)}</Text>}
+                  ? <Image source={{ uri: coach.avatar }} style={{ width: 84, height: 84 }} />
+                  : <Text style={{ ...value(28), color: t.brandText }}>{monogram(coach.name)}</Text>}
               </View>
               {/* A name that could not be read renders as a dash. It is never
                   replaced with "Your coach", which would look like a name and
@@ -614,7 +664,17 @@ export default function MyCoach() {
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: 3, textAlign: 'center' }}>{applied.name}</Text>
               ) : null}
               {coach.tagline ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, textAlign: 'center' }}>{coach.tagline}</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, textAlign: 'center' }}>{coach.tagline}</Text>
+              ) : null}
+              {/* The identity header's chips, as the approved client record
+                  draws them under a name. What they specialise in is the one
+                  thing on the profile that IS a set of short labels, so it
+                  moved up here from "About Them" rather than being said twice.
+                  The coach's own words, untouched — hence no case rule. */}
+              {coach.specialties.length ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: sp.sm, marginTop: sp.md }}>
+                  {coach.specialties.map((s) => <TonedChip key={s} label={s} tone="brand" />)}
+                </View>
               ) : null}
             </View>
 
@@ -672,6 +732,48 @@ export default function MyCoach() {
                 the same reason: the thread exists whether or not anything has
                 been said in it, and a control hidden on a failed read hides the
                 way to speak to the person whose profile is on screen. */}
+            {/* ── the evidence: a ring and six weeks of bars ───────────────
+                See `rhythm` above for what is counted and what is refused.
+                The figure leads and the picture backs it, as every card in
+                the approved look does; when the read is not whole there is no
+                picture and ONE line saying why, never six empty weeks. At
+                large text the ring stacks over its sentence so neither is
+                squeezed. */}
+            {showRhythm ? (
+              <Section>
+                <SectionHead title="Check-in Rhythm" note={`Last ${WEEKS} weeks`} onPress={() => go('/(client)/checkin')} />
+                {rhythm ? (
+                  <>
+                    <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+                      <Ring size={104} tone="brand"
+                        value={lastAdherence == null ? null : lastAdherence / RATING_MAX}
+                        figure={ratingLabel(lastAdherence)} sub="Adherence"
+                        spoken={lastAdherence == null
+                          ? 'Plan adherence on your last sent check-in: not rated'
+                          : `Plan adherence on your last sent check-in: ${lastAdherence} out of ${RATING_MAX}`} />
+                      <Text style={{ ...ty.label, color: t.ink2, flex: fontScale >= 1.35 ? undefined : 1, minWidth: 0 }}>
+                        <Text style={{ ...value(26), ...numeric, color: t.ink }}>{rhythm.weeksWith}</Text>
+                        {` of the last ${WEEKS} weeks with a check-in sent`}
+                      </Text>
+                    </View>
+                    {/* Under the pair and the card's full width: six columns
+                        beside a ring are 34pt each, and "10 Aug" does not fit
+                        in 34pt. */}
+                    <View style={{ marginTop: sp.lg }}>
+                      <DayBars days={rhythm.days} h={52}
+                        spoken={`Check-ins your coach received in each of the last ${WEEKS} weeks, oldest first: ${rhythm.days.map((d) => d.value).join(', ')}`} />
+                    </View>
+                  </>
+                ) : (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    {ci.status === 'loading'
+                      ? 'Reading your check-ins…'
+                      : 'Your check-ins could not be read in full, so no weeks are drawn. That is not a statement that none were sent.'}
+                  </Text>
+                )}
+              </Section>
+            ) : null}
+
             <View style={{ marginTop: sp.lg }}>
               <Cta label="Message Coach" wide onPress={() => go('/(client)/messages')} />
             </View>
@@ -695,8 +797,8 @@ export default function MyCoach() {
                   app/(client)/messages.tsx, keyed by `messages.client_id` with
                   the coach named through `my_coach()` — and not to a second
                   messaging surface. */}
-              <ListRow icon="message" title="Message Coach" note="Your thread with them" onPress={() => go('/(client)/messages')} />
-              <ListRow icon="calendar" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
+              <ListRow icon="message" tone="blue" title="Message Coach" note="Your thread with them" onPress={() => go('/(client)/messages')} />
+              <ListRow icon="calendar" tone="brand" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
               {/* ── and the hour they have NOT opened ──────────────────────
                   The row above books from what the coach has published, and
                   the product owner's own report is about the half that leaves
@@ -716,7 +818,7 @@ export default function MyCoach() {
                   one only when there is none. The note is what keeps them
                   apart — asking is not booking, which is the rule that whole
                   screen exists to hold. */}
-              <ListRow icon="clock" title="Ask for a Time" note="A time they haven’t opened — it asks, it doesn’t book" onPress={() => go('/(client)/request-session')} />
+              <ListRow icon="clock" tone="teal" title="Ask for a Time" note="A time they haven’t opened — it asks, it doesn’t book" onPress={() => go('/(client)/request-session')} />
             </Section>
 
             {/* Moved up, above the bio and the qualifications: the review's
@@ -739,18 +841,26 @@ export default function MyCoach() {
                 had no Notices. This is it. */}
             <CoachAdvice clientId={myId} coachName={coach.name} />
 
-            <Section>
-              <SectionHead title="What They Can See" />
-              {/* Said here rather than left to be discovered. A client is
-                  entitled to know what coaching costs them in privacy, and the
-                  answers are not obvious: the injury document stays with the
-                  client and only the extracted injury reaches the coach, and
-                  blood sugar is invisible until the client turns sharing on. */}
-              <Text style={{ ...ty.label, color: t.ink3 }}>
+            {/* Said here rather than left to be discovered. A client is
+                entitled to know what coaching costs them in privacy, and the
+                answers are not obvious: the injury document stays with the
+                client and only the extracted injury reaches the coach, and
+                blood sugar is invisible until the client turns sharing on.
+
+                Folded, with the short answer as the fold's own note: it is a
+                paragraph a member reads once, and the approved look takes
+                paragraphs off the page and leaves the way to them. Every word
+                of it is still here. */}
+            <Expandable title="What They Can See" note="Your log, check-ins, scans and any injury you disclosed">
+              <Text style={{ ...ty.label, color: t.ink2 }}>
                 Your training log, your check-ins, your scans and measurements, and any injury you have
                 disclosed. Not the document behind an injury — only what was read out of it. Not your blood
                 sugar, unless you turn sharing on yourself.
               </Text>
+            </Expandable>
+
+            <Section>
+              <SectionHead title="Your Plan Changes" />
 
               {/* ── and the plan you rewrote ──────────────────────────────
                   The one thing in that list the member MADE, and the only one
@@ -766,7 +876,7 @@ export default function MyCoach() {
                   holds its own copy in memory; an undo from here would be
                   overwritten by that screen's next tap, silently, after the
                   member had been told it was done. */}
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+              <Text style={{ ...ty.label, color: t.ink3 }}>
                 {coachSeesPlanNote(
                   planEditStatus,
                   planEdits ? editCount(planEdits.edits) : 0,
@@ -795,8 +905,6 @@ export default function MyCoach() {
               ) : null}
             </Section>
 
-            <Rule />
-
             {/* ── who they are ────────────────────────────────────────────── */}
             <Section>
               <SectionHead title="About Them" />
@@ -818,38 +926,23 @@ export default function MyCoach() {
               ) : null}
               {/* Nothing to say about themselves yet: said, so the card is
                   not an empty box under a heading. Not a claim about them. */}
-              {!coach.bio && !coach.specialties.length && !coach.offers.length && !brandNote ? (
-                <Text style={{ ...ty.label, color: t.ink3 }}>{coach.name ?? 'Your coach'} hasn’t written a profile in {BRAND.label} yet.</Text>
-              ) : null}
-
-              {coach.specialties.length ? (
-                <View style={{ marginTop: sp.lg }}>
-                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Specialises In</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                    {coach.specialties.map((s) => (
-                      <View key={s} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
-                        <Text style={{ ...ty.caption, color: t.ink2 }}>{s}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
+              {/* Their specialities are under their name now, so this is about
+                  the bio and the offers only — and says "about themselves"
+                  rather than "a profile", which a coach with three chips in
+                  the header plainly has some of. */}
+              {!coach.bio && !coach.offers.length && !brandNote ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{coach.name ?? 'Your coach'} hasn’t written about themselves in {BRAND.label} yet.</Text>
               ) : null}
 
               {coach.offers.length ? (
                 <View style={{ marginTop: sp.lg }}>
                   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Offers</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                    {coach.offers.map((o) => (
-                      <View key={o} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
-                        <Text style={{ ...ty.caption, color: t.ink2 }}>{o}</Text>
-                      </View>
-                    ))}
+                    {coach.offers.map((o) => <TonedChip key={o} label={o} tone="blue" />)}
                   </View>
                 </View>
               ) : null}
             </Section>
-
-            <Rule />
 
             {/* ── what they say they are qualified to do ──────────────────
                 Their own claim, said so on every line. The alternative — a
@@ -877,7 +970,7 @@ export default function MyCoach() {
               ) : (<>
                 {sortCredentials(creds ?? [], today).map((c, i) => (
                   <View key={c.id} style={{ paddingVertical: sp.sm, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{c.title}</Text>
                     {credentialLine(c) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{credentialLine(c)}</Text>
                     ) : null}
@@ -898,8 +991,6 @@ export default function MyCoach() {
               ) : null}
             </Section>
 
-            <Rule />
-
             {/* ── the arrangement itself ───────────────────────────────────
                 These three rows sat in "Reach Them", between Ask for a Time and
                 the bio. They are not ways of reaching anybody — they are what
@@ -909,7 +1000,7 @@ export default function MyCoach() {
                 booking controls. Same rows, same destinations, same notes. */}
             <Section>
               <SectionHead title="Your Arrangement" />
-              <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
+              <ListRow icon="trophy" tone="orange" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
               {/* A standing appointment is an agreement between these two
                   people, which is what makes this the screen it belongs on —
                   and part 135 is explicit that EITHER party may end one. The
@@ -917,15 +1008,13 @@ export default function MyCoach() {
                   have one: the read that would decide it can fail, and a row
                   hidden on a failed read hides the way out from the member
                   whose arrangement could not be confirmed. */}
-              <ListRow icon="clock" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
+              <ListRow icon="clock" tone="brand" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
               {/* On the screen about this coach, because that is the only place
                   the answer to "whose waiver is this?" is already on the page.
                   The same row is in the Me hub for the member who is looking
                   for a form rather than for their coach. */}
-              <ListRow icon="pencil" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
+              <ListRow icon="pencil" tone="purple" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
             </Section>
-
-            <Rule />
 
             {/* ── your review of them ─────────────────────────────────────
                 Gated on `can_review_coach()` rather than on the presence of a
@@ -1020,7 +1109,7 @@ export default function MyCoach() {
                                 borderWidth: on ? 2 : hairline, borderColor: on ? t.ink : t.ring,
                                 backgroundColor: on ? t.brand : t.surface2,
                               }}>
-                              <Text style={{ ...ty.body, fontWeight: on ? '700' : '400', color: on ? t.bg : t.ink2 }}>{n}</Text>
+                              <Text style={{ ...ty.body, ...font(on ? '700' : '400'), color: on ? t.brandInk : t.ink2 }}>{n}</Text>
                             </Pressable>
                           );
                         })}
@@ -1051,8 +1140,6 @@ export default function MyCoach() {
                 </>);
               })()}
             </Section>
-
-            <Rule />
 
             {/* ── the way out ────────────────────────────────────────────
                 The only `endCoaching` call in the client app was on
@@ -1111,7 +1198,7 @@ export default function MyCoach() {
               say how many there are. */}
           {otherWritten.map((r, i) => (
             <View key={r.id} style={{ paddingVertical: sp.md, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: t.ring }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{myReviewRatingLine(r)}</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{myReviewRatingLine(r)}</Text>
               {r.body ? (
                 /* `grown`, never a pinned lineHeight: this is a paragraph of
                    the member's own writing and the longest run of text in the
