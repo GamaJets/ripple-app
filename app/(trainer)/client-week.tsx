@@ -93,7 +93,7 @@ import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
-import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { WORKOUT_COLS, rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { dayKeyOf } from '../../src/lib/entryEdit';
 import {
@@ -107,15 +107,12 @@ import {
   type CoachPlanDay, type ScheduledFocus,
 } from '../../src/lib/coachWeek';
 
-// Written out here, on one line, rather than imported from the library beside
-// the logic that consumes them. scripts/check-schema.mjs resolves a select list
-// that arrives as a named constant only within the file that names it, so a
-// shared constant is a select list nothing compares against the SQL or against
-// the live database — which is exactly how `workouts.session_mins` came to be
-// declared, committed, generated into setup.sql and never run, breaking every
-// workout save for two days. Every other screen in this group declares its own
-// for the same reason.
-const WORKOUT_COLS = 'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
+// The `workouts` column list is imported from src/lib/workoutRow.ts rather
+// than copied. It was written out here because scripts/check-schema.mjs could
+// only resolve a select list declared in the file that used it; the gate now
+// follows one import hop, so a copy buys a blind spot and nothing else. The
+// note on WORKOUT_COLS says what the three copies cost — three coach screens
+// reading a client's training without `bw`, `timed` or `tempos`.
 
 /** A day type's mark colour. A mark beside ink-coloured text, never coloured
  *  text: the scale reserves status colour for status and none of these clears

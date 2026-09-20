@@ -57,7 +57,7 @@ import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { signedInUid } from '../../src/lib/signedInUid';
 import { isoToday } from '../../src/lib/dayPlan';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
-import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { WORKOUT_COLS, rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { sessionsOf, trainingBoard, unitFor } from '../../src/lib/clientTraining';
 import { MEASURE_SITES } from '../../src/lib/clientMeasurements';
@@ -74,13 +74,14 @@ import {
 } from '../../src/lib/coachClientReport';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
-// Written out here rather than imported from a shared constant:
-// scripts/check-schema.mjs resolves a select list that arrives as a named
-// constant only within the file that names it, so a shared one is a select list
-// nothing compares against the SQL or the live database. Every other screen in
-// this group declares its own for the same reason.
+// Written out here because these four lists have one reader each and belong
+// beside it. The `workouts` one does NOT: it is shared with client-week.tsx,
+// client-training.tsx and log-session.tsx, and is imported from
+// src/lib/workoutRow.ts. All five used to be local, on the argument that
+// scripts/check-schema.mjs could only resolve a select list declared in the
+// file that used it — true when it was written, and no longer: the gate now
+// follows one import hop. The note on WORKOUT_COLS says what the copies cost.
 const SESSION_COLS = 'starts_at, outcome';
-const WORKOUT_COLS = 'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg, source';
 const MEAS_COLS = 'taken_at, kind, value';
 const CLIENT_COLS = 'injuries, weight_unit, length_unit';

@@ -347,17 +347,56 @@ function sourceOf(file) {
   return sources.get(file);
 }
 
-/** A select list written as `'a, b, ' + 'c'`, or as a named constant. */
-function stringExpr(text, consts) {
+/**
+ * A select list written as `'a, b, ' + 'c'`, or as a named constant — declared
+ * here, or imported from one hop away.
+ *
+ * The import hop is not a nicety. This function used to look in the using
+ * file's own constants and nowhere else, and four coach screens read
+ * `workouts` through the same column list: `src/lib/workoutRow.ts` declared it
+ * beside `rowToEntry`, `app/(trainer)/log-session.tsx` imported it, and
+ * client-week, client-report and client-training each hand-copied the literal
+ * with a comment saying they had to, because a shared constant was a select
+ * list THIS CHECK COULD NOT SEE. The comment was accurate. The result was four
+ * copies of one list with one source of truth among them, and three of them
+ * silently short of `bw`, `timed` and `tempos` — so a coach's screens totalled
+ * a client's training against columns the read never asked for.
+ *
+ * Making the gate follow the import is what let those three copies be deleted
+ * without trading drift for a blind spot. Still ONE hop and still a plain
+ * string literal: a constant assembled at runtime, or re-exported through a
+ * barrel, resolves to nothing here and is reported as unreadable rather than
+ * guessed at.
+ */
+function stringExpr(text, consts, file) {
   let out = '';
   for (const piece of splitTopLevel(text, '+')) {
     const lit = stringLiteral(piece);
     if (lit != null) { out += lit; continue; }
-    const named = consts.get(piece.trim());
+    const name = piece.trim();
+    const named = consts.get(name) ?? (file ? importedConst(name, file) : undefined);
     if (named != null) { out += named; continue; }
     return null;
   }
   return out;
+}
+
+/**
+ * The string a name imported into `file` stands for, when the module it comes
+ * from declares it as a plain string literal. Null for everything else —
+ * including a name imported from a module this cannot locate, which is the
+ * ordinary case for a package rather than a relative path.
+ */
+function importedConst(name, file) {
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return undefined;
+  const { code } = sourceOf(file);
+  for (const m of code.matchAll(/import\s*\{([^}]*)\}\s*from\s*'([^']+)'/g)) {
+    const names = m[1].split(',').map((s) => s.trim().split(/\s+as\s+/).pop().trim());
+    if (!names.includes(name)) continue;
+    const target = moduleFile(m[2], file);
+    if (target) return sourceOf(target).consts.get(name);
+  }
+  return undefined;
 }
 
 function moduleFile(spec, from) {
@@ -645,7 +684,7 @@ function scanFile(file) {
 
       if (name === 'select') {
         if (!args.length) continue;                        // .select() is *
-        const list = stringExpr(args[0], consts);
+        const list = stringExpr(args[0], consts, file);
         if (list == null) { add(null, null, `.select(${args[0].slice(0, 30)})`); continue; }
         selectColumns(list, table, add);
       } else if (WRITES.has(name)) {

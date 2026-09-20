@@ -57,17 +57,43 @@ export interface WorkoutRow {
  * and forgotten here comes back undefined and is read as absent, which on this
  * data means a set nobody did or a session with no length.
  *
- * `app/(trainer)/client-training.tsx` and `app/(trainer)/client-report.tsx`
- * still each declare their own identical literal. They predate this constant
- * and are not touched here — three copies of a column list is a drift waiting
- * to happen and pointing them at this one is a separate, mechanical change.
+ * There is one copy of it. `app/(trainer)/client-week.tsx`,
+ * `app/(trainer)/client-report.tsx` and `app/(trainer)/client-training.tsx`
+ * each used to declare their own identical literal, on the argument that
+ * scripts/check-schema.mjs could only resolve a select list declared in the
+ * file that uses it. That argument was true and is no longer: the gate now
+ * follows a `WORKOUT_COLS` imported from one hop away, so the shared constant
+ * is compared against the SQL and against the live database exactly as the
+ * four literals were. The copies are gone, and what they cost is written down
+ * two paragraphs below.
  *
- * Deliberately NOT the whole row: `bw`, `timed` and `tempos` are omitted
- * because the screens reading this show repped work, and `user_id` because the
- * filter already names it.
+ * ── `bw` and `timed` were missing, and it was not deliberate ──────────────
+ *
+ * The note that used to sit here said these were left out "because the screens
+ * reading this show repped work". They do not. `src/lib/clientTraining.ts`,
+ * which every one of those screens runs its session totals through, calls
+ * `isTimedSet(e, i)` and `setLoadKg(e, i, …)` on each set — and both read a
+ * column this list never asked for, so both have always answered no.
+ *
+ * On a coach's screen that meant: a 45-second plank counted as 45 reps and, if
+ * it carried a plate, 45 × 10 kg of volume — the "mass nobody moved" that
+ * clientTraining.ts records itself as having fixed; and every pull-up, dip and
+ * press-up was filed as work with no load rather than as the client's own
+ * bodyweight. The fix landed in the arithmetic and never reached the coach,
+ * because the read stopped short of the columns the arithmetic needs.
+ *
+ * `tempos` joins them for the same reason and a newer one: a coach asking for
+ * a four-second eccentric could not see whether they got one.
+ *
+ * ── What is still deliberately out ────────────────────────────────────────
+ *
+ * `user_id`, because the filter already names it. `zones` and `session_id`,
+ * because — unlike `bw` and `timed` — nothing on any of these paths reads
+ * them; that was checked by grep rather than assumed, and the day one does,
+ * this is the line to add it to.
  */
 export const WORKOUT_COLS =
-  'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
+  'id, performed_at, exercise, sets, bw, timed, tempos, feel, cardio, kcal, session_mins, logged_by, amended_at';
 
 export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   id: r.id,

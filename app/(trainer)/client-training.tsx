@@ -68,7 +68,7 @@ import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
-import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { WORKOUT_COLS, rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { setsSummary } from '../../src/lib/ownTraining';
 import { liftLabel, volumeIn, type WeightUnit } from '../../src/lib/units';
@@ -135,9 +135,18 @@ import {
 } from '../../src/lib/programStart';
 import { isoToday } from '../../src/lib/dayPlan';
 import {
-  WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
+  WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual, prescribedTempo,
   loadCheck, loadTally, loadLine, LOAD_TOLERANCE,
 } from '../../src/lib/planVsActual';
+// ── the speed they actually moved at ──────────────────────────────────────
+//
+// `tempoVerdict` is the comparison and nothing here repeats it: it returns met,
+// differed or unrecorded, refuses to read silence as compliance, and spells the
+// four digits out in words, which is what stops a coach and a member reading
+// them in opposite orders. `tempoSummary` is the same file's line for a set of
+// tempos with nothing to judge them against. See src/lib/performedTempo.ts.
+import { recordedTempo, tempoSummary, tempoVerdict } from '../../src/lib/performedTempo';
+import { dayKeyOf } from '../../src/lib/entryEdit';
 // ── the program the client rewrote ──────────────────────────────────────
 //
 // The coach half of `client_plan_edits`. The READER is the member's own —
@@ -156,15 +165,12 @@ import { historyBoard, historyLine, blockSpanLine } from '../../src/lib/programH
 import { reviewProgram, checksLine, type Finding } from '../../src/lib/programReview';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
-// Written out here, on one line, rather than imported from the library beside
-// the logic that consumes them. scripts/check-schema.mjs resolves a select list
-// that arrives as a named constant only within the file that names it, so a
-// shared constant is a select list nothing compares against the SQL or against
-// the live database — which is exactly how `workouts.session_mins` came to be
-// declared, committed, generated into setup.sql and never run, breaking every
-// workout save for two days. Every other screen in this group declares its own
-// (GOAL_COLS, SCAN_COLS, ITEM_COLS) for the same reason.
-const WORKOUT_COLS = 'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
+// The `workouts` column list is imported from src/lib/workoutRow.ts rather
+// than copied. It was written out here because scripts/check-schema.mjs could
+// only resolve a select list declared in the file that used it; the gate now
+// follows one import hop, so a copy buys a blind spot and nothing else. The
+// note on WORKOUT_COLS says what the three copies cost — three coach screens
+// reading a client's training without `bw`, `timed` or `tempos`.
 const UNIT_COLS = 'weight_unit';
 
 /**
@@ -582,6 +588,20 @@ export default function ClientTraining() {
     oldestDay,
   }), [compareWeek, assigned.status, status, log, oldestDay, today]);
 
+  /**
+   * The tempo the program asks for, movement by movement and set by set.
+   *
+   * The same week `pva` compares against — the one the client's own Train tab
+   * is showing them — so the transcript below is judged against the
+   * prescription that was in front of the person doing the lifting.
+   *
+   * Only ever used inside `pva`'s window, and the row below enforces that. A
+   * session from March is not evidence about a block written in September, and
+   * drawing "as asked" over it would be this screen inventing a prescription
+   * that did not exist on the day.
+   */
+  const askTempo = useMemo(() => prescribedTempo(compareWeek?.days ?? null), [compareWeek]);
+
   /* ── the program checks, re-run against what they are ACTUALLY on ─────
      `reviewProgram` ran once, in the builder, against a draft. Its seven rules
      include `volume-jump`, which reads THIS CLIENT'S OWN training history — and
@@ -846,6 +866,35 @@ export default function ClientTraining() {
     // matched to them, and printing it anyway would attribute "hard" to a set
     // that was not the hard one.
     const effort = e.feel && e.sets && e.feel.length === e.sets.length ? e.feel.join(' · ') : null;
+    /* ── did the tempo they asked for happen ────────────────────────────
+       The other half of a prescription that has only ever had one half on
+       this screen. `tempoVerdict` does the comparing and the wording; this
+       decides only WHETHER there is a comparison to be made, and there are
+       two conditions on that.
+
+       The day has to be inside the window `pva` covers, because the
+       prescription resolved above is the week the client is on NOW and a
+       session from before it was written was done under different
+       instructions. And the movement has to carry a prescribed tempo at all —
+       with none, the verdict per set would be four lines saying what the
+       client did, where `tempoSummary`'s one collapsed line says it better.
+
+       Silence is drawn as silence. A set that was asked for a tempo and
+       recorded none says exactly that, in the member's own words, and gets no
+       mark: it is neither a miss nor compliance, and turning it into either is
+       the one thing this feature must never do. */
+    const day = dayKeyOf(e.t);
+    const judgeable = day != null && pva.fromDay != null && pva.toDay != null
+      && day >= pva.fromDay && day <= pva.toDay;
+    const sets = e.sets ?? [];
+    const asked = judgeable && sets.some((_, n) => askTempo(e.exercise, n) != null);
+    const tempos = asked
+      ? sets.map((_, n) => tempoVerdict(askTempo(e.exercise, n), recordedTempo(e, n)))
+      : [];
+    // What they moved at, when there is no prescription to hold it against.
+    // Still worth drawing: it is a fact about the session the coach has never
+    // been shown, and it claims nothing about a plan.
+    const tempoOnly = asked ? null : tempoSummary(e);
     return (
       <View key={`${e.id ?? e.exercise}-${i}`}
         style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
@@ -860,6 +909,20 @@ export default function ClientTraining() {
         {effort ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>How it felt, set by set: {effort}</Text>
         ) : null}
+        {tempoOnly ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tempoOnly}</Text>
+        ) : null}
+        {tempos.map((v, n) => (v.state === 'none' ? null : (
+          // The mark is a MARK and the sentence carries the claim on its own.
+          // A green line would be the colour saying it, which fails the
+          // contrast floor and anybody reading it in a gym in daylight — and
+          // only 'met' gets one, so an unrecorded set is never tinted like a
+          // set that answered.
+          <View key={n} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 2 }}>
+            {v.state === 'met' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good, marginTop: 5 }} /> : null}
+            <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{`Set ${n + 1}: ${v.line}`}</Text>
+          </View>
+        )))}
       </View>
     );
   };

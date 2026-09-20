@@ -3,7 +3,7 @@ import { currentStreak, longestStreak, personalRecords, weekStats, est1RM, isNew
 import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM, suggestProgression } from './progression';
 import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from './booking';
 import type { WorkoutEntry } from './mockData';
-import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
+import { rowToEntry, entryToRow, PERSISTED_FIELDS, WORKOUT_COLS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { localDay } from './attendance';
 import { isoDay as isoDayOf } from './weekStart';
@@ -225,6 +225,44 @@ for (const k of ['sets', 'feel', 'cardio', 'kcal', 'zones']) {
   ok(k in sparseRow && sparseRow[k] === null, `absent "${k}" should be sent as null, not omitted`);
 }
 ok(rowToEntry(sparseRow as never).sets === undefined, 'a null column should read back as undefined');
+
+// ── and the third end: what a READ actually asks the database for ──────────
+//
+// The two assertions above hold the writer and the reader against each other,
+// and both passed for months over a real defect, because the defect was in
+// neither of them. `WORKOUT_COLS` is the select list every coach-side read of
+// `workouts` uses, and it named neither `bw` nor `timed` — so on a coach's
+// screen `rowToEntry` mapped two columns that never came back, `isTimedSet`
+// and `isBodyweightSet` answered no to every set, a 45-second plank counted as
+// 45 reps, and a weighted one added seconds x kilograms to a tonnage. Then
+// `tempos` was added to both ends of the round trip and to the column list on
+// none of the four screens, so a coach could not see whether the tempo they
+// prescribed had happened.
+//
+// A column on the row and not on the read does not fail: it comes back
+// undefined, and undefined on this data means a set nobody did. So the list is
+// held against the row here, and anything deliberately left out of it has to be
+// named — which is the difference between a decision and an omission.
+const NOT_READ_BY_COACHES = new Set([
+  // The filter on every one of these reads already names it.
+  'user_id',
+  // Time in heart-rate zones. Checked by grep rather than assumed: nothing on
+  // any coach path reads `zones`, and the day one does it belongs on the list.
+  'zones',
+]);
+const asked = new Set(WORKOUT_COLS.split(',').map((c) => c.trim()));
+for (const col of Object.keys(entryToRow('user-1', fullEntry))) {
+  if (NOT_READ_BY_COACHES.has(col)) continue;
+  ok(asked.has(col),
+     `WORKOUT_COLS does not ask for "${col}", so a coach's read of it comes back undefined `
+     + 'and is read as absent — add it there, or add it to NOT_READ_BY_COACHES with a reason');
+}
+// And the exclusions themselves have to still be columns, or the list is a
+// place for a name to hide after the column it excused has been renamed.
+const written = new Set(Object.keys(entryToRow('user-1', fullEntry)));
+for (const col of NOT_READ_BY_COACHES) {
+  ok(written.has(col), `NOT_READ_BY_COACHES names "${col}", which entryToRow no longer writes`);
+}
 
 
 // ── gym revenue summary ─────────────────────────────────────────────────────

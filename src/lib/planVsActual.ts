@@ -63,6 +63,7 @@ import type { Program, ProgramDay } from './programs';
 import { exerciseSlug } from './exerciseId';
 import { expandSets } from './setRows';
 import { countsToVolume } from './setMethods';
+import { intensityOf, readTempo } from './setIntensity';
 import type { WorkoutEntry } from './mockData';
 import { dayKeyOf } from './entryEdit';
 import { type LoadStatus } from '../ui/loadStatus';
@@ -601,4 +602,83 @@ export function loadLine(tally: LoadTally, who: string): string | null {
     out += ` ${tally.noPlan} name${tally.noPlan === 1 ? 's' : ''} no load at all, which is ordinary and is not a gap.`;
   }
   return out;
+}
+
+/* ── the tempo half of the same question ──────────────────────────────────
+ *
+ * `loadCheck` above asks whether the client hit the number the coach wrote.
+ * This asks whether they moved at the speed the coach wrote, which until
+ * `workouts.tempos` existed was a question the data could not answer at all.
+ *
+ * It resolves the PRESCRIPTION only. The comparison is `tempoVerdict` in
+ * src/lib/performedTempo.ts and is deliberately not repeated here: it already
+ * returns met / differed / unrecorded, already refuses to read silence as
+ * compliance, and already spells the four digits out in words — which is the
+ * whole defence against the minority convention that reads them the other way
+ * round. A second comparison in this file would be a second chance to get
+ * that wrong.
+ */
+
+/** Looks up the tempo prescribed for one set of one movement, canonical, or
+ *  null when the program asks for none — or when it asks for more than one and
+ *  the record cannot say which. */
+export type PrescribedTempo = (exercise: string | null | undefined, setIndex: number) => string | null;
+
+const canonicalTempo = (raw: string | null | undefined): string | null => {
+  const r = readTempo(raw);
+  return r.ok ? r.tempo : null;
+};
+
+/**
+ * What the program asks for, per movement and per set.
+ *
+ * PER SET, for the reason the member's own runner gives: set 1 can be a warm-up
+ * at no tempo inside an exercise whose top set is a four-second eccentric. Past
+ * the end of the written rows the movement's own tempo stands, because a client
+ * doing a fifth set of a four-set plan is still doing this movement. Both rules
+ * are `app/(client)/workouts.tsx`'s `prescribedTempoAt`, so the two sides of
+ * the conversation resolve a prescription the same way — and both canonicalise
+ * through `readTempo`, which is the only thing in this app allowed to decide
+ * that a coach's `311` and a member's `3-1-1-0` are one instruction.
+ *
+ * ── when the program says two different things ────────────────────────────
+ *
+ * A movement can appear on Monday at 3-1-1-0 and on Friday at 2-0-X-0. Nothing
+ * on a logged set says which day it belongs to — `workouts` carries no program
+ * id and no day index, which is refusal 1 at the top of this file — so a
+ * squat logged on the 14th cannot be attributed to either prescription. This
+ * answers null for that movement rather than picking one, and the screen then
+ * shows what was recorded without claiming it met or missed anything. Picking
+ * the first would report a client as having missed a tempo nobody asked them
+ * for that day, which is the load bug `bySlug` above already records.
+ */
+export function prescribedTempo(days: readonly ProgramDay[] | null | undefined): PrescribedTempo {
+  type Ask = { perSet: (string | null)[]; whole: string | null };
+  // `undefined` is a movement not yet seen; an explicit `null` is one the
+  // program asks two different things of. The two must not collapse.
+  const bySlug = new Map<string, Ask | null>();
+  for (const d of days ?? []) {
+    for (const ex of d?.exercises ?? []) {
+      const slug = exerciseSlug(ex?.name ?? '');
+      if (!slug) continue;
+      const ask: Ask = {
+        perSet: expandSets(ex).map((r) => canonicalTempo(r.intensity?.tempo)),
+        whole: canonicalTempo(intensityOf(ex, null).tempo),
+      };
+      if (!bySlug.has(slug)) { bySlug.set(slug, ask); continue; }
+      const seen = bySlug.get(slug);
+      if (seen == null) continue;                       // already ambiguous
+      const agrees = seen.whole === ask.whole
+        && seen.perSet.length === ask.perSet.length
+        && seen.perSet.every((x, i) => x === ask.perSet[i]);
+      if (!agrees) bySlug.set(slug, null);
+    }
+  }
+  return (exercise, setIndex) => {
+    const slug = exerciseSlug(exercise ?? '');
+    const ask = slug ? bySlug.get(slug) : null;
+    if (!ask) return null;
+    if (!Number.isInteger(setIndex) || setIndex < 0) return null;
+    return (setIndex < ask.perSet.length ? ask.perSet[setIndex] : ask.whole) ?? null;
+  };
 }

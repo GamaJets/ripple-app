@@ -11,7 +11,7 @@ is paid again on every turn of the session that opened it.
 | ----: | ---: | ---- |
 | 7,657 | 122k | `app/(client)/workouts.tsx` |
 | 5,311 | 82k | `app/(trainer)/builder.tsx` |
-| 5,229 | 87k | `src/lib/coverage.test.ts` |
+| 5,267 | 88k | `src/lib/coverage.test.ts` |
 | 5,161 | 78k | `app/(trainer)/calendar.tsx` |
 | 5,005 | 80k | `app/(trainer)/dashboard.tsx` |
 | 4,252 | 56k | `studio-web/app/accounting/page.tsx` |
@@ -33,8 +33,8 @@ is paid again on every turn of the session that opened it.
 | 2,104 | 34k | `app/(client)/calendar.tsx` |
 | 2,085 | 26k | `studio-web/app/costs/page.tsx` |
 | 2,041 | 28k | `src/lib/coachStatement.ts` |
+| 2,038 | 31k | `app/(trainer)/client-training.tsx` |
 | 1,994 | 33k | `app/(trainer)/analytics.tsx` |
-| 1,975 | 30k | `app/(trainer)/client-training.tsx` |
 | 1,829 | 22k | `studio-web/app/export/page.tsx` |
 | 1,793 | 23k | `src/ui/messaging.ts` |
 | 1,792 | 23k | `studio-web/app/analytics/page.tsx` |
@@ -49,14 +49,14 @@ is paid again on every turn of the session that opened it.
 | 1,667 | 23k | `studio-web/app/money/page.tsx` |
 | 1,654 | 24k | `app/(client)/devices.tsx` |
 | 1,583 | 22k | `src/lib/connect.ts` |
+| 1,580 | 19k | `scripts/check-schema.mjs` |
 | 1,573 | 19k | `studio-web/app/passes/page.tsx` |
 | 1,560 | 20k | `studio-web/app/equipment/page.tsx` |
 | 1,554 | 23k | `app/(owner)/members.tsx` |
-| 1,541 | 19k | `scripts/check-schema.mjs` |
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 
-Total: 46 files, 116,626 lines, ~1685k tokens if every one were read whole.
+Total: 46 files, 116,766 lines, ~1687k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -370,7 +370,7 @@ Total: 46 files, 116,626 lines, ~1685k tokens if every one were read whole.
 
 ## `src/lib/coverage.test.ts`
 
-5,229 lines · ~87k tokens · 292 anchors
+5,267 lines · ~88k tokens · 294 anchors
 
 ```
 86-86         fn       ok
@@ -384,287 +384,289 @@ Total: 46 files, 116,626 lines, ~1685k tokens if every one were read whole.
 155-155       §        progression × RPE/felt
 156-176       fn       felt
 177-186       §        booking
-187-229       §        workout row round trip
-230-233       §        gym revenue summary
-234-235       fn       plan
-236-238       fn       mem
-239-293       fn       pay
-294-302       §        timetable and attendance
-303-322       fn       wk
-323-345       fn       cls
-346-348       §        drop-ins, guest passes and packs (F16)
-349-415       fn       pass
-416-418       §        the door log (F21)
-419-493       fn       visit
-494-497       §        PT session outcomes and payroll (F17)
-498-593       fn       sess
-594-641       fn         line
-642-645       §        gym payroll must not price unconfirmed work
-646-675       fn       tr
-676-703       §        CSV reader (F22)
-704-722       §        money
-723-741       §        dates: the decision this module exists for
-742-767       §        member preview
-768-786       §        payment preview
-787-789       §        equipment register (F20)
-790-864       fn       kit
-865-871       §        the same fifteen rowers, promised to two classes
-872-954       fn         klass
-955-957       §        weekly attendance series (the chart the site draws)
-958-1002      fn       gc
-1003-1004     §        class rates: fill and show are different questions
-1005-1028     fn       cr
-1029-1048     §        one status vocabulary
-1049-1091     §        reconciling a typed figure against a derived one
-1092-1122     §        an unread register is not an empty one
-1123-1125     §        settlement: the same session is never paid twice, and never dropped
-1126-1162     fn       s2
-1163-1196     §        session names come from profiles, not from an embed
-1197-1253     §        an exercise is a thing, not a spelling
-1254-1256     §        member invites: the path from "person the gym knows" to "member"
-1257-1354     fn       mi
-1355-1369     §        each app is drawn in its own colour
-1370-1377     fn       accents
-1378-1399     fn       hue
-1400-1410     fn       lum
-1411-1458     §        "did you know" rotation
-1459-1532     §        plan import
-1533-1544     §        the trainer rota
-1545-1556     fn         at
-1557-1558     fn         cls
-1559-1671     fn         pt
-1672-1678     §        one-to-ones on the gym's own timetable (Phase 1)
-1679-1683     fn         cls
-1684-1809     fn         slot
-1810-1829     §        progress photos
-1830-1864     fn         ph
-1865-1871     §        writing sessions back to Apple Health
-1872-1889     fn         lift
-1890-1893     fn         zoned
-1894-1905     fn         zonedTwice
-1906-1958     fn         stated
-1959-2261     §        the sentence an Android member used to be shown
-2262-2264     §        the member view: two members the timetable cannot tell apart
-2265-2266     fn         ago
-2267-2271     fn         mem
-2272-2274     fn         pay
-2275-2276     fn         visit
-2277-2278     fn         book
-2279-2280     fn         sess
-2281-2285     fn         pass
-2286-2401     fn         classHistory
-2402-2419     §        absence is a question about somebody the gym still expects to see
-2420-2450     fn         rd
-2451-2456     §        client drift: the coach's book, ordered by who is breaking their own pattern
-2457-2457     fn         at
-2458-2458     fn         evs
-2459-2460     fn         who
-2461-2472     fn         D
-2473-2484     §        drift is a change, not a level
-2485-2500     §        a client with NO DATA AT ALL is never "fine"
-2501-2509     §        no invented figures
-2510-2517     §        UNKNOWN must not be sorted to the bottom as if it were fine
-2518-2518     fn         order
-2519-2531     fn         posOf
-2532-2536     §        the baseline is clamped to the client's own record
-2537-2541     §        too little record is UNKNOWN, not a verdict
-2542-2546     §        going silent off a real pattern is measured, not guessed
-2547-2557     §        housekeeping
-2558-2566     §        sending ONE progress photo to your coach
-2567-2572     fn         grant
-2573-2577     §        the default is closed
-2578-2580     §        per photo, never per account
-2581-2583     §        revocable: the grant IS the access
-2584-2589     §        access ends when the coaching relationship does
-2590-2596     §        one member cannot read another member's shared photo
-2597-2607     §        the client can always tell, and "we do not know" is an answer
-2608-2619     §        the send control refuses rather than lies
-2620-2620     §        what the client screen lists as visible to the coach
-2621-2627     fn         shPh
-2628-2628     §        the coach's strip
-2629-2637     fn         sh
-2638-2650     §        the one thing revocation cannot reach, pinned to the TTL that bounds it
-2651-2662     §        month-end close
-2663-2678     §        the window
-2679-2679     §        narrowing a slice to a month keeps all three states
-2680-2693     fn         junePay
-2694-2719     §        what came in
-2720-2720     §        what it was for
-2721-2738     fn         mem
-2739-2739     §        what is still owed
-2740-2764     fn         inv
-2765-2765     §        what does not reconcile
-2766-2781     fn         fmt
-2782-2782     §        the close, end to end
-2783-2788     fn         sess
-2789-2796     fn         rec
-2797-2810     fn         build
-2811-2882     fn         unmarkedBlock
-2883-2889     §        the long view: months and years, not weeks
-2890-2902     fn         at
-2903-2907     §        the window is the member's own, not a round number of months
-2908-2915     §        a month with no training is a month with NO DATA
-2916-2923     §        a trained month reports what was actually lifted
-2924-2930     §        a month of pure cardio has sessions but no tonnage
-2931-2940     §        the break stays visible, and is never closed off early
-2941-2946     §        the shape of a year, with the months outside the history left absent
-2947-2953     §        then versus now
-2954-2960     §        personal bests over TIME, not just the current best
-2961-2974     §        a short history is not a failed long one
-2975-2981     §        nothing loaded, nothing claimed
-2982-2986     §        a corrupt row must not take the history down with it
-2987-2993     §        the totals
-2994-3003     §        a hold is not repetitions, in any of the three loops in longView.ts
-3004-3024     fn           hCell
-3025-3100     §        the gym's own export (gymExport.ts)
-3101-3117     §        escaping: the assertion the whole file stands on
-3118-3127     §        and it survives the repo's own reader
-3128-3140     §        money and dates leave as they are stored
-3141-3154     §        a whole bundle
-3155-3155     fn         fileFor
-3156-3157     fn         sheetFor
-3158-3167     §        members.csv round-trips through previewMembers
-3168-3172     fn         bob
-3173-3177     fn         sean
-3178-3190     §        payments.csv round-trips through previewPayments
-3191-3198     §        plans.csv round-trips through previewPlans
-3199-3213     §        a null must never arrive as a zero
-3214-3218     §        the invite token is a live credential and does not leave
-3219-3226     §        a partial export must be unmistakable
-3227-3233     fn         stub
-3234-3237     fn         readme
-3238-3246     §        loading is not the same as failed, and blocks the download
-3247-3259     §        an empty gym is a different fact from a broken one
-3260-3268     §        an address the gym does not hold must not read as "no address"
-3269-3275     §        the stem stays usable when the gym's own name did not read
-3276-3286     §        the staff view: a trainer with no data must never read as fine
-3287-3287     fn         at
-3288-3292     fn         span
-3293-3304     fn         tr
-3305-3309     fn         shift
-3310-3312     fn         cl
-3313-3357     §        the roster
-3358-3374     fn         acts
-3375-3379     fn         build
-3380-3380     fn         by
-3381-3381     fn         order
-3382-3383     fn         posOf
-3384-3391     §        THE TRAP
-3392-3443     §        and the gate now exists one layer lower too
-3444-3452     §        the other three ways a person ends up unknown
-3453-3459     §        evidence, when there is some, is ownerAnalytics\' own verdict
-3460-3476     §        ordering: unknown is never filed under fine
-3477-3493     §        delivery, money and hours
-3494-3500     §        the book
-3501-3523     §        the gym-wide figures
-3524-3539     §        a failed read is never an empty roster
-3540-3548     §        loading is a third state, not a kind of failure and not a kind of empty
-3549-3563     §        the halves fail independently
-3564-3569     §        no roster, no page
-3570-3580     §        an empty gym is a different fact from a broken one
-3581-3586     §        a roster nothing can be said about
-3587-3593     §        the parts each name what their absence costs
-3594-3597     fn       by2
-3598-3605     §        gym-wide retention (Phase 2 · Studio web: retention)
-3606-3606     fn         rAgo
-3607-3608     fn         rng
-3609-3612     fn         mem
-3613-3616     fn         vis
-3617-3620     fn         bk
-3621-3625     fn         rrec
-3626-3637     §        TRAP 2: a percentage over a handful of people
-3638-3638     fn         jan
-3639-3639     fn         feb
-3640-3640     fn         mar
-3641-3695     fn         aug
-3696-3750     §        TRAP 1: a gym with no door log cannot be told who has lapsed
-3751-3761     §        drift: a break in a pattern, not a level — the coach-side model, rolled up
-3762-3762     fn         dc
-3763-3777     fn         dd
-3778-3789     §        nothing read is not the same as nothing happening
-3790-3812     §        no roster, and still loading
-3813-3830     §        the intervention loop (Phase 4 · surface, contact, record, measure)
-3831-3831     fn         iAgo
-3832-3833     fn         iev
-3834-3834     fn         ievs
-3835-3840     fn         span
-3841-3846     fn         ic
-3847-3851     fn         imem
-3852-3870     §        5 · what was tried, read back
-3871-3890     §        2 · the window comes from the member's own rate, not from a round number
-3891-3911     fn         baseDays
-3912-3912     §        2 (the one that bites) · an intervention logged yesterday
-3913-3921     fn         yBase
-3922-3922     fn         wkBase
-3923-3931     fn         ftBase
-3932-3947     §        the four other ways it refuses, each a different fact
-3948-3949     §        3 · a second contact inside the window means neither gets the credit
-3950-3950     fn         both
-3951-3956     fn         byId
-3957-3960     fn         withUndated
-3961-3975     §        3 · counts of what followed, and NO rate
-3976-3980     §        1 · a logged call is not a training session
-3981-3981     fn         steady
-3982-4006     fn         drifting
-4007-4015     fn         fiveCalls
-4016-4023     §        4 · quieten, never hide
-4024-4041     fn         sB
-4042-4077     §        pass conversion: used a pass, then joined
-4078-4125     fn         pcVisit
-4126-4127     fn         pcBy
-4128-4134     §        the counts a gym asked for
-4135-4148     §        TRAP 2: a walk-in with no account is unanswerable, not a failure
-4149-4156     §        TRAP 4: a pass that has not run out has not failed
-4157-4167     §        TRAP 3: no percentage over a handful, and the SAME floor as /retention
-4168-4173     §        TRAP 1: a sequence, never a cause
-4174-4197     §        who joined, when, and the holder as the unit
-4198-4207     §        how long it took
-4208-4208     §        which members bring guests who join
-4209-4209     fn         pcHostA
-4210-4220     fn         pcHostB
-4221-4237     §        the money: two figures that are never one
-4238-4245     §        a price nobody recorded is not a free pass
-4246-4283     §        three states, never two
-4284-4374     §        every holder is accounted for exactly once
-4375-4432     fn         labels
-4433-4433     fn         clientTitles
-4434-4443     fn         ownerTitles
-4444-4485     fn             titles
-4486-4617     §        which country the picker opens on
-4618-4685     fn         j
-4686-4709     fn         t
-4710-4717     §        a read at the row limit is not the whole set
-4718-4749     fn         rows
-4750-4794     §        capped(): the phone's answer, where throwing is the wrong one
-4795-4815     §        the fourth load status
-4816-4832     §        the screen and the settle button must quote the same number
-4833-4838     fn         done
-4839-4840     fn         owed
-4841-4844     fn         pays
-4845-4855     fn         mixed
-4856-4861     fn         allFee
-4862-4868     §        the refusals that must survive
-4869-4885     fn         paid
-4886-4918     §        one day, one number of calories left
-4919-4994     §        the day's movement is not paid for twice
-4995-5051     §        active energy and whole-day energy are not the same number
-5052-5059     §        a progress export states what happened, or says nothing
-5060-5093     fn         row
-5094-5120     §        the CSV another app has to read
-5121-5126     §        Goal targets (TF-28)
-5127-5127     fn         day
-5128-5131     fn         goal
-5132-5133     fn         pts
-5134-5139     §        nothing measured, nothing claimed
-5140-5150     §        a custom goal is never given a number
-5151-5166     §        progress starts when the GOAL does
-5167-5170     §        no reading before the goal: the first one after stands in
-5171-5175     §        moving the wrong way is 0%, never negative
-5176-5181     §        crossing the target counts
-5182-5195     §        a rate needs a window
-5196-5203     §        a trend pointing away from the target has no finish date
-5204-5211     §        overdue
-5212-5229     §        ordering
+187-228       §        workout row round trip
+229-252       §        and the third end: what a READ actually asks the database for
+253-267       fn       asked
+268-271       §        gym revenue summary
+272-273       fn       plan
+274-276       fn       mem
+277-331       fn       pay
+332-340       §        timetable and attendance
+341-360       fn       wk
+361-383       fn       cls
+384-386       §        drop-ins, guest passes and packs (F16)
+387-453       fn       pass
+454-456       §        the door log (F21)
+457-531       fn       visit
+532-535       §        PT session outcomes and payroll (F17)
+536-631       fn       sess
+632-679       fn         line
+680-683       §        gym payroll must not price unconfirmed work
+684-713       fn       tr
+714-741       §        CSV reader (F22)
+742-760       §        money
+761-779       §        dates: the decision this module exists for
+780-805       §        member preview
+806-824       §        payment preview
+825-827       §        equipment register (F20)
+828-902       fn       kit
+903-909       §        the same fifteen rowers, promised to two classes
+910-992       fn         klass
+993-995       §        weekly attendance series (the chart the site draws)
+996-1040      fn       gc
+1041-1042     §        class rates: fill and show are different questions
+1043-1066     fn       cr
+1067-1086     §        one status vocabulary
+1087-1129     §        reconciling a typed figure against a derived one
+1130-1160     §        an unread register is not an empty one
+1161-1163     §        settlement: the same session is never paid twice, and never dropped
+1164-1200     fn       s2
+1201-1234     §        session names come from profiles, not from an embed
+1235-1291     §        an exercise is a thing, not a spelling
+1292-1294     §        member invites: the path from "person the gym knows" to "member"
+1295-1392     fn       mi
+1393-1407     §        each app is drawn in its own colour
+1408-1415     fn       accents
+1416-1437     fn       hue
+1438-1448     fn       lum
+1449-1496     §        "did you know" rotation
+1497-1570     §        plan import
+1571-1582     §        the trainer rota
+1583-1594     fn         at
+1595-1596     fn         cls
+1597-1709     fn         pt
+1710-1716     §        one-to-ones on the gym's own timetable (Phase 1)
+1717-1721     fn         cls
+1722-1847     fn         slot
+1848-1867     §        progress photos
+1868-1902     fn         ph
+1903-1909     §        writing sessions back to Apple Health
+1910-1927     fn         lift
+1928-1931     fn         zoned
+1932-1943     fn         zonedTwice
+1944-1996     fn         stated
+1997-2299     §        the sentence an Android member used to be shown
+2300-2302     §        the member view: two members the timetable cannot tell apart
+2303-2304     fn         ago
+2305-2309     fn         mem
+2310-2312     fn         pay
+2313-2314     fn         visit
+2315-2316     fn         book
+2317-2318     fn         sess
+2319-2323     fn         pass
+2324-2439     fn         classHistory
+2440-2457     §        absence is a question about somebody the gym still expects to see
+2458-2488     fn         rd
+2489-2494     §        client drift: the coach's book, ordered by who is breaking their own pattern
+2495-2495     fn         at
+2496-2496     fn         evs
+2497-2498     fn         who
+2499-2510     fn         D
+2511-2522     §        drift is a change, not a level
+2523-2538     §        a client with NO DATA AT ALL is never "fine"
+2539-2547     §        no invented figures
+2548-2555     §        UNKNOWN must not be sorted to the bottom as if it were fine
+2556-2556     fn         order
+2557-2569     fn         posOf
+2570-2574     §        the baseline is clamped to the client's own record
+2575-2579     §        too little record is UNKNOWN, not a verdict
+2580-2584     §        going silent off a real pattern is measured, not guessed
+2585-2595     §        housekeeping
+2596-2604     §        sending ONE progress photo to your coach
+2605-2610     fn         grant
+2611-2615     §        the default is closed
+2616-2618     §        per photo, never per account
+2619-2621     §        revocable: the grant IS the access
+2622-2627     §        access ends when the coaching relationship does
+2628-2634     §        one member cannot read another member's shared photo
+2635-2645     §        the client can always tell, and "we do not know" is an answer
+2646-2657     §        the send control refuses rather than lies
+2658-2658     §        what the client screen lists as visible to the coach
+2659-2665     fn         shPh
+2666-2666     §        the coach's strip
+2667-2675     fn         sh
+2676-2688     §        the one thing revocation cannot reach, pinned to the TTL that bounds it
+2689-2700     §        month-end close
+2701-2716     §        the window
+2717-2717     §        narrowing a slice to a month keeps all three states
+2718-2731     fn         junePay
+2732-2757     §        what came in
+2758-2758     §        what it was for
+2759-2776     fn         mem
+2777-2777     §        what is still owed
+2778-2802     fn         inv
+2803-2803     §        what does not reconcile
+2804-2819     fn         fmt
+2820-2820     §        the close, end to end
+2821-2826     fn         sess
+2827-2834     fn         rec
+2835-2848     fn         build
+2849-2920     fn         unmarkedBlock
+2921-2927     §        the long view: months and years, not weeks
+2928-2940     fn         at
+2941-2945     §        the window is the member's own, not a round number of months
+2946-2953     §        a month with no training is a month with NO DATA
+2954-2961     §        a trained month reports what was actually lifted
+2962-2968     §        a month of pure cardio has sessions but no tonnage
+2969-2978     §        the break stays visible, and is never closed off early
+2979-2984     §        the shape of a year, with the months outside the history left absent
+2985-2991     §        then versus now
+2992-2998     §        personal bests over TIME, not just the current best
+2999-3012     §        a short history is not a failed long one
+3013-3019     §        nothing loaded, nothing claimed
+3020-3024     §        a corrupt row must not take the history down with it
+3025-3031     §        the totals
+3032-3041     §        a hold is not repetitions, in any of the three loops in longView.ts
+3042-3062     fn           hCell
+3063-3138     §        the gym's own export (gymExport.ts)
+3139-3155     §        escaping: the assertion the whole file stands on
+3156-3165     §        and it survives the repo's own reader
+3166-3178     §        money and dates leave as they are stored
+3179-3192     §        a whole bundle
+3193-3193     fn         fileFor
+3194-3195     fn         sheetFor
+3196-3205     §        members.csv round-trips through previewMembers
+3206-3210     fn         bob
+3211-3215     fn         sean
+3216-3228     §        payments.csv round-trips through previewPayments
+3229-3236     §        plans.csv round-trips through previewPlans
+3237-3251     §        a null must never arrive as a zero
+3252-3256     §        the invite token is a live credential and does not leave
+3257-3264     §        a partial export must be unmistakable
+3265-3271     fn         stub
+3272-3275     fn         readme
+3276-3284     §        loading is not the same as failed, and blocks the download
+3285-3297     §        an empty gym is a different fact from a broken one
+3298-3306     §        an address the gym does not hold must not read as "no address"
+3307-3313     §        the stem stays usable when the gym's own name did not read
+3314-3324     §        the staff view: a trainer with no data must never read as fine
+3325-3325     fn         at
+3326-3330     fn         span
+3331-3342     fn         tr
+3343-3347     fn         shift
+3348-3350     fn         cl
+3351-3395     §        the roster
+3396-3412     fn         acts
+3413-3417     fn         build
+3418-3418     fn         by
+3419-3419     fn         order
+3420-3421     fn         posOf
+3422-3429     §        THE TRAP
+3430-3481     §        and the gate now exists one layer lower too
+3482-3490     §        the other three ways a person ends up unknown
+3491-3497     §        evidence, when there is some, is ownerAnalytics\' own verdict
+3498-3514     §        ordering: unknown is never filed under fine
+3515-3531     §        delivery, money and hours
+3532-3538     §        the book
+3539-3561     §        the gym-wide figures
+3562-3577     §        a failed read is never an empty roster
+3578-3586     §        loading is a third state, not a kind of failure and not a kind of empty
+3587-3601     §        the halves fail independently
+3602-3607     §        no roster, no page
+3608-3618     §        an empty gym is a different fact from a broken one
+3619-3624     §        a roster nothing can be said about
+3625-3631     §        the parts each name what their absence costs
+3632-3635     fn       by2
+3636-3643     §        gym-wide retention (Phase 2 · Studio web: retention)
+3644-3644     fn         rAgo
+3645-3646     fn         rng
+3647-3650     fn         mem
+3651-3654     fn         vis
+3655-3658     fn         bk
+3659-3663     fn         rrec
+3664-3675     §        TRAP 2: a percentage over a handful of people
+3676-3676     fn         jan
+3677-3677     fn         feb
+3678-3678     fn         mar
+3679-3733     fn         aug
+3734-3788     §        TRAP 1: a gym with no door log cannot be told who has lapsed
+3789-3799     §        drift: a break in a pattern, not a level — the coach-side model, rolled up
+3800-3800     fn         dc
+3801-3815     fn         dd
+3816-3827     §        nothing read is not the same as nothing happening
+3828-3850     §        no roster, and still loading
+3851-3868     §        the intervention loop (Phase 4 · surface, contact, record, measure)
+3869-3869     fn         iAgo
+3870-3871     fn         iev
+3872-3872     fn         ievs
+3873-3878     fn         span
+3879-3884     fn         ic
+3885-3889     fn         imem
+3890-3908     §        5 · what was tried, read back
+3909-3928     §        2 · the window comes from the member's own rate, not from a round number
+3929-3949     fn         baseDays
+3950-3950     §        2 (the one that bites) · an intervention logged yesterday
+3951-3959     fn         yBase
+3960-3960     fn         wkBase
+3961-3969     fn         ftBase
+3970-3985     §        the four other ways it refuses, each a different fact
+3986-3987     §        3 · a second contact inside the window means neither gets the credit
+3988-3988     fn         both
+3989-3994     fn         byId
+3995-3998     fn         withUndated
+3999-4013     §        3 · counts of what followed, and NO rate
+4014-4018     §        1 · a logged call is not a training session
+4019-4019     fn         steady
+4020-4044     fn         drifting
+4045-4053     fn         fiveCalls
+4054-4061     §        4 · quieten, never hide
+4062-4079     fn         sB
+4080-4115     §        pass conversion: used a pass, then joined
+4116-4163     fn         pcVisit
+4164-4165     fn         pcBy
+4166-4172     §        the counts a gym asked for
+4173-4186     §        TRAP 2: a walk-in with no account is unanswerable, not a failure
+4187-4194     §        TRAP 4: a pass that has not run out has not failed
+4195-4205     §        TRAP 3: no percentage over a handful, and the SAME floor as /retention
+4206-4211     §        TRAP 1: a sequence, never a cause
+4212-4235     §        who joined, when, and the holder as the unit
+4236-4245     §        how long it took
+4246-4246     §        which members bring guests who join
+4247-4247     fn         pcHostA
+4248-4258     fn         pcHostB
+4259-4275     §        the money: two figures that are never one
+4276-4283     §        a price nobody recorded is not a free pass
+4284-4321     §        three states, never two
+4322-4412     §        every holder is accounted for exactly once
+4413-4470     fn         labels
+4471-4471     fn         clientTitles
+4472-4481     fn         ownerTitles
+4482-4523     fn             titles
+4524-4655     §        which country the picker opens on
+4656-4723     fn         j
+4724-4747     fn         t
+4748-4755     §        a read at the row limit is not the whole set
+4756-4787     fn         rows
+4788-4832     §        capped(): the phone's answer, where throwing is the wrong one
+4833-4853     §        the fourth load status
+4854-4870     §        the screen and the settle button must quote the same number
+4871-4876     fn         done
+4877-4878     fn         owed
+4879-4882     fn         pays
+4883-4893     fn         mixed
+4894-4899     fn         allFee
+4900-4906     §        the refusals that must survive
+4907-4923     fn         paid
+4924-4956     §        one day, one number of calories left
+4957-5032     §        the day's movement is not paid for twice
+5033-5089     §        active energy and whole-day energy are not the same number
+5090-5097     §        a progress export states what happened, or says nothing
+5098-5131     fn         row
+5132-5158     §        the CSV another app has to read
+5159-5164     §        Goal targets (TF-28)
+5165-5165     fn         day
+5166-5169     fn         goal
+5170-5171     fn         pts
+5172-5177     §        nothing measured, nothing claimed
+5178-5188     §        a custom goal is never given a number
+5189-5204     §        progress starts when the GOAL does
+5205-5208     §        no reading before the goal: the first one after stands in
+5209-5213     §        moving the wrong way is 0%, never negative
+5214-5219     §        crossing the target counts
+5220-5233     §        a rate needs a window
+5234-5241     §        a trend pointing away from the target has no finish date
+5242-5249     §        overdue
+5250-5267     §        ordering
 ```
 
 ## `app/(trainer)/calendar.tsx`
@@ -2187,6 +2189,67 @@ Total: 46 files, 116,626 lines, ~1685k tokens if every one were read whole.
 2032-2041     fn       statementShareBlurb
 ```
 
+## `app/(trainer)/client-training.tsx`
+
+2,038 lines · ~31k tokens · 54 anchors
+
+```
+3-16          §        The hole this closes
+17-27         §        The permission was already there
+28-36         §        Nothing here works anything out
+37-44         §        The dashes
+45-84         §        Whose kilograms
+85-97         §        the two modules the coach could not reach
+98-114        §        the finer grain, and the picture of it
+115-140       §        the four things this screen could not say before
+141-149       §        the speed they actually moved at
+150-211       §        the program the client rewrote
+212-251       default  ClientTraining
+252-345       fn         load
+346-370       fn         client
+371-384       fn         reloadLog
+385-387       fn         sessions
+388-391       fn         board
+392-453       fn         pick
+454-455       fn         lastSeven
+456-462       fn           byDay
+463-479       fn         position
+480-496       fn         compareWeek
+497-519       fn         oldestDay
+520-533       fn         muscleWindowRead
+534-537       fn           p
+538-547       fn         muscles
+548-561       fn         muscleNote
+562-565       fn         cells
+566-566       fn         lifetime
+567-567       fn         arc
+568-568       fn         best
+569-569       fn         trainedCells
+570-576       fn         worstGap
+577-578       fn         stage
+579-602       fn         pva
+603-635       fn         askTempo
+636-691       fn         review
+692-721       fn         loadPlanEdits
+722-726       fn         pull
+727-744       fn         hist
+745-750       fn         editDiff
+751-762       fn         editAged
+763-770       fn         editWhen
+771-779       fn         editNote
+780-784       fn         editLoad
+785-798       fn         findingLoads
+799-804       fn         seg
+805-850       fn         chip
+851-889       fn         exerciseRow
+890-934       fn           asked
+935-996       fn         sessionBlock
+997-1970      fn         dayBlock
+1971-2026     fn       FormChecks
+2027-2027     fn       FormClipPlayer
+2028-2038     fn         player
+```
+
 ## `app/(trainer)/analytics.tsx`
 
 1,994 lines · ~33k tokens · 44 anchors
@@ -2236,64 +2299,6 @@ Total: 46 files, 116,626 lines, ~1685k tokens if every one were read whole.
 987-1000      fn         countOf
 1001-1020     fn         pull
 1021-1994     fn         exportAnalytics
-```
-
-## `app/(trainer)/client-training.tsx`
-
-1,975 lines · ~30k tokens · 51 anchors
-
-```
-3-16          §        The hole this closes
-17-27         §        The permission was already there
-28-36         §        Nothing here works anything out
-37-44         §        The dashes
-45-84         §        Whose kilograms
-85-97         §        the two modules the coach could not reach
-98-114        §        the finer grain, and the picture of it
-115-140       §        the four things this screen could not say before
-141-205       §        the program the client rewrote
-206-245       default  ClientTraining
-246-339       fn         load
-340-364       fn         client
-365-378       fn         reloadLog
-379-381       fn         sessions
-382-385       fn         board
-386-447       fn         pick
-448-449       fn         lastSeven
-450-456       fn           byDay
-457-473       fn         position
-474-490       fn         compareWeek
-491-513       fn         oldestDay
-514-527       fn         muscleWindowRead
-528-531       fn           p
-532-541       fn         muscles
-542-555       fn         muscleNote
-556-559       fn         cells
-560-560       fn         lifetime
-561-561       fn         arc
-562-562       fn         best
-563-563       fn         trainedCells
-564-570       fn         worstGap
-571-572       fn         stage
-573-615       fn         pva
-616-671       fn         review
-672-701       fn         loadPlanEdits
-702-706       fn         pull
-707-724       fn         hist
-725-730       fn         editDiff
-731-742       fn         editAged
-743-750       fn         editWhen
-751-759       fn         editNote
-760-764       fn         editLoad
-765-778       fn         findingLoads
-779-784       fn         seg
-785-830       fn         chip
-831-871       fn         exerciseRow
-872-933       fn         sessionBlock
-934-1907      fn         dayBlock
-1908-1963     fn       FormChecks
-1964-1964     fn       FormClipPlayer
-1965-1975     fn         player
 ```
 
 ## `studio-web/app/export/page.tsx`
@@ -3036,6 +3041,87 @@ Total: 46 files, 116,626 lines, ~1685k tokens if every one were read whole.
 1552-1583     fn       mySessionCredits
 ```
 
+## `scripts/check-schema.mjs`
+
+1,580 lines · ~19k tokens · 74 anchors
+
+```
+34-55         §        How the live database is asked
+56-74         §        And the FUNCTIONS, since 13 Sep 2026
+75-87         §        NAMES, not bodies
+88-107        §        how the live list is got, and why only with a secret key
+108-132       §        what the function comparison therefore cannot see
+133-204       §        What a row is allowed to look like
+205-228       fn       blankJsComments
+229-246       fn       skipString
+247-261       fn       readBalanced
+262-276       fn       splitTopLevel
+277-286       fn       stringLiteral
+287-295       fn       lineOf
+296-307       fn       noteColumn
+308-336       fn       objectKeys
+337-370       fn       sourceOf
+371-389       fn       stringExpr
+390-393       fn       importedConst
+394-401       fn           names
+402-418       fn       moduleFile
+419-435       §        Which `row` is THE row
+436-454       fn       blocksOf
+455-463       fn       scopeChain
+464-467       fn       ownBlock
+468-474       fn       sameBlock
+475-495       fn       paramsOf
+496-511       fn       declarationsOf
+512-522       fn       declarationFor
+523-530       fn           here
+531-554       fn       functionBody
+555-571       fn       constantString
+572-576       fn       definitionOf
+577-580       fn           body
+581-591       fn           names
+592-609       fn       topLevelReturns
+610-626       fn       objectLiterals
+627-651       fn       selectColumns
+652-672       fn       scanFile
+673-730       fn           add
+731-756       fn       trailingCall
+757-780       fn       ternaryArms
+781-795       fn       arrowHead
+796-816       fn       NO_ROW
+817-823       fn       readRow
+824-824       fn         again
+825-844       fn         giveUp
+845-901       fn             spreads
+902-963       fn         readReturns
+964-995       fn       walk
+996-999       fn       blankSql
+1000-1034     fn         blank
+1035-1035     fn       declaredFns
+1036-1040     fn       droppedFns
+1041-1048     fn       declare
+1049-1050     fn       bare
+1051-1069     fn       parseSetup
+1070-1070     fn         marks
+1071-1081     fn         partAt
+1082-1130     fn         publicName
+1131-1158     §        A later part may RETIRE a table
+1159-1171     §        The FUNCTIONS the bundle declares
+1172-1239     fn         fnName
+1240-1255     fn         callable
+1256-1282     fn       report
+1283-1300     fn       env
+1301-1308     fn       ask
+1309-1339     fn       probe
+1340-1375     fn       listLive
+1376-1396     fn             listed
+1397-1413     fn           worker
+1414-1463     fn             settle
+1464-1499     §        The functions, both directions
+1500-1500     fn       columnCount
+1501-1540     fn       callableFns
+1541-1580     fn         width
+```
+
 ## `studio-web/app/passes/page.tsx`
 
 1,573 lines · ~19k tokens · 30 anchors
@@ -3143,85 +3229,6 @@ Total: 46 files, 116,626 lines, ~1685k tokens if every one were read whole.
 665-788       §        the hundred that is not a hundred everywhere
 789-789       fn               slices
 790-1554      fn               n
-```
-
-## `scripts/check-schema.mjs`
-
-1,541 lines · ~19k tokens · 72 anchors
-
-```
-34-55         §        How the live database is asked
-56-74         §        And the FUNCTIONS, since 13 Sep 2026
-75-87         §        NAMES, not bodies
-88-107        §        how the live list is got, and why only with a secret key
-108-132       §        what the function comparison therefore cannot see
-133-204       §        What a row is allowed to look like
-205-228       fn       blankJsComments
-229-246       fn       skipString
-247-261       fn       readBalanced
-262-276       fn       splitTopLevel
-277-286       fn       stringLiteral
-287-295       fn       lineOf
-296-307       fn       noteColumn
-308-336       fn       objectKeys
-337-350       fn       sourceOf
-351-362       fn       stringExpr
-363-379       fn       moduleFile
-380-396       §        Which `row` is THE row
-397-415       fn       blocksOf
-416-424       fn       scopeChain
-425-428       fn       ownBlock
-429-435       fn       sameBlock
-436-456       fn       paramsOf
-457-472       fn       declarationsOf
-473-483       fn       declarationFor
-484-491       fn           here
-492-515       fn       functionBody
-516-532       fn       constantString
-533-537       fn       definitionOf
-538-541       fn           body
-542-552       fn           names
-553-570       fn       topLevelReturns
-571-587       fn       objectLiterals
-588-612       fn       selectColumns
-613-633       fn       scanFile
-634-691       fn           add
-692-717       fn       trailingCall
-718-741       fn       ternaryArms
-742-756       fn       arrowHead
-757-777       fn       NO_ROW
-778-784       fn       readRow
-785-785       fn         again
-786-805       fn         giveUp
-806-862       fn             spreads
-863-924       fn         readReturns
-925-956       fn       walk
-957-960       fn       blankSql
-961-995       fn         blank
-996-996       fn       declaredFns
-997-1001      fn       droppedFns
-1002-1009     fn       declare
-1010-1011     fn       bare
-1012-1030     fn       parseSetup
-1031-1031     fn         marks
-1032-1042     fn         partAt
-1043-1091     fn         publicName
-1092-1119     §        A later part may RETIRE a table
-1120-1132     §        The FUNCTIONS the bundle declares
-1133-1200     fn         fnName
-1201-1216     fn         callable
-1217-1243     fn       report
-1244-1261     fn       env
-1262-1269     fn       ask
-1270-1300     fn       probe
-1301-1336     fn       listLive
-1337-1357     fn             listed
-1358-1374     fn           worker
-1375-1424     fn             settle
-1425-1460     §        The functions, both directions
-1461-1461     fn       columnCount
-1462-1501     fn       callableFns
-1502-1541     fn         width
 ```
 
 ## `studio-web/app/revenue/page.tsx`

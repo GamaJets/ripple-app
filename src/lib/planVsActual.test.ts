@@ -8,7 +8,7 @@
 // window, or a movement whose name was spelled differently.
 import {
   WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
-  loadCheck, loadTally, loadLine, LOAD_TOLERANCE,
+  loadCheck, loadTally, loadLine, LOAD_TOLERANCE, prescribedTempo,
 } from './planVsActual';
 import type { ProgramDay } from './programs';
 import type { WorkoutEntry } from './mockData';
@@ -278,6 +278,52 @@ eq(loadLine(loadTally([mv(null, 50), mv(null, null)]), 'Priya'), null,
   'a block that names no loads anywhere gets no line at all rather than one apologising for itself');
 ok(/nothing to compare Priya against/.test(loadLine(loadTally([mv(100, null)]), 'Priya')!),
   'and a prescription nothing was logged against says so about the record, not about the person');
+
+/* ── the tempo the coach asked for ──────────────────────────────────────
+   The comparison itself is performedTempo.ts's and is asserted there. What is
+   pinned here is the RESOLUTION: which tempo a given set of a given movement
+   was asked for, and the cases where the honest answer is that nothing can
+   say. */
+
+const withTempo = (name: string, tempo: string | null, rows?: (string | null)[]) => ({
+  ...ex(name),
+  tempo,
+  ...(rows ? { setRows: rows.map((r) => ({ tempo: r })) } : {}),
+});
+
+const t1 = prescribedTempo([
+  { day: 'Mon', focus: 'Upper', exercises: [withTempo('Bench Press', '311')] },
+]);
+eq(t1('Bench Press', 0), '3-1-1-0', 'a tempo written as 311 resolves to the one canonical form both apps compare in');
+eq(t1('bench press', 2), '3-1-1-0', 'and it is found by slug, so the spelling in the log does not matter');
+eq(t1('Back Squat', 0), null, 'a movement the program does not name asks for nothing');
+eq(t1('Bench Press', 7), '3-1-1-0', "past the end of the written sets the movement's own tempo still stands");
+eq(prescribedTempo(null)('Bench Press', 0), null, 'no program asks for nothing, and never throws');
+
+// Per set, because set 1 can be a warm-up inside an exercise whose top set is a
+// four-second eccentric.
+const t2 = prescribedTempo([
+  { day: 'Mon', focus: 'Upper', exercises: [withTempo('Bench Press', '3110', [null, '4010', '4010'])] },
+]);
+eq(t2('Bench Press', 0), null, 'a warm-up row that names no tempo asks for none, and does not inherit a mark it was not given');
+eq(t2('Bench Press', 1), '4-0-1-0', 'the row that names one is what set 2 is judged against');
+eq(t2('Bench Press', 4), '3-1-1-0', "and past the last row, the movement's own");
+
+// Two days, two prescriptions, and nothing on a logged set saying which day it
+// belongs to. Refusal 1 at the top of the module, applied to tempo.
+const t3 = prescribedTempo([
+  { day: 'Mon', focus: 'Upper', exercises: [withTempo('Bench Press', '3110')] },
+  { day: 'Fri', focus: 'Upper', exercises: [withTempo('Bench Press', '20X0')] },
+]);
+eq(t3('Bench Press', 0), null,
+  'a movement prescribed two different tempos in one week answers null rather than picking one and reporting a miss nobody earned');
+
+const t4 = prescribedTempo([
+  { day: 'Mon', focus: 'Upper', exercises: [withTempo('Bench Press', '3110')] },
+  { day: 'Fri', focus: 'Upper', exercises: [withTempo('Bench Press', '3-1-1-0')] },
+]);
+eq(t4('Bench Press', 0), '3-1-1-0',
+  'but two days that ask for the same thing in two notations are one prescription, because readTempo is what decides that');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('planVsActual: ok — matched by slug over a window, never a weekday, never a percentage, and never "not logged" over an unread log');
