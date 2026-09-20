@@ -1,16 +1,15 @@
 // Client tab navigator — Home · Train · Meals · Progress · Me
 //
 // Configuration, not layout: every Tabs.Screen, name, href, title and the order
-// they appear in is untouched. The only change is that the tab label and the
-// bar's padding come off the scale (`src/theme/scale`) instead of being raw
-// numbers, and a dead emoji-based TabIcon (nothing rendered it since the Icon
-// set landed) is gone.
+// they appear in is untouched. The bar that draws them is the shared floating
+// one, src/ui/FloatingTabBar.tsx, handed to <Tabs> through `tabBar`; an icon
+// takes the size and colour the bar gives it, because the current tab's icon
+// is a different size and colour from the rest.
 import { Tabs, Redirect } from 'expo-router';
 import { groupAllowed } from '../../src/lib/variant';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { sp, type as ty, grown } from '../../src/theme/scale';
+import { FloatingTabBar } from '../../src/ui/FloatingTabBar';
 import { WaiverGate, useWaiver } from '../../src/ui/waiver';
 import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
@@ -33,8 +32,6 @@ export default function ClientLayout() {
   // case the redirect exists for — one query, no writes, and the component
   // unmounts immediately after.
   const t = useTheme();
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, 10);
 
   // What this client missed while they were away — and the one thing that
   // outranks it.
@@ -114,6 +111,7 @@ export default function ClientLayout() {
     <WaiverGate>
     <Tabs
       backBehavior="history"
+      tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{
         // No navigator header, anywhere in this group — the same line
         // app/(trainer)/_layout.tsx and app/(owner)/_layout.tsx have always
@@ -151,24 +149,18 @@ export default function ClientLayout() {
         // The three header* style options that used to be here went with it.
         // They only ever described a header this group does not draw.
         headerShown: false,
-        // The bar grows with the reader's text. 56 was drawn around a 23pt icon
-        // and an 11pt name, and on Larger Text the name is 22 or 33 — which the
-        // safe-area padding then pushes off the bottom of a bar that never
-        // moved. Only the part that holds content is scaled; the inset below it
-        // is the phone's and is not text.
-        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: grown(56) + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
-        tabBarActiveTintColor: t.brand,
-        tabBarInactiveTintColor: t.ink3,
-        // The scale's smallest step, in sentence case and at the emphasis weight.
-        tabBarLabelStyle: { ...ty.caption, fontSize: 11, fontWeight: '500' },
+        // The bar itself is src/ui/FloatingTabBar.tsx — one component for all
+        // three apps — so nothing about its look is configured here. It reads
+        // the inset and the reader's text size for itself, and it still
+        // honours the `tabBarStyle: { display: 'none' }` onboarding sets below.
         sceneStyle: { backgroundColor: t.bg },
       }}
     >
-      <Tabs.Screen name="dashboard" options={{ title: 'Home', tabBarIcon: ({ color }) => <Icon name="home" size={23} color={color} /> }} />
-      <Tabs.Screen name="workouts" options={{ title: 'Train', tabBarIcon: ({ color }) => <Icon name="train" size={23} color={color} /> }} />
-      <Tabs.Screen name="nutrition" options={{ title: 'Meals', tabBarIcon: ({ color }) => <Icon name="meals" size={23} color={color} /> }} />
-      <Tabs.Screen name="scans" options={{ title: 'Progress', tabBarIcon: ({ color }) => <Icon name="progress" size={23} color={color} /> }} />
-      <Tabs.Screen name="profile" options={{ title: 'Me', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
+      <Tabs.Screen name="dashboard" options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Icon name="home" size={size} color={color} /> }} />
+      <Tabs.Screen name="workouts" options={{ title: 'Train', tabBarIcon: ({ color, size }) => <Icon name="train" size={size} color={color} /> }} />
+      <Tabs.Screen name="nutrition" options={{ title: 'Meals', tabBarIcon: ({ color, size }) => <Icon name="meals" size={size} color={color} /> }} />
+      <Tabs.Screen name="scans" options={{ title: 'Progress', tabBarIcon: ({ color, size }) => <Icon name="progress" size={size} color={color} /> }} />
+      <Tabs.Screen name="profile" options={{ title: 'Me', tabBarIcon: ({ color, size }) => <Icon name="me" size={size} color={color} /> }} />
       <Tabs.Screen name="messages" options={{ href: null, title: "Messages" }} />
       <Tabs.Screen name="devices" options={{ href: null, title: "Watch & Devices" }} />
       <Tabs.Screen name="foodlog" options={{ href: null, title: "Food Log" }} />

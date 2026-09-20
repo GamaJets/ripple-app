@@ -5,7 +5,7 @@ import { ReactNode, createContext, useCallback, useContext, useMemo, useRef, use
 import { View, Text, Pressable, TextInput, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  paletteByKey, paletteForScheme, highContrast, brandInkFor,
+  paletteByKey, paletteForScheme, highContrast, withAccent,
   DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta,
 } from '../theme/tokens';
 import { Icon } from './Icon';
@@ -138,9 +138,7 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   // below, exactly as before.
   const withVariant: Theme = base;
 
-  const branded: Theme = accent
-    ? { ...withVariant, brand: accent, brandInk: brandInkFor(accent) }
-    : withVariant;
+  const branded: Theme = accent ? withAccent(withVariant, accent) : withVariant;
   // ── Why the theme and the four setters are held still ─────────────────────
   //
   // `theme` is built out of spreads, so it used to be a NEW object on every

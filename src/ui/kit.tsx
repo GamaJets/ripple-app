@@ -2,19 +2,24 @@
 // Screen-level primitives built on `theme/scale`. Screens compose these instead
 // of hand-rolling a card out of inline styles for the 3,815th time.
 //
-// The look is "instrument panel": the data is the only thing with ink on it.
-// Chrome recedes — sections are separated by air and a hairline rather than
-// boxed, and a real card is spent only on something you can act on. Accent
-// colour marks the live metric and the primary action, and nothing else.
+// The look is the approved mockups': a pale ground, white cards with a soft
+// shadow and no edge, one night-green hero card per screen, Sora for what a
+// screen leads with and Plus Jakarta Sans for what it says. Colour is spent
+// on DATA — a ring per macro, a plate behind a row's icon, a chip that says
+// "Slipping" — through the small data palette in src/theme/tokens.ts, always
+// by NAME (`tone="orange"`) so a component can pick the mark, the plate or the
+// readable ink of that hue for itself. The accent still marks the primary
+// action, and the night hero is where the bright accent lives.
 import { useState, type ReactNode } from 'react';
 import { View, Text, Pressable, ScrollView, type ViewStyle, type StyleProp } from 'react-native';
 import { router } from 'expo-router';
-import Svg, { Circle, Polyline, Line } from 'react-native-svg';
+import Svg, { Circle, Polyline, Polygon, Line } from 'react-native-svg';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, fontScale, grown } from '../theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font, fontScale, grown } from '../theme/scale';
+import { DATA_HUES, type DataHue, type Theme } from '../theme/tokens';
 import { effectiveWidth, linesAtScale } from '../lib/typeScale';
-import { hitSlopFor } from '../lib/a11y';
+import { hitSlopFor, readableInkOn } from '../lib/a11y';
 import { appLocale } from '../lib/locale';
 import { num } from '../lib/format';
 import { plainExact } from '../lib/units';
@@ -42,6 +47,38 @@ import { isWhole, type LoadStatus } from './loadStatus';
  * that a person with low vision or in bright sun may not get either. Every one
  * of them below now carries its state in words as well.
  */
+
+/* ── tone ─────────────────────────────────────────────────────────────────── */
+
+/**
+ * A colour, asked for by NAME.
+ *
+ * Every new part below takes `tone="orange"` and not `tone={t.data.orange}`,
+ * for one reason: a hue here is three colours with three jobs — the MARK (an
+ * arc, a bar, 3:1), the PLATE behind it, and the INK that may be text on
+ * either (4.5:1) — and a caller handing over one hex has chosen the job for
+ * the component. The mockups draw chip labels in the mark colour; orange on
+ * its own plate is 3.11:1. With a name, the chip takes the ink, the ring takes
+ * the mark, and nobody has to remember which is which.
+ *
+ * `brand` is the accent — the gym's own under white-label, with its measured
+ * plate and text colour. `neutral` is the grey of "nothing to report": a
+ * locked badge, a rest day. The seven hues are src/theme/tokens.ts's data
+ * palette and do not move under a gym's colour, because they are meaning.
+ *
+ * Older parts (`ListRow`, `Card`, `Flag`) take a raw colour string as `tone`
+ * and still do. `isTone` is how `ListRow` tells the two apart.
+ */
+export type Tone = 'brand' | 'neutral' | DataHue;
+
+const TONE_NAMES: ReadonlySet<string> = new Set(['brand', 'neutral', ...DATA_HUES]);
+const isTone = (v: string | undefined): v is Tone => !!v && TONE_NAMES.has(v);
+
+function toneOf(t: Theme, tone: Tone): { mark: string; soft: string; ink: string } {
+  if (tone === 'brand') return { mark: t.brand, soft: t.brandSoft, ink: t.brandText };
+  if (tone === 'neutral') return { mark: t.ink3, soft: t.surface3, ink: t.ink2 };
+  return { mark: t.data[tone], soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+}
 
 /* ── structure ────────────────────────────────────────────────────────────── */
 
@@ -107,18 +144,25 @@ export function Rule({ inset = 0 }: { inset?: number }) {
  *
  * The <Rule/> a screen puts between two sections still draws; on the ground
  * between two cards it is a faint line in a gap and nothing more. The
- * paddings are inside the card, so a row's own vertical padding is unchanged
- * and a Card inside a Section keeps its hairline (see Card) so white on
- * white stays a box.
+ * paddings are inside the card, so a row's own vertical padding is unchanged.
+ *
+ * ── No edge, a shadow ─────────────────────────────────────────────────────
+ *
+ * The card had a hairline border because the ground was white too, and a
+ * border was the only thing that made it a box. The approved mockups put white
+ * cards on a pale grey ground with the two-layer shadow in `elevation.card`
+ * and NO edge — the ground showing between them is the divider. A Card inside
+ * a Section is told from it by the same shadow, so it lost its hairline too.
  */
 export function Section({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
   const t = useTheme();
   return (
     <View style={[{
-      backgroundColor: t.surface, borderRadius: radius.md,
-      borderWidth: hairline, borderColor: t.ring,
+      backgroundColor: t.surface, borderRadius: radius.lg,
+      ...elevation.card,
       paddingVertical: layout.section, paddingHorizontal: sp.lg,
-      marginTop: sp.md,
+      // 14 between cards, as the mockups space them: the ground has to show.
+      marginTop: 14,
     }, style]}>{children}</View>
   );
 }
@@ -159,7 +203,12 @@ export function ScreenHeader({
         {leading ? <View style={{ paddingTop: eyebrow ? 0 : 1 }}>{leading}</View> : null}
         <View style={{ flex: 1, minWidth: 0 }}>
           {eyebrow ? <Text style={greeting ? { ...ty.body, color: t.ink2 } : { ...ty.micro, color: t.ink3 }}>{eyebrow}</Text> : null}
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginTop: eyebrow ? (greeting ? 2 : 5) : 0 }}>
+          {/* `display` — 30pt Sora — on every tab root, greeting or not: "My
+              Program", "Clients" and the name under "Good morning," are the
+              same step in the mockups. It WRAPS rather than shrinking; a
+              gym's name at 30pt on a narrow phone is two lines, and two lines
+              of a name is still the name. */}
+          <Text accessibilityRole="header" style={{ ...ty.display, color: t.ink, marginTop: eyebrow ? (greeting ? 0 : 4) : 0 }}>
             {title}
           </Text>
           {subtitle ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{subtitle}</Text> : null}
@@ -185,7 +234,7 @@ export function ScreenHeader({
  * slot of a PageHead with nothing in it — has to be exactly this wide, or the
  * title beside it is centred on the row and not on the screen.
  */
-const ROUND = 38;
+const ROUND = 40;
 
 /**
  * The head of every page reached from a row, the way the approved board draws
@@ -193,7 +242,7 @@ const ROUND = 38;
  * centre line, and at the trailing edge either one control — the settings
  * gear on Profile, the unread pill on Notifications, a share, a + — or a blank
  * the width of the back control. The blank is the whole trick: a title
- * centred between a 38pt button and nothing sits 19pt off the axis, which is
+ * centred between a 40pt button and nothing sits 20pt off the axis, which is
  * visible from across the room and was visible on every one of the twelve
  * hand copies this replaces.
  *
@@ -239,7 +288,7 @@ export function PageHead({ title, subtitle, leading, trailing, onBack, backLabel
           : (leading ?? <View style={{ width: ROUND }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />)}
         {title ? (
           <Text accessibilityRole="header" numberOfLines={linesAtScale(fontScale, 2)}
-            style={{ ...ty.title, color: t.ink, flex: 1, minWidth: 0, textAlign: 'center' }}>
+            style={{ ...ty.page, color: t.ink, flex: 1, minWidth: 0, textAlign: 'center' }}>
             {title}
           </Text>
         ) : <View style={{ flex: 1 }} />}
@@ -296,7 +345,10 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
   // Short pairs ("This Month" / "Analytics ›") are nowhere near the line and
   // stay a row. An estimate, deliberately: measuring would cost a layout pass
   // and a flash of the wrong arrangement on every card of every screen.
-  const crowded = !!note && (title.length * 9 + note.length * 6) * fontScale > 290;
+  //
+  // The constants moved with the type: the title is 20pt Sora now — a wide
+  // geometric face, about 11.5pt a character — and the note is 14 or 15pt.
+  const crowded = !!note && (title.length * 11.5 + note.length * (onPress ? 8 : 7)) * fontScale > 300;
   const stacked = fontScale >= 1.5 || crowded;
   return (
     // `gap` and the two `flexShrink`s are not tidying. Without them this row
@@ -326,7 +378,7 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
       gap: stacked ? sp.xs : sp.md,
       marginBottom: sp.md,
     }}>
-      <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, flexShrink: 1 }}>{title}</Text>
+      <Text accessibilityRole="header" style={{ ...ty.section, color: t.ink, flexShrink: 1 }}>{title}</Text>
       {note ? (
         // The chevron is drawn as a character, so it is also SPOKEN as one —
         // "All activity right-pointing angle quotation mark". The label says the
@@ -351,7 +403,17 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
               in a right-to-left locale that edge is the left one. */}
           {/* …and stacked under the title it is a subtitle, which starts where
               the title starts. 'auto' is the leading edge in every locale. */}
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: stacked ? 'auto' : END_ALIGN }}>{note}{onPress ? ' ' + FORWARD_CHAR : ''}</Text>
+          {/* A note that GOES somewhere is a link and is drawn as one — the
+              mockups' green "See all", 15pt bold — in `brandText`, which is
+              the accent only where the accent is readable as text and ink
+              where it is not. A note that only says something stays the quiet
+              caption. The two used to look identical, and the only way to find
+              out which one was tappable was to tap it. The chevron went with
+              the grey: colour and weight now say "link", and the role says it
+              to a screen reader. */}
+          <Text style={onPress
+            ? { ...ty.label, ...font('700'), color: t.brandText, textAlign: stacked ? 'auto' : END_ALIGN }
+            : { ...ty.caption, color: t.ink3, textAlign: stacked ? 'auto' : END_ALIGN }}>{note}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -463,7 +525,7 @@ export function Hero({
               strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, arc)))}
               transform="rotate(-90 36 36)" />
           </Svg>
-          <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink2 }}>{arcPct(arc)}%</Text>
+          <Text style={{ ...ty.caption, ...numeric, ...font('600'), color: t.ink2 }}>{arcPct(arc)}%</Text>
         </View>
       ) : null}
     </Pressable>
@@ -519,7 +581,7 @@ export function ChipGrid({ items, tone }: { items: Chip[]; tone?: string }) {
           style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}
         >
           <Icon name={c.icon} size={14} color={mark} />
-          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{c.label}</Text>
+          <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{c.label}</Text>
         </Pressable>
       ))}
     </View>
@@ -534,14 +596,42 @@ export interface KpiItem {
   /** true = this delta is movement in the direction the client wants. */
   good?: boolean;
   route?: string;
+  /** `tiles` mode only: the tile's colour by name, and its small trend. */
+  tone?: Tone;
+  trend?: (number | null | undefined)[];
 }
 
 /**
  * Metrics as columns divided by a hairline — not as a row of bordered boxes.
  * Same information, roughly half the packaging.
  */
-export function KpiRow({ items, onPress }: { items: KpiItem[]; onPress?: (i: KpiItem) => void }) {
+export function KpiRow({ items, onPress, tiles }: {
+  items: KpiItem[]; onPress?: (i: KpiItem) => void;
+  /** Draw each item as a <KpiTile> — its own white card, the figure in its
+   *  tone, a trend under it — instead of columns in one card. The mockups'
+   *  row of three under a hero. It sits on the GROUND, so it goes between
+   *  Sections and not inside one. The strip below stays for everything that
+   *  is a row of figures inside a card. */
+  tiles?: boolean;
+}) {
   const t = useTheme();
+  if (tiles) {
+    return (
+      // Three across, and two across with the third under them once the
+      // reader's text is large: a 26pt Sora figure at 1.35 in a 108pt tile is
+      // a figure shrunk to its floor, which is the opposite of what they asked
+      // the phone for.
+      <View style={{ flexDirection: 'row', flexWrap: fontScale >= 1.35 ? 'wrap' : 'nowrap', gap: sp.md, marginTop: 14 }}>
+        {items.map((k) => (
+          <View key={k.label} style={{ flexGrow: 1, flexBasis: fontScale >= 1.35 ? '40%' : 0, minWidth: 0, flexDirection: 'row' }}>
+            <KpiTile label={k.label} value={k.value} unit={k.unit} tone={k.tone} trend={k.trend}
+              onPress={onPress && k.route ? () => onPress(k) : undefined}
+              spoken={[k.label, [k.value, k.unit].filter(Boolean).join(' '), k.delta].filter(Boolean).join(', ')} />
+          </View>
+        ))}
+      </View>
+    );
+  }
   return (
     <View style={{ flexDirection: 'row' }}>
       {items.map((k, i) => {
@@ -611,12 +701,12 @@ export function Card({ children, onPress, tone, style }: {
   const t = useTheme();
   const body = (
     <View style={[{
-      backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg,
-      ...elevation.e1,
-      // A hairline on every card, not only a toned one: sections are cards
-      // now, so a Card inside a Section is white on white and needs an edge
-      // to be a box at all. The tone, where there is one, is that edge.
-      borderWidth: hairline, borderColor: tone ?? t.ring,
+      backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg,
+      ...elevation.card,
+      // No edge — see Section. A TONED card keeps one, because there the edge
+      // is not packaging: it is the warn or crit colour saying what kind of
+      // card this is, beside a kicker that says it in words.
+      ...(tone ? { borderWidth: hairline * 2, borderColor: tone } : null),
     }, style]}>{children}</View>
   );
   // A tappable card is a button and has to say so; without a role it announces
@@ -687,7 +777,7 @@ export function ActionCard({
           </View>
         ) : null}
         <View style={{ flex: 1 }}>
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{title}</Text>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{title}</Text>
           {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{note}</Text> : null}
         </View>
         <Cta label={cta} onPress={onPress} tone={mark} />
@@ -696,23 +786,38 @@ export function ActionCard({
   );
 }
 
-/** A row that reads as one line of a list: icon, two lines, chevron. */
+/**
+ * A row that reads as one line of a list: icon, two lines, chevron.
+ *
+ * 64pt tall with a 17pt bold title and a 14pt caption, as the mockups set
+ * every row — the old 15/12 row was the single most repeated thing in the app
+ * and the main reason it read as small print.
+ *
+ * `tone` is two things, told apart by `isTone`. A NAME from the data palette
+ * (`tone="pink"`) draws the mockups' rounded-square coloured plate — an
+ * <IconPlate> — which is how a settings list stops being a column of identical
+ * grey circles. A raw colour (`tone={t.warn}`), which is what every caller
+ * before the mockups passes, keeps the quiet circle and tints the icon, because
+ * those callers mean "this row's read failed", and that is a status mark and
+ * not decoration.
+ */
 export function ListRow({ icon, title, note, onPress, tone }: {
-  icon: IconName; title: string; note?: string; onPress: () => void; tone?: string;
+  icon: IconName; title: string; note?: string; onPress: () => void; tone?: Tone | string;
 }) {
   const t = useTheme();
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={note ? `${title}. ${note}` : title}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-      {/* A circle, as the board draws every row's icon. */}
-      <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-        <Icon name={icon} size={17} color={tone || t.brand} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{title}</Text>
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 64, paddingVertical: 6 }}>
+      {isTone(tone) ? <IconPlate icon={icon} tone={tone} /> : (
+        <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={icon} size={20} color={tone || t.brand} />
+        </View>
+      )}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ ...ty.head, color: t.ink }}>{title}</Text>
         {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text> : null}
       </View>
-      <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+      <Icon name={FORWARD_ICON} size={18} color={t.ink3} />
     </Pressable>
   );
 }
@@ -734,14 +839,17 @@ export function Cta({ label, onPress, tone, wide, disabled, a11yLabel }: {
 }) {
   const t = useTheme();
   return (
-    // 11 + 18 + 11 is 40pt tall, four short of the minimum, and this is the
-    // primary action on most screens — pressed one-handed, mid-set, with a wet
-    // thumb. Slop rather than padding, so nothing in any layout moves.
+    // Two sizes, and `wide` picks. WIDE is the screen's primary action as the
+    // mockups draw it: 56pt tall, a 16pt radius, an 18pt bold label — pressed
+    // one-handed, mid-set, with a wet thumb, and now sized for it. The inline
+    // form — "Join" at the end of a row, the button in an ActionCard — is 44pt
+    // with a 15pt bold label: a 56pt button in a 64pt row is the row. Both are
+    // `minHeight` and grow with the reader's text; neither needs slop any more.
     <Pressable onPress={onPress} disabled={disabled}
       accessibilityRole="button" accessibilityLabel={a11yLabel || label} accessibilityState={{ disabled: !!disabled }}
-      hitSlop={{ top: 2, bottom: 2, left: 0, right: 0 }}
       style={{
-        backgroundColor: disabled ? t.surface2 : (tone || t.brand), borderRadius: radius.sm,
+        backgroundColor: disabled ? t.surface3 : (tone || t.brand), borderRadius: wide ? radius.md : 14,
+        minHeight: grown(wide ? 56 : 44), justifyContent: 'center',
         // A DISABLED PRIMARY ACTION HAS TO STILL LOOK LIKE A BUTTON.
         //
         // Reported from the gym floor: "how does a coach save a session they
@@ -763,10 +871,12 @@ export function Cta({ label, onPress, tone, wide, disabled, a11yLabel }: {
         // greys involved — so this is the same 2× hairline the sheet's own tick
         // uses for an untapped set.
         ...(disabled ? { borderWidth: hairline * 2, borderColor: t.ring } : null),
-        paddingVertical: 11, paddingHorizontal: wide ? 0 : sp.lg,
+        paddingVertical: sp.sm, paddingHorizontal: sp.lg,
         alignItems: 'center', ...(wide ? { alignSelf: 'stretch' } : null),
       }}>
-      <Text style={{ ...ty.label, fontWeight: '600', color: disabled ? t.ink3 : t.brandInk }}>{label}</Text>
+      <Text style={wide
+        ? { ...ty.button, color: disabled ? t.ink3 : t.brandInk, textAlign: 'center' }
+        : { ...ty.label, ...font('700'), color: disabled ? t.ink3 : t.brandInk, textAlign: 'center' }}>{label}</Text>
     </Pressable>
   );
 }
@@ -878,22 +988,28 @@ export function Ghost({ label, onPress, icon, a11yLabel, disabled }: {
   // row of identical "Cancel" and "Leave" buttons could not be told apart.
   const spoken = a11yLabel || label || (icon ? ICON_NAMES[icon] ?? icon : undefined);
   return (
-    // The round form is 38pt and the pill form 40pt tall; both are under 44, and
-    // the round one is the back button on nearly every screen in the app.
+    // The round form is 40pt — under 44, and it is the back button on nearly
+    // every screen in the app, so it keeps its slop. It is a WHITE disc with
+    // the card's shadow, as the mockups draw the bell and the gear: the old
+    // surface2 fill is two points of grey away from the new ground and the
+    // control vanished into it. The pill form is 44pt and takes surface3 for
+    // the same reason — it has to read as a button on the ground AND on a card.
     <Pressable onPress={onPress} disabled={disabled}
       accessibilityRole="button" accessibilityLabel={spoken}
       accessibilityState={{ disabled: !!disabled }}
-      hitSlop={round ? hitSlopFor(38) : { top: 2, bottom: 2, left: 0, right: 0 }}
+      hitSlop={round ? hitSlopFor(ROUND) : undefined}
       style={{
-        backgroundColor: t.surface2,
-        borderRadius: round ? radius.pill : radius.sm,
+        backgroundColor: round ? t.surface : t.surface3,
+        ...(round ? elevation.card : null),
+        borderRadius: round ? radius.pill : 14,
         width: round ? ROUND : undefined, height: round ? ROUND : undefined,
-        paddingVertical: round ? 0 : 11, paddingHorizontal: round ? 0 : sp.lg,
+        minHeight: round ? undefined : grown(44),
+        paddingVertical: round ? 0 : sp.sm, paddingHorizontal: round ? 0 : sp.lg,
         alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: sp.sm,
         opacity: disabled ? 0.5 : 1,
       }}>
-      {icon ? <Icon name={icon} size={round ? 18 : 15} color={disabled ? t.ink3 : t.ink2} /> : null}
-      {label ? <Text style={{ ...ty.label, fontWeight: '500', color: disabled ? t.ink3 : t.ink }}>{label}</Text> : null}
+      {icon ? <Icon name={icon} size={round ? 20 : 16} color={disabled ? t.ink3 : t.ink} /> : null}
+      {label ? <Text style={{ ...ty.label, ...font('600'), color: disabled ? t.ink3 : t.ink }}>{label}</Text> : null}
     </Pressable>
   );
 }
@@ -905,7 +1021,7 @@ export function QuickRow({ items }: { items: { icon: IconName; label: string; on
     <View style={{ flexDirection: 'row', gap: sp.sm }}>
       {items.map((q) => (
         <Pressable key={q.label} onPress={q.onPress} accessibilityRole="button"
-          style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.md, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring }}>
+          style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.md, backgroundColor: t.surface, ...elevation.card }}>
           <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name={q.icon} size={17} color={t.brand} />
           </View>
@@ -986,44 +1102,53 @@ export function Scrim({ onPress, label = 'Close', hidden, opacity = 0.55 }: {
  * A 3px meter. The track is a dim step of the fill, so state reads across the
  * whole bar rather than only where it's filled.
  */
-export function Meter({ label, val, target, unit = 'g', dim }: {
-  label: string; val: number; target: number; unit?: string; dim?: boolean;
+export function Meter({ label, val, target, unit = 'g', dim, tone = 'brand', note }: {
+  label: string;
+  /** `null` is "not read", and draws no fill and a dash — never an empty bar
+   *  that reads as nothing eaten. */
+  val: number | null | undefined;
+  target: number; unit?: string; dim?: boolean;
+  /** The bar's colour, by name: protein blue, carbs orange, fat purple. */
+  tone?: Tone;
+  /** Replaces "96 / 120 g" at the trailing edge — "14 sets", "11 of 12". It is
+   *  also what is spoken, so it must carry the quantity on its own. */
+  note?: string;
 }) {
   const t = useTheme();
-  const pct = Math.max(0, Math.min(100, Math.round((val / (target || 1)) * 100)));
+  const known = typeof val === 'number' && Number.isFinite(val);
+  const pct = known ? Math.max(0, Math.min(100, Math.round(((val as number) / (target || 1)) * 100))) : 0;
+  // `plainExact`, here and in the label below, because these are grams of a
+  // macro and a challenge score in kilometres — both carry a decimal place,
+  // and a bare `{val}` writes an English full stop into a row whose other
+  // figures come from `num1` and `plain`. Separator only: a meter must not
+  // round what it was handed.
+  // One space before the unit, whether the caller typed one (' km') or not ('g').
+  const u = unit.trim() ? ` ${unit.trim()}` : '';
+  const shown = note ?? `${known ? plainExact(val as number) : '—'} / ${plainExact(target)}${u}`;
+  const said = note ?? (known ? `${plainExact(val as number)} of ${plainExact(target)}${u}` : 'not read');
   return (
-    // "Protein" and "84 / 150g" are two stops that read as two unrelated facts,
-    // and the 3px bar between them is the third — a proportion carried entirely
-    // by how far a coloured line travels. One element, one sentence, and the
-    // percentage said rather than drawn.
     <View
       accessible
       accessibilityRole="progressbar"
-      accessibilityLabel={`${label}, ${plainExact(val)} of ${plainExact(target)}${unit}`}
-      accessibilityValue={{ min: 0, max: 100, now: pct }}
+      accessibilityLabel={`${label}, ${said}`}
+      accessibilityValue={known ? { min: 0, max: 100, now: pct } : undefined}
       style={{ marginTop: sp.md }}
     >
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
-        {/* `plainExact`, and the same in the label above, because these are
-            grams of a macro and a challenge score in kilometres — both carry a
-            decimal place, and a bare `{val}` writes an English full stop into a
-            row whose other figures come from `num1` and `plain`. Separator
-            only: a meter must not round what it was handed. */}
-        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{plainExact(val)} / {plainExact(target)}{unit}</Text>
+      {/* The mockups' labelled bar: the name in bold ink, the quantity quiet
+          at the trailing edge, and an 8pt bar — up from 3, which at arm's
+          length was a hairline with a colour. The two words wrap rather than
+          truncate; "Carbohydrates" at 1.35 beside "130 / 180 g" is two lines. */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.sm }}>
+        <Text style={{ ...ty.caption, ...font('700'), color: t.ink, flexShrink: 1 }}>{label}</Text>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flexShrink: 1, textAlign: END_ALIGN }}>{shown}</Text>
       </View>
-      <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-        <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: t.brand, opacity: dim ? 0.45 : 1 }} />
+      <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, marginTop: 6, overflow: 'hidden' }}>
+        <View style={{ height: 8, borderRadius: 4, width: `${pct}%`, backgroundColor: toneOf(t, tone).mark, opacity: dim ? 0.45 : 1 }} />
       </View>
     </View>
   );
 }
 
-/**
- * Single-series trend. 2px line, one recessive baseline, and an end dot ringed
- * in the ground colour so it stays legible where it crosses the rule. One
- * series needs no legend — the section title says what is plotted.
- */
 /**
  * The line chart used across seven screens, and the one that says WHEN.
  *
@@ -1075,13 +1200,23 @@ export function Meter({ label, val, target, unit = 'g', dim }: {
  * axis and "72.9 kg · 14 Aug 2026"; a caller without still gets the value, and
  * the hint line says only what is actually on offer.
  */
-export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
+export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = 'brand' }: {
   data: (number | null | undefined)[]; h?: number; w?: number;
   /** ISO dates ('2026-08-14' or '2026-08'), or short labels, parallel to `data`. */
   labels?: string[];
   unit?: string;
+  /** Draw it as the mockups' AREA chart: the tone's pale plate filled under
+   *  each unbroken run, a 3pt line, a ringed last point. It is the same chart
+   *  — the touch readout, the axis and the gaps are untouched — which is the
+   *  point of making it a prop: an "area chart" that was a second component
+   *  would be this one again without the honest parts. A run of one reading
+   *  gets no fill; a dot has no area under it. */
+  area?: boolean;
+  /** The line's colour, by name. */
+  tone?: Tone;
 }) {
   const t = useTheme();
+  const c = toneOf(t, tone);
   const [sel, setSel] = useState<number | null>(null);
   const [boxW, setBoxW] = useState(w);
 
@@ -1183,21 +1318,28 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
               nobody recorded. A run of one cannot be a line and is drawn as
               the dot it is — deleting it would erase the only evidence that
               the reading was ever taken. */}
+          {area ? runs.map((run, ri) => run.length >= 2 ? (
+            <Polygon key={`a${ri}`} fill={c.soft}
+              points={`${run.map((p) => `${x(p.i)},${y(p.v)}`).join(' ')} ${x(run[run.length - 1].i)},${h - 8} ${x(run[0].i)},${h - 8}`} />
+          ) : null) : null}
           {runs.map((run, ri) => run.length >= 2 ? (
             <Polyline key={ri} points={run.map((p) => `${x(p.i)},${y(p.v)}`).join(' ')}
-              fill="none" stroke={t.brand} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              fill="none" stroke={c.mark} strokeWidth={area ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
           ) : (
-            <Circle key={ri} cx={x(run[0].i)} cy={y(run[0].v)} r={2.5} fill={t.brand} />
+            <Circle key={ri} cx={x(run[0].i)} cy={y(run[0].v)} r={2.5} fill={c.mark} />
           ))}
           {shownPoint != null ? (
             <>
               <Line x1={x(shownPoint.i)} y1={top} x2={x(shownPoint.i)} y2={bottom} stroke={t.ring} strokeWidth={1} />
-              <Circle cx={x(shownPoint.i)} cy={y(shownPoint.v)} r={6} fill={t.bg} />
+              <Circle cx={x(shownPoint.i)} cy={y(shownPoint.v)} r={6} fill={t.surface} />
               <Circle cx={x(shownPoint.i)} cy={y(shownPoint.v)} r={4} fill={t.ink} />
             </>
           ) : null}
-          <Circle cx={x(last.i)} cy={y(last.v)} r={6} fill={t.bg} />
-          <Circle cx={x(last.i)} cy={y(last.v)} r={4} fill={t.brand} />
+          {/* The halo is the CARD's colour. It was `t.bg`, which was the same
+              white until the ground went grey; a grey disc on a white card is
+              a smudge behind the point it was meant to lift. */}
+          <Circle cx={x(last.i)} cy={y(last.v)} r={6} fill={t.surface} />
+          <Circle cx={x(last.i)} cy={y(last.v)} r={area ? 3.5 : 4} fill={area ? t.surface : c.mark} stroke={c.mark} strokeWidth={area ? 3 : 0} />
         </Svg>
       </View>
       {/* The axis. Each label is placed at its own point's x fraction, so it
@@ -1474,7 +1616,7 @@ export function FigureCard({
       {cmp ? (
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 3 }}>
           <Dot tone={mark || t.ink3} top={grown(6)} />
-          <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink2, flex: 1 }}>{cmp}</Text>
+          <Text style={{ ...ty.label, ...numeric, ...font('600'), color: t.ink2, flex: 1 }}>{cmp}</Text>
         </View>
       ) : null}
     </>
@@ -1553,7 +1695,7 @@ export function SyncBadge({ state, label }: { state: SyncState; label?: string }
     <View accessible accessibilityRole="text" accessibilityLabel={words} accessibilityLiveRegion="polite"
       style={{ flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start' }}>
       <Dot tone={tone} />
-      <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, flexShrink: 1 }}>{words}</Text>
+      <Text style={{ ...ty.caption, ...font('500'), color: t.ink2, flexShrink: 1 }}>{words}</Text>
     </View>
   );
 }
@@ -1612,14 +1754,17 @@ export function AttentionRow({
 }) {
   const t = useTheme();
   const below = !!action && fontScale >= 1.35;
-  const D = grown(40);
+  const D = grown(42);
   const spoken = [name, reason, status, age, sync ? SYNC_WORDS[sync] : ''].filter(Boolean).join('. ');
   const identity = avatar ?? (monogram || icon ? (
-    <View style={{ width: D, height: D, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+    // The mockups' avatar: the accent's pale plate with the initials in the
+    // accent AS TEXT — `brandText`, which is ink where a gym's colour is not
+    // readable. It was `t.brand` on surface2, a mark colour doing a text job.
+    <View style={{ width: D, height: D, borderRadius: radius.pill, backgroundColor: monogram ? t.brandSoft : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
       {monogram
         // Array.from, not slice: a name that opens with an emoji or an
         // astral-plane letter is two UTF-16 units, and half of one is "�".
-        ? <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{Array.from(monogram).slice(0, 2).join('')}</Text>
+        ? <Text style={{ ...ty.label, ...font('700'), color: t.brandText }}>{Array.from(monogram).slice(0, 2).join('')}</Text>
         : <Icon name={icon!} size={18} color={tone || t.brand} />}
     </View>
   ) : null);
@@ -1627,13 +1772,13 @@ export function AttentionRow({
     <>
       {identity}
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text numberOfLines={2} style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
+        <Text numberOfLines={2} style={{ ...ty.head, color: t.ink }}>{name}</Text>
         <Text numberOfLines={linesAtScale(fontScale, 3)} style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{reason}</Text>
         {status || age ? (
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 3 }}>
             {status ? <Dot tone={tone || t.ink3} top={grown(5)} /> : null}
             <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-              {status ? <Text style={{ color: t.ink2, fontWeight: '500' }}>{status}</Text> : null}
+              {status ? <Text style={{ color: t.ink2, ...font('500') }}>{status}</Text> : null}
               {status && age ? ' · ' : ''}{age}
             </Text>
           </View>
@@ -1700,7 +1845,7 @@ export function ActionBlock({ title, reason, meta, cta, secondary, children }: {
   const t = useTheme();
   return (
     <Section>
-      <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink }}>{title}</Text>
+      <Text accessibilityRole="header" style={{ ...ty.section, color: t.ink }}>{title}</Text>
       {reason ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{reason}</Text> : null}
       {meta ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{meta}</Text> : null}
       {children}
@@ -1835,6 +1980,426 @@ export function ChartShell({ status, points, emptyLine, partialLine, errorLine, 
   return <>{children}</>;
 }
 
+/* ── the mockups' parts ───────────────────────────────────────────────────
+ *
+ * Everything from here to Segmented arrived with the approved mockups. Four
+ * rules hold for all of it, and each is the reason for a line of code below:
+ *
+ *   TOKENS ONLY. A colour is a `Tone` name or a theme token; a size is off the
+ *   scale or is a drawing's own geometry.
+ *
+ *   NULL IS NOT ZERO. A ring handed `null` draws its track, no arc, and a dash
+ *   in the middle. A bar chart handed `null` for Wednesday draws nothing on
+ *   Wednesday; handed 0 it draws the grey stub of a day with nothing in it.
+ *   Whether there is a chart AT ALL — loading, failed, partial, one point — is
+ *   ChartShell's decision, and every chart here is meant to be its child.
+ *
+ *   A CHART IS ONE SENTENCE. Each drawing is a single `accessible` element
+ *   with the `spoken` sentence its caller passes — required, not optional,
+ *   because only the caller knows what the numbers mean — and its insides are
+ *   hidden, so VoiceOver does not swipe through seven bars to say nothing.
+ *
+ *   NEVER COLOUR ALONE. A chip is words on a plate. A legend is words beside a
+ *   swatch. A ring has its figure inside it. A tile's colour repeats what its
+ *   label says and carries nothing the label does not.
+ *
+ * Anything with text inside a drawing is sized through `grown()`, so the ring
+ * grows with the figure in it; and nothing names a physical side, so Yoga
+ * mirrors all of it. The drawings themselves do not mirror — see Spark.
+ */
+
+const HIDE = { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' } as const;
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const known = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** A rounded-square coloured plate with an icon on it — what replaces the grey
+ *  circle in a row, a badge, a tool. Decoration: the row beside it says what
+ *  it is, so it is hidden from a screen reader. The icon takes the tone's INK,
+ *  not its mark: a 20pt glyph of thin strokes is closer to text than to a bar. */
+export function IconPlate({ icon, tone = 'brand', size = 40 }: { icon: IconName; tone?: Tone; size?: number }) {
+  const t = useTheme();
+  const c = toneOf(t, tone);
+  return (
+    <View {...HIDE} style={{
+      width: size, height: size, borderRadius: Math.round(size * 0.3), backgroundColor: c.soft,
+      alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    }}>
+      <Icon name={icon} size={Math.round(size * 0.5)} color={c.ink} />
+    </View>
+  );
+}
+
+/** Words on a pale plate of their own hue: "On Track", "6-Day Streak",
+ *  "320 kcal". The label is the tone's INK — the mockups draw it in the mark,
+ *  and orange on its own plate is 3.11:1. The words ARE the state; the colour
+ *  lets an eye find the one row in forty that has it. */
+export function TonedChip({ label, tone = 'brand', icon }: { label: string; tone?: Tone; icon?: IconName }) {
+  const t = useTheme();
+  const c = toneOf(t, tone);
+  return (
+    <View accessible accessibilityRole="text" accessibilityLabel={label} style={{
+      flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start',
+      minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3, borderRadius: grown(26) / 2, backgroundColor: c.soft,
+    }}>
+      {icon ? <Icon name={icon} size={13} color={c.ink} /> : null}
+      <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: c.ink, flexShrink: 1 }}>{label}</Text>
+    </View>
+  );
+}
+
+/**
+ * The ring every ring below is. `value` is 0–1 or null; `figure` is the words
+ * in the middle, already formatted by the caller, or null.
+ *
+ * A null `value` draws the track and no arc — and no ROUND CAP either, which
+ * is the detail that matters: a zero-length dash with `strokeLinecap="round"`
+ * still paints a dot at twelve o'clock, and a dot reads as "just started".
+ * So the arc is not rendered at all unless there is something to draw.
+ */
+function RingBase({ value: v, figure, sub, size, stroke, arc, track, ink, subInk, figureSize, spoken, under }: {
+  value: number | null | undefined; figure: string | null | undefined; sub?: string;
+  size: number; stroke: number; arc: string; track: string; ink: string; subInk: string;
+  figureSize: number; spoken: string;
+  /** MiniRing: the sub goes UNDER the ring, not inside it. */
+  under?: boolean;
+}) {
+  const D = grown(size);
+  const r = (size - stroke) / 2, C = 2 * Math.PI * r;
+  const has = known(v) && v > 0;
+  return (
+    <View accessible accessibilityRole="progressbar" accessibilityLabel={spoken}
+      accessibilityValue={known(v) ? { min: 0, max: 100, now: Math.round(clamp01(v) * 100) } : undefined}
+      style={{ alignItems: 'center', flexShrink: 0, ...(under ? { flex: 1, minWidth: 0 } : null) }}>
+      <View {...HIDE} style={{ width: D, height: D, alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={D} height={D} viewBox={`0 0 ${size} ${size}`} style={{ position: 'absolute' }}>
+          <Circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={track} strokeWidth={stroke} />
+          {has ? (
+            <Circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={arc} strokeWidth={stroke} strokeLinecap="round"
+              strokeDasharray={C} strokeDashoffset={C * (1 - clamp01(v as number))}
+              transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+          ) : null}
+        </Svg>
+        {/* Shrinks to the hole rather than wrapping or clipping: "12,480" in
+            a 136pt ring is wider than "1,850", and the hole is what it is. */}
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
+          style={{ ...(under ? { ...ty.caption, ...font('700') } : value(figureSize)), color: ink, maxWidth: D - stroke * 2 - 10, textAlign: 'center' }}>
+          {fig(figure)}
+        </Text>
+        {sub && !under ? (
+          <Text numberOfLines={linesAtScale(fontScale, 1)} style={{ ...ty.micro, ...font('400'), fontSize: 12, color: subInk, maxWidth: D - stroke * 2 - 14, textAlign: 'center' }}>{sub}</Text>
+        ) : null}
+      </View>
+      {sub && under ? (
+        <Text {...HIDE} numberOfLines={linesAtScale(fontScale, 2)} style={{ ...ty.micro, color: subInk, marginTop: 6, textAlign: 'center' }}>{sub}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+interface RingProps {
+  /** 0–1, or null for "not read": track only, and a dash for the figure. */
+  value: number | null | undefined;
+  /** The words in the middle, formatted by the caller. Null draws a dash. */
+  figure: string | null | undefined;
+  /** The quiet line under the figure: "of 2,400 kcal", "this week". */
+  sub?: string;
+  /** The whole thing as one sentence. Required: a ring is a picture of a
+   *  number, and only the caller knows what the number is OF. */
+  spoken: string;
+  size?: number;
+}
+
+/** The ring on a white card — Meals' calories, a client's adherence. */
+export function Ring({ tone = 'brand', size = 136, ...p }: RingProps & { tone?: Tone }) {
+  const t = useTheme();
+  return <RingBase {...p} size={size} stroke={Math.round(size * 0.095)} figureSize={Math.round(size * 0.2)}
+    arc={toneOf(t, tone).mark} track={t.surface3} ink={t.ink} subInk={t.ink3} />;
+}
+
+/** The ring on the night hero card: the bright accent on a night2 track. */
+export function HeroRing({ size = 104, ...p }: RingProps) {
+  const t = useTheme();
+  return <RingBase {...p} size={size} stroke={Math.round(size * 0.105)} figureSize={Math.round(size * 0.24)}
+    arc={t.brandBright} track={t.night2} ink={t.nightInk} subInk={t.nightInk2} />;
+}
+
+/** One of a row of small coloured rings — Calories, Protein, Water, Steps —
+ *  each `flex: 1`, so four share a card's width. The figure sits inside and
+ *  the name under, and the name is part of `spoken`'s job, not a second stop. */
+export function MiniRing({ tone = 'brand', label, ...p }: Omit<RingProps, 'sub' | 'size'> & { tone?: Tone; label: string }) {
+  const t = useTheme();
+  return <RingBase {...p} sub={label} under size={70} stroke={8} figureSize={14}
+    arc={toneOf(t, tone).mark} track={t.surface3} ink={t.ink} subInk={t.ink2} />;
+}
+
+/** The hero card's button: the bright accent under its deep ink, full width,
+ *  56pt. Only ever ON night — on a white card the primary action is Cta. */
+export function CtaBright({ label, onPress, disabled, a11yLabel, tone }: {
+  label: string; onPress: () => void; disabled?: boolean; a11yLabel?: string;
+  /** A raw colour that replaces the bright accent — client Home's button goes
+   *  `t.warn` on a recovery day, and that must survive the move onto night.
+   *  The label's ink is then MEASURED against it, as a gym's accent is. */
+  tone?: string;
+}) {
+  const t = useTheme();
+  const fill = tone && tone !== t.brand ? tone : t.brandBright;
+  const ink = fill === t.brandBright ? t.brandDeep : readableInkOn(fill);
+  return (
+    <Pressable onPress={onPress} disabled={disabled}
+      accessibilityRole="button" accessibilityLabel={a11yLabel || label} accessibilityState={{ disabled: !!disabled }}
+      style={{
+        alignSelf: 'stretch', minHeight: grown(56), borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+        alignItems: 'center', justifyContent: 'center',
+        backgroundColor: disabled ? t.night2 : fill,
+        // Off, and still a button: the same argument as Cta's disabled edge.
+        ...(disabled ? { borderWidth: hairline * 2, borderColor: t.nightInk2 } : null),
+      }}>
+      <Text style={{ ...ty.button, color: disabled ? t.nightInk2 : ink, textAlign: 'center' }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * The night hero card: the ONE dark card a screen leads with.
+ *
+ * An eyebrow in tracked capitals, a Sora headline, one quiet meta line, an
+ * optional ring at the trailing edge and the bright button under them — the
+ * mockups' "TODAY · WEEK 1 OF 12 / Push Day / 5 exercises · 17 sets / 3 of 5 /
+ * Start Workout". One per screen, for Hero's reason: a second means neither.
+ *
+ * `eyebrow` is drawn as the caller types it. The mockups set it in capitals
+ * and the caller types the capitals; nothing here transforms case, because a
+ * transform would shout a client's name or a programme's title that happened
+ * to be passed in. The words are one spoken sentence with the header role, so
+ * the rotor lands on the card; the ring and the button keep their own stops
+ * because they are a different quantity and an action.
+ *
+ * `children` sit between the words and the button, on night: a row of night2
+ * tiles, a "Next up" line. They must use the night inks — `t.nightInk`,
+ * `t.nightInk2` — and never `t.ink`, which is near-black on this ground.
+ *
+ * At the largest text the ring drops under the words so the headline keeps
+ * the card's width; the button is always full width and always last.
+ */
+export function HeroCard({ eyebrow, title, meta, ring, cta, children, onPress }: {
+  eyebrow?: string;
+  title: string;
+  meta?: string;
+  /** A <HeroRing>. */
+  ring?: ReactNode;
+  cta?: { label: string; onPress: () => void; disabled?: boolean; a11yLabel?: string; tone?: string };
+  children?: ReactNode;
+  /** The words as a button — where the card opens something and the CTA does
+   *  something else. */
+  onPress?: () => void;
+}) {
+  const t = useTheme();
+  const stacked = !!ring && fontScale >= 1.5;
+  const words = (
+    <>
+      {eyebrow ? <Text style={{ ...ty.eyebrow, color: t.nightInk3 }}>{eyebrow}</Text> : null}
+      <Text style={{ ...ty.display, color: t.nightInk, marginTop: eyebrow ? 6 : 0 }}>{title}</Text>
+      {meta ? <Text style={{ ...ty.label, color: t.nightInk2, marginTop: 6 }}>{meta}</Text> : null}
+    </>
+  );
+  const spoken = [eyebrow, title, meta].filter(Boolean).join(', ');
+  return (
+    <View style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero }}>
+      <View style={{ flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'flex-start' : 'center', justifyContent: 'space-between', gap: sp.md }}>
+        {onPress ? (
+          <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={spoken} style={{ flex: stacked ? undefined : 1, minWidth: 0 }}>{words}</Pressable>
+        ) : (
+          <View accessible accessibilityRole="header" accessibilityLabel={spoken} style={{ flex: stacked ? undefined : 1, minWidth: 0 }}>{words}</View>
+        )}
+        {ring}
+      </View>
+      {children}
+      {cta ? <View style={{ marginTop: sp.lg }}><CtaBright {...cta} /></View> : null}
+    </View>
+  );
+}
+
+/** One day (or one of anything) in a DayBars. */
+export interface DayBar {
+  /** Under the bar: "M", "Tue". */
+  label: string;
+  /** null = not known, and nothing is drawn. 0 = known to be nothing, and a
+   *  grey stub is: a rest day is a fact, a failed read is not. */
+  value: number | null | undefined;
+  tone?: Tone;
+}
+
+/**
+ * A week as seven bars. `max` is the top of the scale; absent, the tallest
+ * bar is — but pass it wherever there is a real ceiling (a target, 100%), or
+ * a week of tiny numbers draws as a week of full bars.
+ */
+export function DayBars({ days, max, h = 58, spoken }: { days: DayBar[]; max?: number; h?: number; spoken: string }) {
+  const t = useTheme();
+  const top = max ?? Math.max(0, ...days.map((d) => (known(d.value) ? d.value : 0)));
+  return (
+    <View accessible accessibilityRole="image" accessibilityLabel={spoken} style={{ flexDirection: 'row', gap: sp.xs }}>
+      {days.map((d, i) => {
+        const v = known(d.value) ? d.value : null;
+        const stub = v != null && (v <= 0 || top <= 0);
+        return (
+          <View key={`${d.label}-${i}`} {...HIDE} style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+            <View style={{ height: h, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'flex-end' }}>
+              {v == null ? null : (
+                <View style={{
+                  width: 18, borderRadius: 6,
+                  height: stub ? 6 : Math.max(6, Math.round(h * clamp01(v / top))),
+                  backgroundColor: stub ? t.surface3 : toneOf(t, d.tone ?? 'brand').mark,
+                }} />
+              )}
+            </View>
+            <Text numberOfLines={1} style={{ ...ty.micro, color: t.ink3 }}>{d.label}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/** One slice of a Donut, and one line of its Legend. */
+export interface Slice {
+  label: string;
+  /** The slice's size. Null and non-positive slices are not drawn. */
+  value: number | null | undefined;
+  tone: Tone;
+  /** What the legend prints for it — "8", "62%" — formatted by the caller. */
+  shown?: string | null;
+}
+
+/**
+ * Shares of a whole as a ring of coloured arcs, with a figure in the hole.
+ *
+ * Nothing to draw — no slices, or none above zero — is the grey track and a
+ * dash, never an even split. Slices are NOT summed across anything the caller
+ * should not sum: the component adds what it is given, so a caller with two
+ * currencies gives it one.
+ */
+export function Donut({ slices, centre, sub, size = 100, stroke = 15, spoken }: {
+  slices: Slice[]; centre?: string | null; sub?: string; size?: number; stroke?: number; spoken: string;
+}) {
+  const t = useTheme();
+  const D = grown(size);
+  const r = (size - stroke) / 2, C = 2 * Math.PI * r;
+  const drawn = slices.filter((s) => known(s.value) && s.value > 0);
+  const total = drawn.reduce((n, s) => n + (s.value as number), 0);
+  let acc = 0;
+  return (
+    <View accessible accessibilityRole="image" accessibilityLabel={spoken}
+      style={{ width: D, height: D, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <Svg {...HIDE} width={D} height={D} viewBox={`0 0 ${size} ${size}`} style={{ position: 'absolute' }}>
+        <Circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={t.surface3} strokeWidth={stroke} />
+        {total > 0 ? drawn.map((s, i) => {
+          const len = C * ((s.value as number) / total);
+          const at = acc; acc += len;
+          // A 2-unit gap between neighbours so two adjacent hues stay two
+          // slices; a lone slice is a whole ring and gets no gap.
+          const gap = drawn.length > 1 ? Math.min(2, len / 2) : 0;
+          return (
+            <Circle key={`${s.label}-${i}`} cx={size / 2} cy={size / 2} r={r} fill="none"
+              stroke={toneOf(t, s.tone).mark} strokeWidth={stroke}
+              strokeDasharray={`${len - gap} ${C - len + gap}`} strokeDashoffset={-at}
+              transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+          );
+        }) : null}
+      </Svg>
+      <Text {...HIDE} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
+        style={{ ...value(22), color: t.ink, maxWidth: D - stroke * 2 - 10 }}>{fig(centre)}</Text>
+      {sub ? <Text {...HIDE} numberOfLines={1} style={{ ...ty.micro, ...font('400'), fontSize: 12, color: t.ink3 }}>{sub}</Text> : null}
+    </View>
+  );
+}
+
+/** The words beside a Donut: a swatch, a name, a figure, one line each. It is
+ *  what makes the donut readable without its colours — and each line is one
+ *  spoken fact, "On Track, 8". */
+export function Legend({ items }: { items: Slice[] }) {
+  const t = useTheme();
+  return (
+    <View style={{ flex: 1, minWidth: 0, gap: sp.sm }}>
+      {items.map((s, i) => (
+        <View key={`${s.label}-${i}`} accessible accessibilityLabel={`${s.label}, ${fig(s.shown) === '—' ? 'no figure' : fig(s.shown)}`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+          <View {...HIDE} style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: toneOf(t, s.tone).mark }} />
+          <Text style={{ ...ty.caption, color: t.ink2, flex: 1, minWidth: 0 }}>{s.label}</Text>
+          <Text style={{ ...ty.caption, ...font('700'), ...numeric, color: t.ink }}>{fig(s.shown)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** The x/y of a series in a w×h drawing, gaps kept as gaps — for the small
+ *  trend in a KpiTile. Spark has its own because it also has an axis. */
+function plot(data: (number | null | undefined)[], w: number, h: number, padY: number) {
+  const pts = readablePoints(data);
+  const vals = pts.map((p) => p.v);
+  const min = Math.min(...vals), rng = (Math.max(...vals) - min) || 1;
+  const n = data.length;
+  const x = (i: number) => (n > 1 ? (i / (n - 1)) * w : w / 2);
+  const y = (v: number) => padY + (h - padY * 2) * (1 - (v - min) / rng);
+  return { pts, runs: segments(data), x, y };
+}
+
+/**
+ * A figure in a tile of its own: the Sora number in its tone, the label under
+ * it, and a small trend along the bottom — the mockups' "12 Active Clients".
+ *
+ * `value` is a STRING the caller formatted, or null for the dash; the tile
+ * does no arithmetic and no rounding. The figure takes the tone's INK (a 26pt
+ * figure shrunk to fit a narrow tile is not reliably "large text"). `trend` is
+ * decoration over a number already printed: fewer than two readings and the
+ * strip is simply empty — still its height, so three tiles in a row keep one
+ * baseline. It is one spoken fact, `spoken` or "label, value unit".
+ */
+export function KpiTile({ label, value: shown, unit, tone = 'brand', trend, onPress, spoken }: {
+  label: string; value: string | null | undefined; unit?: string; tone?: Tone;
+  trend?: (number | null | undefined)[]; onPress?: () => void; spoken?: string;
+}) {
+  const t = useTheme();
+  const c = toneOf(t, tone);
+  const W = 84, H = 24;
+  const drawn = trend ? plot(trend, W, H, 3) : null;
+  const said = spoken ?? [label, fig(shown) === '—' ? 'no figure' : [fig(shown), unit].filter(Boolean).join(' ')].join(', ');
+  return (
+    <Pressable onPress={onPress} disabled={!onPress}
+      accessible accessibilityLabel={said} accessibilityRole={onPress ? 'button' : undefined}
+      style={{ flex: 1, minWidth: 0, backgroundColor: t.surface, borderRadius: radius.md, padding: sp.md, gap: sp.xs, ...elevation.card }}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
+          style={{ ...value(26), color: c.ink, flexShrink: 1 }}>{fig(shown)}</Text>
+        {unit ? <Text style={{ ...ty.caption, color: t.ink3, marginStart: 3, flexShrink: 1 }}>{unit}</Text> : null}
+      </View>
+      {/* Two lines reserved, so "Workouts" and "Need You" and "InBody Score"
+          leave their sparklines on one line across the row. */}
+      <Text numberOfLines={linesAtScale(fontScale, 2)} style={{ ...ty.micro, color: t.ink3, minHeight: grown(18) * 2 }}>{label}</Text>
+      {/* No `trend` prop, no strip: a row of tiles with nothing to trend is
+          three figures, not three figures over three blanks. A trend that was
+          passed and is too short keeps the strip's height — see above. */}
+      {trend === undefined ? null : (
+      <View {...HIDE} style={{ height: H }}>
+        {drawn && drawn.pts.length >= 2 ? (
+          <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+            {drawn.runs.map((run, ri) => run.length >= 2 ? (
+              <Polygon key={`f${ri}`} fill={c.soft}
+                points={`${run.map((p) => `${drawn.x(p.i)},${drawn.y(p.v)}`).join(' ')} ${drawn.x(run[run.length - 1].i)},${H} ${drawn.x(run[0].i)},${H}`} />
+            ) : null)}
+            {drawn.runs.map((run, ri) => run.length >= 2 ? (
+              <Polyline key={`l${ri}`} points={run.map((p) => `${drawn.x(p.i)},${drawn.y(p.v)}`).join(' ')}
+                fill="none" stroke={c.mark} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+            ) : null)}
+          </Svg>
+        ) : null}
+      </View>
+      )}
+    </Pressable>
+  );
+}
+
 /** One segment of a Segmented bar. */
 export interface Segment<K extends string = string> {
   key: K;
@@ -1906,22 +2471,26 @@ export function Segmented<K extends string>({ options, value, onChange, scroll, 
           ...(scroll ? { flexGrow: 1 } : wrap ? { flexGrow: 1, flexBasis: '45%' } : { flex: 1 }),
           minHeight: grown(40), paddingHorizontal: scroll ? sp.lg : sp.xs,
           alignItems: 'center', justifyContent: 'center',
-          borderRadius: wrap ? radius.sm : radius.pill,
+          borderRadius: radius.sm,
           backgroundColor: on ? t.ink : 'transparent',
           opacity: o.disabled ? 0.5 : 1,
         }}>
         <Text numberOfLines={1} adjustsFontSizeToFit={!scroll} minimumFontScale={0.85}
-          style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2, textAlign: 'center' }}>
+          style={{ ...ty.label, ...numeric, ...font('600'), color: on ? t.surface : t.ink2, textAlign: 'center' }}>
           {o.label}
         </Text>
       </Pressable>
     );
   });
-  const bar: ViewStyle = { backgroundColor: t.surface2, borderRadius: wrap ? radius.md : radius.pill, padding: 3 };
+  // A rounded BOX, not a pill: surface3, a 13pt radius, 4pt inside and 4pt
+  // between, with 10pt-radius segments — the mockups' bar. surface3 rather
+  // than surface2 because the bar sits on the ground as often as on a card,
+  // and surface2 is two points of grey from the ground.
+  const bar: ViewStyle = { backgroundColor: t.surface3, borderRadius: 13, padding: 4, gap: 4 };
   return scroll ? (
     <View style={[bar, style]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist"
-        keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+        keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, gap: 4 }}>
         {segs}
       </ScrollView>
     </View>

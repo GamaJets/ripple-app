@@ -50,7 +50,7 @@ import { Icon, type IconName } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, PageHead, Flag, Notice, Field, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, PageHead, Flag, Notice, Field, MiniRing, fig, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -106,7 +106,16 @@ interface RowFigure {
    *  reason; where it is real this names the device it came from. Null when
    *  there is nothing worth a line. */
   note: string | null;
+  /** How far toward the goal, 0 and up, for the three rows that COUNT toward
+   *  one — water, steps, sleep. Null wherever `text` is a dash, by
+   *  construction: it is only ever set on the branch that printed a real
+   *  figure, so a ring can never be drawn from a number the row withheld. */
+  ratio?: number | null;
 }
+
+/** The three counted habits, and the hue each takes in the rings over the
+ *  list. A tick is not a quantity and gets no ring. */
+const RING_TONE: Record<string, Tone> = { water: 'teal', steps: 'purple', sleep: 'blue' };
 
 export default function Habits() {
   const t = useTheme();
@@ -244,7 +253,7 @@ export default function Habits() {
   function rowFigure(id: string, done: boolean): RowFigure {
     if (id === 'water') {
       if (!waterCounted || h.waterGoal == null) return { text: fig(null), note: hydration.text };
-      return { text: `${num(h.water)}/${num(h.waterGoal)}`, note: null };
+      return { text: `${num(h.water)}/${num(h.waterGoal)}`, note: null, ratio: h.waterGoal > 0 ? h.water / h.waterGoal : null };
     }
     if (id === 'steps') {
       if (c.stepGoal == null) return { text: fig(null), note: null };
@@ -261,7 +270,7 @@ export default function Habits() {
       }
       // numbers-ok: stepsDevice is the device's name, not a count.
       if (wear.today.steps == null) return { text: fig(null), note: `Your ${stepsDevice} has no step count for today yet.` };
-      return { text: `${num(wear.today.steps)}/${num(c.stepGoal)}`, note: `Today, from your ${stepsDevice}` };
+      return { text: `${num(wear.today.steps)}/${num(c.stepGoal)}`, note: `Today, from your ${stepsDevice}`, ratio: c.stepGoal > 0 ? wear.today.steps / c.stepGoal : null };
     }
     if (id === 'sleep') {
       if (c.sleepGoalHours == null) return { text: fig(null), note: null };
@@ -273,12 +282,13 @@ export default function Habits() {
         const src = lastNight.source;
         return {
           text: `${plain(lastNight.minutesAsleep / 60, 1)}/${goal}`,
+          ratio: c.sleepGoalHours > 0 ? lastNight.minutesAsleep / 60 / c.sleepGoalHours : null,
           note: src
             ? `Last night, from your ${src.sourceName}${src.basis === 'in-bed' ? ' — time in bed' : ''}${lastNight.kept ? ', as read earlier' : ''}`
             : 'Last night, from your device',
         };
       }
-      if (typedNight) return { text: `${plain(typedNight.hours, 1)}/${goal}`, note: 'Last night, as you logged it on Recovery' };
+      if (typedNight) return { text: `${plain(typedNight.hours, 1)}/${goal}`, note: 'Last night, as you logged it on Recovery', ratio: c.sleepGoalHours > 0 ? typedNight.hours / c.sleepGoalHours : null };
       if (deviceSleep.status === 'loading' || wellness.status === 'loading') {
         return { text: fig(null), note: 'Reading last night…' };
       }
@@ -405,6 +415,28 @@ export default function Habits() {
           ) : null}
 
           <View style={{ marginTop: sp.sm }}>
+            {/* ── the counted three, as rings ─────────────────────────────────
+                Water, steps and sleep are quantities against a goal, and the
+                mockups draw a quantity against a goal as a small coloured
+                ring. Each is `rowFigure`'s own answer for that row — the same
+                text, and a ratio that exists only where the text is a real
+                figure — so a watch that has not answered is a ring with no
+                arc and a dash, exactly as its row is a dash with the reason
+                under it. Only the habits actually on today's list get one. */}
+            {h.habits.some((hb) => RING_TONE[hb.id]) ? (
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+                {h.habits.filter((hb) => RING_TONE[hb.id]).map((hb) => {
+                  const f = rowFigure(hb.id, hb.done);
+                  const counted = f.text !== fig(null);
+                  return (
+                    <MiniRing key={hb.id} tone={RING_TONE[hb.id]} label={hb.label}
+                      value={counted ? f.ratio ?? null : null}
+                      figure={counted ? f.text : null}
+                      spoken={`${hb.label}, ${counted ? f.text.replace('/', ' of ') : 'not counted'}`} />
+                  );
+                })}
+              </View>
+            ) : null}
             {h.habits.map((hb, hi) => {
               // The run for THIS line, or null. Three different nulls meet here
               // and none of them is a zero:

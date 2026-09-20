@@ -23,11 +23,10 @@ import { BRAND } from '../../src/lib/brands';
 import { weekIndexOf } from '../../src/lib/weekStart';
 import { trainIntent } from '../../src/lib/trainIntent';
 import { View, Text, ScrollView, Pressable, Alert, Image } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Cta, Ghost, QuickRow, Notice, Card, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Cta, Ghost, QuickRow, Notice, Card, Flag, HeroCard, HeroRing, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, hairline } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { num, fmtTime } from '../../src/lib/format';
@@ -676,47 +675,42 @@ export default function Home() {
             empty ring over "0 of 4" is a claim about the member's week that a
             failed or capped read cannot make, and the two Notices further down
             say which of the two it was. */}
-        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Weekly Goal</Text>
-              <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>
-                {logKnown ? `${wk.days} of ${goalDays} training days` : 'This week could not be counted'}
-              </Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                {!logKnown
-                  ? 'Your log could not be read in full, so nothing here is guessed.'
-                  // A goal is a floor, not a quota — past it the count is
-                  // still the member's own, and "6 of 3" reads as a fault.
-                  : wk.days > goalDays ? `Past your goal by ${wk.days - goalDays} · keep it up`
-                  : wk.days === goalDays ? 'Goal met · keep the momentum going'
-                  : `${goalDays - wk.days} ${goalDays - wk.days === 1 ? 'day' : 'days'} left this week`}
-              </Text>
-            </View>
-            {/* The ring is decoration over the figure inside it, so the
-                control is a button that says the figure and where it goes —
-                not a progressbar, which a reader cannot tap. */}
+        {/* The night hero card, since the approved mockups: the same three
+            facts and the same button, on <HeroCard>. Nothing about WHAT is
+            shown moved — the count, the withheld state, the floor-not-quota
+            wording, the button's adaptive label, route and tone are the lines
+            that were here. */}
+        <HeroCard
+          eyebrow="WEEKLY GOAL"
+          title={logKnown ? `${wk.days} of ${goalDays} training days` : 'This week could not be counted'}
+          meta={!logKnown
+            ? 'Your log could not be read in full, so nothing here is guessed.'
+            // A goal is a floor, not a quota — past it the count is
+            // still the member's own, and "6 of 3" reads as a fault.
+            : wk.days > goalDays ? `Past your goal by ${wk.days - goalDays} · keep it up`
+            : wk.days === goalDays ? 'Goal met · keep the momentum going'
+            : `${goalDays - wk.days} ${goalDays - wk.days === 1 ? 'day' : 'days'} left this week`}
+          ring={
+            // The ring is decoration over the figure inside it, so the
+            // control is a button that says the figure and where it goes —
+            // not a progressbar, which a reader cannot tap. The button's label
+            // replaces the ring's own, which is why both are the same words.
             <Pressable onPress={() => router.push('/(client)/week')} accessibilityRole="button"
               accessibilityLabel={logKnown
                 ? `${wk.days} of ${goalDays} training days this week. Open This Week`
                 : 'This week could not be counted. Open This Week'}
-              hitSlop={8}
-              style={{ width: 62, height: 62, alignItems: 'center', justifyContent: 'center' }}>
-              <Svg width={62} height={62} viewBox="0 0 62 62" style={{ position: 'absolute' }}
-                accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                <Circle cx="31" cy="31" r="26" fill="none" stroke={t.surface2} strokeWidth={6} />
-                {logKnown ? (
-                  <Circle cx="31" cy="31" r="26" fill="none" stroke={t.brand} strokeWidth={6} strokeLinecap="round"
-                    strokeDasharray={2 * Math.PI * 26}
-                    strokeDashoffset={2 * Math.PI * 26 * (1 - Math.min(1, wk.days / Math.max(1, goalDays)))}
-                    transform="rotate(-90 31 31)" />
-                ) : null}
-              </Svg>
-              <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>
-                {logKnown ? `${wk.days}/${goalDays}` : fig(null)}
-              </Text>
+              hitSlop={8}>
+              {/* `null` when the log is not whole: track only, and a dash. */}
+              <HeroRing
+                value={logKnown ? wk.days / Math.max(1, goalDays) : null}
+                figure={logKnown ? `${wk.days}/${goalDays}` : null}
+                sub="this week"
+                spoken={logKnown ? `${wk.days} of ${goalDays} training days this week` : 'This week could not be counted'}
+              />
             </Pressable>
-          </View>
+          }
+          cta={{ label: today.cta, tone: today.tone, onPress: () => router.push(trainIntent(today.route) as any) }}
+        >
           {/* ── why THIS button, said beside it ──────────────────────────────
               The button is adaptive — Start Workout, Recovery, Log a Meal, View
               Plan — and its reason used to live in the Today card, which sits
@@ -726,13 +720,10 @@ export default function Home() {
               headline and (for a session) what the session is; the Today card
               keeps the full sentence. Nothing here is a new claim: both halves
               are the `today` and `workout` the card below already draws. */}
-          <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.lg }}>
+          <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.lg }}>
             {today.headline}{today.route.includes('workouts') && workout.exercises.length ? ` · ${workout.focus}` : ''}
           </Text>
-          <View style={{ marginTop: sp.sm }}>
-            <Cta label={today.cta} wide tone={today.tone} onPress={() => router.push(trainIntent(today.route) as any)} />
-          </View>
-        </View>
+        </HeroCard>
 
         {/* ── interrupts: what is wrong, before what is next ────────────────
             The data-layout review's fourth slot: an urgent injury, a write that

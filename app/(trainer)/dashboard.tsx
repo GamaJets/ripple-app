@@ -59,7 +59,7 @@ import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag, AttentionRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag, AttentionRow, TonedChip, Donut, Legend, type Tone } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
 import { sp, layout, radius, hairline, elevation, grown, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -265,16 +265,22 @@ const NEW_THIS_WEEK_DAYS = 7;
  * claim that there was a record to be missing from. Never colour alone: the
  * words carry the state and the dot repeats it (kit rule two).
  */
-function rowStatus(t: Theme, c: RosterClient, d: Drift | null, driftRead: boolean, today: string): { words: string; tone: string | null } {
-  if (d && d.status === 'at_risk') return { words: 'Needs check-in', tone: driftTone(t, d) };
-  if (d && d.status === 'watch') return { words: 'Slipping', tone: driftTone(t, d) };
+//
+// `chip` is the same state as a NAME from the kit's data palette, for the four
+// states the mockups draw as a chip — red for a check-in owed, amber for
+// slipping, purple for the unknown (driftTone's own reason for giving it a hue
+// of its own), blue for new, the accent for on track. Absent wherever `tone`
+// is null, and on the adherence line, which is a sentence and not a state.
+function rowStatus(t: Theme, c: RosterClient, d: Drift | null, driftRead: boolean, today: string): { words: string; tone: string | null; chip?: Tone } {
+  if (d && d.status === 'at_risk') return { words: 'Needs check-in', tone: driftTone(t, d), chip: 'red' };
+  if (d && d.status === 'watch') return { words: 'Slipping', tone: driftTone(t, d), chip: 'amber' };
   const days = c.joinedAt ? daysBetween(c.joinedAt, today) : null;
-  if (days != null && days >= 0 && days < NEW_THIS_WEEK_DAYS) return { words: 'New this week', tone: t.brand };
+  if (days != null && days >= 0 && days < NEW_THIS_WEEK_DAYS) return { words: 'New this week', tone: t.brand, chip: 'blue' };
   // No account behind them, so there is no activity to be missing — see the
   // note on `attnReason`, which learned this the expensive way.
   if (c.handAdded) return { words: `Added by you · ${c.goal}`, tone: null };
-  if (d && d.status === 'idle') return { words: 'Missing progress', tone: driftTone(t, d) };
-  if (d) return { words: 'On track', tone: driftTone(t, d) };
+  if (d && d.status === 'idle') return { words: 'Missing progress', tone: driftTone(t, d), chip: 'purple' };
+  if (d) return { words: 'On track', tone: driftTone(t, d), chip: 'brand' };
   // No drift verdict to speak, and a figure THEY submitted that says something.
   // This was a separate "Below target" flag on a second line of the row; the
   // row has one line now, so it is that line's words where nothing above had
@@ -2330,13 +2336,18 @@ export default function TrainerClients() {
             not dropped: it is the line under the strip, with the two things
             a bare percentage never said — what it is a mean OF, and of how
             many (the review's second rule). */}
-        <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, paddingVertical: sp.lg, paddingHorizontal: sp.lg }}>
-          <KpiRow
+        {/* Three tiles on the ground, as the mockups draw the strip, through
+            the kit's `tiles` mode: each figure in a hue of its own. No trend
+            is passed, because there is no series behind these three counts and
+            a sparkline is not a thing to invent. The line under them is the
+            same line, on the ground now rather than in the card. */}
+        <View>
+          <KpiRow tiles
             onPress={(k) => { if (k.route) router.push(k.route as never); }}
             items={[
-              { label: 'Active Clients', value: fig(rosterCount), route: '/(trainer)/analytics' },
-              { label: 'Sessions Today', value: todaySessions === null ? fig(null) : fig(todaySessions.length), route: '/(trainer)/calendar' },
-              { label: 'Need Attention', value: fig(isWhole(rosterStatus) && drift ? needsAttention.length : null), route: '/(trainer)/nudges' },
+              { label: 'Active Clients', value: fig(rosterCount), route: '/(trainer)/analytics', tone: 'blue' },
+              { label: 'Sessions Today', value: todaySessions === null ? fig(null) : fig(todaySessions.length), route: '/(trainer)/calendar', tone: 'brand' },
+              { label: 'Need Attention', value: fig(isWhole(rosterStatus) && drift ? needsAttention.length : null), route: '/(trainer)/nudges', tone: 'red' },
             ]}
           />
           {rosterStatus === 'error' || rosterStatus === 'partial' || rosterStatus === 'loading' || sessionsUnread ? (
@@ -2355,6 +2366,38 @@ export default function TrainerClients() {
             </Text>
           ) : null}
         </View>
+
+        {/* ── roster health ────────────────────────────────────────────────
+            The mockups' donut, over the four bands src/lib/clientDrift.ts
+            already sorts the book into — the same `bands` the Clients head,
+            the segment bar and `bookState` count from, so this is a picture of
+            figures the screen already states and not a new claim.
+
+            Drawn only from a read that can support a verdict about the WHOLE
+            book: a whole roster, a drift answer, and drift coverage that was
+            neither truncated nor refused for anybody — `bookState`'s gate,
+            word for word. Anything less and the card is absent rather than
+            drawn from part of the book; the line under the tiles above already
+            says which read fell short. The legend carries every count in
+            words, so the colours repeat the state and never are it. */}
+        {isWhole(rosterStatus) && bands && bands.total > 0 && driftRead && !driftRead.truncated && !driftRead.notAsked.size ? (() => {
+          const slices = [
+            { label: 'On Track', value: bands.steady, shown: num(bands.steady), tone: 'brand' as const },
+            { label: 'Slipping', value: bands.watch, shown: num(bands.watch), tone: 'amber' as const },
+            { label: 'Needs Check-in', value: bands.drifting, shown: num(bands.drifting), tone: 'red' as const },
+            { label: 'Nothing Recorded', value: bands.unknown, shown: num(bands.unknown), tone: 'purple' as const },
+          ];
+          return (
+            <Section>
+              <SectionHead title="Roster Health" />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+                <Donut slices={slices} centre={num(bands.total)} sub={bands.total === 1 ? 'client' : 'clients'}
+                  spoken={`Roster health. ${slices.map((x) => `${x.shown} ${x.label.toLowerCase()}`).join(', ')}, of ${num(bands.total)}.`} />
+                <Legend items={slices} />
+              </View>
+            </Section>
+          );
+        })() : null}
 
         {/* ── today ─────────────────────────────────────────────────────────
             The day ahead, in booking order, and the one add control the
@@ -2837,10 +2880,22 @@ export default function TrainerClients() {
                       6pt so it reads at arm's length; the words are what a
                       screen reader gets. Two lines allowed, so a large text
                       size wraps the line rather than cutting a figure. */}
+                  {st.chip ? (
+                    // The mockups' status chip: the state's words on a plate
+                    // of its hue, and the row's other facts in plain caption
+                    // after it. Hidden from a screen reader on purpose — the
+                    // row's own label already says the whole line once.
+                    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+                      style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                      <TonedChip label={st.words} tone={st.chip} />
+                      {extras.length ? <Text style={{ ...ty.caption, color: t.ink2, flexShrink: 1 }} numberOfLines={2}>{extras.join(' · ')}</Text> : null}
+                    </View>
+                  ) : (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     {st.tone ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: st.tone }} /> : null}
                     <Text style={{ ...ty.caption, color: st.tone ? t.ink2 : t.ink3, flexShrink: 1 }} numberOfLines={2}>{line}</Text>
                   </View>
+                  )}
                 </View>
                 <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
               </View>

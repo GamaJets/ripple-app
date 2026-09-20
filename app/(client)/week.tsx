@@ -13,7 +13,9 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Flag, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Flag, PartialRead, DayBars } from '../../src/ui/kit';
+import { isWhole } from '../../src/ui/loadStatus';
+import { num } from '../../src/lib/format';
 import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useCallback, useMemo } from 'react';
@@ -282,6 +284,31 @@ export default function ThisWeek() {
 
         <Section>
           <SectionHead title="The Plan" note={trainingDays === 0 ? 'No days scheduled' : `${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />
+
+          {/* ── the week at a glance ────────────────────────────────────────
+              Seven bars: how many movements the log holds for each day of THIS
+              week — the same entries `logged` below marks a day "Logged" from,
+              counted instead of flattened to yes or no. A day that has not
+              happened yet draws nothing; a day that has, with nothing logged,
+              draws the grey stub of a counted zero. Only from a whole log: the
+              two Notices above already say why a failed or capped read marks
+              nothing, and a row of stubs under them would say "you did not
+              train" about days this screen could not see. */}
+          {isWhole(logStatus) ? (() => {
+            const perDay = rows.map(({ label, i }) => {
+              if (i > todayIdx) return { label, value: null };
+              const date = new Date(weekOpened); date.setDate(weekOpened.getDate() + i);
+              const key = isoDay(date);
+              return { label, value: log.filter((l) => isoDay(new Date(l.t)) === key).length };
+            });
+            const said = perDay.filter((d) => d.value != null)
+              .map((d) => `${d.label} ${d.value === 0 ? 'none' : num(d.value as number)}`).join(', ');
+            return (
+              <View style={{ marginBottom: sp.lg }}>
+                <DayBars days={perDay} spoken={`Movements logged each day this week. ${said}.`} />
+              </View>
+            );
+          })() : null}
 
           {/* Which week of the block these seven days are, and the sentence
               saying why that one. Nothing at all for a one-week programme, so a

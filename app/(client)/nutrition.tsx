@@ -17,7 +17,6 @@ import { num, numUpTo } from '../../src/lib/format';
 import { fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
@@ -94,7 +93,7 @@ import type { FoodFacts } from '../../src/lib/foodPortion';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, ListRow, fig, Segmented } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, ListRow, fig, Segmented, Ring, Meter } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -1355,18 +1354,16 @@ export default function Nutrition() {
           <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
             accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories could not be counted. Open the food log'}
             hitSlop={8}
-            style={{ width: 156, height: 156, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginTop: sp.md }}>
-            <Svg width={156} height={156} viewBox="0 0 156 156" style={{ position: 'absolute' }}
-              accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <Circle cx="78" cy="78" r="68" fill="none" stroke={t.surface3} strokeWidth={11} />
-              {dayWhole && target.kcal ? (
-                <Circle cx="78" cy="78" r="68" fill="none" stroke={t.brand} strokeWidth={11} strokeLinecap="round"
-                  strokeDasharray={2 * Math.PI * 68} strokeDashoffset={2 * Math.PI * 68 * (1 - Math.min(1, eaten.kcal / target.kcal))}
-                  transform="rotate(-90 78 78)" />
-              ) : null}
-            </Svg>
-            <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(30), color: t.ink }}>{dayWhole ? num(eaten.kcal) : fig(null)}</Text>
-            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>of {num(target.kcal)} kcal</Text>
+            style={{ alignSelf: 'center', marginTop: sp.md }}>
+            {/* The kit's <Ring>. `null` for both while the day is not whole or
+                there is no target: track only and a dash, never an empty arc
+                round a full allowance. The button's label above replaces the
+                ring's own, so the two say the same thing. */}
+            <Ring size={156}
+              value={dayWhole && target.kcal ? eaten.kcal / target.kcal : null}
+              figure={dayWhole ? num(eaten.kcal) : null}
+              sub={`of ${num(target.kcal)} kcal`}
+              spoken={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today` : 'Today’s calories could not be counted'} />
           </Pressable>
           <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
             {dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'left' : 'over'}` : 'Calories not counted'}
@@ -1379,18 +1376,15 @@ export default function Nutrition() {
           </Text>
           {/* Intake against target, not the plan's totals: three figures under
               a sentence about what you have eaten mean what you have eaten. */}
-          <View style={{ flexDirection: 'row', marginTop: sp.lg, paddingVertical: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
-            {[
-              { label: 'Protein', value: dayWhole ? `${Math.round(eaten.protein)} / ${target.protein} g` : fig(null) },
-              { label: 'Carbs', value: dayWhole ? `${Math.round(eaten.carbs)} / ${target.carbs} g` : fig(null) },
-              { label: 'Fat', value: dayWhole ? `${Math.round(eaten.fat)} / ${target.fat} g` : fig(null) },
-            ].map((macro, index) => (
-              <View key={macro.label} accessible accessibilityLabel={`${macro.label}, ${dayWhole ? macro.value.replace(' / ', ' of ') : 'not counted'}`}
-                style={{ flex: 1, alignItems: 'center', paddingHorizontal: sp.xs, borderStartWidth: index ? hairline : 0, borderStartColor: t.ring }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{macro.label}</Text>
-                <Text numberOfLines={1} style={{ ...value(17), color: t.ink, marginTop: 3 }}>{macro.value}</Text>
-              </View>
-            ))}
+          {/* The kit's <Meter>, one per macro, each in its own data hue as the
+              mockups draw them. `null` while the day is not whole: no fill and
+              a dash over the target, spoken as "not read" — not an empty bar,
+              which would say nothing had been eaten. Rounded HERE, as the
+              strip this replaces did; the meter prints what it is handed. */}
+          <View style={{ marginTop: sp.xs }}>
+            <Meter label="Protein" tone="blue" val={dayWhole ? Math.round(eaten.protein) : null} target={target.protein} />
+            <Meter label="Carbs" tone="orange" val={dayWhole ? Math.round(eaten.carbs) : null} target={target.carbs} />
+            <Meter label="Fat" tone="purple" val={dayWhole ? Math.round(eaten.fat) : null} target={target.fat} />
           </View>
           {/* Where the targets above came from, in one line beside them — a
               target with no source reads as a rule nobody set. Three sources

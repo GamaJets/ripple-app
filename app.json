@@ -57,6 +57,19 @@
           "backgroundColor": "#0f172a"
         }
       ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "node_modules/@expo-google-fonts/sora/600SemiBold/Sora_600SemiBold.ttf",
+            "node_modules/@expo-google-fonts/sora/700Bold/Sora_700Bold.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/400Regular/PlusJakartaSans_400Regular.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/500Medium/PlusJakartaSans_500Medium.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/600SemiBold/PlusJakartaSans_600SemiBold.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/700Bold/PlusJakartaSans_700Bold.ttf"
+          ]
+        }
+      ],
       "expo-router",
       "expo-image-picker",
       "expo-camera",

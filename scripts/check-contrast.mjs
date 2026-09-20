@@ -151,7 +151,14 @@ const ROOTS = ['app', 'src/ui'];
 const ROOT = process.cwd();
 
 /** The tokens tuned to 3:1 as marks, and therefore never safe as ink. */
-const STATUS = /\bt\.(crit|warn|serious|good|s[1-6])\b/;
+// The data palette joined them with the approved mockups: `t.data.orange` is a
+// ring's arc at 3.03:1 and `t.data.orangeSoft` is a plate, and the mockups
+// themselves draw chip labels in the mark colour, so this is the form the
+// mistake WILL take. Each hue has a third value that is measured as text —
+// `t.data.orangeInk`, held to 4.5:1 in src/lib/a11y.test.ts — and the `\b`
+// after the hue is what lets it through: there is no word boundary inside
+// "orangeInk".
+const STATUS = /\bt\.(crit|warn|serious|good|s[1-6]|data\.(?:blue|orange|purple|teal|pink|amber|red)(?:Soft)?)\b/;
 
 /**
  * `color:` and not backgroundColor / borderColor / tintColor / shadowColor —

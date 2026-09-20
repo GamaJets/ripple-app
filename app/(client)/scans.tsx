@@ -1866,7 +1866,7 @@ export default function Scans() {
             "when" as well as "what". Two readings are the least a line can be
             drawn from; under that the line says what it is waiting for. */}
         {progressTrendReads.length > 1 ? (
-          <Spark
+          <Spark area
             data={progressTrendReads.map((reading) => (progressMetric === 'weight' ? weightIn(reading.value, wu) : reading.value)).filter((v): v is number => v != null)}
             unit={progressMetric === 'weight' ? ` ${wu}` : '%'}
             labels={progressTrendReads.map((reading) => reading.at)}

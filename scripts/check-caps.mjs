@@ -131,10 +131,24 @@ const ALL_ROOTS = [...APP_ROOTS, 'studio-web/app', 'studio-web/components'];
  * Adding a component here is a claim that its text renders as typed.
  */
 const VISIBLE = new Map([
-  ['Cta', ['label']],            // ty.label — kit.tsx:427
-  ['Ghost', ['label']],          // ty.label — kit.tsx:526
-  ['ListRow', ['title']],        // ty.body  — kit.tsx:401
-  ['PageHead', ['title']],       // ty.title — kit.tsx, the board's centred page head
+  ['Cta', ['label']],            // ty.button when wide, ty.label inline
+  ['Ghost', ['label']],          // ty.label
+  ['ListRow', ['title']],        // ty.head
+  ['PageHead', ['title']],       // ty.page — the centred page head
+  // The approved mockups' parts. Each is a LABEL — a button, a chip, the name
+  // under a ring or over a bar, a tile's caption — in a face that draws what
+  // was typed, so each is held to Title Case from its first call site. Two
+  // things this cannot see, as with ActionBlock below: `cta={{ label }}` on
+  // HeroCard is an object literal, and a DayBars/Donut/Legend label lives in
+  // an array. <HeroCard eyebrow> is deliberately absent: it is the one slot
+  // set in tracked capitals, its caller types the capitals ("TODAY · WEEK 1 OF
+  // 12"), and Title Case is the wrong rule for it.
+  ['CtaBright', ['label']],      // ty.button
+  ['HeroCard', ['title']],       // ty.display
+  ['TonedChip', ['label']],      // ty.micro at 700
+  ['KpiTile', ['label']],        // ty.micro
+  ['MiniRing', ['label']],       // ty.micro
+  ['Meter', ['label']],          // ty.caption at 700
   ['ActionCard', ['title', 'cta']], // ty.body kit.tsx:380, and cta is a <Cta>
   // The data-layout shapes (round 4). Each of these is a HEADING over a card —
   // ty.head, the face SectionHead's title now uses — and every call site that
@@ -149,8 +163,8 @@ const VISIBLE = new Map([
   // row that can say more, and the first two callers both wrote a sentence in
   // it — "Marked on this phone · waiting to send" — which is the right thing to
   // write there. Same standing as <Notice title>: case-visible, and prose.
-  ['FigureCard', ['title']],     // ty.head, through SectionHead
-  ['ActionBlock', ['title']],    // ty.head
+  ['FigureCard', ['title']],     // ty.section, through SectionHead
+  ['ActionBlock', ['title']],    // ty.section
   ['Expandable', ['title']],     // ty.head
 ]);
 

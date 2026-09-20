@@ -4,21 +4,20 @@
 // they appear in is untouched. The primary bar stays six items; everything else
 // in this group is a detail screen registered with `href: null`.
 //
-// The bar now follows the same accessibility rules as the client app: its
-// content height grows with Dynamic Type and it gets out of the way while the
-// keyboard is open. That matters on Coach because several primary tabs open
-// dense forms and scheduling tools, and a fixed 56pt bar was the one navigation
-// surface that still clipped large labels while Client already scaled correctly.
+// The bar is the shared floating one (src/ui/FloatingTabBar.tsx). It grows
+// with Dynamic Type and gets out of the way while the keyboard is open — that
+// second part is asked for HERE, with `tabBarHideOnKeyboard`, because several
+// primary Coach tabs open dense forms and scheduling tools and a composer's
+// Send must not be pushed up by a bar.
 //
 // A `<Tabs.Screen>` list is walked by expo-router rather than rendered, so keep
 // commentary out from between the entries — notes about a route belong here, or
 // in the route's own file header.
 import { Tabs, Redirect } from 'expo-router';
 import { groupAllowed } from '../../src/lib/variant';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { sp, type as ty, grown } from '../../src/theme/scale';
+import { FloatingTabBar } from '../../src/ui/FloatingTabBar';
 import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 import { FloorQueueSync } from '../../src/ui/floorQueue';
@@ -40,8 +39,6 @@ export default function TrainerLayout() {
   if (!loading && !authed) return <Redirect href="/" />;
 
   const t = useTheme();
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, 10);
   // What this coach missed while they were away, filtered to the coach app —
   // they are not told about client-only changes. Keyed on the account, so a
   // coach who has just made one is shown nothing at all.
@@ -50,29 +47,22 @@ export default function TrainerLayout() {
     <>
       <Tabs
         backBehavior="history"
+        tabBar={(props) => <FloatingTabBar {...props} />}
         screenOptions={{
           headerShown: false,
           tabBarHideOnKeyboard: true,
-          // Keep the phone's safe-area inset literal, but grow the part that
-          // actually contains the icon + label with the reader's text size.
-          tabBarStyle: {
-            backgroundColor: t.surface,
-            borderTopColor: t.ring,
-            minHeight: grown(56) + bottomPad,
-            paddingTop: sp.sm,
-            paddingBottom: bottomPad,
-          },
-          tabBarActiveTintColor: t.brand,
-          tabBarInactiveTintColor: t.ink3,
-          tabBarLabelStyle: { ...ty.caption, fontSize: 11, fontWeight: '500' },
+          // The bar itself is src/ui/FloatingTabBar.tsx — one component for all
+          // three apps — so nothing about its look is configured here. It
+          // reads `tabBarHideOnKeyboard` above, the inset and the reader's
+          // text size for itself.
           sceneStyle: { backgroundColor: t.bg },
         }}
       >
-        <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
-        <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color }) => <Icon name="train" size={23} color={color} /> }} />
-        <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color }) => <Icon name="calendar" size={23} color={color} /> }} />
-        <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ color }) => <Icon name="video" size={23} color={color} /> }} />
-        <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color }) => <Icon name="chart" size={23} color={color} /> }} />
+        <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color, size }) => <Icon name="people" size={size} color={color} /> }} />
+        <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color, size }) => <Icon name="train" size={size} color={color} /> }} />
+        <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color, size }) => <Icon name="calendar" size={size} color={color} /> }} />
+        <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ color, size }) => <Icon name="video" size={size} color={color} /> }} />
+        <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color, size }) => <Icon name="chart" size={size} color={color} /> }} />
         <Tabs.Screen name="sessions" options={{ href: null, title: 'Mark Sessions' }} />
         <Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
         <Tabs.Screen name="client-attendance" options={{ href: null, title: 'Their Attendance' }} />
@@ -127,7 +117,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="account" options={{ href: null, title: 'Account & Sign-in' }} />
         <Tabs.Screen name="join-code" options={{ href: null, title: 'Your Code' }} />
         <Tabs.Screen name="devices" options={{ href: null, title: 'Watch & Devices' }} />
-        <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
+        <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color, size }) => <Icon name="me" size={size} color={color} /> }} />
       </Tabs>
       <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
       {/* Renders nothing. Reads this coach's unsent floor queue — attendance

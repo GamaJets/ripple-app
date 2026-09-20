@@ -1,5 +1,18 @@
 import { Stack, useRouter } from 'expo-router';
 import { useEffect } from 'react';
+import { useFonts } from 'expo-font';
+import * as SplashScreen from 'expo-splash-screen';
+// One weight per import, not the package index: the index `require`s every
+// weight the family ships — eight Soras, fourteen Jakartas — and Metro bundles
+// whatever is required, so the index would put sixteen unused font files in
+// every OTA update.
+import { Sora_600SemiBold } from '@expo-google-fonts/sora/600SemiBold';
+import { Sora_700Bold } from '@expo-google-fonts/sora/700Bold';
+import { PlusJakartaSans_400Regular } from '@expo-google-fonts/plus-jakarta-sans/400Regular';
+import { PlusJakartaSans_500Medium } from '@expo-google-fonts/plus-jakarta-sans/500Medium';
+import { PlusJakartaSans_600SemiBold } from '@expo-google-fonts/plus-jakarta-sans/600SemiBold';
+import { PlusJakartaSans_700Bold } from '@expo-google-fonts/plus-jakarta-sans/700Bold';
+import { fallBackToSystemFace } from '../src/theme/scale';
 import * as Updates from 'expo-updates';
 import { sayUpdateCheck, whyFailed } from '../src/lib/updateCheck';
 import { reportError } from '../src/lib/reportError';
@@ -54,11 +67,29 @@ import { ReachabilityProbe } from '../src/ui/reachability';
 import { OfflineFlush } from '../src/ui/offlineFlush';
 import { MessageOutboxHandler } from '../src/ui/messaging';
 
+// The splash stays up until the two families have loaded or failed — see
+// RootLayout. Asked for at module load because the native splash hides itself
+// on the first frame otherwise, and a call made from an effect is a frame late.
+// The catch is for a reload in development, where there is no splash to hold.
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// The keys are the family names src/theme/scale.ts spells. The same six files
+// are embedded in the binary by the expo-font plugin in app.json, where a
+// build has been made since; this load is what covers a build made before, a
+// development client and the web, and on a build that has them it is a no-op
+// that settles on the first tick.
+const FONTS = {
+  Sora_600SemiBold, Sora_700Bold,
+  PlusJakartaSans_400Regular, PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold, PlusJakartaSans_700Bold,
+};
+
 function ThemedStack() {
   const t = useTheme();
   const router = useRouter();
   // Tapping a notification (reminder or coach push) opens the right screen.
   useEffect(() => addNotificationTapListener((route) => { try { router.push(route as any); } catch { /* ignore */ } }), []);
+
   return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }} />;
 }
 
@@ -161,6 +192,32 @@ function LockedApp() {
 
 export default function RootLayout() {
   useApplyUpdateOnLaunch();
+
+  // ── First paint waits for the type, and never for longer than the load ────
+  //
+  // The hook lives in RootLayout because RootLayout is always mounted: the
+  // splash must come down whatever happens below — a lock screen in place of
+  // the stack, an error boundary's fallback — and a hook inside the stack
+  // would never run in either case. What is HELD is only <LockedApp />, at the
+  // bottom of the provider stack, so the forty providers above it start their
+  // reads while the fonts load instead of after, and holding the paint costs
+  // the member nothing they would have seen sooner.
+  //
+  // Two ways out, and both draw the app. Loaded: the scale's families resolve.
+  // Failed: `fallBackToSystemFace()` rewrites the scale to the system face with
+  // its weights put back, BEFORE the first frame, so a font that could not be
+  // read is an app in San Francisco or Roboto and never a blank one. It is
+  // called during render on purpose — an effect would run after the frame that
+  // had already spread the custom family names into every style on screen —
+  // and it is idempotent, so a second render calling it again changes nothing.
+  const [fontsLoaded, fontsError] = useFonts(FONTS);
+  if (fontsError) fallBackToSystemFace();
+  const settled = fontsLoaded || !!fontsError;
+  useEffect(() => {
+    if (!settled) return;
+    if (fontsError) reportError('fonts.load', fontsError);
+    SplashScreen.hideAsync().catch(() => {});
+  }, [settled, fontsError]);
   return (
     // ── ABOVE EVERY PROVIDER, and it was below all forty of them ──────────
     //
@@ -292,7 +349,7 @@ export default function RootLayout() {
                             render — where there is nothing left to preserve
                             because the whole tree is going anyway. */}
                         <ErrorBoundary>
-                          <LockedApp />
+                          {settled ? <LockedApp /> : null}
                         </ErrorBoundary>
                         </ClassesProvider>
                         </ProgramTemplatesProvider>
