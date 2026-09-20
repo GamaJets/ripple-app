@@ -32,8 +32,8 @@ import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Notice, Ghost, PartialRead, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Notice, Ghost, PartialRead, PageHead, Ring } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, font } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { catalogueValue as cap } from '../../src/lib/format';
@@ -101,7 +101,7 @@ function Chips({ options, value, onChange, a11y }: {
           <Pressable key={o} onPress={() => onChange(o)} accessibilityRole="button"
             accessibilityLabel={a11y(o)} accessibilityState={{ selected: on }}
             style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{o}</Text>
+            <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{o}</Text>
           </Pressable>
         );
       })}
@@ -248,10 +248,17 @@ export default function OwnerLibrary() {
           return (
             <Section>
               <SectionHead title="Movements in the Catalogue" />
-              <View accessible accessibilityLabel={`Movements in the catalogue, ${figure}, ${note}`}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              {/* The count in a ring whose arc is the share of it that has a
+                  demonstration to watch. Both come from the same whole read or
+                  neither is drawn — a share of part of a catalogue is a wrong
+                  share, so under anything but `countable` it is a track and a
+                  dash. */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Ring size={120} tone="purple"
+                  value={countable && rows.length > 0 ? illustrated / rows.length : null}
+                  figure={countable ? figure : null} sub="movements"
+                  spoken={`Movements in the catalogue, ${countable ? `${figure}, ${illustrated} illustrated` : 'no figure'}, ${note}`} />
+                <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>{note}</Text>
               </View>
             </Section>
           );
@@ -260,19 +267,17 @@ export default function OwnerLibrary() {
         <Fetched at={fetchedAt} onRefresh={() => { void reload(); }} busy={status === 'loading'} />
 
 
-        <Section>
-          <SectionHead title="What it assumes you own" />
-          <KpiRow items={[
-            { label: 'Kinds of Kit', value: countable ? String(kitKinds) : '—' },
-            { label: 'Illustrated', value: countable ? String(illustrated) : '—' },
-            { label: 'Text Only', value: countable ? String(rows.length - illustrated) : '—' },
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {countable
-              ? 'Filter by equipment below to see how much of the catalogue your floor can actually support. Your register is on the Equipment screen.'
-              : 'These stay blank until the whole catalogue has been read, rather than reporting a figure computed from part of it.'}
-          </Text>
-        </Section>
+        {/* What it assumes you own, as tiles on the ground. */}
+        <KpiRow tiles items={[
+          { label: 'Kinds of Kit', value: countable ? String(kitKinds) : '—', tone: 'amber' },
+          { label: 'Illustrated', value: countable ? String(illustrated) : '—', tone: 'purple' },
+          { label: 'Text Only', value: countable ? String(rows.length - illustrated) : '—', tone: 'neutral' },
+        ]} />
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, marginBottom: sp.lg }}>
+          {countable
+            ? 'Filter by equipment to see what your floor can support.'
+            : 'Blank until the whole catalogue has been read.'}
+        </Text>
 
 
         {/* ── finding one ────────────────────────────────────────────────── */}

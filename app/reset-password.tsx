@@ -30,8 +30,8 @@ import { Stack, useRouter } from 'expo-router';
 import { useTheme, PasswordField, PasswordRules } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
-import { Card, Cta } from '../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../src/theme/scale';
+import { Card, Cta, HeroCard } from '../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, font } from '../src/theme/scale';
 import { passwordMeetsLocalRules, PASSWORD_MIN } from '../src/lib/passwordRules';
 
 function parseAuthParams(url: string): Record<string, string> {
@@ -127,36 +127,32 @@ export default function ResetPassword() {
 
   // One field style, shared with <PasswordField> (which lifts the marginBottom
   // onto its wrapper so the eye toggle stays centred on the input itself).
-  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md } as const;
+  // The door's field — see app/welcome.tsx: a 52pt `surface2` pill on the card.
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, minHeight: 52, paddingVertical: sp.md, marginBottom: sp.md } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5, marginBottom: sp.md }}>
-            {stage === 'done' ? 'Password updated' : 'Set a new password'}
-          </Text>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.md, paddingBottom: 40, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+          {/* The door's night head, and the stage's one sentence as its line:
+              each of the four stages used to carry its own paragraph under a
+              shared title. */}
+          <HeroCard eyebrow={appName.toUpperCase()}
+            title={stage === 'done' ? 'Password Updated' : stage === 'invalid' ? 'Link Expired' : 'Set a New Password'}
+            meta={stage === 'checking' ? 'Checking your reset link…'
+              : stage === 'invalid' ? 'This link is invalid or has expired. Request a new one and use it within an hour.'
+              : stage === 'done' ? "You're signed in with your new password."
+              : `One password for every ${appName} app.`} />
 
-          {stage === 'checking' ? (
-            <Text style={{ ...ty.body, color: t.ink3 }}>Checking your reset link…</Text>
-          ) : null}
-
+          {stage === 'checking' ? null : (
+          <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
           {stage === 'invalid' ? (
-            <>
-              <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.xl }}>
-                This link is invalid or has expired. Request a new one and use it within an hour.
-              </Text>
-              <Cta wide label="Request a New Link" onPress={() => router.replace('/forgot-password')} />
-            </>
+            <Cta wide label="Request a New Link" onPress={() => router.replace('/forgot-password')} />
           ) : null}
 
           {stage === 'ready' || stage === 'saving' ? (
             <>
-              <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.xl }}>
-                Choose a new password for your {appName} account. It applies to Client, Trainer, and Owner access alike.
-              </Text>
               {error ? (
                 <Card tone={t.crit} style={{ marginBottom: sp.md }}>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
@@ -165,10 +161,10 @@ export default function ResetPassword() {
                   </View>
                 </Card>
               ) : null}
-              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>New password</Text>
+              <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>New password</Text>
               <PasswordField value={pw} onChangeText={setPw} placeholder={`New password (${PASSWORD_MIN}+ characters)`} style={inp} accessibilityLabel="New password" autoFocus />
               <PasswordRules value={pw} />
-              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Confirm new password</Text>
+              <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Confirm new password</Text>
               <PasswordField value={pw2} onChangeText={setPw2} placeholder="Confirm new password" style={inp} accessibilityLabel="Confirm new password" />
               {pw2.length > 0 && pw !== pw2 ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: -6, marginBottom: sp.md }}>
@@ -183,13 +179,10 @@ export default function ResetPassword() {
           ) : null}
 
           {stage === 'done' ? (
-            <>
-              <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.xl }}>
-                You're signed in with your new password. Pick a portal to continue.
-              </Text>
-              <Cta wide label="Continue" onPress={() => router.replace('/')} />
-            </>
+            <Cta wide label="Continue" onPress={() => router.replace('/')} />
           ) : null}
+          </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

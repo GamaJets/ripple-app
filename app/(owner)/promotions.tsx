@@ -36,9 +36,9 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, fig, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, fig, PageHead, Ring } from '../../src/ui/kit';
 import { plainExact } from '../../src/lib/units';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -276,22 +276,23 @@ export default function Promotions() {
             // 'partial'. The codes below are real; how many of them there are is
             // not known, so no numeral is offered — including the one that would
             // otherwise read "nothing is redeemable right now".
-            ? 'Your codes are listed below, but the read did not come back whole, so this cannot say how many are live. A count over part of a list is not a smaller number, it is a wrong one. Pull down to read them again.'
+            ? 'The list did not come back whole, so no count is stated. Pull down to read it again.'
             : live === 0
               ? (off ?? 0) > 0
                 ? `Nothing is redeemable right now. ${off} code${off === 1 ? ' is' : 's are'} switched off below — switch one back on, or create a new offer.`
                 : 'Create an offer and push it straight to your members.'
-              : `${(off ?? 0) > 0 ? `${off} more switched off. ` : ''}Push a live code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.`;
+              : `${(off ?? 0) > 0 ? `${off} more switched off. ` : ''}A push is queued, not guaranteed — delivery follows each member's notification settings.`;
+          // Live of every code the gym holds, as the ring. Both halves come
+          // from the same whole read or neither is drawn: `live` is null
+          // unless the list is countable, and a null draws no arc and a dash.
+          const share = countable && live != null && promos.length > 0 ? live / promos.length : null;
           return (
             <Section>
-              <SectionHead title="Live Codes" />
-              <View accessible accessibilityLabel={`Live codes, ${figure} ${unit}, ${note}`}>
-                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                    style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
-                  <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{unit}</Text>
-                </View>
-                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              <SectionHead title="Live Codes" note={countable && promos.length ? `of ${promos.length}` : undefined} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Ring size={112} value={share} figure={live == null ? null : figure} sub={unit} tone="brand"
+                  spoken={`Live codes, ${figure === '—' ? 'no figure' : `${figure} ${unit}`}, ${note}`} />
+                <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>{note}</Text>
               </View>
             </Section>
           );
@@ -387,7 +388,7 @@ export default function Promotions() {
               borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: p.active ? t.ink : t.ink3, letterSpacing: 1 }}>{p.code}</Text>
+                <Text style={{ ...ty.body, ...numeric, ...font('600'), color: p.active ? t.ink : t.ink3, letterSpacing: 1 }}>{p.code}</Text>
                 {/* The count is rows in promo_redemptions, not a stored
                     counter — so a 0 here means nobody has used it, and -1
                     means the count itself could not be read, which renders as

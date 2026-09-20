@@ -46,9 +46,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, fig, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
-import type { Theme } from '../../src/theme/tokens';
+import { Rule, Section, SectionHead, KpiRow, fig, Flag, PageHead, Ring, TonedChip, IconPlate, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { isoDate } from '../../src/lib/format';
 import { reportError } from '../../src/lib/reportError';
@@ -152,11 +151,13 @@ function day(iso: string | null): string {
  * promises are already spent, which is a different kind of problem from "due
  * soon" and must not read the same.
  */
-function toneFor(t: Theme, days: number | null): string {
-  if (days == null) return t.ink3;
-  if (days <= 0) return t.crit;
-  if (days <= 7) return t.s3;
-  return t.ink3;
+/** The clock's colour, by name: red once the thirty days are spent, amber in
+ *  the last week, quiet otherwise. Always drawn beside `clockLabel`'s words. */
+function toneFor(days: number | null): Tone {
+  if (days == null) return 'neutral';
+  if (days <= 0) return 'red';
+  if (days <= 7) return 'amber';
+  return 'neutral';
 }
 
 function clockLabel(days: number | null): string {
@@ -365,16 +366,26 @@ export default function OwnerDeletions() {
                 : soonest == null
                   ? `${queue.length} waiting, with no clock recorded against ${queue.length === 1 ? 'it' : 'them'}.`
                   : `Soonest runs out in ${soonest} ${soonest === 1 ? 'day' : 'days'}.`;
-          const mark = failed || overdue ? t.crit : t.brand;
+          // The statutory clock as a ring: what is LEFT of the thirty days on
+          // the request that runs out first, so the arc empties as the
+          // deadline approaches and is gone — red, "overdue" — once it has
+          // passed. With nobody waiting there is no clock, and the ring is a
+          // bare track round a measured nought; with no read there is no
+          // nought either, only the dash.
+          const clear = loaded && !failed && !queueShort && queue.length === 0;
+          const ringTone: Tone = failed || overdue ? 'red' : soonest != null && soonest <= 7 ? 'amber' : 'brand';
           return (
             <Section>
-              <SectionHead title="Waiting on You" />
-              <View accessible accessibilityLabel={`Waiting on you, ${figure}, ${note}`}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
-                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
+              <SectionHead title="Waiting on You" note={figure === '—' ? undefined : `${figure} waiting`} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Ring size={120} tone={ringTone}
+                  value={soonest == null ? null : Math.max(0, Math.min(30, soonest)) / 30}
+                  figure={soonest != null ? String(Math.max(0, soonest)) : clear ? '0' : null}
+                  sub={soonest != null ? (soonest <= 0 ? 'overdue' : soonest === 1 ? 'day left' : 'days left') : clear ? 'waiting' : undefined}
+                  spoken={`Waiting on you, ${figure === '—' ? 'no figure' : figure}, ${note}`} />
+                <View style={{ flex: 1, minWidth: 140, gap: sp.sm }}>
+                  {failed || overdue ? <TonedChip label={failed ? 'Not Read' : 'Overdue'} tone="red" icon="info" /> : null}
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{note}</Text>
                 </View>
               </View>
             </Section>
@@ -386,18 +397,15 @@ export default function OwnerDeletions() {
         <Fetched at={fetchedAt} onRefresh={() => { void load(); }} />
 
 
-        <Section>
-          <SectionHead title="The 30-day Promise" />
-          <KpiRow items={[
-            { label: 'Waiting', value: fig(loaded && !queueShort ? queue.length : null) },
-            { label: 'Overdue', value: fig(loaded && !queueShort ? overdue : null) },
-            { label: 'Soonest', value: fig(soonest), unit: soonest == null ? undefined : 'd' },
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            The store listing tells members their account is deleted within 30 days of asking.
-            The clock starts the moment they tap it in the app, not when you open this screen.
-          </Text>
-        </Section>
+        {/* The 30-day promise, as tiles on the ground. */}
+        <KpiRow tiles items={[
+          { label: 'Waiting', value: fig(loaded && !queueShort ? queue.length : null), tone: 'blue' },
+          { label: 'Overdue', value: fig(loaded && !queueShort ? overdue : null), tone: 'red' },
+          { label: 'Soonest', value: fig(soonest), unit: soonest == null ? undefined : 'd', tone: 'amber' },
+        ]} />
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+          Members are promised deletion within 30 days. The clock starts when they ask, not when you open this.
+        </Text>
 
 
         <Section>
@@ -422,7 +430,7 @@ export default function OwnerDeletions() {
                 accessibilityRole="button"
                 accessibilityLabel="Try reading the queue again"
                 style={{ alignSelf: 'flex-start', marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
+                <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
           ) : null}
@@ -441,23 +449,21 @@ export default function OwnerDeletions() {
             </Text>
             )
           ) : queue.map((p, i) => {
-            const tone = toneFor(t, p.daysRemaining);
             const working = busy === p.subjectId;
             return (
               <View key={p.subjectId}>
                 {i > 0 ? <Rule /> : null}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                  <IconPlate icon="clock" tone={toneFor(p.daysRemaining)} />
+                  <View style={{ flex: 1, minWidth: 120 }}>
+                    <Text style={{ ...ty.head, color: t.ink }} numberOfLines={1}>
                       {fig(p.name)}
                     </Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {p.role ? ROLE_LABEL[p.role] ?? p.role : 'Unknown role'} · asked {day(p.requestedAt)}
                     </Text>
                   </View>
-                  <View style={{ borderWidth: hairline, borderColor: tone, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 2 }}>
-                    <Text style={{ ...ty.micro, color: tone }}>{clockLabel(p.daysRemaining)}</Text>
-                  </View>
+                  <TonedChip label={clockLabel(p.daysRemaining)} tone={toneFor(p.daysRemaining)} />
                   <Pressable
                     onPress={() => confirm(p)}
                     disabled={working}
@@ -476,7 +482,7 @@ export default function OwnerDeletions() {
                         3.03–4.05:1 on every palette, and this is the control
                         that erases a member permanently — the word "Delete"
                         and the accessibility label carry it without colour. */}
-                    <Text style={{ ...ty.label, fontWeight: '600', color: working ? t.ink3 : t.ink }}>
+                    <Text style={{ ...ty.label, ...font('600'), color: working ? t.ink3 : t.ink }}>
                       {working ? 'Deleting…' : 'Delete'}
                     </Text>
                   </Pressable>

@@ -17,7 +17,7 @@ import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PartialRead, Flag, PageHead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PartialRead, Flag, PageHead, Meter } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
@@ -130,7 +130,6 @@ export default function OwnerFeedback() {
             : truncated ? `More than ${rows.length.toLocaleString()} submissions — too many to average here`
             : rows.length === 0 ? 'No submissions yet'
             : `${rows.length} submission${rows.length === 1 ? '' : 's'}`;
-          const pctOfFive = avg == null ? null : Math.round(Math.max(0, Math.min(1, avg / 5)) * 100);
           return (
             <Section>
               <SectionHead title="Average Rating" />
@@ -142,13 +141,26 @@ export default function OwnerFeedback() {
                 </View>
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
               </View>
-              {pctOfFive == null ? null : (
-                <View accessible accessibilityRole="progressbar" accessibilityLabel={`${pctOfFive}% of five stars`}
-                  accessibilityValue={{ min: 0, max: 100, now: pctOfFive }}
-                  style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.lg, overflow: 'hidden' }}>
-                  <View style={{ height: 3, borderRadius: 2, width: `${pctOfFive}%`, backgroundColor: t.brand }} />
-                </View>
+              {/* The rating as the five stars it was given in, filled to the
+                  nearest whole one; the figure above keeps the decimal. Hidden
+                  from a screen reader, which has already been told the number.
+                  Amber INK and not the amber mark: a glyph is text. */}
+              {avg == null ? null : (
+                <Text accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+                  style={{ ...ty.title, letterSpacing: 2, marginTop: sp.sm }}>
+                  <Text style={{ color: t.data.amberInk }}>{'★'.repeat(Math.round(avg))}</Text>
+                  <Text style={{ color: t.ink3 }}>{'☆'.repeat(5 - Math.round(avg))}</Text>
+                </Text>
               )}
+              {/* How the average is made up — which a 3.0 of all threes and a
+                  3.0 of ones and fives do not share. Withheld with the average
+                  under a capped read (`avg` is null then), for the same
+                  reason: a share of a slice of the inbox is not a share. */}
+              {avg == null ? null : [5, 4, 3, 2, 1].map((n) => {
+                const c = rated.filter((r) => r.rating === n).length;
+                return <Meter key={n} label={`${n} Star${n === 1 ? '' : 's'}`} val={c} target={rated.length}
+                  tone={n >= 4 ? 'brand' : n === 3 ? 'amber' : 'red'} note={c.toLocaleString()} />;
+              })}
             </Section>
           );
         })()}

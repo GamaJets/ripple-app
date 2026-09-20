@@ -37,8 +37,8 @@ import { plainExact } from '../../src/lib/units';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, Cta, Spark, Notice, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, KpiRow, Cta, Spark, Notice, fig, PageHead, Meter, Donut, Legend, type Slice, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
@@ -323,6 +323,21 @@ export default function OwnerRevenue() {
     };
   }, [takings, cur]);
 
+  /** The till by payment method — see "How It Was Paid" in the render. Null
+   *  whenever the till has no one currency to state a slice in. */
+  const sources = useMemo((): Slice[] | null => {
+    if (!takings || !till || till.empty || till.currency == null) return null;
+    const METHODS: [GymPayment['method'], string, Tone][] = [
+      ['card', 'Card', 'blue'], ['cash', 'Cash', 'brand'], ['transfer', 'Transfer', 'purple'],
+      ['direct_debit', 'Direct Debit', 'teal'], ['other', 'Other', 'neutral'],
+    ];
+    const out = METHODS.map(([m, label, tone]): Slice => {
+      const cents = takings.filter((p) => p.method === m && p.amountCents > 0).reduce((a, p) => a + p.amountCents, 0);
+      return { label, tone, value: cents, shown: money(cents, till.currency) };
+    }).filter((s) => (s.value as number) > 0);
+    return out.length ? out : null;
+  }, [takings, till]);
+
   /**
    * What Stripe took that the till above does not have.
    *
@@ -418,18 +433,37 @@ export default function OwnerRevenue() {
             ? `${till.count} payments, in more than one currency — so there is no one total to state.`
             : `${till?.count} payment${till?.count === 1 ? '' : 's'} recorded — memberships, classes, packs and the desk, whatever somebody entered`;
           return (
-            <Section>
-              <SectionHead title="Taken · 30 Days" />
-              {/* A money figure is shrunk to fit and never wrapped: broken
-                  across two lines it is a different number. */}
-              <View accessible accessibilityLabel={`Taken in 30 days, ${figure}, ${note}`}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
-              </View>
-            </Section>
+            /* The night hero, built here rather than with the kit's `HeroCard`
+               because its title wraps and this one must not: a money figure is
+               shrunk to fit and never wrapped — broken across two lines it is
+               a different number. */
+            <View accessible accessibilityLabel={`Taken in 30 days, ${figure}, ${note}`}
+              style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero }}>
+              <Text style={{ ...ty.eyebrow, color: t.nightInk3 }}>TAKEN · 30 DAYS</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                style={{ ...ty.hero, ...numeric, color: t.nightInk, marginTop: 6 }}>{figure}</Text>
+              <Text style={{ ...ty.label, color: t.nightInk2, marginTop: sp.sm }}>{note}</Text>
+            </View>
           );
         })()}
+
+        {/* ── how it was paid ─────────────────────────────────────────────
+            The till above as a mix, by the method somebody recorded against
+            each payment. Drawn only when the till is ONE currency and has
+            something in it: a ring round two moneys is the sum this screen
+            refuses, and an empty ring under "no payment recorded" is the same
+            sentence twice. Refunds and corrections are negative and are in the
+            figure above but in no slice — a share of a whole cannot be owed. */}
+        {sources ? (
+          <Section>
+            <SectionHead title="How It Was Paid" note="Payments recorded" />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+              <Donut slices={sources} centre={num(sources.length)} sub={sources.length === 1 ? 'method' : 'methods'}
+                spoken={`How the last 30 days were paid. ${sources.map((s) => `${s.label} ${s.shown ?? ''}`).join(', ')}`} />
+              <View style={{ flex: 1, minWidth: 160 }}><Legend items={sources} /></View>
+            </View>
+          </Section>
+        ) : null}
 
         {/* Under the figure rather than in the header, because it is about
             the whole screen and not about one figure — and so the first
@@ -545,8 +579,7 @@ export default function OwnerRevenue() {
               includes everybody who did nothing this month. */}
           {!trainersUnknown && valuePerClient != null ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Value per client is delivered-session value spread over every client on the book, including any
-              who did not train in the last 30 days. It is not what an active client is worth to you.
+              Value per client counts every client on the book, not only those who trained.
             </Text>
           ) : null}
         </Section>
@@ -574,7 +607,7 @@ export default function OwnerRevenue() {
                owner dashboard: filtering the nulls out drew the line over four
                points and the labels over six, so each point was reported under
                a month it did not belong to. */
-            <Spark data={series} labels={labels} />
+            <Spark data={series} labels={labels} area tone="blue" />
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
           )}
@@ -626,17 +659,10 @@ export default function OwnerRevenue() {
             <Text style={{ ...ty.label, color: t.ink3 }}>No sessions delivered in the last 30 days.</Text>
           ) : byTrainer.map((p) => {
             const pct = Math.round((p.sessions / trainerTotal) * 100);
-            return (
-              <View key={p.id} style={{ marginBottom: sp.lg }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>{p.name}</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{p.sessions} · {pct}%</Text>
-                </View>
-                <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-                  <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: t.brand }} />
-                </View>
-              </View>
-            );
+            // The kit's labelled 8pt bar where a 3pt hairline was: the name in
+            // bold, the count and its share at the trailing edge, spoken once.
+            return <Meter key={p.id} label={p.name} val={p.sessions} target={trainerTotal} tone="blue"
+              note={`${num(p.sessions)} · ${pct}%`} />;
           })}
         </Section>
 
@@ -647,10 +673,7 @@ export default function OwnerRevenue() {
             gym never granted. */}
         <Section>
           <SectionHead title="Online Orders" note="Stripe" onPress={() => router.push('/(owner)/orders')} />
-          <Text style={{ ...ty.label, color: t.ink3 }}>
-            What members bought from your own Stripe account — what sold, a member&rsquo;s receipt,
-            and any order Stripe charged for that never produced a membership or a pass.
-          </Text>
+          <Text style={{ ...ty.label, color: t.ink3 }}>What sold, receipts, and any order charged but never delivered.</Text>
         </Section>
 
 

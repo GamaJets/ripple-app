@@ -12,8 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { ListRow, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { ListRow, PageHead, Section } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty } from '../../src/theme/scale';
 import { OWNER_NAV, searchNav } from '../../src/lib/features';
 
 export default function Explore() {
@@ -30,7 +30,7 @@ export default function Explore() {
         <PageHead title="Explore" />
 
         {/* ── the field is the screen ────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg, marginBottom: sp.sm }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface, borderRadius: radius.md, paddingHorizontal: sp.md, marginTop: sp.lg, marginBottom: sp.sm, ...elevation.card }}>
           <Icon name="search" size={16} color={t.ink3} />
           <TextInput value={q} onChangeText={setQ} placeholder="Search…" placeholderTextColor={t.ink3} autoCapitalize="none" accessibilityLabel="Search"
             style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
@@ -43,11 +43,13 @@ export default function Explore() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Nothing matches “{q}”.</Text>
           </View>
         ) : (
-          <View>
+          /* On a surface card with the kit's toned plates, as every other
+             list of destinations in the three apps is now drawn. */
+          <Section>
             {list.map((h) => (
-              <ListRow key={h.key} icon={h.icon} title={h.label} note={h.note} onPress={() => router.push(h.route as any)} />
+              <ListRow key={h.key} icon={h.icon} tone="brand" title={h.label} note={h.note} onPress={() => router.push(h.route as any)} />
             ))}
-          </View>
+          </Section>
         )}
       </ScrollView>
     </SafeAreaView>

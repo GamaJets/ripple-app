@@ -32,8 +32,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, Ghost, Cta, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { Rule, Section, ScreenHeader, Ghost, Cta, Flag, IconPlate, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, value, font } from '../../src/theme/scale';
 import { DEFAULT_PALETTE } from '../../src/theme/tokens';
 import { useBrand } from '../../src/ui/brand';
 import { useTenant } from '../../src/ui/tenant';
@@ -206,6 +206,22 @@ export default function OwnerBrand() {
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md } as const;
   const G = layout.gutter;
 
+  /** A step's head: its number on a toned plate, its name in Sora, and whether
+   *  it is done as a chip that carries the word — green "Set", amber "Not set
+   *  yet" — so the state is never the colour alone. A plain function called in
+   *  place, not a component declared in the render body (which would remount
+   *  the name field under the caret on every keystroke). */
+  const stepHead = (n: number, title: string, tone: Exclude<Tone, 'brand' | 'neutral'>, state?: { label: string; done: boolean }) => (
+    <View accessible accessibilityRole="header" accessibilityLabel={`Step ${n}, ${title}${state ? `, ${state.label}` : ''}`}
+      style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
+      <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.data[`${tone}Soft`], alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ ...value(18), color: t.data[`${tone}Ink`] }}>{n}</Text>
+      </View>
+      <Text style={{ ...ty.section, color: t.ink, flex: 1, minWidth: 120 }}>{title}</Text>
+      {state ? <TonedChip label={state.label} tone={state.done ? 'brand' : 'amber'} /> : null}
+    </View>
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
@@ -213,8 +229,7 @@ export default function OwnerBrand() {
         {/* The board's tab-root opening: a quiet eyebrow, the title, and the
             one sentence that says where the settings live — the kit's
             ScreenHeader rather than the same lines by hand. */}
-        <ScreenHeader eyebrow="Your Gym" title="Brand"
-          subtitle="Your gym's name and colour — saved to the gym, not to this phone" />
+        <ScreenHeader eyebrow="Your Gym" title="Brand" subtitle="Saved to the gym, not to this phone" />
 
         <Fetched at={fetchedAt} onRefresh={() => { refresh(); }} busy={status === 'loading'} />
 
@@ -228,7 +243,7 @@ export default function OwnerBrand() {
             is where both are checked before an owner walks away. */}
         {/* ── step 1: the gym's name ─────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Step 1 · Gym Name" note={!known ? undefined : tenant?.name?.trim() ? 'Set' : 'Not set yet'} />
+          {stepHead(1, 'Gym Name', 'blue', !known ? undefined : tenant?.name?.trim() ? { label: 'Set', done: true } : { label: 'Not Set Yet', done: false })}
           {status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your gym…</Text>
           ) : status === 'error' ? (
@@ -265,7 +280,7 @@ export default function OwnerBrand() {
               chosen nothing was headed with the name of whichever swatch this
               phone happened to be drawn in — a choice nobody made, stated as
               the gym's. */}
-          <SectionHead title="Step 2 · Colour" note={!known ? undefined : gymColor ? (palettes.find((p) => p.key === palette)?.name ?? 'Chosen') : 'Not chosen yet'} />
+          {stepHead(2, 'Colour', 'purple', !known ? undefined : gymColor ? { label: palettes.find((p) => p.key === palette)?.name ?? 'Chosen', done: true } : { label: 'Not Chosen Yet', done: false })}
           {/* Four states, four sentences — the Gym Name section above has
               handled all four since it was written, and this one had two.
               `status === 'error'` was stated; everything else fell through to
@@ -330,16 +345,24 @@ export default function OwnerBrand() {
             mock of it. The words are the names of the controls; nothing here is
             a figure, a member or a session. */}
         <Section>
-          <SectionHead title="Step 3 · Check the Preview" />
-          <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, overflow: 'hidden', ...elevation.e1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
-              <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: t.brand }} />
-              {/* The gym's name where it is known, and this app's own label
-                  otherwise — never a placeholder standing in for a real one. */}
-              <Text style={{ ...ty.head, color: t.ink, flex: 1 }}>{known && tenant?.name ? tenant.name : appName}</Text>
+          {stepHead(3, 'Check the Preview', 'teal')}
+          {/* The approved look's own parts, in the live theme: the night hero
+              with its bright action first, because that is what every tab now
+              opens on and it is where an accent is drawn BRIGHT on near-black
+              rather than as itself on white — a second pairing a swatch cannot
+              show. A picture of a hero, not a hero: said as an image. */}
+          <View accessible accessibilityRole="image" accessibilityLabel="Sample: the night hero card with its bright button in your colour"
+            style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, ...elevation.hero }}>
+            <Text style={{ ...ty.eyebrow, color: t.nightInk3 }}>YOUR GYM</Text>
+            {/* The gym's name where it is known, and this app's own label
+                otherwise — never a placeholder standing in for a real one. */}
+            <Text style={{ ...ty.display, color: t.nightInk, marginTop: 6 }}>{known && tenant?.name ? tenant.name : appName}</Text>
+            <View style={{ marginTop: sp.lg, minHeight: 52, borderRadius: radius.md, backgroundColor: t.brandBright, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ ...ty.button, color: t.brandDeep }}>Hero Action</Text>
             </View>
+          </View>
+          <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, overflow: 'hidden', marginTop: sp.md, ...elevation.card }}>
             <View style={{ padding: sp.lg }}>
-              <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>Body copy, headings and the controls below, in your colours.</Text>
 
               {/* A selected chip beside an unselected one: the board's "chosen"
                   state is the brand fill, and this is where an accent too close
@@ -349,10 +372,10 @@ export default function OwnerBrand() {
                 style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.brand, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
                   <Icon name="check" size={13} color={t.brandInk} />
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Selected</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.brandInk }}>Selected</Text>
                 </View>
                 <View style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Not Selected</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>Not Selected</Text>
                 </View>
               </View>
 
@@ -360,11 +383,11 @@ export default function OwnerBrand() {
                   row's grey circle, which is the 3:1 "mark" case below. */}
               <View accessible accessibilityRole="image" accessibilityLabel="Sample: a list row with its icon in your colour"
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
-                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="calendar" size={17} color={t.brand} />
-                </View>
+                {/* The kit's own plate: your colour as TEXT-weight ink on its
+                    pale mix, which is how every row in the app now draws it. */}
+                <IconPlate icon="calendar" tone="brand" />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>A Row Title</Text>
+                  <Text style={{ ...ty.head, color: t.ink }}>A Row Title</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>The line under it, which never takes your colour</Text>
                 </View>
               </View>
@@ -376,17 +399,14 @@ export default function OwnerBrand() {
                   this row exists to show. */}
               <View accessible accessibilityRole="image" accessibilityLabel="Sample: three status marks. Fine takes your colour; warning and critical keep their own."
                 style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg, marginBottom: sp.lg }}>
-                {([['Fine', t.brand], ['Warning', t.warn], ['Critical', t.crit]] as const).map(([l, c]) => (
-                  <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: c }} />
-                    <Text style={{ ...ty.caption, color: t.ink2 }}>{l}</Text>
-                  </View>
+                {([['Fine', 'brand'], ['Warning', 'amber'], ['Critical', 'red']] as const).map(([l, c]) => (
+                  <TonedChip key={l} label={l} tone={c} icon={c === 'brand' ? 'check' : 'info'} />
                 ))}
               </View>
 
               <View accessible accessibilityRole="image" accessibilityLabel="Sample: the primary button in your colour"
-                style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Primary Action</Text>
+                style={{ backgroundColor: t.brand, borderRadius: radius.md, minHeight: 52, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.button, color: t.brandInk }}>Primary Action</Text>
               </View>
             </View>
           </View>
@@ -402,8 +422,12 @@ export default function OwnerBrand() {
           {(() => {
             const onBrand = contrastRatio(t.brandInk, t.brand);
             const asMark = contrastRatio(t.brand, t.surface2);
-            const textOk = meetsText(t.brandInk, t.brand, ty.label.fontSize, '600');
+            const textOk = meetsText(t.brandInk, t.brand, ty.button.fontSize, '700');
             const markOk = meetsMark(t.brand, t.surface2);
+            // The hero's pairing, measured like the other two: the accent drawn
+            // bright on night, under its own deep ink.
+            const onBright = contrastRatio(t.brandDeep, t.brandBright);
+            const brightOk = meetsText(t.brandDeep, t.brandBright, ty.button.fontSize, '700');
             return (
               <View style={{ marginTop: sp.lg }}>
                 <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Readability</Text>
@@ -417,9 +441,12 @@ export default function OwnerBrand() {
                   [markOk, asMark == null
                     ? 'Your colour as an icon could not be measured.'
                     : `Your colour as an icon on a row · ${num1(asMark)} to 1 · ${markOk ? 'stands out' : 'faint against the row — icons and selected states will be hard to find'}`],
+                  [brightOk, onBright == null
+                    ? 'The hero button could not be measured.'
+                    : `Hero button text on your bright colour · ${num1(onBright)} to 1 · ${brightOk ? 'reads clearly' : 'hard to read on the night hero'}`],
                 ] as const).map(([ok, line], ix) => (
-                  <View key={ix} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: ix === 0 ? 0 : 3 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, marginTop: 5, backgroundColor: ok ? t.good : t.warn }} />
+                  <View key={ix} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: ix === 0 ? 0 : sp.sm }}>
+                    <IconPlate icon={ok ? 'check' : 'info'} tone={ok ? 'brand' : 'amber'} size={28} />
                     <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{line}</Text>
                   </View>
                 ))}
@@ -430,8 +457,7 @@ export default function OwnerBrand() {
 
 
         {/* ── where the two of them reach ────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Where Your Brand Shows" />
+        <Expandable title="Where Your Brand Shows" note="Name everywhere · colour here and on the console">
           {/* ── A paragraph selling four things that do not exist ───────────
               It read: "On Studio plans each trainer gets this panel for their
               own client app — their logo, colours, and domain. You keep the
@@ -477,7 +503,7 @@ export default function OwnerBrand() {
           <Text style={{ ...ty.caption, color: t.ink3 }}>
             The name and the colour are the whole of the branding today, and they do not reach the same places. The name is the gym’s everywhere — every owner’s device, and what your members and coaches see their app called. The colour is drawn by this app and by the web console only; a member’s app and a coach’s app keep their own accent.
           </Text>
-        </Section>
+        </Expandable>
       </ScrollView>
     </SafeAreaView>
   );

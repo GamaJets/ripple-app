@@ -28,7 +28,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, type as ty, font, value } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Fetched } from '../../src/ui/fetched';
@@ -166,12 +166,12 @@ export default function OwnerExercise() {
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                 {detail.group ? (
                   <View style={{ backgroundColor: t.brand, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{detail.group}</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.brandInk }}>{detail.group}</Text>
                   </View>
                 ) : null}
                 {chips.map((c) => (
                   <View key={c} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{c}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{c}</Text>
                   </View>
                 ))}
               </View>
@@ -193,12 +193,12 @@ export default function OwnerExercise() {
                   <SectionHead title="Muscles Worked" />
                   {detail.primaryMuscles.length ? (
                     <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
-                      <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
+                      <Text style={font('600')}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
                     </Text>
                   ) : null}
                   {detail.secondaryMuscles.length ? (
                     <Text style={{ ...ty.body, color: t.ink2 }}>
-                      <Text style={{ fontWeight: '600' }}>Also: </Text>{detail.secondaryMuscles.map(cap).join(', ')}
+                      <Text style={font('600')}>Also: </Text>{detail.secondaryMuscles.map(cap).join(', ')}
                     </Text>
                   ) : null}
                 </Section>
@@ -215,7 +215,11 @@ export default function OwnerExercise() {
                   <SectionHead title="How to Do It" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-                      <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
+                      {/* The step's number on a toned plate, as the look numbers
+                          every sequence; the ink is the hue's text step. */}
+                      <View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: t.data.blueSoft, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ ...value(13), color: t.data.blueInk }}>{n + 1}</Text>
+                      </View>
                       <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
                     </View>
                   ))}

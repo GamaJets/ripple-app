@@ -74,8 +74,8 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch, Linking } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, Cta, ListRow, Flag, Notice, Ghost, Segmented, AttentionRow } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, Cta, ListRow, Flag, Notice, Ghost, Segmented, AttentionRow, HeroCard } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
@@ -976,8 +976,22 @@ export default function OwnerOps() {
             "Platform" named Repple, not this gym — the same drift Overview
             settled when it dropped "Repple HQ · Platform". Everything on this
             screen belongs to the owner's own gym. */}
-        <ScreenHeader eyebrow="Your Gym" title="Operations"
-          subtitle="What needs you, then notices, support, fees and the floor" />
+        <ScreenHeader eyebrow="Your Gym" title="Operations" />
+
+        {/* ── the state, in one night hero ────────────────────────────────
+            The count is a count only when every source answered: a queue built
+            from four reads out of five is a smaller number than the truth and
+            reads as the whole of it, so a short read says "Needs You" with no
+            figure and a failed one says it was not checked. The rows, the
+            failed sources by name and the retry are in the card below. */}
+        <HeroCard eyebrow="NEEDS ACTION"
+          title={needsReading && !needs.length ? 'Checking…'
+            : needsWhole ? (needs.length ? `${needs.length} Need${needs.length === 1 ? 's' : ''} You` : 'All Clear')
+            : needs.length ? 'Needs You' : 'Not Checked'}
+          meta={needsReading && !needs.length ? undefined
+            : !needsWhole ? 'Not everything could be checked — see below.'
+            : needs.length ? needs.slice(0, 2).map((n) => n.name).join(' · ')
+            : 'Payments, support, deletions, equipment and settings all read.'} />
 
         {/* ── 1 · needs action ───────────────────────────────────────────── */}
         {/* Above the bar, because it is about the gym and not about a tab: an
@@ -1004,10 +1018,7 @@ export default function OwnerOps() {
           {needsReading ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: needs.length || unchecked.length ? sp.md : 0 }}>Checking what needs you…</Text>
           ) : needsWhole && needs.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing needs you right now. Card payments, the support inbox, deletion requests, the equipment
-              register and your gym’s settings were all read, and none has anything outstanding.
-            </Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing outstanding in any of the five.</Text>
           ) : null}
         </Section>
 
@@ -1299,7 +1310,7 @@ export default function OwnerOps() {
                         : line.answer === 'unstated' ? t.warn : t.ink3,
                     }} />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {line.outcome} · {line.answer === 'paid' ? 'Paid'
                           : line.answer === 'unpaid' ? 'Not paid' : 'Not stated'}
                       </Text>
@@ -1596,7 +1607,7 @@ export default function OwnerOps() {
                     <Pressable onPress={() => setOpenT(open ? null : tk.id)} style={{ paddingVertical: sp.md }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                         {tk.resolved ? null : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />}
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{tk.subject}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{tk.subject}</Text>
                         {tk.resolved ? <Text style={{ ...ty.micro, color: t.ink3 }}>Resolved</Text> : null}
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tk.from}</Text>
@@ -1700,11 +1711,11 @@ export default function OwnerOps() {
             it, then the account and its paperwork. */}
         <Section>
           <SectionHead title="People and Floor" />
-          <ListRow icon="calendar" title="Trainer Rota" note="Who is on the floor when, against what is booked"
+          <ListRow icon="calendar" tone="blue" title="Trainer Rota" note="Who is on the floor, against what is booked"
             onPress={() => router.push('/(owner)/rota')} />
-          <ListRow icon="wrench" title="Equipment Register" note="What the gym owns, and what is due a service"
+          <ListRow icon="wrench" tone="amber" title="Equipment Register" note="What the gym owns, and what is due a service"
             onPress={() => router.push('/(owner)/equipment')} />
-          <ListRow icon="dumbbell" title="Exercise Library" note="Every movement the app can teach, and the kit each one needs"
+          <ListRow icon="dumbbell" tone="purple" title="Exercise Library" note="Every movement, and the kit each one needs"
             onPress={() => router.push('/(owner)/library')} />
         </Section>
 
@@ -1714,11 +1725,11 @@ export default function OwnerOps() {
             is the only standing route to the screen and its audit log. */}
         <Section>
           <SectionHead title="Administration" />
-          <ListRow icon="clock" title="Deletion Requests" note="Members who asked to be erased, and the 30-day clock"
+          <ListRow icon="clock" tone="red" title="Deletion Requests" note="Members who asked to be erased, and the 30-day clock"
             onPress={() => router.push('/(owner)/deletions')} />
-          <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
+          <ListRow icon="settings" tone="neutral" title="Settings" note="Your sign-in, your data, and deleting your account"
             onPress={() => router.push('/(owner)/settings')} />
-          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
+          <ListRow icon="search" tone="teal" title="User Guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
         </Section>
       </ScrollView>

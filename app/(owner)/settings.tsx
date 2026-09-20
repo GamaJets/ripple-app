@@ -618,15 +618,15 @@ export default function OwnerSettings() {
 
         <Section>
           <SectionHead title="Your Data" />
-          <ListRow icon="share" title={exporting ? 'Preparing Export…' : 'Export My Data'}
+          <ListRow icon="share" tone="blue" title={exporting ? 'Preparing Export…' : 'Export My Data'}
             note="Everything Repple stores about you, as a JSON file you can keep"
             onPress={exportData} />
           {facts?.requestedAt ? (
-            <ListRow icon={BACK_ICON} title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
-              note="Keep your account. You can withdraw right up until the deletion is carried out."
+            <ListRow icon={BACK_ICON} tone="brand" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
+              note="Keep your account — possible until the deletion is carried out"
               onPress={withdraw} />
           ) : (
-            <ListRow icon="minus" tone={t.crit} title={deleting ? 'Requesting…' : 'Delete My Account'}
+            <ListRow icon="minus" tone="red" title={deleting ? 'Requesting…' : 'Delete My Account'}
               note="Ask for your account and your data to be erased permanently"
               onPress={deleteAccount} />
           )}
@@ -645,7 +645,7 @@ export default function OwnerSettings() {
             ? <Flag tone={t.crit}>{queueLine()}</Flag>
             : <Text style={{ ...ty.label, color: t.ink2 }}>{queueLine()}</Text>}
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{ownersLine()}</Text>
-          <ListRow icon="clock" title="Deletion Requests" note="The queue, and the 30-day clock running on it"
+          <ListRow icon="clock" tone="amber" title="Deletion Requests" note="The queue, and the 30-day clock running on it"
             onPress={() => router.push('/(owner)/deletions')} />
         </Section>
 

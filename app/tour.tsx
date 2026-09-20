@@ -15,10 +15,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../src/ui/components';
-import { Section, SectionHead, Cta, Ghost } from '../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../src/theme/scale';
+import { Section, Cta, Ghost, HeroCard, IconPlate, type Tone } from '../src/ui/kit';
+import { sp, layout, type as ty } from '../src/theme/scale';
 import { VARIANT, VARIANT_LABEL, HOME_ROUTE, type AppVariant } from '../src/lib/variant';
 import { guideFor, GUIDE_INTRO } from '../src/lib/guide';
+
+const STEP_TONES: Tone[] = ['brand', 'blue', 'purple', 'orange', 'teal', 'pink'];
 
 /** Per app, so installing the coach app still gets its own tour. */
 export const tourKey = (v: AppVariant) => `repple.tour.seen.${v}`;
@@ -48,23 +50,27 @@ export default function Tour() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 32, flexGrow: 1 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>Getting started</Text>
-        <Text style={{ ...ty.title, color: t.ink, marginTop: 2 }}>{VARIANT_LABEL[VARIANT]}</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>{GUIDE_INTRO[VARIANT]}</Text>
-
-        {/* progress — which of the tabs we are on */}
-        <View style={{ flexDirection: 'row', gap: 6, marginBottom: sp.xl }}>
-          {sections.map((_, n) => (
-            <View key={n} style={{ height: 3, flex: 1, borderRadius: 2, backgroundColor: n <= i ? t.brand : t.surface2 }} />
-          ))}
-        </View>
+        {/* The step's night head: which app and how far through, the tab's
+            name in Sora, its one-line summary, and the pips — bright for the
+            steps reached, the night's own tile for the ones ahead. Said once,
+            as the hero's spoken line; the pips are its picture. */}
+        <HeroCard eyebrow={`${VARIANT_LABEL[VARIANT]} · ${i + 1} of ${sections.length}`.toUpperCase()} title={s.tab} meta={s.summary}>
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+            style={{ flexDirection: 'row', gap: 6, marginTop: sp.lg }}>
+            {sections.map((_, n) => (
+              <View key={n} style={{ height: 6, flex: 1, borderRadius: 3, backgroundColor: n <= i ? t.brandBright : t.night2 }} />
+            ))}
+          </View>
+        </HeroCard>
+        {/* The app's own introduction, once, on the first step — it is about
+            the whole app and was being repeated over every tab. */}
+        {i === 0 ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>{GUIDE_INTRO[VARIANT]}</Text> : null}
 
         <Section>
-          <SectionHead title={s.tab} note={`${i + 1} of ${sections.length}`} />
-          <Text style={{ ...ty.body, color: t.ink, marginBottom: sp.lg }}>{s.summary}</Text>
           {s.points.map((p, n) => (
-            <View key={n} style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-              <Text style={{ ...ty.body, color: t.brand }}>•</Text>
+            <View key={n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: n === s.points.length - 1 ? 0 : sp.md }}>
+              {/* One hue per step, so moving on is visibly a new page. */}
+              <IconPlate icon="check" tone={STEP_TONES[i % STEP_TONES.length]} size={32} />
               <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{p}</Text>
             </View>
           ))}

@@ -9,7 +9,7 @@
 // label above, and the notice is ink text beside a coloured dot rather than
 // coloured text.
 import { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme, PasswordField, PasswordRules } from '../src/ui/components';
@@ -18,12 +18,12 @@ import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { openLegalDoc } from '../src/ui/legal';
 import { USE_SUPABASE } from '../src/lib/config';
-import { VARIANT, VARIANT_TILE } from '../src/lib/variant';
+import { VARIANT } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
-import { Card, Cta, Ghost } from '../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
+import { Card, Cta, CtaBright, HeroCard, Segmented } from '../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../src/theme/scale';
 import { BrandMark, BrandWordmark } from '../src/ui/BrandMark';
 import { BRAND_ID, DEFAULT_BRAND_ID } from '../src/lib/brands';
 
@@ -154,8 +154,10 @@ export default function Welcome() {
   };
   // One field style, shared with <PasswordField> (which lifts the marginBottom
   // onto its wrapper so the eye toggle stays centred on the input itself).
-  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md } as const;
-  const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
+  // The approved look's field: a 52pt pill of `surface2` on the card, at the
+  // card's own corner, so a thumb finds it and the label above it stays quiet.
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, minHeight: 52, paddingVertical: sp.md, marginBottom: sp.md } as const;
+  const lab = { ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 } as const;
 
   /* ── the door ───────────────────────────────────────────────────────────
      The approved board opens every app on a product door — the mark, the
@@ -166,13 +168,14 @@ export default function Welcome() {
      coach and studio apps lead with Sign In (most people arriving at them
      were invited and already have an account).
 
-     Drawn in the theme's own tokens rather than the board's fixed near-black,
-     so a white-label brand's palette, a member's chosen palette and the
-     phone's light mode all still hold — under dark mode the default palette
-     is Repple Dark, which IS the board's ground; under light mode the same
-     lockup sits on white. The mark is the same mark the icon carries; the
-     wordmark is the brand's name set plainly, because the board's stylised
-     mark is a raster and cannot be resolved from one — see the handoff.
+     NIGHT, full screen, in light mode and dark alike: the approved look opens
+     every app on the same near-black the hero cards are cut from, and a door
+     that was white by day was a different product from the screens behind it.
+     Still the theme's own tokens and never a fixed hex — `t.night` is derived
+     per palette, and `brandBright` is the accent only where the accent clears
+     3:1 on it and white where it does not — so a white-label brand's palette
+     holds here exactly as it holds on a hero. The wordmark is drawn in
+     `nightInk` with its three bars in `brandBright`.
 
      Composed to board page 1: nothing above the lockup, the mark over the
      wordmark over the one word that tells Coach and Studio apart, the
@@ -197,43 +200,53 @@ export default function Welcome() {
       setShowForm(true);
     };
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.night }}>
         <Stack.Screen options={{ headerShown: false }} />
+        {/* The clock and the battery, in white while this screen is up: the
+            ground is night whatever the phone's own appearance is. */}
+        <StatusBar barStyle="light-content" />
         <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingVertical: sp.xl, justifyContent: 'space-between' }}>
           {/* Nothing above the lockup but ground, as the board leaves it. */}
           <View />
 
-          {/* The lockup, centred. The wordmark is set in the hero step because
-              it is the one thing this screen says; the -2 tracking that step
-              carries is an optical correction for a 44pt NUMBER and would
-              close a word's letters into each other, so it is opened up here.
-              The variant word is upper-cased the same way the wordmark is —
-              it is part of the lockup, not a label — and set in the brand
-              green as the board sets it. */}
+          {/* The lockup, centred. The variant word is upper-cased and tracked
+              the same way the wordmark is — it is part of the lockup, not a
+              label — and set in the bright accent as the board sets it. */}
           <View style={{ alignItems: 'center', paddingHorizontal: sp.md }}>
             {/* The house brand's door carries the board's wordmark — the word
-                IS the logo, so it is drawn rather than typeset. A white-label
-                tenant has no such drawing: its door says its own name in type,
-                under the two-letter mark in its own accent. */}
+                IS the logo, so it is drawn rather than typeset: white letters,
+                bright bars. A white-label tenant has no such drawing: its door
+                says its own name in Sora, the display face, under the mark
+                in its own accent as it is drawn on night. */}
             {BRAND_ID === DEFAULT_BRAND_ID ? (
               <View accessible accessibilityRole="header" accessibilityLabel={appName}>
-                <BrandWordmark width={236} />
+                <BrandWordmark width={236} ink={t.nightInk} signal={t.brandBright} />
               </View>
             ) : (
+              /* The hero step's -1.5 tracking is an optical correction for a
+                 44pt NUMBER and would close a word's letters into each other,
+                 so it is opened up here. Wraps rather than shrinks: a gym's
+                 name is the one thing on this screen that must be legible. */
               <>
-                <BrandMark size={96} />
-                <Text accessibilityRole="header" style={{ ...ty.hero, color: t.ink, letterSpacing: 2, textAlign: 'center', marginTop: sp.lg }}>{appName.toUpperCase()}</Text>
+                <BrandMark size={84} ink={t.nightInk} signal={t.brandBright} />
+                <Text accessibilityRole="header" style={{ ...ty.hero, color: t.nightInk, letterSpacing: 0, textAlign: 'center', marginTop: sp.lg }}>{appName}</Text>
               </>
             )}
             {VARIANT !== 'client' ? (
-              <Text style={{ ...ty.micro, color: t.brand, letterSpacing: 4, marginTop: sp.xs }}>{(VARIANT === 'trainer' ? 'Coach' : 'Studio').toUpperCase()}</Text>
+              <Text style={{ ...ty.eyebrow, color: t.brandBright, letterSpacing: 5, marginTop: sp.md }}>{(VARIANT === 'trainer' ? 'Coach' : 'Studio').toUpperCase()}</Text>
             ) : null}
-            <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', maxWidth: 300, marginTop: sp.xxl }}>{strap}</Text>
+            <Text style={{ ...ty.title, color: t.nightInk, textAlign: 'center', maxWidth: 300, marginTop: sp.xxl }}>{strap}</Text>
           </View>
 
-          <View style={{ gap: sp.md }}>
-            <Cta wide label={primaryLabel} onPress={() => openForm(primaryMode)} />
-            <Ghost label={secondaryLabel} onPress={() => openForm(secondaryMode)} />
+          <View style={{ gap: sp.sm }}>
+            <CtaBright label={primaryLabel} onPress={() => openForm(primaryMode)} />
+            {/* The quiet one: words on the night, no fill, still a 48pt
+                target. The kit's `Ghost` is a `surface2` pill and would be a
+                grey slab on this ground. */}
+            <Pressable onPress={() => openForm(secondaryMode)} accessibilityRole="button" accessibilityLabel={secondaryLabel}
+              style={{ minHeight: 52, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ ...ty.button, color: t.nightInk2 }}>{secondaryLabel}</Text>
+            </Pressable>
           </View>
         </View>
       </SafeAreaView>
@@ -246,20 +259,17 @@ export default function Welcome() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
-          {/* ── the brand mark ──────────────────────────────────────────── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-            {/* The tile the user just tapped on their home screen — teal for
-                Repple, indigo for Coach, amber for Studio. */}
-            <View style={{ width: 46, height: 46, borderRadius: radius.md, backgroundColor: VARIANT_TILE[VARIANT], alignItems: 'center', justifyContent: 'center' }}>
-              <BrandMark size={34} ink="#ffffff" signal="#22c55e" />
-            </View>
-            <Text style={{ ...ty.title, color: t.ink }}>{appName}</Text>
-          </View>
-          <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>
-            {pendingEmail ? `One step left — the ${spellDigits(EMAIL_OTP_LENGTH)} digits we just emailed you.`
-              : mode === 'up' ? 'Create your account to get started.' : 'Welcome back — sign in to continue.'}
-          </Text>
+          {/* ── the night head ──────────────────────────────────────────
+              The door's ground carried onto the form as a hero card: whose app
+              this is, what this step is in Sora, and the one line that says
+              what happens next. It replaced a tile-and-name row whose tile was
+              two hardcoded hexes. */}
+          <HeroCard eyebrow={appName.toUpperCase()}
+            title={pendingEmail ? 'One Step Left' : mode === 'up' ? 'Create Your Account' : 'Welcome Back'}
+            meta={pendingEmail ? `The ${spellDigits(EMAIL_OTP_LENGTH)} digits we just emailed you.`
+              : mode === 'up' ? 'A minute, and you are in.' : 'Sign in to continue.'} />
 
+          {/* The form — or the code boxes — on a surface card over the ground. */}
           {pendingEmail ? (
             /* The confirmation code, in the same boxes the phone door uses —
                though NOT necessarily the same number of them: the email length
@@ -273,6 +283,7 @@ export default function Welcome() {
                they ever see the message — the failure that had email
                confirmation switched off in the first place. Digits give a
                scanner nothing to press. See src/ui/emailOtp.ts. */
+            <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
             <OtpCodeEntry
               title="Confirm Your Email"
               sentTo={pendingEmail}
@@ -297,16 +308,17 @@ export default function Welcome() {
                 setNotice(`Nothing has been sent anywhere else. If ${pendingEmail} is wrong, correct it and create the account again.`);
               }}
             />
+            </View>
           ) : (
           <>
-          {/* Sign in / Sign up toggle */}
-          <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginBottom: sp.xl }}>
-            {([['up', 'Create Account'], ['in', 'Sign In']] as const).map(([m, label]) => (
-              <Pressable key={m} onPress={() => { setMode(m); setNotice(null); }} accessibilityRole="button" accessibilityLabel={label} style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: mode === m ? t.brand : 'transparent' }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: mode === m ? t.brandInk : t.ink3 }}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
+          {/* Sign in / Sign up — the kit's Segmented, so the selected state,
+              the tab roles and what the bar does at large text are its. The
+              handler is the one the hand-built toggle had: switch, and clear
+              whatever the last attempt said. */}
+          <Segmented style={{ marginBottom: sp.xl }} value={mode}
+            onChange={(m) => { setMode(m); setNotice(null); }}
+            options={[{ key: 'up', label: 'Create Account' }, { key: 'in', label: 'Sign In' }] as const} />
 
           {notice ? (
             <Card tone={t.brand} style={{ marginBottom: sp.md }}>
@@ -329,10 +341,10 @@ export default function Welcome() {
             accessibilityLabel="Continue with your phone number"
             style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
-              backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 14,
+              backgroundColor: t.surface2, borderRadius: radius.md, minHeight: 52, paddingVertical: sp.md,
               marginBottom: sp.lg,
             }}>
-            <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>Continue with your phone number</Text>
+            <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>Continue with your phone number</Text>
           </Pressable>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
             <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
@@ -370,13 +382,14 @@ export default function Welcome() {
           ) : null}
           {mode === 'in' ? (
             <Pressable onPress={() => router.push('/forgot-password')} accessibilityRole="button" accessibilityLabel="Forgot password" hitSlop={8} style={{ alignSelf: 'flex-end', marginTop: -4, marginBottom: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Forgot password?</Text>
+              <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>Forgot password?</Text>
             </Pressable>
           ) : null}
 
           <View style={{ marginTop: sp.sm }}>
             <Cta wide disabled={!canGo || busy} onPress={go}
               label={busy ? 'Please Wait…' : mode === 'up' ? 'Create Account' : 'Sign In'} />
+          </View>
           </View>
 
           {/* There is no "Continue with Apple" or "Continue with Google" here,
@@ -418,10 +431,10 @@ export default function Welcome() {
             <View style={{ marginTop: sp.xl }}>
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
                 Your account is securely stored. By continuing you agree to the{' '}
-                <Text accessibilityRole="link" style={{ color: t.brand, textDecorationLine: 'underline' }}
+                <Text accessibilityRole="link" style={{ color: t.brandText, textDecorationLine: 'underline' }}
                   onPress={() => { void openLegalDoc('terms'); }}>Terms of Service</Text>
                 {' '}and the{' '}
-                <Text accessibilityRole="link" style={{ color: t.brand, textDecorationLine: 'underline' }}
+                <Text accessibilityRole="link" style={{ color: t.brandText, textDecorationLine: 'underline' }}
                   onPress={() => { void openLegalDoc('privacy'); }}>Privacy Policy</Text>.
               </Text>
             </View>

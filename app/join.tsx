@@ -13,7 +13,7 @@
 // client — it hands the code to the screen that asks the server about it, and
 // the coach still accepts the request.
 import { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, StatusBar } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
 import { useBrand } from '../src/ui/brand';
@@ -120,9 +120,12 @@ export default function JoinLanding() {
   }, [raw, router]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.gutter }}>
-      <ActivityIndicator color={t.brand} />
-      <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, textAlign: 'center' }}>
+    /* Night, as the launch screen and the door either side of it are: this
+       is a hand-over between the two and must not flash white between them. */
+    <View style={{ flex: 1, backgroundColor: t.night, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.gutter }}>
+      <StatusBar barStyle="light-content" />
+      <ActivityIndicator color={t.brandBright} />
+      <Text style={{ ...ty.body, color: t.nightInk2, marginTop: sp.lg, textAlign: 'center' }}>
         {/* This is the FIRST screen a member sees after tapping their gym's
             invitation link, and it named the supplier rather than the gym. This
             is a white-label build and the app on this phone may not be called

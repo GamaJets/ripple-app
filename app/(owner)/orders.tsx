@@ -47,8 +47,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, Flag, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Flag, fig, PageHead, Donut, Legend, TonedChip, type Slice } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
@@ -251,18 +251,39 @@ export default function OwnerOrders() {
             : needsAPerson === 0
             ? `${list.length} order${list.length === 1 ? '' : 's'} in ${WINDOW_DAYS} days, and every paid one produced what it was for.`
             : `${needsAPerson} member${needsAPerson === 1 ? '' : 's'} paid and did not get what they bought.`;
-          const mark = needsAPerson > 0 ? t.crit : t.brand;
+          // The book by state, as the ring the figure sits in. The four are a
+          // partition — see the long note that used to head the "By State"
+          // tiles, kept below — so the ring is the whole book and the red
+          // slice IS the figure in its centre. Nothing is drawn until the read
+          // is in hand: an unread book is a track and a dash, never four
+          // noughts.
+          const slices: Slice[] = loaded ? [
+            { label: 'Paid and Granted', tone: 'brand', value: list.filter((o) => o.status === 'paid').length - trouble.paidWithNothing.length },
+            { label: 'Awaiting Payment', tone: 'blue', value: list.filter((o) => o.status === 'pending').length },
+            { label: 'Abandoned', tone: 'neutral', value: list.filter((o) => o.status === 'abandoned').length },
+            { label: 'Not Granted', tone: 'red', value: needsAPerson },
+          ].map((x) => ({ ...x, shown: String(x.value) } as Slice)) : [];
           return (
             <Section>
-              <SectionHead title="Need Attention" />
-              <View accessible accessibilityLabel={`Need attention, ${figure}, ${note}`}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
-                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
+              <SectionHead title="Need Attention" note={loaded ? `${list.length} in ${WINDOW_DAYS} days` : undefined} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Donut slices={slices} centre={loaded ? String(needsAPerson) : null} sub="need you" size={120}
+                  spoken={`Need attention, ${figure === '—' ? 'no figure' : figure}, ${note}`} />
+                <View style={{ flex: 1, minWidth: 140, gap: sp.sm }}>
+                  {/* The alarm colour only when somebody paid and got nothing,
+                      and always with its word. */}
+                  {loaded ? <TonedChip label={needsAPerson > 0 ? 'Needs You' : 'All Granted'} tone={needsAPerson > 0 ? 'red' : 'brand'} icon={needsAPerson > 0 ? 'info' : 'check'} /> : null}
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{note}</Text>
                 </View>
               </View>
+              {loaded && list.length > 0 ? (
+                <View style={{ marginTop: sp.lg }}><Legend items={slices} /></View>
+              ) : null}
+              {loaded && needsAPerson > 0 ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  Not granted: {trouble.failed.length} recorded, {trouble.paidWithNothing.length} silent.
+                </Text>
+              ) : null}
             </Section>
           );
         })()}
@@ -368,15 +389,13 @@ export default function OwnerOrders() {
               <Text style={{ ...ty.body, color: t.ink2 }}>
                 {p.count} order{p.count === 1 ? '' : 's'} in {p.currency}
               </Text>
-              <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>
+              <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>
                 {money(p.cents, p.currency)}
               </Text>
             </View>
           ))}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Paid orders only. Money that Stripe took but the gym never granted is counted above,
-            under Need Attention, rather than in this total — putting it in here is how it stops
-            being visible as something to fix.
+            Paid orders only. Money Stripe took but the gym never granted is under Need Attention, not here.
           </Text>
         </Section>
 
@@ -397,30 +416,10 @@ export default function OwnerOrders() {
             gym's completed sales. It belongs to Not Granted alone, and Paid is
             now the orders that produced what they were for. The four are then
             a partition of the book, which is what a row of tiles under this
-            heading claims to be. */}
-        <Section>
-          <SectionHead title="By State" note={loaded ? `${list.length} in ${WINDOW_DAYS} days` : undefined} />
-          <KpiRow items={[
-            {
-              label: 'Paid',
-              value: fig(loaded ? list.filter((o) => o.status === 'paid').length - trouble.paidWithNothing.length : null),
-              delta: loaded ? 'and granted' : undefined,
-            },
-            { label: 'Awaiting', value: fig(loaded ? list.filter((o) => o.status === 'pending').length : null) },
-            { label: 'Abandoned', value: fig(loaded ? list.filter((o) => o.status === 'abandoned').length : null) },
-            {
-              label: 'Not Granted',
-              value: fig(loaded ? needsAPerson : null),
-              // The two doors the same harm arrives through, kept apart: the
-              // webhook recorded 'failed' and said why in `failure_note`, or it
-              // wrote 'paid' and left both entitlement columns empty, which
-              // says nothing at all. The second is the one no column reports.
-              delta: loaded && needsAPerson > 0
-                ? `${trouble.failed.length} recorded, ${trouble.paidWithNothing.length} silent`
-                : undefined,
-            },
-          ]} />
-        </Section>
+            heading claims to be.
+
+            Drawn as the ring in the figure card at the top now, from the same
+            four counts; this note stays where the argument was made. */}
 
 
         {/* ── the book ───────────────────────────────────────────────────── */}
@@ -459,7 +458,7 @@ export default function OwnerOrders() {
                 accessibilityRole="button"
                 accessibilityLabel="Try reading the order book again"
                 style={{ alignSelf: 'flex-start', marginTop: sp.md, backgroundColor: t.surface2, borderRadius: 8, paddingHorizontal: sp.lg, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
+                <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
           ) : !loaded ? (
@@ -483,7 +482,7 @@ export default function OwnerOrders() {
               }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                   {bad ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }} numberOfLines={1}>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }} numberOfLines={1}>
                     {o.memberName ?? 'Name not readable'}
                   </Text>
                   <Text style={{ ...ty.body, ...numeric, color: t.ink }}>

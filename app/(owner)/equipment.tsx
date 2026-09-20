@@ -22,8 +22,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Flag, PageHead, Donut, Legend, AttentionRow, IconPlate, type Slice } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -383,13 +383,25 @@ export default function OwnerEquipment() {
               : queue.length === 0
                 ? 'Every scheduled item is in date.'
                 : `${sum?.overdue ?? 0} overdue · ${sum?.due ?? 0} due · ${sum?.unrecorded ?? 0} never serviced`;
+          // What is in the queue, by why it is there: red overdue, amber due,
+          // purple for a schedule nobody has ever logged against. `sum` is
+          // null until the register is in hand, and the ring is then a track
+          // and a dash — a board somebody walks past must never draw "nothing
+          // due" out of a read that did not come back.
+          const slices: Slice[] = sum ? [
+            { label: 'Overdue', tone: 'red', value: sum.overdue, shown: String(sum.overdue) },
+            { label: 'Due', tone: 'amber', value: sum.due, shown: String(sum.due) },
+            { label: 'Never Serviced', tone: 'purple', value: sum.unrecorded, shown: String(sum.unrecorded) },
+          ] : [];
           return (
             <Section>
               <SectionHead title="Needing Attention" />
-              <View accessible accessibilityLabel={`Needing attention, ${figure}, ${note}`}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Donut slices={slices} centre={loaded ? figure : null} sub="need you" size={112}
+                  spoken={`Needing attention, ${figure === '—' ? 'no figure' : figure}, ${note}`} />
+                {sum && queue.length > 0
+                  ? <View style={{ flex: 1, minWidth: 140 }}><Legend items={slices} /></View>
+                  : <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>{note}</Text>}
               </View>
             </Section>
           );
@@ -411,13 +423,37 @@ export default function OwnerEquipment() {
         ) : null}
 
 
+        {/* Directly under the figure they are the rows OF: the kit's
+            AttentionRow on an amber plate, red when the date has passed, each
+            with its state in words and the one action that clears it. */}
+        {queue.length > 0 ? (
+          <Section>
+            <SectionHead title="Needs Attention" />
+            {queue.map(({ item, state }, i) => (
+              <AttentionRow key={item.id} divider={i > 0}
+                avatar={<IconPlate icon="wrench" tone={state === 'overdue' ? 'red' : 'amber'} />}
+                name={item.name}
+                reason={[
+                  item.category || 'Uncategorised',
+                  item.quantity > 1 ? `${item.quantity} units` : null,
+                  state === 'unrecorded' ? 'schedule set, never logged'
+                    : nextServiceDue(item) ? `due ${nextServiceDue(item)}` : null,
+                ].filter(Boolean).join(' · ')}
+                status={STATE_LABEL[state]} tone={state === 'overdue' ? t.crit : t.warn}
+                action={{ label: 'Serviced', onPress: () => markServiced(item) }} />
+            ))}
+          </Section>
+        ) : null}
+
+        {/* The register's three figures as tiles on the ground, as the look
+            keeps them; the sentences that qualify them sit in the card under. */}
+        <KpiRow tiles items={[
+          { label: 'Items', value: !loaded || list.length === 0 ? '—' : String(sum!.items), tone: 'blue' },
+          { label: 'Usable Units', value: !loaded || list.length === 0 ? '—' : String(sum!.usableUnits), tone: 'brand' },
+          { label: 'Out of Service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits), tone: 'amber' },
+        ]} />
+        {failed || (loaded && list.length === 0) ? (
         <Section>
-          <SectionHead title="The Register" />
-          <KpiRow items={[
-            { label: 'Items', value: !loaded || list.length === 0 ? '—' : String(sum!.items) },
-            { label: 'Usable Units', value: !loaded || list.length === 0 ? '—' : String(sum!.usableUnits) },
-            { label: 'Out of Service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits) },
-          ]} />
           {failed ? (
             // Said "pull the screen again" over a ScrollView with no
             // RefreshControl on it, and there was no retry anywhere else on the
@@ -425,18 +461,18 @@ export default function OwnerEquipment() {
             // maintenance board had failed to load was a gesture that does
             // nothing. The gesture is real now, and the button under "All kit"
             // below runs the same read.
-            <Flag tone={t.crit} style={{ marginTop: sp.md }}>
+            <Flag tone={t.crit}>
               {loaded
                 ? 'The register could not be read again just now. These are from the last read that came back — the stamp at the top says when.'
                 : 'These are blank because the read failed, not because the register is empty. Pull down, or read it again from the button below, before assuming nothing is due.'}
             </Flag>
           ) : loaded && list.length === 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              An empty register is not an empty gym. These stay blank until the kit is entered,
-              rather than reporting a confident zero.
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              An empty register is not an empty gym — these stay blank until the kit is entered.
             </Text>
           ) : null}
         </Section>
+        ) : null}
 
 
         {/* The catalogue hangs off the register rather than off the dashboard
@@ -447,43 +483,12 @@ export default function OwnerEquipment() {
             tap away here, and would be nowhere from a revenue roll-up. */}
         <Section>
           <SectionHead title="What the platform can teach on it" />
-          <ListRow icon="dumbbell" title="Exercise Library"
-            note="Every movement in the catalogue, filtered by the equipment it needs"
+          <ListRow icon="dumbbell" tone="purple" title="Exercise Library"
+            note="Every movement, filtered by the equipment it needs"
             onPress={() => router.push('/(owner)/library')} />
         </Section>
 
 
-        {queue.length > 0 ? (
-          <>
-            <Section>
-              <SectionHead title="Needs Attention" />
-              {queue.map(({ item, state }, i) => (
-                <View key={item.id}>
-                  {i > 0 ? <Rule /> : null}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{item.name}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                        {item.category || 'Uncategorised'}
-                        {item.quantity > 1 ? ` · ${item.quantity} units` : ''}
-                        {state === 'unrecorded'
-                          ? ' · schedule set, never logged'
-                          : nextServiceDue(item) ? ` · due ${nextServiceDue(item)}` : ''}
-                      </Text>
-                    </View>
-                    <Pill t={t} state={state} />
-                    <Pressable onPress={() => markServiced(item)} hitSlop={8}
-                      accessibilityRole="button" accessibilityLabel={`Record service for ${item.name}`}
-                      style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Serviced</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
-            </Section>
-            <Rule />
-          </>
-        ) : null}
 
         <Section>
           <SectionHead title={loaded && list.length ? `All kit · ${list.length}` : 'All kit'} />
@@ -522,7 +527,7 @@ export default function OwnerEquipment() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, opacity: retired ? 0.5 : 1 }}>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{e.name}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{e.name}</Text>
                       {e.identifier ? <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>{e.identifier}</Text> : null}
                     </View>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -641,7 +646,7 @@ export default function OwnerEquipment() {
                 accessibilityState={{ disabled: !name.trim() || busy, busy }}
                 accessibilityHint={!name.trim() ? 'Give the item a name first.' : undefined}
                 style={{ backgroundColor: name.trim() && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: name.trim() && !busy ? t.brandInk : t.ink3 }}>
+                <Text style={{ ...ty.label, ...font('600'), color: name.trim() && !busy ? t.brandInk : t.ink3 }}>
                   {busy ? 'Adding…' : 'Add to the register'}
                 </Text>
               </Pressable>

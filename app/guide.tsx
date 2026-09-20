@@ -23,11 +23,10 @@ import { useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../src/ui/components';
 import type { Theme } from '../src/theme/tokens';
-import { Rule, Section, SectionHead, Ghost } from '../src/ui/kit';
+import { Section, Ghost, PageHead, HeroCard, Expandable, IconPlate, type Tone } from '../src/ui/kit';
 import { sp, layout, type as ty } from '../src/theme/scale';
 import { VARIANT, VARIANT_LABEL } from '../src/lib/variant';
 import { tabsFor, topicsFor, GUIDE_INTRO, type GuideSection } from '../src/lib/guideContent';
-import { BACK_ICON } from '../src/ui/direction';
 
 /**
  * That this screen has been opened. Read by app/(client)/getting-started.tsx,
@@ -62,20 +61,20 @@ export const GUIDE_SEEN_KEY = 'repple.guide.seen';
  * …/>`; a plain call cannot carry one, and dropping it would cost React the
  * identity of both lists — a quieter bug than the one being fixed here.
  */
-const block = (s: GuideSection, t: Theme) => (
-  <View key={s.title}>
-    <Section>
-      <SectionHead title={s.title} />
-      <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>{s.summary}</Text>
-      {s.points.map((p, i) => (
-        <View key={i} style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
-          <Text style={{ ...ty.body, color: t.brand }}>•</Text>
-          <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{p}</Text>
-        </View>
-      ))}
-    </Section>
-    <Rule />
-  </View>
+// Folded now: the title and its one-line summary are the row, and the points
+// open under it on toned plates. Six tabs and every cross-app topic, all open,
+// was a wall a reader had to scroll to find one thing in; this is a list they
+// can scan. The kit's `Expandable` keeps its own open state, which is exactly
+// what the remount bug above would have thrown away on every render.
+const block = (s: GuideSection, t: Theme, tone: Tone) => (
+  <Expandable key={s.title} title={s.title} note={s.summary}>
+    {s.points.map((p, i) => (
+      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: i === s.points.length - 1 ? 0 : sp.md }}>
+        <IconPlate icon="check" tone={tone} size={32} />
+        <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{p}</Text>
+      </View>
+    ))}
+  </Expandable>
 );
 
 export default function Guide() {
@@ -91,7 +90,7 @@ export default function Guide() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 48 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 48 }}>
         {/* ── the way out ──────────────────────────────────────────────────
             Seen on an iPhone 17 Pro: this screen had no back control at all.
             It is pushed from the Profile tab, it hides the tab bar, and the
@@ -103,29 +102,23 @@ export default function Guide() {
             Leading edge with an a11yLabel, which is the house form — see
             src/ui/FeedbackScreen.tsx for the argument. "Done" stays where it
             is: somebody who read to the end should not have to scroll back. */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>User guide</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 2 }}>{VARIANT_LABEL[VARIANT]}</Text>
-          </View>
-        </View>
-        {/* marginBottom, not nothing. The rule below sat on the last line of
-            this paragraph — a hairline touching descenders reads as an
-            underline on the sentence rather than as the end of the header. */}
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>{GUIDE_INTRO[VARIANT]}</Text>
+        {/* The kit's pushed-page head — the round back control on the
+            leading edge — and then the night hero that says whose guide this
+            is, with the app's own introduction as its one line. */}
+        <PageHead title="User Guide" />
+        <HeroCard eyebrow="USER GUIDE" title={VARIANT_LABEL[VARIANT]} meta={GUIDE_INTRO[VARIANT]} />
 
 
         {/* marginTop to match "Across the app" below. Without it this kicker
             sat hard against the rule above it and read as part of the header
             paragraph rather than as the label on the list under it. */}
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>The tabs</Text>
-        {tabs.map((s) => block(s, t))}
+        {tabs.map((s) => block(s, t, 'brand'))}
 
         {topics.length ? (
           <>
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Across the app</Text>
-            {topics.map((s) => block(s, t))}
+            {topics.map((s) => block(s, t, 'blue'))}
           </>
         ) : null}
 

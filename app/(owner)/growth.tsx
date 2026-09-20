@@ -58,9 +58,8 @@ import { plainExact } from '../../src/lib/units';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
-import { DistBar } from '../../src/ui/charts';
+import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Flag, fig, HeroCard, Ring, Meter, Donut, Legend, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
@@ -269,19 +268,16 @@ export default function OwnerGrowth() {
    *  it on the call site is the one silent way to break this conversion. Same
    *  edit, same reason, as app/(client)/injuries.tsx.
    */
-  const bar = (key: string, { label, right, pct, dim }: { label: string; right: string; pct: number; dim?: boolean }) => (
-    <View key={key} style={{ marginBottom: sp.lg }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
-        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{right}</Text>
-      </View>
-      <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-        <View style={{ height: 3, borderRadius: 2, width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: t.brand, opacity: dim ? 0.55 : 1 }} />
-      </View>
-    </View>
+  // The kit's labelled 8pt `Meter` now, where a hand-built 3pt hairline was.
+  // `right` is the Meter's `note`, so the count and its share are what is
+  // drawn AND what is spoken; the tone names the section, not a judgement.
+  const bar = (key: string, { label, right, pct, dim, tone }: { label: string; right: string; pct: number; dim?: boolean; tone?: Tone }) => (
+    <Meter key={key} label={label} val={Math.max(0, Math.min(100, pct))} target={100} note={right} dim={dim} tone={tone} />
   );
 
   const G = layout.gutter;
+  const FUNNEL_TONES: Tone[] = ['blue', 'purple', 'teal', 'brand'];
+  const promosWhole = isWhole(promoStatus);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -308,24 +304,18 @@ export default function OwnerGrowth() {
             ? `${roll.trainers} on the roster · ${roll.trainers - idle} delivering sessions`
             : 'No trainers yet — this fills in as they join your gym.';
           return (
-            <Section>
-              <SectionHead title={label} />
-              <View accessible accessibilityLabel={`${label}, ${figure}, ${note}`}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
-              </View>
+            /* The tab root's one night hero. The figure is two or three
+               characters ("+2", "0", a dash), so the kit's wrapping title is
+               safe here in a way it is not for money. */
+            <HeroCard eyebrow={label.toUpperCase()} title={figure} meta={note}>
               {/* Under the figure, not buried at the bottom: this is the
                   sentence that stops every trainer figure below being read as
-                  a member figure. It used to end by saying member churn was not
-                  derived anywhere on this handset. It is, now — immediately
-                  below, and pointed at from here so an owner reading the figure
-                  knows where the other question is answered. */}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                This figure and the trainer sections around it count trainers. Your
-                members are counted separately, in Member Retention below.
+                  a member figure — one line now, pointing at where the other
+                  question is answered. */}
+              <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>
+                Counts trainers. Members are in Member Retention below.
               </Text>
-            </Section>
+            </HeroCard>
           );
         })()}
 
@@ -345,6 +335,19 @@ export default function OwnerGrowth() {
               under their own names, so nobody has to work out which population
               a percentage is a share of. */}
           <SectionHead title="Trainer Retention" note="Trainers, not members · last 30 days" />
+          {/* The share of the roster that is NOT idle, as a ring, with the
+              sample it is a share of beside it. `idlePct` is null for a roster
+              that did not come back whole or has nobody on it, and the ring
+              then draws no arc and a dash — never a full or an empty circle. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg, marginBottom: sp.lg }}>
+            <Ring size={112} tone="brand"
+              value={idlePct == null ? null : (100 - idlePct) / 100}
+              figure={idlePct == null ? null : `${num(100 - idlePct)}%`} sub="active"
+              spoken={idlePct == null ? 'Active trainers, no figure' : `${num(100 - idlePct)}% of trainers active, ${num(roll.trainers - idle)} of ${num(roll.trainers)}`} />
+            <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>
+              {idlePct == null ? 'No share to state yet.' : `${num(roll.trainers - idle)} of ${num(roll.trainers)} trainers had a client or a session in the last 30 days.`}
+            </Text>
+          </View>
           <KpiRow items={[
             // "0 of 0" under a dash is a fraction of nobody. `idlePct` is
             // already null with an empty roster, so the caption says the same
@@ -372,7 +375,7 @@ export default function OwnerGrowth() {
               : trainersUnread ? 'Your roster could not be read, so nothing here is a statement about your trainers.'
               : trainersUnknown ? 'Only part of your roster came back, so no share of it is stated.'
               : roll.trainers === 0 ? 'No trainers on your roster yet, so there is nobody to be a share of.'
-              : `Over the ${num(roll.trainers)} trainer${roll.trainers === 1 ? '' : 's'} on your roster today. Idle means no clients and no sessions in the last 30 days. Members who joined or left are counted separately, in Member Retention below.`}
+              : `Over the ${num(roll.trainers)} trainer${roll.trainers === 1 ? '' : 's'} on your roster today. Idle means no clients and no sessions in 30 days.`}
           </Text>
         </Section>
 
@@ -391,6 +394,22 @@ export default function OwnerGrowth() {
             title="Member Retention"
             note={churn.headline.label ? `Members · ${churn.headline.label}` : 'Members'}
           />
+          {/* The members who STAYED, as a ring: the complement of the churn
+              rate below it, over the same roster the rate is over. A withheld
+              rate is a withheld ring — no arc, a dash, and `headline.note`
+              under the row says which reason applied. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg, marginBottom: sp.lg }}>
+            <Ring size={112} tone="blue"
+              value={churn.headline.pct == null ? null : (100 - churn.headline.pct) / 100}
+              figure={churn.headline.pct == null ? null : `${num1(100 - churn.headline.pct)}%`} sub="stayed"
+              spoken={churn.headline.pct == null ? 'Members who stayed, no figure' : `${num1(100 - churn.headline.pct)}% of members stayed, ${churn.headline.label ?? ''}`} />
+            {/* Always shown, never only on the failure. Under a rate it says
+                what the rate is OVER — "2 of 20 on the books when August
+                began" — and where there is none it says which of the reasons
+                applied. A dash with no sentence beside it is a dash an owner
+                learns to ignore. */}
+            <Text style={{ ...ty.label, color: t.ink2, flex: 1, minWidth: 140 }}>{churn.headline.note}</Text>
+          </View>
           {/* A KpiRow and not a second <Hero>. The kit's hero is the screen's
               ONE figure and this screen already has one; two of them side by
               side make an owner decide which number the tab is about, which is
@@ -411,13 +430,6 @@ export default function OwnerGrowth() {
             { label: 'Left', value: fig(churn.lastClosed?.left ?? null),
               delta: churn.lastClosed ? churn.lastClosed.label : 'no finished month yet' },
           ]} />
-          {/* Always shown, never only on the failure. Under a rate it says what
-              the rate is OVER — "2 of 20 on the books when August began" — and
-              where there is none it says which of the reasons applied. A dash
-              with no sentence beside it is a dash an owner learns to ignore. */}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {churn.headline.note}
-          </Text>
           <View style={{ marginTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               {churn.loading ? 'Reading your memberships…'
@@ -467,14 +479,20 @@ export default function OwnerGrowth() {
             ))}
           </View>
 
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+        </Section>
+
+        {/* How the rate is worked out, behind a fold: it explains the
+            method, and every WITHHELD month already carries its own reason
+            on its own row above. */}
+        <Expandable title="How Churn Is Counted">
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
             Churn is leavers over the roster the month opened with, counted per person
             rather than per membership row. A month still running has no rate — the
             leavers it has not had yet have not happened. Nothing in the record says WHEN
             a membership was cancelled, only the end date somebody wrote, so a month that
             lost anybody undated withholds the rate rather than printing the smaller one.
           </Text>
-        </Section>
+        </Expandable>
 
 
         {/* ── platform client analytics ──────────────────────────────────── */}
@@ -502,19 +520,18 @@ export default function OwnerGrowth() {
               where nobody is engaged and nobody is at risk — so the picture is
               withheld rather than drawn empty. */}
           {trainersUnknown ? null : (
-            <View style={{ marginTop: sp.xl }}>
-              <DistBar segments={[
-                { label: 'Engaged', value: ca.engaged, color: t.brand },
-                { label: 'At Risk', value: ca.atRisk, color: t.warn },
-              ]} />
-              <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
-                {([['Engaged', ca.engaged, t.brand], ['At risk', ca.atRisk, t.warn]] as const).map(([l, v, col]) => (
-                  <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
-                    <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {num(v)}</Text>
-                  </View>
-                ))}
-              </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg, marginTop: sp.xl }}>
+              {(() => {
+                const mix = [
+                  { label: 'Engaged', value: ca.engaged, tone: 'brand' as Tone, shown: num(ca.engaged) },
+                  { label: 'At Risk', value: ca.atRisk, tone: 'amber' as Tone, shown: num(ca.atRisk) },
+                ];
+                return (<>
+                  <Donut slices={mix} centre={num(ca.total)} sub="clients"
+                    spoken={`${num(ca.total)} clients, ${num(ca.engaged)} engaged, ${num(ca.atRisk)} at risk`} />
+                  <View style={{ flex: 1, minWidth: 140 }}><Legend items={mix} /></View>
+                </>);
+              })()}
             </View>
           )}
           <View style={{ marginTop: sp.xl }}>
@@ -524,7 +541,7 @@ export default function OwnerGrowth() {
               : ca.byTrainer.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on the roster yet.</Text> : null}
             {/* The key moved onto the View `bar` returns — see its header. */}
             {trainersUnread ? null : ca.byTrainer.map((bt) => bar(bt.id, {
-              label: bt.name, right: `${num(bt.clients)} · ${bt.pct}%`, pct: bt.pct,
+              label: bt.name, right: `${num(bt.clients)} · ${bt.pct}%`, pct: bt.pct, tone: 'blue',
             }))}
           </View>
         </Section>
@@ -540,7 +557,7 @@ export default function OwnerGrowth() {
             : trainersUnread ? <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so there was nothing to group into cohorts.</Text>
             : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No trainer signups to group yet.</Text> : null}
           {coh.map((c) => bar(c.label, {
-            label: c.label, right: `${c.pct}% · ${num(c.active)}/${num(c.total)}`, pct: c.pct, dim: c.pct < 60,
+            label: c.label, right: `${c.pct}% · ${num(c.active)}/${num(c.total)}`, pct: c.pct, dim: c.pct < 60, tone: 'purple',
           }))}
         </Section>
 
@@ -554,10 +571,23 @@ export default function OwnerGrowth() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read — an empty funnel here would say nobody signed up, which is not something this screen found out.</Text>
           ) : roll.trainers === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No trainers at your gym yet — the funnel fills in as they join.</Text>
-          ) : funnel.map(([label, count, pct]) => bar(label, {
-            label, right: `${num(count)} · ${pct}%`, pct,
+          ) : funnel.map(([label, count, pct], i) => bar(label, {
+            // One hue per stage, so the narrowing reads as four named steps
+            // stacked rather than one bar drawn four times.
+            label, right: `${num(count)} · ${pct}%`, pct, tone: FUNNEL_TONES[i % FUNNEL_TONES.length],
           }))}
         </Section>
+
+        {/* ── how the codes have done, as figures ─────────────────────────
+            On the ground above the list, as the look keeps tiles. Only from a
+            WHOLE read: a first page of codes is not the gym's codes, and a
+            code whose redemptions could not be counted (-1) withholds the
+            total rather than being added in as nought. */}
+        <KpiRow tiles items={[
+          { label: 'Codes', value: fig(promosWhole ? num(promos.length) : null), tone: 'purple' },
+          { label: 'Active', value: fig(promosWhole ? num(promos.filter((p) => p.active).length) : null), tone: 'brand' },
+          { label: 'Used, All Time', value: fig(promosWhole && promos.every((p) => p.redeemed >= 0) ? num(promos.reduce((a, p) => a + p.redeemed, 0)) : null), tone: 'orange' },
+        ]} />
 
 
         {/* ── promo / referral codes ─────────────────────────────────────── */}
@@ -643,7 +673,7 @@ export default function OwnerGrowth() {
               accessibilityLabel="The promo or referral code to create"
               placeholder="CODE" placeholderTextColor={t.ink3}
               autoCapitalize="characters" autoCorrect={false}
-              style={{ ...ty.body, fontWeight: '500', letterSpacing: 1, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 }} />
+              style={{ ...ty.body, ...font('500'), letterSpacing: 1, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 }} />
             <Cta label="Create" onPress={create} />
           </View>
           {/* Last in the card now, so the trailing margin is only there when
@@ -653,7 +683,7 @@ export default function OwnerGrowth() {
               <Pressable key={d} onPress={() => setDisc(d)}
                 accessibilityRole="button" accessibilityLabel={`${d} percent off`} accessibilityState={{ selected: on }}
                 style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{d}%</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: on ? t.brandInk : t.ink2 }}>{d}%</Text>
               </Pressable>); })}
           </View>
 

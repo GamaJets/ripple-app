@@ -16,20 +16,19 @@ import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
-import { Cta, Ghost, Card } from '../src/ui/kit';
+import { Cta, Card, PageHead, HeroCard } from '../src/ui/kit';
 import { Icon } from '../src/ui/Icon';
 // The code half of this screen now lives in src/ui/OtpCodeEntry — six boxes, a
 // countdown and a resend that reports both outcomes — because email
 // confirmation needs the identical gesture and two copies would drift.
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
-import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../src/theme/scale';
 import {
   COUNTRIES, initialCountry, nationalPlaceholder, countryFor, flagFor,
   toE164, isPlausiblePhone, maskedForDisplay,
   OTP_LENGTH,
 } from '../src/lib/phone';
 import { deviceRegion } from '../src/lib/unitPreference';
-import { BACK_ICON } from '../src/ui/direction';
 import { useScrollPad } from '../src/ui/keyboardPad';
 
 export default function PhoneSignIn() {
@@ -74,7 +73,7 @@ export default function PhoneSignIn() {
   });
 
   const field = {
-    backgroundColor: t.surface2, borderRadius: radius.sm,
+    backgroundColor: t.surface2, borderRadius: radius.md, minHeight: 52,
     paddingHorizontal: sp.lg, paddingVertical: 14,
     ...ty.body, color: t.ink,
   } as const;
@@ -101,23 +100,31 @@ export default function PhoneSignIn() {
           followed only by the button that submits it, and the code stage puts
           six boxes and a countdown in the same place — both have to clear the
           keyboard, not stop under it. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: scrollPad }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xxl }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => (stage === 'code' ? setStage('number') : router.back())} />
-          <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
-        </View>
+        {/* The kit's pushed-page head, with the back this screen has always
+            had: out of the code stage to the number, out of the number stage
+            to the door. */}
+        <PageHead title={appName} onBack={() => (stage === 'code' ? setStage('number') : router.back())} />
 
+        {/* The step's night head, with two pips: the number, then the code. */}
+        <HeroCard eyebrow={stage === 'number' ? 'STEP 1 OF 2' : 'STEP 2 OF 2'}
+          title={stage === 'number' ? 'What’s Your Number?' : 'Check Your Texts'}
+          meta={stage === 'number' ? 'We’ll text you a code. No password to remember, and nothing to reset.' : undefined}>
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+            style={{ flexDirection: 'row', gap: 6, marginTop: sp.lg }}>
+            {[0, 1].map((n) => (
+              <View key={n} style={{ height: 6, flex: 1, borderRadius: 3, backgroundColor: n === 0 || stage === 'code' ? t.brandBright : t.night2 }} />
+            ))}
+          </View>
+        </HeroCard>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
         {stage === 'number' ? (
           <>
-            <Text style={{ ...ty.title, color: t.ink }}>What’s Your Number?</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.xl }}>
-              We’ll text you a six-digit code. No password to remember, and nothing to reset.
-            </Text>
-
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Mobile number</Text>
+            <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Mobile number</Text>
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
               <Pressable onPress={() => { setSearch(''); setPickerOpen(true); }}
                 accessibilityRole="button" accessibilityLabel={`Country: ${countryFor(iso).name}, +${countryFor(iso).dial}`}
@@ -146,7 +153,7 @@ export default function PhoneSignIn() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 7 }}>We’ll text {e164}</Text>
             ) : null}
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: 6 }}>Your name</Text>
+            <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginTop: sp.xl, marginBottom: 6 }}>Your name</Text>
             <TextInput value={name} onChangeText={setName} placeholder="Only needed the first time"
               placeholderTextColor={t.ink3} autoCapitalize="words" autoComplete="name"
               accessibilityLabel="Your name" style={field} />
@@ -187,6 +194,7 @@ export default function PhoneSignIn() {
             onChange={() => { setStage('number'); setError(null); }}
           />
         )}
+        </View>
       </ScrollView>
 
       {/* ── country picker ─────────────────────────────────────────────── */}

@@ -26,8 +26,8 @@ import { View, Text, TextInput, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
-import { Cta } from '../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../src/theme/scale';
+import { Cta, HeroCard } from '../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, font } from '../src/theme/scale';
 import { VARIANT } from '../src/lib/variant';
 import { useTenant } from '../src/ui/tenant';
 import { readNumber } from '../src/lib/units';
@@ -106,21 +106,22 @@ export default function Onboarding() {
     router.replace(role === 'client' ? '/(client)/onboarding' : '/(trainer)/dashboard');
   };
 
-  const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
-  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
+  const lab = { ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 } as const;
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, minHeight: 52, paddingVertical: sp.md } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xxl, paddingBottom: sp.xxl, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.md, paddingBottom: sp.xxl, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {role === 'owner' && (
           <View>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Step 1 of 1</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Name Your Gym</Text>
-            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>
-              This is what your members and trainers will see. You can change it later under Brand.
-            </Text>
+            {/* The step's night head: where you are, what this step is in
+                Sora, and one line. No progress bar — there is one step, and a
+                full bar over a form nobody has filled in would be a lie. */}
+            <HeroCard eyebrow="STEP 1 OF 1" title="Name Your Gym"
+              meta="What your members and trainers see. Change it later under Brand." />
 
+            <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
             <Text style={lab}>Gym name</Text>
             <TextInput
               value={gymName}
@@ -150,13 +151,13 @@ export default function Onboarding() {
               accessibilityLabel="What one delivered session pays"
             />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Payroll is counted against this. Left blank, the app shows a dash rather than
-              guessing at what you owe.
+              Payroll is counted against this. Left blank, payroll shows a dash, not a guess.
             </Text>
+            </View>
           </View>
         )}
 
-        <View style={{ flex: 1 }} />
+        <View style={{ flex: 1, minHeight: sp.xl }} />
         <Cta wide onPress={next} label={role === 'owner' ? (saving ? 'Saving…' : 'Open Studio') : 'Enter Portal'} />
       </ScrollView>
     </SafeAreaView>

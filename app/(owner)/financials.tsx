@@ -60,13 +60,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Cta, Ghost, Notice, Spark, fig, PageHead, FigureCard, ActionBlock } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Notice, Spark, PageHead, ActionBlock, Ring, Meter, Donut, Legend, IconPlate, TonedChip, Expandable, type Tone, type Slice } from '../../src/ui/kit';
 import { useMrrHistory } from '../../src/ui/useMrrHistory';
 import { isWhole } from '../../src/ui/loadStatus';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, anyEntered, reviewFinances, reviewBasis, storageNote, type FinInputs, type FinFlag } from '../../src/lib/finReview';
 import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise, sharedCurrency } from '../../src/lib/gymRecord';
+// gymRecord's minor-unit formatter, reached through the namespace and never
+// imported by name: this file already has a `money` of its own — the closure
+// over the gym's currency below — and scripts/check-currency.mjs reads a named
+// import of `money` as "every money() here is gymRecord's two-argument one",
+// which would flag each of the closure's one-argument calls.
+import * as gymRecord from '../../src/lib/gymRecord';
+// The month's recorded costs split by what they were spent on, one pot per
+// currency per category — the donut under the cost form is drawn from it.
+import { gymCostsByCategory } from '../../src/lib/gymCosts';
+import { sharePercent } from '../../src/lib/sharePercent';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
@@ -872,7 +882,38 @@ export default function Financials() {
   // percentages and leaves the figures out, which is the only honest version
   // when nobody has said what money this gym counts in.
   const r = useMemo(() => (ready ? reviewFinances(fin, cur) : null), [fin, ready, cur]);
-  const toneColor = (tone: FinFlag['tone']) => (tone === 'good' ? t.good : tone === 'watch' ? t.warn : t.crit);
+  const flagTone = (tone: FinFlag['tone']): Tone => (tone === 'good' ? 'brand' : tone === 'watch' ? 'amber' : 'red');
+
+  /* ── the month's recorded costs, as a picture per currency ────────────────
+   *
+   * One donut per currency and never one for the gym: rent in pounds and an
+   * insurer in euros are two amounts of money, and a ring that put them round
+   * one centre would be the sum src/lib/gymCosts.ts refuses. Drawn only from a
+   * WHOLE read — a partial list of costs is a wrong mix, not a smaller one.
+   * Five named hues and then one neutral slice for the rest, because a
+   * thirteen-colour ring names nothing. */
+  const COST_TONES: Tone[] = ['blue', 'orange', 'purple', 'teal', 'pink'];
+  const costMix = useMemo(() => {
+    if (!isWhole(costs.status) || costs.rows.length === 0) return [];
+    const cats = gymCostsByCategory(costs.rows);
+    const currencies = Array.from(new Set(cats.flatMap((c) => c.taken.pots.map((p) => p.currency))));
+    return currencies.map((ccy) => {
+      const lines = cats
+        .map((c) => ({ id: c.category, label: c.label, minor: c.taken.pots.find((p) => p.currency === ccy)?.minorUnits ?? 0 }))
+        .filter((l) => l.minor > 0)
+        .sort((a, b) => b.minor - a.minor);
+      const total = lines.reduce((n, l) => n + l.minor, 0);
+      const named = lines.slice(0, COST_TONES.length);
+      const rest = lines.slice(COST_TONES.length).reduce((n, l) => n + l.minor, 0);
+      const slices: Slice[] = named.map((l, i) => ({ label: l.label, value: l.minor, tone: COST_TONES[i], shown: gymRecord.money(l.minor, ccy) }));
+      if (rest > 0) slices.push({ label: 'Everything Else', value: rest, tone: 'neutral', shown: gymRecord.money(rest, ccy) });
+      return { ccy, total, slices, staff: lines.find((l) => l.id === 'staff')?.minor ?? null };
+    });
+  }, [costs.status, costs.rows]);
+  const costsLeftOut = useMemo(() => {
+    if (!isWhole(costs.status)) return 0;
+    return gymCostsByCategory(costs.rows).reduce((n, c) => n + c.taken.unlabelled + c.taken.unpriced, 0);
+  }, [costs.status, costs.rows]);
 
   /* ── every tile is a dash unless the figures under it were entered ───────
    *
@@ -924,9 +965,11 @@ export default function Financials() {
       flexDirection: 'row', gap: sp.md, paddingVertical: sp.md,
       borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
     }}>
-      <View style={{ width: 6, height: 6, borderRadius: 3, marginTop: 8, backgroundColor: toneColor(f.tone) }} />
+      {/* A toned plate where a 6pt dot was: green holds, amber slips, red needs
+          the owner. The title beside it carries the same judgement in words. */}
+      <IconPlate icon={f.tone === 'good' ? 'check' : f.tone === 'watch' ? 'info' : 'flame'} tone={flagTone(f.tone)} size={36} />
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{f.title}</Text>
+        <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{f.title}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{f.detail}</Text>
       </View>
     </View>
@@ -969,7 +1012,7 @@ export default function Financials() {
             sentence comes from src/lib/finReview.ts rather than being typed
             here, so a rewrite of this screen cannot quietly drop the one line
             that stops the grade below being read as a verdict from a model. */}
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
           {reviewBasis()}
         </Text>
         {/* What the register below covers. Absent entirely for the one-gym
@@ -1004,6 +1047,39 @@ export default function Financials() {
           currency={cur}
           closesUnread={!isWhole(monthClose.closes.status)}
         />
+
+        {/* ── where it went ───────────────────────────────────────────────
+            The list above as a mix. One card per currency; absent entirely
+            until a whole read has at least one denominated line in it, because
+            an empty ring under a list that says "nothing recorded" is the same
+            sentence twice and an empty ring under a FAILED read is a lie. */}
+        {costMix.map((m) => {
+          const total = gymRecord.money(m.total, m.ccy);
+          const staffShare = m.staff != null ? sharePercent(m.staff, m.total) : null;
+          return (
+            <Section key={m.ccy}>
+              <SectionHead title="Costs by Category" note={[costs.monthLabel, m.ccy].filter(Boolean).join(' · ')} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Donut slices={m.slices} centre={String(m.slices.length)} sub={m.slices.length === 1 ? 'category' : 'categories'}
+                  spoken={`Recorded costs in ${m.ccy}, ${total ?? 'an amount this app cannot state'}. ${m.slices.map((s) => `${s.label} ${s.shown ?? ''}`).join(', ')}`} />
+                <View style={{ flex: 1, minWidth: 160 }}><Legend items={m.slices} /></View>
+              </View>
+              {/* Labour's share of what was WRITTEN DOWN — staff not on
+                  payroll only. Trainer session pay is settled on Payroll and
+                  is deliberately not in this list (GYM_COSTS_NOT_TWICE), so
+                  the label says which people it means. */}
+              {m.staff != null && staffShare ? (
+                <Meter label="Staff Not on Payroll" val={m.staff} target={m.total} tone="purple"
+                  note={`${staffShare} of recorded costs`} />
+              ) : null}
+            </Section>
+          );
+        })}
+        {costsLeftOut > 0 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {costsLeftOut === 1 ? '1 cost has' : `${num(costsLeftOut)} costs have`} no readable amount or currency and {costsLeftOut === 1 ? 'is' : 'are'} in no ring.
+          </Text>
+        ) : null}
 
 
         {/* ── no account, so no figures ─────────────────────────────────────
@@ -1212,24 +1288,27 @@ export default function Financials() {
                 ? `Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${num(r.marginPct)}% margin`
                 : `Grade ${r.grade} · a ${num(r.marginPct)}% net margin. The amounts are not written here because this gym has not set its currency.`;
               const pctOf100 = Math.round(Math.max(0, Math.min(100, r.score)));
+              // Green holds, amber slips, red needs the owner — and the grade
+              // chip beside the ring says the same thing in a word, so the
+              // colour is never the only carrier.
+              const tone: Tone = r.score >= 70 ? 'brand' : r.score >= 55 ? 'amber' : 'red';
               return (
-                /* The kit's FigureCard, which is this card: the head, one
-                   figure shrunk to fit with its unit, the sentence under it,
-                   and one spoken line for all of it. The meter is a child, so
-                   it stays its own element outside that line. */
-                <FigureCard title="Health Score" note={`Grade ${r.grade}`}
-                  figure={fig(r.score)} unit="/100" detail={note}
-                  /* `r.score` is a number by type — the review has run —
-                     so the spoken sentence carries it directly rather than
-                     through fig(), which could only ever draw the dash a
-                     sentence must not contain. */
-                  spoken={`Health score, ${num(r.score)} out of 100, ${note}`}>
-                  <View accessible accessibilityRole="progressbar" accessibilityLabel={`${pctOf100}% health score`}
-                    accessibilityValue={{ min: 0, max: 100, now: pctOf100 }}
-                    style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.lg, overflow: 'hidden' }}>
-                    <View style={{ height: 3, borderRadius: 2, width: `${pctOf100}%`, backgroundColor: t.brand }} />
+                /* The approved look's figure card: the score as a ring, which
+                   is what a score out of a hundred IS, with the grade and the
+                   one sentence beside it. `r.score` is a number by type — the
+                   review has run — so the ring is never handed a null here;
+                   every state in which it has not run is a branch above. */
+                <Section>
+                  <SectionHead title="Health Score" note="From your figures" />
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                    <Ring value={pctOf100 / 100} figure={num(r.score)} sub="of 100" tone={tone}
+                      spoken={`Health score, ${num(r.score)} out of 100, ${note}`} />
+                    <View style={{ flex: 1, minWidth: 140, gap: sp.sm }}>
+                      <TonedChip label={`Grade ${r.grade}`} tone={tone} />
+                      <Text style={{ ...ty.label, color: t.ink2 }}>{note}</Text>
+                    </View>
                   </View>
-                </FigureCard>
+                </Section>
               );
             })()}
 
@@ -1288,7 +1367,7 @@ export default function Financials() {
                 /* The series goes in WITH its holes and the labels with it, so
                    a month nobody recorded breaks the line rather than being
                    closed over. Same discipline as the Sessions Trend. */
-                <Spark data={mrrHist.series} labels={mrrHist.labels} />
+                <Spark data={mrrHist.series} labels={mrrHist.labels} area />
               ) : (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   This month is recorded. A trend needs a second month — come back after your next billing month and this becomes a line.
@@ -1299,14 +1378,21 @@ export default function Financials() {
             <Rule />
 
             <Section>
-              <SectionHead title="What These Figures Say" note={`Grade ${r.grade}`} />
-              <Text style={{ ...ty.body, color: t.ink2 }}>{r.summary}</Text>
-            </Section>
-
-            <Rule />
-
-            <Section>
               <SectionHead title="This Month" note="From your figures" />
+              {/* Money in beside money out, on one scale, so the gap between
+                  the two bars IS the margin. Both are what the owner typed, in
+                  the gym's one currency; neither is the register's or the cost
+                  list's figure, and a blank expenses box draws no bar. */}
+              {(() => {
+                const top = Math.max(fin.revenue, has('expenses') ? fin.expenses : 0) || 1;
+                return (
+                  <View style={{ marginBottom: sp.lg }}>
+                    <Meter label="Revenue" val={fin.revenue} target={top} tone="brand" note={money(fin.revenue)} />
+                    <Meter label="Expenses" val={has('expenses') ? fin.expenses : null} target={top} tone="amber"
+                      note={has('expenses') ? money(fin.expenses) : 'Not entered'} />
+                  </View>
+                );
+              })()}
               {[0, 2, 4, 6].map((i) => (
                 <View key={i} style={{ marginTop: i === 0 ? 0 : sp.lg }}>
                   <KpiRow items={kpis.slice(i, i + 2).map(([l, v]) => ({ label: l, value: v }))} />
@@ -1318,12 +1404,16 @@ export default function Financials() {
                   them is not. Only shown when there IS a dash. */}
               {kpis.some(([, v]) => v === dash) ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                  A dash is a figure you have not entered, not a nought. Leaving a box blank is a
-                  perfectly good answer — it only means this row and the score above it stop
-                  speaking for that line rather than reporting it as nothing.
+                  A dash is a figure you have not entered, not a nought.
                 </Text>
               ) : null}
             </Section>
+
+            {/* The review's paragraph, under the pictures it summarises and
+                folded: the ring, the chip and the two bars already say it. */}
+            <Expandable title="What These Figures Say" note={`Grade ${r.grade}`}>
+              <Text style={{ ...ty.body, color: t.ink2 }}>{r.summary}</Text>
+            </Expandable>
 
             {r.strengths.length > 0 ? (<>
               <Rule />
