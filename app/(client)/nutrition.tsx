@@ -1604,7 +1604,13 @@ export default function Nutrition() {
         <PageHead title="Nutrition"
           subtitle={`Today · ${new Date().toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}`}
           leading={<Ghost icon="share" a11yLabel="Share Plan" onPress={sharePlan} />}
-          trailing={<Ghost icon="info" a11yLabel={SCREEN_HELP.meals.title} onPress={() => setHelpOpen(true)} />} />
+          // Two controls in the trailing slot: search, then help. Search is on
+          // every tab root now — a member who knows the word for what they want
+          // should not have to know which tab it was filed under.
+          trailing={<View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs }}>
+            <Ghost icon="search" a11yLabel="Search anything in Repple" onPress={() => router.push('/(client)/explore')} />
+            <Ghost icon="info" a11yLabel={SCREEN_HELP.meals.title} onPress={() => setHelpOpen(true)} />
+          </View>} />
 
         {/* Plan, Targets and Recipes as the board draws them. Targets is the
             Goal screen, which owns the figures; Recipes opens the first meal

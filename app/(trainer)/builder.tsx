@@ -50,7 +50,7 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, ListRow, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Meter, Segmented, type Segment, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, PageHead, ChipGrid, Cta, Ghost, Flag, Notice, PartialRead, Meter, Segmented, type Segment, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, font, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -2611,10 +2611,37 @@ export default function Builder() {
             The line under the title is the review's first requirement — who
             this is for, said before anything else and again in the footer
             that stays on screen. */}
+        {/* The trailing control was Templates and is now Search, for the same
+            reason every other tab root's is: this is one of six roots, and the
+            coach app's only search (app/(trainer)/explore.tsx, over
+            TRAINER_NAV) was reachable from exactly one of them. Templates did
+            not lose its way in — it is the first chip in the row directly
+            below, beside the other two things Programs now owns. */}
         <PageHead title="Build Program"
           subtitle={client ? `Building for ${client.name}` : 'Your own draft — nobody chosen yet'}
           leading={cameFrom ? undefined : null} onBack={goBack}
-          trailing={<Ghost icon="grid" onPress={() => router.push('/(trainer)/templates')} a11yLabel="Templates" />} />
+          trailing={<Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} a11yLabel="Search every screen" />} />
+
+        {/* ── everything else that is "building" ───────────────────────────
+            Programs led to three destinations while Videos held a whole tab
+            for two, so Videos gave up its tab (app/(trainer)/_layout.tsx says
+            why) and the four screens a coach builds with now sit together:
+            this builder, the templates it saves to, the catalogue it picks
+            movements from, and the clips those movements are demonstrated by.
+
+            A chip row rather than a section of rows: this screen's job is the
+            form under it, and four one-tap destinations should cost one line,
+            not four. Keys are routes so no two can collide. */}
+        <Section style={{ paddingBottom: 0 }}>
+          <ChipGrid
+            tone={t.brand}
+            items={[
+              { icon: 'grid', label: 'Templates', key: '/(trainer)/templates', onPress: () => router.push('/(trainer)/templates') },
+              { icon: 'dumbbell', label: 'Exercise Library', key: '/(trainer)/library', onPress: () => router.push('/(trainer)/library') },
+              { icon: 'video', label: 'Videos', key: '/(trainer)/videos', onPress: () => router.push('/(trainer)/videos') },
+            ]}
+          />
+        </Section>
 
         {/* The program's name, first — it is the template's name and the
             name every client sees over their week. */}

@@ -118,8 +118,8 @@ import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 // The month window's instant, recomputed at midnight, on foreground and on
 // focus — never frozen at mount. See src/ui/today.ts.
-import { useNow } from '../../src/ui/today';
-import { Rule, Section, SectionHead, PageHead, Notice, Flag, ListRow, PartialRead, fig, HeroCard, KpiRow, Meter, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
+import { useNow, useToday } from '../../src/ui/today';
+import { Rule, Section, SectionHead, PageHead, Ghost, Card, Notice, Flag, ListRow, PartialRead, fig, HeroCard, KpiRow, Meter, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { minorMoney, wholeMoney, type Taken, type TakenRow } from '../../src/lib/coachMoney';
 import { takingsStrands, TAKINGS_IS_GROSS } from '../../src/lib/coachRevenue';
@@ -156,6 +156,13 @@ import { useLateCancelCharges } from '../../src/ui/sessions';
 import { useMySettlements } from '../../src/ui/coachSettlements';
 import { PaidRuns } from '../../src/ui/PaidRuns';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
+// The ageing book and the sentence it makes, both already written and both
+// already drawn on app/(trainer)/dashboard.tsx. Nothing here computes an
+// amount of its own: `homeMoney` sums the OVERDUE rows per currency and
+// `homeMoneyTitle`/`homeMoneyNote` say what the figure is, including the
+// refusals — two currencies are two amounts and are never added.
+import { ageingBook, type CoachInvoice } from '../../src/lib/coachInvoice';
+import { homeMoney, homeMoneyDrawn, homeMoneyTitle, homeMoneyNote } from '../../src/lib/homeMoney';
 import { fetchMyReceipts } from '../../src/ui/coachReceipts';
 import { fetchMyPayouts } from '../../src/ui/coachPayouts';
 import {
@@ -347,7 +354,12 @@ export default function CoachMoney() {
   const [duesRead, setDuesRead] = useState<LoadStatus>('loading');
   const [codes, setCodes] = useState<CodeReturnsRead>({ status: 'loading', rows: [] });
   const [connect, setConnect] = useState<{ acct: ConnectStatus | null; read: LoadStatus }>({ acct: null, read: 'loading' });
-  const [issued, setIssued] = useState<{ count: number; status: LoadStatus }>({ count: 0, status: 'loading' });
+  // The rows, not just how many of them there are. This screen counted the
+  // coach's issued documents and threw the documents away, so the one question
+  // a coach opens a Money tab to ask — who has not paid me — was computed
+  // nowhere on it and drawn on the Clients screen instead. Nothing new is
+  // read: `fetchMyInvoices` was already one of the ten reads in `load`.
+  const [issued, setIssued] = useState<{ rows: CoachInvoice[]; count: number; status: LoadStatus }>({ rows: [], count: 0, status: 'loading' });
   // The third strand of Coming In, and for most coaches the biggest one. Its
   // own state and its own status: it fails independently of Stripe's two
   // tables, and a screen that shared one status would hide a working half
@@ -413,7 +425,7 @@ export default function CoachMoney() {
     setDuesRead(inv.status);
     setCodes(cr);
     setConnect({ acct: ca, read: ca == null ? 'error' : 'ready' });
-    setIssued({ count: docs.rows.length, status: docs.status });
+    setIssued({ rows: docs.rows, count: docs.rows.length, status: docs.status });
     setReceipts(rec);
     setPayouts(pay);
     setCosts(cost);
@@ -449,6 +461,17 @@ export default function CoachMoney() {
      re-read the server against the same wrong dates, which made the stale
      figure look freshly confirmed. See src/ui/today.ts. */
   const now = useNow();
+  /* What is owed, and how much of it is late — the lead of this tab.
+     `useToday()` and not a day key taken off `now` inside a memo keyed on the
+     invoices: that is the bug recorded over `invoiceAgeing` in
+     app/(trainer)/dashboard.tsx, where the day froze at whenever the rows last
+     landed and an invoice that went overdue at midnight stayed "upcoming"
+     until the next read. Both this
+     screen and app/(trainer)/invoices.tsx now age the same rows against the
+     same day. */
+  const today = useToday();
+  const ageing = useMemo(() => ageingBook(issued.rows, issued.status, today), [issued, today]);
+  const owedBook = useMemo(() => homeMoney(ageing, issued.status), [ageing, issued.status]);
   /* The hero's month and the month before it, as statement periods. `useMemo`
      on `now` because `useNow` hands back a new Date only when the day, the
      foreground or the focus changes, so the ranges move exactly when the
@@ -801,7 +824,51 @@ export default function CoachMoney() {
             the eyebrow this screen had ("What comes in, and what goes out")
             was a second line of prose in the first viewport, and the two
             ledgers it named are still both here, in the Notice further down. */}
-        <PageHead title="Payments" />
+        {/* "Money", not "Payments": this is a tab root now — it took the slot
+            Videos gave up (app/(trainer)/_layout.tsx says why) — and the bar
+            under it says Money, so the page must not argue with the bar.
+            Payments is one of the nine screens BELOW this one and still
+            carries that name. No back control: a tab root has nothing to go
+            back to, so the leading slot is a blank of the control's width and
+            the trailing one is the search every tab root now carries. */}
+        <PageHead title="Money" leading={null}
+          trailing={<Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} a11yLabel="Search every screen" />} />
+
+        {/* ── what is owed, before what was taken ─────────────────────────
+            The tab leads with the question a coach opens it to ask. Every
+            figure comes from `homeMoney` over the ageing book — the same
+            function and the same rows app/(trainer)/dashboard.tsx draws its
+            card from, so the two screens cannot disagree — and the sum is over
+            the OVERDUE rows alone, per currency, never added across
+            currencies. Nothing is computed here.
+
+            It renders NOTHING when there is nothing outstanding and the read
+            was whole (`homeMoneyDrawn`), because a card that permanently says
+            "all clear" is a card people stop reading. A FAILED read still
+            draws, in the critical tone, with the reason — silence there would
+            read as "nobody owes you anything", which is the one wrong thing
+            this card could say. */}
+        {homeMoneyDrawn(owedBook) ? (
+          <Card onPress={() => router.push('/(trainer)/invoices')} tone={owedBook.failed ? t.crit : t.s3} style={{ marginTop: sp.md }}>
+            <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{homeMoneyTitle(owedBook)}</Text>
+            {(owedBook.pots ?? []).map((p) => {
+              const amount = minorMoney(p.minorUnits, p.currency);
+              if (!amount) return null;
+              return (
+                <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.sm }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{p.count} in {p.currency}</Text>
+                  <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{amount}</Text>
+                </View>
+              );
+            })}
+            {(owedBook.pots?.length ?? 0) > 1 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                These are separate amounts of money and are deliberately not added together.
+              </Text>
+            ) : null}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{homeMoneyNote(owedBook)}</Text>
+          </Card>
+        ) : null}
 
         {/* ── THE FIGURE ─────────────────────────────────────────────────
             The board's hero: a head, one big figure, the movement against
@@ -1588,7 +1655,16 @@ export default function CoachMoney() {
         </Section>
 
 
+        {/* ── the rest of a coach's money, named ──────────────────────────
+            This Section had no head at all, which was survivable while Money
+            hung off Profile and Analytics and was survivable for exactly as
+            long. It is a tab root now, so the drawer of screens under it has
+            to say it is one. Billing, Ad Spend, Cash and Transfers and What It
+            Costs You are NOT repeated here: each already has its row inside
+            the section that holds its figures, and two rows to one screen is
+            how a coach comes to think they are two screens. */}
         <Section>
+          <SectionHead title="Everything Else About Money" />
           <ListRow icon="grid" title="Payments & Packages"
             note="Who bought what, who is subscribed, and the price list they buy from"
             onPress={() => router.push('/(trainer)/payments')} />
@@ -1620,6 +1696,14 @@ export default function CoachMoney() {
           <ListRow icon="chart" title="Statement of Record"
             note="What this app recorded in a year or a quarter, to hand to an accountant — never a tax return"
             onPress={() => router.push('/(trainer)/statement')} />
+          {/* The ninth money screen, and the only one this page did not reach.
+              Which Codes Worked above answers what a coach PAID for a client;
+              this answers who they got for nothing. It was reachable from the
+              Clients screen's tools drawer and from Analytics, neither of
+              which is where a coach asks where their business comes from. */}
+          <ListRow icon="people" title="Who Brings You Clients"
+            note="The clients who referred somebody, and what those referrals have been worth"
+            onPress={() => router.push('/(trainer)/referrals')} />
         </Section>
 
 

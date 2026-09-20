@@ -410,7 +410,18 @@ export default function CoachProfile() {
             the identity block under it is the title. Settings keeps the
             trailing edge: the one control a coach reaches for from here that
             is not about how clients see them. */}
-        <PageHead trailing={<Ghost icon="settings" a11yLabel="Open settings" onPress={() => router.push('/(trainer)/settings')} />} />
+        {/* Search beside Settings rather than in the leading slot: this head
+            draws no title, so the two controls sit in the space a title would
+            have taken and nothing is squeezed — and the leading slot here is
+            the back chevron, which this screen keeps. Search is the same
+            control, to the same screen, as the one on every other coach tab
+            root. */}
+        <PageHead trailing={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+            <Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />
+            <Ghost icon="settings" a11yLabel="Open settings" onPress={() => router.push('/(trainer)/settings')} />
+          </View>
+        } />
 
         {/* ── who this is: a large centred avatar, the name, the tagline ────
             Drawn from the provider whatever `access` says, because a name and

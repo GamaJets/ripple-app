@@ -804,9 +804,14 @@ export default function Home() {
           eyebrow={firstName ? `${hi},` : d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}
           title={firstName || hi}
           actions={<>
-            {/* No search control up here any more: the mockup's header is the
-                bell and the face, and Explore is a row in the list at the
-                foot of the screen — the same route, one scroll away. */}
+            {/* Search is back, and it is on every tab root now rather than on
+                this one alone. It was taken out of here on the argument that
+                Explore is a row at the foot of this screen — true, and it is
+                the wrong shape of true: a row at the foot of Home is not
+                reachable from Meals or Progress, and "which tab was that
+                under" is the question a member asks when they are already
+                lost. The row at the foot stays; this is the same route. */}
+            <Ghost icon="search" a11yLabel="Search anything in Repple" onPress={() => router.push('/(client)/explore')} />
             {/* The bell opens the inbox now. It routed to '/(client)/messages'
                 for as long as it has existed, because `notifications` had a
                 writer and no reader — so "your session was cancelled" opened a

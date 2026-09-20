@@ -3000,7 +3000,14 @@ export default function TrainerSchedule() {
             instruction, and they cost the month card its place in the first
             viewport. `leading={null}` because a tab root has nowhere to go
             back to. */}
-        <PageHead title="Calendar" leading={null}
+        {/* Search takes the LEADING slot here and not the trailing one. Every
+            coach tab root now carries the way into Explore — it was on Clients
+            and nowhere else, so five of six roots had no search at all — and
+            on this root the trailing edge is already the diary's one add
+            control, which must not move. A tab root has nothing to go back to,
+            so that slot was a blank of exactly a control's width. */}
+        <PageHead title="Calendar"
+          leading={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />}
           trailing={<Ghost icon="plus" a11yLabel="Add a Session" onPress={() => { setAddClient(null); setAddOpen(true); }} />} />
         <View style={{ height: sp.md }} />
 

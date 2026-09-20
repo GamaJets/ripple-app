@@ -74,7 +74,10 @@ export type Tone = 'brand' | 'neutral' | DataHue;
 const TONE_NAMES: ReadonlySet<string> = new Set(['brand', 'neutral', ...DATA_HUES]);
 const isTone = (v: string | undefined): v is Tone => !!v && TONE_NAMES.has(v);
 
-function toneOf(t: Theme, tone: Tone): { mark: string; soft: string; ink: string } {
+/** Exported for the Me hub's group spines, which are a rule of colour rather
+ *  than a plate or a chip and so have no component of their own to live in.
+ *  `mark` is the only member anything outside this file wants. */
+export function toneOf(t: Theme, tone: Tone): { mark: string; soft: string; ink: string } {
   if (tone === 'brand') return { mark: t.brand, soft: t.brandSoft, ink: t.brandText };
   if (tone === 'neutral') return { mark: t.ink3, soft: t.surface3, ink: t.ink2 };
   return { mark: t.data[tone], soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };

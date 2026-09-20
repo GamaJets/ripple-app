@@ -31,6 +31,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme, useThemeControls } from '../../src/ui/components';
 import { Rule, Section, ScreenHeader, Ghost, Cta, Flag, IconPlate, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value, font } from '../../src/theme/scale';
@@ -50,6 +51,7 @@ import { num1 } from '../../src/lib/format';
 
 export default function OwnerBrand() {
   const t = useTheme();
+  const router = useRouter();
   const { palette, setPalette, palettes, setAccent } = useThemeControls();
   const { appName, adoptGymName } = useBrand();
   const { tenant, status, updateTenant, refresh } = useTenant();
@@ -229,7 +231,12 @@ export default function OwnerBrand() {
         {/* The board's tab-root opening: a quiet eyebrow, the title, and the
             one sentence that says where the settings live — the kit's
             ScreenHeader rather than the same lines by hand. */}
-        <ScreenHeader eyebrow="Your Gym" title="Brand" subtitle="Saved to the gym, not to this phone" />
+        {/* The same search control the Overview tab carries. Studio's hidden
+            screens hang off Overview (13 of them) and Ops (5), so an owner
+            standing on any other tab root had no way into
+            app/(owner)/explore.tsx and its search over OWNER_NAV. */}
+        <ScreenHeader eyebrow="Your Gym" title="Brand" subtitle="Saved to the gym, not to this phone"
+          actions={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(owner)/explore')} />} />
 
         <Fetched at={fetchedAt} onRefresh={() => { refresh(); }} busy={status === 'loading'} />
 

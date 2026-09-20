@@ -976,7 +976,12 @@ export default function OwnerOps() {
             "Platform" named Repple, not this gym — the same drift Overview
             settled when it dropped "Repple HQ · Platform". Everything on this
             screen belongs to the owner's own gym. */}
-        <ScreenHeader eyebrow="Your Gym" title="Operations" />
+        {/* The same search control the Overview tab carries. Studio's hidden
+            screens hang off Overview (13 of them) and Ops (5), so an owner
+            standing on any other tab root had no way into
+            app/(owner)/explore.tsx and its search over OWNER_NAV. */}
+        <ScreenHeader eyebrow="Your Gym" title="Operations"
+          actions={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(owner)/explore')} />} />
 
         {/* ── the state, in one night hero ────────────────────────────────
             The count is a count only when every source answered: a queue built

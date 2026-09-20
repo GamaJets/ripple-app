@@ -57,8 +57,9 @@ import { num, num1 } from '../../src/lib/format';
 import { plainExact } from '../../src/lib/units';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Flag, fig, HeroCard, Ring, Meter, Donut, Legend, Expandable, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, fig, HeroCard, Ring, Meter, Donut, Legend, Expandable, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
@@ -78,6 +79,7 @@ const DISCOUNTS = [10, 20, 30, 50];
 
 export default function OwnerGrowth() {
   const t = useTheme();
+  const router = useRouter();
   const { promos, status: promoStatus, addPromo, toggleActive, removePromo, refresh: refreshPromos } = usePromos();
   // The roster read has to be waited on. Every count on this screen — new this
   // month, idle, the whole funnel — is derived from `trainers`, so before it
@@ -285,7 +287,12 @@ export default function OwnerGrowth() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         {/* The board's tab-root opening: a quiet eyebrow and the title. */}
-        <ScreenHeader eyebrow="Trainers and Members" title="Growth" />
+        {/* The same search control the Overview tab carries. Studio's hidden
+            screens hang off Overview (13 of them) and Ops (5), so an owner
+            standing on any other tab root had no way into
+            app/(owner)/explore.tsx and its search over OWNER_NAV. */}
+        <ScreenHeader eyebrow="Trainers and Members" title="Growth"
+          actions={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(owner)/explore')} />} />
 
         {/* ── the figure ─────────────────────────────────────────────────── */}
         {/* A card rather than the kit's bare `Hero`: the one block on this

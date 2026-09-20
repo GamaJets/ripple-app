@@ -192,6 +192,7 @@ const TRAINER_TABS: GuideSection[] = [
     points: [
       'Start from a template, or add training days and build from scratch.',
       'Assign to Client pushes the program into that client’s Train tab.',
+      'Templates, the Exercise Library and your Videos are all one tap from the top of this tab — everything you build with is here.',
       'Save any program you like as a template to reuse.',
       'Where a client has disclosed an injury, Assign is withheld until you have read the list and confirmed it. The confirmation covers what you were shown, so recovering does not ask you again but a new disclosure does.',
       'Exercises that load what they disclosed are marked while you build, and named again before the program goes out.',
@@ -210,16 +211,25 @@ const TRAINER_TABS: GuideSection[] = [
       'Group Classes schedules classes and checks members in. Export Schedule sends your booked sessions to your own calendar app.',
     ],
   },
+  // Videos held this slot and now sits inside Programs, which is where a coach
+  // builds — app/(trainer)/_layout.tsx records the measurement that moved it.
+  // Its six points did not disappear: the clip settings and What Your Programs
+  // Need are on the screen itself, the Programs section above says where the
+  // screen is, and nothing about it changed.
+  //
+  // Money takes the slot. Nine screens of a coach's money hung off Profile and
+  // Analytics with no tab at all, so the part of the job that decides whether
+  // the coaching pays was the part the tour never mentioned.
   {
-    title: 'Videos',
-    summary: 'The clips your clients see inside their program.',
+    title: 'Money',
+    summary: 'What you are owed, what came in, and what went out.',
     points: [
-      'Record a clip, upload one, or paste a hosted link.',
-      'Each clip is set to Only Me, My Clients, Everyone at the Gym, or Anyone on Repple.',
-      'You can also name individual clients on a clip. A named client can watch it whatever that setting says, including one set to Only Me.',
-      'Somebody you typed in by hand rather than somebody who signed up cannot be named on a clip. The list says which of your clients those are rather than failing at them quietly.',
-      'A clip is matched to the movement and shows against it for the clients who can see it, ahead of anything Repple would otherwise have shown them.',
-      'What Your Programs Need lists the movements in your own templates that you have never filmed, and separates the ones the catalogue already illustrates from the ones a client would see nothing for.',
+      'It opens on what is outstanding: the invoices you have issued that are past their due date, counted and totalled per currency.',
+      'Total Taken is gross — what clients were charged, before Stripe’s fee and ours, plus anything you recorded by hand.',
+      'Two currencies are always two figures. Repple never adds them together and never converts one into the other.',
+      'Cash and transfers never reach Repple on their own, so every figure here is a floor until you record them.',
+      'Payments, Invoices, Cash and Transfers, What It Costs You, Ad Spend, Billing, the Statement of Record and Who Brings You Clients are all on this tab.',
+      'The Statement of Record is what you hand an accountant for a quarter or a year. It is a record of what this app was told, never a tax return.',
     ],
   },
   {

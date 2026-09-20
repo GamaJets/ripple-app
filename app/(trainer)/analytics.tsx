@@ -1070,7 +1070,11 @@ export default function TrainerAnalytics() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <ScreenHeader eyebrow="Your coaching business" title="Analytics" />
+        {/* The same search control every coach tab root carries now. It was on
+            Clients alone, so the other five roots — this one included — had no
+            way into app/(trainer)/explore.tsx at all. */}
+        <ScreenHeader eyebrow="Your coaching business" title="Analytics"
+          actions={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />} />
 
         {/* ── the window ────────────────────────────────────────────────────
             The board's chip row, in the segmented-bar idiom the kit already

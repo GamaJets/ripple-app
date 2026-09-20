@@ -237,7 +237,16 @@ export default function OwnerTrainers() {
         <ScreenHeader
           eyebrow="Your Coaching Staff"
           title="Trainers"
-          actions={<Ghost icon="plus" a11yLabel="Invite a Trainer by Email" onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />}
+          actions={<>
+            {/* The same search control the Overview tab carries. Studio's
+                hidden screens hang off Overview (13 of them) and Ops (5), so
+                an owner standing on any other tab root had no way into
+                app/(owner)/explore.tsx and its search over OWNER_NAV. Before
+                the invite control, not after: `actions` renders in order and
+                the primary action of a screen belongs at its trailing edge. */}
+            <Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(owner)/explore')} />
+            <Ghost icon="plus" a11yLabel="Invite a Trainer by Email" onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />
+          </>}
         />
 
         {/* The whole screen is one list and the figures over it, so the reason

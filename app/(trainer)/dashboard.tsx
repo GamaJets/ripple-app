@@ -455,36 +455,72 @@ const IN_PERSON_SHORTCUTS: [IconName, string, string][] = [
   ['check', 'Your Register', '/(trainer)/my-register'],
 ];
 
-const SHORTCUTS: [IconName, string, string][] = [
-  // First, and first for a reason. Asked "where is the coach's code to give to
-  // clients? it should be readily available", the answer was: press Invite a
-  // Client below and read it off a modal sheet whose title is about adding one.
-  // Nothing on this screen — or any other — said the sheet held it. This chip is
-  // the whole fix on the navigation side: one tap from the coach's home tab to
-  // /(trainer)/join-code, which is the code, the link and the share sheet and
-  // nothing else. Not in IN_PERSON_SHORTCUTS: an online coach hands their code
-  // out more often than a coach who works in a room, not less.
+/**
+ * The tools drawer, in three named groups instead of one wall.
+ *
+ * ── What was measured ─────────────────────────────────────────────────────
+ *
+ * This tab led to 25 destinations one tap away while Videos led to 2, and a
+ * flat ChipGrid of fourteen chips under one word — "Coaching Tools" — is the
+ * same wall the member app's Me screen has. A coach scanning it was reading a
+ * list with no order in it: their own nutrition log sat between a leaderboard
+ * and a feedback form.
+ *
+ * So the chips are grouped by WHOSE question they answer — everybody on the
+ * book, the book as a whole, or the coach themselves — and each group says so
+ * in a head above it. Nothing is a new destination and nothing here is new
+ * code: it is the same array, cut into three.
+ *
+ * ── What left, and where it is now ────────────────────────────────────────
+ *
+ * Three chips are gone from this drawer and none of the three screens is a tap
+ * further away than it was:
+ *
+ *   · Programs   — is a tab. A chip on one tab root pointing at another tab is
+ *                  a tap to open a drawer to reach something the bar already
+ *                  holds.
+ *   · Analytics  — likewise a tab.
+ *   · Videos     — stopped being a tab (app/(trainer)/_layout.tsx says why) and
+ *                  is now a chip on Programs, beside Templates and the Exercise
+ *                  Library. Still reached from Analytics, from an exercise and
+ *                  from the Exercise Library, and still in src/lib/features.ts
+ *                  so Explore finds it by name.
+ *
+ * Referrals stays, even though Money — which is a tab now — carries it too: it
+ * is read against the roster listed on this screen as often as against the
+ * takings, and a second way in is not a second screen.
+ */
+type Shortcut = [IconName, string, string];
+
+/** Reaching the people on the book. Your Code first, and first for a reason:
+ *  asked "where is the coach's code to give to clients? it should be readily
+ *  available", the answer was: press Invite a Client below and read it off a
+ *  modal sheet whose title is about adding one. Nothing on this screen — or any
+ *  other — said the sheet held it. Not in IN_PERSON_SHORTCUTS: an online coach
+ *  hands their code out more often than a coach who works in a room, not less. */
+const REACH_SHORTCUTS: Shortcut[] = [
   ['share', 'Your Code', '/(trainer)/join-code'],
   ['bell', 'Broadcast', '/(trainer)/broadcast'],
-  ['train', 'Programs', '/(trainer)/builder'],
-  ...IN_PERSON_SHORTCUTS,
-  ['video', 'Videos', '/(trainer)/videos'],
-  ['chart', 'Analytics', '/(trainer)/analytics'],
+];
+
+/** Reading the book as a whole. Leaderboard and Referrals are read for the same
+ *  reason — who on this book is worth more than the sessions they buy — and
+ *  Referrals had the same problem Your Register had: `/(trainer)/referrals` was
+ *  named in src/lib/features.ts and nowhere else in the app, so the screen that
+ *  says which clients bring in other clients could only be searched for. */
+const BOOK_SHORTCUTS: Shortcut[] = [
   ['trophy', 'Leaderboard', '/(trainer)/leaderboard'],
-  // Beside Leaderboard because both are read for the same reason — who on this
-  // book is worth more than the sessions they buy. It had the same problem Your
-  // Register had: `/(trainer)/referrals` was named in src/lib/features.ts and
-  // nowhere else in the app, so the screen that says which clients are bringing
-  // in other clients could be reached only by searching for it.
   ['people', 'Referrals', '/(trainer)/referrals'],
   ['message', 'Feedback', '/(trainer)/feedback'],
-  // The coach's own tracking, last and together because these three are the
-  // only things here that are not about a client. My Training was reachable
-  // only from a row inside Profile, which is buried — and a coach who cannot
-  // find where to log their own session logs it nowhere, or worse, into
-  // somebody else's record. Nutrition and Progress sit beside it rather than
-  // anywhere else for exactly that reason: the same coach, on the same day,
-  // looking for the same thing.
+];
+
+/** The coach's own tracking — the only things in this drawer that are not about
+ *  a client. My Training was reachable only from a row inside Profile, which is
+ *  buried, and a coach who cannot find where to log their own session logs it
+ *  nowhere, or worse, into somebody else's record. Nutrition and Progress sit
+ *  beside it for exactly that reason: the same coach, on the same day, looking
+ *  for the same thing. */
+const OWN_SHORTCUTS: Shortcut[] = [
   ['dumbbell', 'My Training', '/(trainer)/my-training'],
   ['meals', 'My Nutrition', '/(trainer)/my-nutrition'],
   ['progress', 'My Progress', '/(trainer)/my-progress'],
@@ -3315,27 +3351,32 @@ export default function TrainerClients() {
               what a shut drawer owes the reader: what is in it, by name, so
               nobody has to open it to find out whether Broadcast lives here. */}
           <Fold id="tools" title="Coaching Tools"
-            note="Your code, broadcast, programs, schedule, videos, analytics, leaderboard, referrals, feedback, your own training, and posting a notice.">
-          {/* Seven destinations, and this was a horizontal ScrollView with its
-              indicator hidden — so Analytics, Leaderboard and Feedback sat past
-              the right edge of a phone with nothing on screen saying they were
-              there. The client app's Train tab had the identical fault and hid
-              most of its row; ChipGrid wraps instead. It has to be a plain View
-              to do it: flexWrap is inert inside a horizontal ScrollView, which
-              lays out on one unbounded axis, so this could not be fixed in
-              place. `tone` keeps the coach's icons in brand, as they were.
-              `key` is the route, so two chips sharing a word cannot collide. */}
-          {/* For a coach who works in the room, or one we do not know about,
-              this is the list it has always been. For a coach who has said they
-              work online and has nobody on the book training in person, the
-              in-person tools drop below the rest with the reason on them —
-              DE-EMPHASISED, never removed. `showsInPerson` resolves every
-              unknown to "show everything", so a roster that failed to load or a
-              question nobody answered hides nothing at all. */}
+            note="Your code, broadcast and notices; the leaderboard, referrals and feedback; your own training, nutrition and progress. Programs, Schedule, Money and Analytics are tabs.">
+          {/* Fourteen chips under one word was the wall this fold opened onto.
+              They are three named groups now — see REACH_SHORTCUTS above — and
+              the note on the shut fold names all three, because a shut drawer
+              owes the reader what is in it.
+
+              Each group is a ChipGrid, which WRAPS. This was once a horizontal
+              ScrollView with its indicator hidden, so Leaderboard and Feedback
+              sat past the right edge of a phone with nothing on screen saying
+              they were there; flexWrap is inert inside a horizontal ScrollView,
+              so that could not be fixed in place. `tone` keeps the coach's
+              icons in brand and `key` is the route, so two chips sharing a word
+              cannot collide.
+
+              For a coach who works in the room, or one we do not know about,
+              Schedule and Your Register sit in the first group as they always
+              have. For a coach who has said they work online and has nobody on
+              the book training in person, they drop below the rest with the
+              reason on them — DE-EMPHASISED, never removed. `showsInPerson`
+              resolves every unknown to "show everything", so a roster that
+              failed to load or a question nobody answered hides nothing. */}
+          <SectionHead title="Everybody On Your Book" />
           <ChipGrid
             tone={t.brand}
             items={[
-              ...(showsInPerson(delivery) ? SHORTCUTS : SHORTCUTS.filter((sc) => !IN_PERSON_SHORTCUTS.includes(sc)))
+              ...[...REACH_SHORTCUTS, ...(showsInPerson(delivery) ? IN_PERSON_SHORTCUTS : [])]
                 .map(([ic, label, route]) => ({
                   icon: ic, label, key: route, onPress: () => router.push(route as any),
                 })),
@@ -3344,10 +3385,10 @@ export default function TrainerClients() {
               // before" list — was complete and `bcOpen` was never set true
               // anywhere in the repo, so the only way to post a gym-wide notice
               // was unreachable while `reloadNotices` still paid for a read on
-              // every pull-to-refresh. It is a chip rather than a SHORTCUTS row
-              // because SHORTCUTS is a table of ROUTES and this is a modal on
-              // this screen; giving the table an action arm to hold one entry
-              // would make every other row carry a null.
+              // every pull-to-refresh. It is a chip rather than a table row
+              // because the tables above are tables of ROUTES and this is a
+              // modal on this screen; giving them an action arm to hold one
+              // entry would make every other row carry a null.
               //
               // Beside Broadcast on purpose: those are the two all-client
               // tools, and a coach who wants one has usually just considered
@@ -3362,6 +3403,24 @@ export default function TrainerClients() {
               },
             ]}
           />
+          <View style={{ marginTop: sp.lg }}>
+            <SectionHead title="How the Book Is Doing" />
+            <ChipGrid
+              tone={t.brand}
+              items={BOOK_SHORTCUTS.map(([ic, label, route]) => ({
+                icon: ic, label, key: route, onPress: () => router.push(route as any),
+              }))}
+            />
+          </View>
+          <View style={{ marginTop: sp.lg }}>
+            <SectionHead title="Your Own Training" />
+            <ChipGrid
+              tone={t.brand}
+              items={OWN_SHORTCUTS.map(([ic, label, route]) => ({
+                icon: ic, label, key: route, onPress: () => router.push(route as any),
+              }))}
+            />
+          </View>
           {!showsInPerson(delivery) ? (
             <View style={{ marginTop: sp.lg }}>
               <SectionHead title="In-Person Tools" />

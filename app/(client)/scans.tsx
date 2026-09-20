@@ -1816,7 +1816,11 @@ export default function Scans() {
             control: this is a tab root and there is nowhere to go back to. */}
         <PageHead
           title="Progress"
-          leading={null}
+          // Search, from every tab root. A member who knows the word for what
+          // they want should not have to know which tab it was filed under —
+          // the Me hub's field, the same route, on the screens they are
+          // already on. The leading slot was a deliberate blank.
+          leading={<Ghost icon="search" a11yLabel="Search anything in Repple" onPress={() => router.push('/(client)/explore')} />}
           // Labelled, not a bare icon: TF-21 was written by somebody who
           // could not tell what the icon would do until they had done it.
           trailing={<Ghost icon="share" label="Share" onPress={shareProgress} />}

@@ -29,9 +29,9 @@ import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
-import { Section, SectionHead, KpiRow, ListRow, PageHead, Ghost, Donut, Legend, Field, Flag, fig, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, KpiRow, ListRow, PageHead, Ghost, Donut, Legend, Field, Flag, fig, toneOf, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font } from '../../src/theme/scale';
-import { CLIENT_FEATURES } from '../../src/lib/features';
+import { CLIENT_FEATURES, ME_GROUPS, ME_QUICK, ME_QUICK_TITLE, meGroupFeatures, type Feature } from '../../src/lib/features';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
@@ -54,7 +54,7 @@ import { Icon, type IconName } from '../../src/ui/Icon';
 import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
 import { monthNamesShort, fmtFullDay, fmtPointMonth, num } from '../../src/lib/format';
 import { localDate } from '../../src/lib/localDate';
-import { FORWARD_ICON, turn } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { activeDays, longestStreak } from '../../src/lib/streaks';
@@ -84,11 +84,9 @@ const BADGE_LOOK: Record<BadgeKey, { icon: IconName; tone: Tone }> = {
   'one-tonne': { icon: 'scale', tone: 'blue' },
   'ten-tonnes': { icon: 'scale', tone: 'teal' },
 };
-/** A medal's plate and glyph colours. The kit's `toneOf` is not exported and
- *  its IconPlate is a rounded square; the mockup's medal is a circle. */
-const medalColours = (t: Theme, tone: Tone) => tone === 'brand' ? { soft: t.brandSoft, ink: t.brandText }
-  : tone === 'neutral' ? { soft: t.surface3, ink: t.ink3 }
-  : { soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+/** A medal's plate and glyph colours. Not IconPlate: that is a rounded square
+ *  and the mockup's medal is a circle. The colours are the kit's own. */
+const medalColours = (t: Theme, tone: Tone) => toneOf(t, tone);
 /** How many weeks the three tiles' trends look back over. */
 const TREND_WEEKS = 8;
 
@@ -258,147 +256,6 @@ function Seg({ options, value: val, onChange, t }: { options: string[]; value: s
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-const HUB_ICON: Record<string, IconName> = {
-  '/(client)/report': 'chart', '/(client)/consistency': 'flame', '/(client)/records': 'trophy',
-  '/(client)/standards': 'chart', '/(client)/goal': 'target', '/(client)/measurements': 'ruler',
-  '/(client)/achievements': 'trophy', '/(client)/cards': 'share', '/(client)/activity': 'bell',
-  '/(client)/week': 'calendar', '/(client)/library': 'video', '/(client)/tools': 'settings',
-  '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil', '/(client)/injuries': 'heart', '/(client)/intake': 'pencil', '/(client)/my-coach': 'people',
-  '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message', '/(client)/reminders': 'bell', '/(client)/packages': 'trophy',
-  '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
-  '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
-  '/(client)/coach-documents': 'pencil', '/(client)/notifications': 'bell',
-  '/(client)/agreements': 'pencil',
-  // The gym group. Only the four where src/lib/features.ts says 'grid' — its
-  // default for anything without an obvious glyph — and membership.tsx has
-  // already chosen something better for the same row. The other four
-  // (pt-sessions, attendance, membership, referral) resolve from features.ts
-  // below and need no entry here.
-  '/(client)/access': 'lock', '/(client)/gym-plans': 'target',
-  '/(client)/receipts': 'clock', '/(client)/offers': 'sparkle',
-};
-
-// Eight rows were added to this hub with no HUB_ICON entry, and every one of
-// them rendered a chevron where its icon belongs — a column of identical grey
-// arrows, next to a second chevron at the row's end. Nothing caught it: the
-// fallback was `|| 'chevron'`, which is a valid IconName, so types, gates and
-// tests were all green while the screen was visibly wrong.
-//
-// src/lib/features.ts already carries an icon for every route in this app —
-// it is what Explore renders. Reading it here means a row added to HUB_GROUPS
-// without a bespoke icon gets the one Explore shows for the same destination,
-// which is right by construction. HUB_ICON above is now only an override.
-const FEATURE_ICON: Record<string, IconName> = Object.fromEntries(CLIENT_FEATURES.map((f) => [f.route, f.icon]));
-const hubIcon = (route: string): IconName => HUB_ICON[route] ?? FEATURE_ICON[route] ?? 'grid';
-const HUB_GROUPS: { title: string; tone: Tone; items: { label: string; note: string; route: string }[] }[] = [
-  // First, deliberately. Pairing a watch is not an occasional settings errand —
-  // it is the thing a member opens Me to do in their first week and again every
-  // time a strap stops syncing, and it was the fifth group down, under roughly
-  // twenty-eight rows. A group's position is the only ranking this screen has.
-  { title: 'Devices & Media', tone: 'pink', items: [
-    { label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
-    { label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
-  ] },
-  { title: 'Progress & Insights', tone: 'blue', items: [
-    { label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
-    { label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency' },
-    { label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records' },
-    { label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards' },
-    { label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal' },
-    { label: 'Body Measurements', note: 'Waist, chest, arms over time', route: '/(client)/measurements' },
-    { label: 'Achievements', note: 'Badges and milestones', route: '/(client)/achievements' },
-    { label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards' },
-    { label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity' },
-  ] },
-  { title: 'Training', tone: 'brand', items: [
-    { label: 'This Week', note: 'Your week of training at a glance', route: '/(client)/week' },
-    { label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
-    { label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
-    { label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
-    { label: 'Injuries & Limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries' },
-    // The intake had no in-app entry point at all: the coach's "Ask Them to
-    // Finish It" push deep-linked to it and nothing else reached it. It sits
-    // beside Injuries because they are the same kind of thing — what your coach
-    // needs to know about your body, owned by you and written only by you.
-    { label: 'Your Intake', note: 'What your coach should know before they train you', route: '/(client)/intake' },
-  ] },
-  { title: 'Daily', tone: 'orange', items: [
-    { label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
-    { label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
-    { label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
-    { label: 'Reminders', note: 'Hydration & supplement nudges', route: '/(client)/reminders' },
-  ] },
-  { title: 'Connect', tone: 'teal', items: [
-    // The coach you HAVE, above the directory of coaches you do not. There was
-    // no screen for the former until part 130 made one possible.
-    { label: 'Your Coach', note: 'Who is coaching you, and what they can see', route: '/(client)/my-coach' },
-    // Directly under Your Coach, because these are that coach's own papers and
-    // not Repple's. The release signed on joining is a different document owned
-    // by a different party, and coach-documents.tsx says so on its face — a
-    // member who cannot tell the two apart takes a dispute to the wrong people.
-    { label: "Your Coach's Documents", note: 'Waivers and forms your coach asks you to read', route: '/(client)/coach-documents' },
-    // Directly beneath the coach's, because they are the two sets of paperwork
-    // a member cannot otherwise tell apart, and this one is the gym's. Until it
-    // existed a member had no way to sign a gym waiver at all: every signature
-    // the product held was a member of staff typing the member's name at the
-    // desk. Both screens name their owner on their face for the same reason —
-    // somebody who cannot tell whose document it is takes a dispute to the
-    // wrong party.
-    { label: "Your Gym's Paperwork", note: 'Waivers and consents your gym asks you to sign', route: '/(client)/agreements' },
-    { label: 'Find a Trainer', note: 'Have a code from your coach? Enter it here', route: '/(client)/trainers' },
-    { label: 'Memberships & Packs', note: 'Your session packs & payments', route: '/(client)/packages' },
-    { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
-    // Immediately above Messages, because the two are constantly mistaken for
-    // each other and the pairing is the explanation: this is what was SENT to
-    // you, the row below is what you and your coach have SAID to each other.
-    // The bell in the dashboard header still opens the thread rather than this,
-    // so until that changes this row and Explore are the only ways in.
-    { label: 'Notifications', note: 'Bookings, cancellations and anything your gym has sent you', route: '/(client)/notifications' },
-    { label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
-    // Not "Post progress to Instagram / TikTok". Nothing in this app is
-    // connected to a social network — the NETWORKS list whose Connect button
-    // flipped a local boolean was removed from social.tsx as fabricated state,
-    // and what is left is one React Native `Share.share()` call. The row now
-    // describes the OS share sheet, which is the whole of what happens.
-    { label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social' },
-  ] },
-  // ── the gym, which was three levels down under a heading about coaches ──
-  //
-  // Seven screens — the entry barcode, payments, buying a plan, approving
-  // delivered sessions, redeeming a gym code, inviting a friend and attendance
-  // — were reachable only through `membership.tsx`, and the real way into THAT
-  // was two rows at the very bottom of a 111 KB "Book Sessions" screen, under a
-  // SectionHead reading "Your Coach". A gym membership and an entry pass filed
-  // under a heading about a coach.
-  //
-  // src/lib/features.ts already files every one of these under `area: 'me'`, so
-  // Explore and this hub disagreed about where they live. That disagreement is
-  // the hazard profile.tsx:533 already warns is standing; this closes the
-  // largest part of it.
-  //
-  // Above Account, because these are things a member DOES — at the turnstile,
-  // at renewal, when a session needs approving — and Account is where they go
-  // to change a setting.
-  { title: 'Your Gym', tone: 'purple', items: [
-    // First, because it is the one opened while standing at a door.
-    { label: 'Entry Barcode', note: 'The code you scan to get in', route: '/(client)/access' },
-    { label: 'Membership', note: 'Your plan, passes and what they include', route: '/(client)/membership' },
-    { label: 'Buy or Renew a Plan', note: "Plans and passes your gym sells", route: '/(client)/gym-plans' },
-    // An action OWED rather than a place to browse: a session a coach has
-    // recorded is waiting on the member to confirm it happened.
-    { label: 'Sessions to Approve', note: 'Confirm sessions your coach has recorded', route: '/(client)/pt-sessions' },
-    { label: 'Payments & Receipts', note: 'What you have paid your gym', route: '/(client)/receipts' },
-    { label: 'Class Attendance', note: 'The classes you have actually been to', route: '/(client)/attendance' },
-    { label: 'Offers', note: 'Redeem a code your gym has given you', route: '/(client)/offers' },
-    { label: 'Invite a Friend', note: 'Your referral link', route: '/(client)/referral' },
-  ] },
-  { title: 'Account', tone: 'neutral', items: [
-    { label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
-    { label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings' },
-    { label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback' },
-  ] },
-];
-
 export default function Profile() {
   const t = useTheme();
   const router = useRouter();
@@ -441,7 +298,6 @@ export default function Profile() {
 
   const [showDob, setShowDob] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   // The units this client reads in. These used to be two `useState`s local to
   // the edit sheet, defaulted to kg and cm, thrown away when the sheet closed —
@@ -708,49 +564,35 @@ export default function Profile() {
   }, [cd.id]);
   const statsLine = [age != null ? age + ' yrs' : null, heightLabel(cd.heightCm, lu), weightLabel(cd.weightKg, wu)]
     .filter(Boolean).join(' · ') || 'Add your height and weight';
-  const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
-  // Every group renders. There used to be a `HUB_KEEP` set here, one line above
-  // this, that filtered HUB_GROUPS down to Connect · Devices & Media · Account
-  // and dropped Progress & Insights, Training and Daily on the floor.
+  const solo = cd.coachingMode === 'solo';
+  // ── the hub is not a list any more, and it is not written down here ───────
   //
-  // ── Why it was there ───────────────────────────────────────────────────────
+  // There used to be a HUB_GROUPS const above this: forty-one rows, hand
+  // written, a second copy of src/lib/features.ts that nobody diffed against
+  // the first. Twice, a screen ended up in neither list and had no route into
+  // it from anywhere in the app — ten screens the first time, eight the second,
+  // among them the one that changes a member's own password. The header of
+  // src/lib/features.ts is the write-up of both.
   //
-  // The IA rebalance that introduced Explore moved "find any screen" to a
-  // search field, and the Me tab was slimmed to match: the hub was meant to
-  // hold the things you go to Me FOR — your coach, your devices, your account —
-  // while everything else was to be found by searching. src/lib/features.ts
-  // still describes the result in its own header as "the slimmed Me hub".
+  // The list is gone. Every row below comes from CLIENT_FEATURES, filed by its
+  // `meGroup`, so adding a screen to the index is the same act as putting it
+  // on this screen and the two cannot drift. scripts/check-client-index.mjs
+  // fails the build on a client screen that is in neither the index nor the
+  // written-down exclusions.
   //
-  // ── Why it is gone ─────────────────────────────────────────────────────────
-  //
-  // The slimming was safe only if Explore really did list everything, and it
-  // never did. CLIENT_FEATURES was missing Reminders outright, so the row in the
-  // Daily group was Reminders' ONLY link anywhere in the app and hiding the
-  // group made the screen unreachable — not hard to find, unreachable, with no
-  // route into it from any tab, hub, banner or search result. Eighteen or so
-  // screens whose own headers say "reachable from the profile hub" were in the
-  // same position or one banner away from it, all of them describing a hub that
-  // had stopped rendering them.
-  //
-  // Search is a second way to reach a screen. It is not a first one: it only
-  // finds what somebody already knows to type, and a member who has never seen
-  // "Strength Standards" will not search for it. So the hub lists everything
-  // again, with per-group collapse (see `collapsed` above, expanded by default) so
-  // the length costs nothing, and Explore is the shortcut rather than the door.
-  //
-  // Every route below resolves to a real file in app/(client)/. A row pointing
-  // at nothing is worse than no row, so if one is ever deleted, delete its row
-  // here in the same change. The claim carries no COUNT any more — the sentence
-  // said 32 while there were 41, which is the third time a number kept by hand
-  // in this comment has gone stale, and the paragraph below is about exactly
-  // that. scripts/check-reachable.mjs is what actually holds it.
-  //
-  // That count said 28 while there were 30 rows, which is the ordinary fate of
-  // a number kept by hand. Both halves of the claim are now checked by a script
-  // rather than by this sentence: scripts/check-reachable.mjs fails if a route
-  // named here does not exist on disk, and fails if a route file in app/ is
-  // named by nothing anywhere — the Reminders failure, from the other side.
-  const hubGroups = HUB_GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
+  // Forty-one rows in one column became six cards. Each opens a list of what
+  // is in it, which is one more tap and a name to aim at, and the search field
+  // above them is the shortcut for anyone who already knows what they want.
+  const groups = useMemo(() => ME_GROUPS.map((g) => ({
+    ...g,
+    items: meGroupFeatures(g.key).filter((f) => !(solo && f.soloHide)),
+  })).filter((g) => g.items.length > 0), [solo]);
+  // The three under the cards. Fixed, and the heading does not claim they are
+  // this member's own — see ME_QUICK in src/lib/features.ts for why that is not
+  // a shortcut worth taking.
+  const quick = useMemo(() => ME_QUICK
+    .map((r) => CLIENT_FEATURES.find((f) => f.route === r))
+    .filter((f): f is Feature => !!f && !(solo && f.soloHide)), [solo]);
   const G = layout.gutter;
 
   return (
@@ -989,38 +831,51 @@ export default function Profile() {
         </Section>
 
 
-        <Section>
-          {/* First of the three, and permanent. Reported as "Repple Coach has a
-              Getting Started, however Client doesn't have this" — what that app
-              had was the first-run tour firing on a fresh install, which is
-              gone the moment it is skipped. This row is here whether the list
-              is finished or not: the HOME row leaves when there is nothing left
-              in it, and a screen nothing links to fails check:reachable and,
-              more to the point, cannot be gone back to. */}
-          <ListRow icon="sparkle" tone="amber" title="Getting Started" note="What is set up, and what is still worth doing"
-            onPress={() => router.push('/(client)/getting-started')} />
-          <ListRow icon="search" tone="blue" title="User Guide" note="What each tab does, any time"
-            onPress={() => router.push('/guide')} />
-          <ListRow icon="search" tone="purple" title="Explore All Features" note="Search anything in the app"
-            onPress={() => router.push('/(client)/explore')} />
-        </Section>
+        {/* ── search, before anything else ──────────────────────────────────
+            Not a second search. It is the field Explore already owns, sitting
+            where a member looks first; tapping it opens that screen. A member
+            who knows the word for what they want should never have to know
+            which of six cards it was filed under. */}
+        <Pressable onPress={() => router.push("/(client)/explore")} accessibilityRole="button"
+          accessibilityLabel="Search anything in Repple"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginTop: sp.lg }}>
+          <Icon name="search" size={16} color={t.ink3} />
+          <Text style={{ ...ty.body, color: t.ink3 }}>Search anything in Repple</Text>
+        </Pressable>
 
-        {/* ── the hub: grouped, collapsible, deliberately quiet ───────────── */}
-        {hubGroups.map((g) => { const gc = collapsed[g.title] ?? false; return (
-          <Section key={g.title}>
-            {/* The group's name is a heading now, not a 13pt grey label: it is
-                what names the card, and it was the quietest text in it. */}
-            <Pressable onPress={() => setCollapsed((p) => ({ ...p, [g.title]: !gc }))} accessibilityRole="button" accessibilityLabel={(gc ? 'Expand ' : 'Collapse ') + g.title}
-              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, marginBottom: gc ? 0 : sp.xs }}>
-              <Text style={{ ...ty.head, color: t.ink, flex: 1, minWidth: 0 }}>{g.title}</Text>
-              <View style={{ transform: [{ rotate: turn(gc ? 0 : 90) }] }}><Icon name={FORWARD_ICON} size={16} color={t.ink3} /></View>
+        {/* ── the six ───────────────────────────────────────────────────────
+            A card with a coloured spine, its name, and the line that says what
+            is behind it. The spine is the group's Tone through the data
+            palette — never a hex here. */}
+        <View style={{ gap: sp.sm, marginTop: sp.lg }}>
+          {groups.map((g) => (
+            <Pressable key={g.key} onPress={() => router.push({ pathname: '/(client)/me-group', params: { g: g.key } })}
+              accessibilityRole="button" accessibilityLabel={`${g.title}. ${g.note}. ${g.items.length} screens`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, borderStartWidth: 4, borderStartColor: toneOf(t, g.tone).mark, ...elevation.card }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.head, color: t.ink }}>{g.title}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{g.note}</Text>
+              </View>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{g.items.length}</Text>
+              <Icon name={FORWARD_ICON} size={18} color={t.ink3} />
             </Pressable>
-            {!gc ? g.items.map((h) => (
-              <ListRow key={h.route} icon={hubIcon(h.route)} tone={g.tone} title={h.label} note={h.note}
-                onPress={() => router.push(h.route as any)} />
-            )) : null}
+          ))}
+        </View>
+
+        {/* ── three shortcuts, and an honest heading over them ─────────────
+            ME_QUICK_TITLE is "Most people start here", not "You open these
+            most". Nothing records which screens THIS member opens, so the
+            second sentence would be a claim about them that the app has no
+            basis for. See ME_QUICK in src/lib/features.ts. */}
+        {quick.length ? (
+          <Section style={{ marginTop: sp.lg }}>
+            <SectionHead title={ME_QUICK_TITLE} />
+            {quick.map((f) => (
+              <ListRow key={f.route} icon={f.icon} tone="brand" title={f.label} note={f.note}
+                onPress={() => router.push(f.route as any)} />
+            ))}
           </Section>
-        ); })}
+        ) : null}
       </ScrollView>
 
       {/* edit profile sheet */}

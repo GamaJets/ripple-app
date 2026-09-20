@@ -1,4 +1,23 @@
-// Trainer portal tabs — Clients · Programs · Schedule · Videos · Analytics · Profile
+// Trainer portal tabs — Clients · Programs · Schedule · Money · Analytics · Profile
+//
+// ── Videos gave its tab to Money ──────────────────────────────────────────
+//
+// Measured across this group: Clients led to 25 destinations one tap away,
+// Profile 15, Analytics 10, Schedule 4, Programs 3 — and Videos 2. A tab is
+// the most valuable space in the app and Videos was holding one for two
+// screens, neither of which is a coach's day.
+//
+// Meanwhile nine screens about a coach's money — money, payments, invoices,
+// billing, statement, costs, receipts, referrals, ad-spend — had no tab at all
+// and hung off Profile and Analytics.
+//
+// So Videos becomes a detail screen and Money takes the slot. Nothing is
+// deleted and nothing is stranded: `videos` keeps its route, keeps its row in
+// src/lib/features.ts (so Explore still finds it by name), is still reached
+// from Analytics, from an exercise and from the Exercise Library, and now has
+// a row of its own on Programs — which is where building lives. Its one
+// exclusive child, `broadcast-session`, is reached only from Videos and so is
+// reached exactly as it was.
 //
 // Configuration, not layout: every Tabs.Screen, name, href, title and the order
 // they appear in is untouched. The primary bar stays six items; everything else
@@ -61,7 +80,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color, size }) => <Icon name="people" size={size} color={color} /> }} />
         <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color, size }) => <Icon name="train" size={size} color={color} /> }} />
         <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color, size }) => <Icon name="calendar" size={size} color={color} /> }} />
-        <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ color, size }) => <Icon name="video" size={size} color={color} /> }} />
+        <Tabs.Screen name="money" options={{ title: 'Money', tabBarIcon: ({ color, size }) => <Icon name="trending" size={size} color={color} /> }} />
         <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color, size }) => <Icon name="chart" size={size} color={color} /> }} />
         <Tabs.Screen name="sessions" options={{ href: null, title: 'Mark Sessions' }} />
         <Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
@@ -107,7 +126,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="client-report" options={{ href: null, title: 'Their Record' }} />
         <Tabs.Screen name="credentials" options={{ href: null, title: 'Credentials' }} />
         <Tabs.Screen name="messages" options={{ href: null, title: 'Messages' }} />
-        <Tabs.Screen name="money" options={{ href: null, title: 'Money' }} />
+        <Tabs.Screen name="videos" options={{ href: null, title: 'Videos' }} />
         <Tabs.Screen name="brand" options={{ href: null, title: 'Branding' }} />
         <Tabs.Screen name="statement" options={{ href: null, title: 'Statement' }} />
         <Tabs.Screen name="getting-started" options={{ href: null, title: 'Getting Started' }} />
