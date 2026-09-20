@@ -48,8 +48,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Section, SectionHead, PageHead, Ghost, fig, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Ghost, fig, Flag, Ring, TonedChip } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
 import { classRoster, UNLINKED_CLASS, type RosterMember } from '../../src/lib/classAttendance';
 import { parseRate, rateText, payEstimate, rateFieldNote } from '../../src/lib/coachPrefs';
@@ -412,24 +412,22 @@ export default function ClassCheckin() {
               {/* `present` and `booked` are plain counts under `counted`, so
                   they go into the sentence as digits; the dash is only ever
                   drawn under the label, never spoken mid-sentence. */}
-              <View accessible accessibilityLabel={`Checked in, ${counted ? `${present} of ${booked}` : 'not counted'}. ${note}`}>
-                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                  <Text style={{ ...value(32), color: t.ink }}>{fig(counted ? present : null)}</Text>
-                  {counted ? (
-                    <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{'/ ' + booked}</Text>
-                  ) : null}
+              {/* The register as a RING: how far through it the coach is, read
+                  at a glance from the door. It replaces a figure over a pill
+                  bar and keeps both of their rules — `arc` is null unless
+                  `counted`, and a null ring is a track with no arc and a dash,
+                  never an empty circle that reads as nobody here. The ring
+                  speaks the whole sentence; the words beside it are hidden from
+                  a screen reader so it is not said twice. */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Ring size={112} value={arc == null ? null : Math.max(0, Math.min(1, arc))}
+                  figure={counted ? String(present) : null} sub={counted ? `of ${booked}` : undefined}
+                  spoken={`Checked in, ${counted ? `${present} of ${booked}` : 'not counted'}. ${note}`} />
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flex: 1, minWidth: 140, gap: sp.xs }}>
+                  {pct != null ? <TonedChip tone={pct >= 100 ? 'brand' : 'blue'} label={`${pct}% in`} /> : null}
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{note}</Text>
                 </View>
-                <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{note}</Text>
               </View>
-              {pct != null ? (
-                <View
-                  accessibilityRole="progressbar"
-                  accessibilityLabel={`${pct}% of those booked checked in`}
-                  accessibilityValue={{ min: 0, max: 100, now: pct }}
-                  style={{ height: 8, borderRadius: radius.pill, backgroundColor: t.surface2, marginTop: sp.md, overflow: 'hidden' }}>
-                  <View style={{ width: `${pct}%`, height: '100%', borderRadius: radius.pill, backgroundColor: t.brand }} />
-                </View>
-              ) : null}
             </Section>
           );
         })()}
@@ -536,8 +534,10 @@ export default function ClassCheckin() {
             </Flag>
           ) : roster.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No one has booked this class yet — members appear here as they book.</Text>
-          ) : (
-            roster.map((m, i) => (
+          ) : (<>
+            {/* The instruction every booked row used to repeat, said once. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.xs, marginBottom: sp.xs }}>Tap a name when they arrive</Text>
+            {roster.map((m, i) => (
               // The state carries "present"; the WAITLIST was carried by an
               // amber dot and a caption, and a Pressable's label replaces both.
               // So a coach taking the register with VoiceOver heard a
@@ -547,19 +547,19 @@ export default function ClassCheckin() {
                 accessibilityLabel={m.status === 'waitlist' ? `${m.name}, on the waiting list` : m.name}
                 accessibilityState={{ checked: m.attended, selected: m.attended }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 28, height: 28, borderRadius: radius.pill, backgroundColor: m.attended ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 28, height: 28, borderRadius: radius.pill, backgroundColor: m.attended ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
                   {m.attended ? <Icon name="check" size={15} color={t.brandInk} /> : null}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{m.name}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                    {m.status === 'waitlist' ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn }} /> : null}
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>{m.status === 'waitlist' ? 'Waitlist' : m.attended ? 'Present' : 'Booked · tap when they arrive'}</Text>
-                  </View>
-                </View>
+                {/* Name in the heading face, state as a toned chip at the far
+                    end: green present, amber waitlist, blue booked. The
+                    Pressable's label above still carries the waitlist in words
+                    — a chip inside a button is drawn, not spoken. */}
+                <Text style={{ ...ty.head, color: t.ink, flex: 1, minWidth: 0 }}>{m.name}</Text>
+                <TonedChip tone={m.status === 'waitlist' ? 'amber' : m.attended ? 'brand' : 'blue'}
+                  label={m.status === 'waitlist' ? 'Waitlist' : m.attended ? 'Present' : 'Booked'} />
               </Pressable>
-            ))
-          )}
+            ))}
+          </>)}
         </Section>
 
 

@@ -133,9 +133,9 @@ import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { liftIn, plain, readLift, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, KpiRow, fig } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
-import { sp, layout, radius, hairline, elevation, numeric, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, numeric, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { useRoster } from '../../src/ui/roster';
 import { searchRoster, rosterSearchLine, rosterPickerLine } from '../../src/lib/rosterSearch';
@@ -1525,28 +1525,46 @@ export default function LogSession() {
               under itself that it is not written anywhere, because every other
               figure on this screen ends up in somebody's record and this one
               must not be mistaken for one that does. */}
+          {/* A NIGHT strip, and the figure in the hero face: the clock is the
+              one thing on this screen read from across a rack, by somebody
+              holding a bar, and it was a 24pt line beside an 18pt icon. Night
+              rather than a white card because it is the floor's instrument and
+              not a field — nothing else on this sheet is night, so it cannot
+              be mistaken for something that gets saved. Everything on it uses
+              the night inks; the button is the bright accent under its deep
+              ink, the pair the kit's hero button is drawn in. */}
           {isLive ? (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
-              <Icon name="clock" size={18} color={clockFrom != null ? t.brand : t.ink3} />
-              <View style={{ flex: 1, minWidth: 140 }}>
+            <View style={{
+              flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.md, marginTop: sp.md,
+              backgroundColor: t.night, borderRadius: radius.lg, padding: sp.lg, ...elevation.hero,
+            }}>
+              <View style={{ flex: 1, minWidth: 150 }}>
+                <Text style={{ ...ty.eyebrow, color: t.nightInk3 }}>Session Clock</Text>
                 {clockFrom != null ? (
-                  <SessionClock from={clockFrom} ink={t.ink} />
+                  <SessionClock from={clockFrom} ink={t.nightInk} />
                 ) : (
-                  <Text style={{ ...ty.body, color: t.ink2 }}>Session clock</Text>
+                  <Text style={{ ...ty.section, color: t.nightInk, marginTop: 2 }}>{timersOff ? 'Stopped' : 'Not Started'}</Text>
                 )}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: 2 }}>
                   {clockFrom != null
-                    ? 'Running on this phone for the two of you. It is not written to their record.'
+                    ? 'On this phone only — not written to their record.'
                     : timersOff
-                      ? 'Stopped, and the rest timer with it. Start brings both back.'
-                      : 'Starts here, or with the first set you tick. A rest countdown follows each set.'}
+                      ? 'The rest timer stopped with it. Start brings both back.'
+                      : 'Starts here, or with the first set you tick.'}
                 </Text>
               </View>
-              {clockFrom != null ? (
-                <Ghost label="Stop" a11yLabel="Stop the session clock and the rest timer" onPress={stopClocks} />
-              ) : (
-                <Ghost label="Start" a11yLabel="Start the session clock" onPress={() => { startClock(); tapLight(); }} />
-              )}
+              <Pressable
+                onPress={clockFrom != null ? stopClocks : () => { startClock(); tapLight(); }}
+                accessibilityRole="button"
+                accessibilityLabel={clockFrom != null ? 'Stop the session clock and the rest timer' : 'Start the session clock'}
+                style={{
+                  minHeight: 48, paddingHorizontal: sp.xl, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: clockFrom != null ? t.night2 : t.brandBright,
+                }}>
+                <Text style={{ ...ty.label, ...font('700'), color: clockFrom != null ? t.nightInk : t.brandDeep }}>
+                  {clockFrom != null ? 'Stop' : 'Start'}
+                </Text>
+              </Pressable>
             </View>
           ) : null}
 
@@ -1572,22 +1590,16 @@ export default function LogSession() {
             }, [])));
             const vol = volumeIn(all.volumeKg, wu);
             return (
-              <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
-                <View>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Volume</Text>
-                  {/* A dash, not a nought. A session of bodyweight sets moved a
-                      real amount that this app cannot price, and printing 0 kg
-                      over it would be a measurement of something that did not
-                      happen. */}
-                  <Text style={{ ...ty.body, color: t.ink, marginTop: 2, ...numeric }}>
-                    {vol == null ? '—' : `${num(vol)} ${wu}`}
-                  </Text>
-                </View>
-                <View>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Sets</Text>
-                  <Text style={{ ...ty.body, color: t.ink, marginTop: 2, ...numeric }}>{num(all.setCount)}</Text>
-                </View>
-              </View>
+              /* Two tiles in the colours these two figures have everywhere else
+                 in the look — volume orange, a count blue. A dash, not a
+                 nought, for the volume: a session of bodyweight sets moved a
+                 real amount that this app cannot price, and printing 0 kg over
+                 it would be a measurement of something that did not happen.
+                 `KpiTile` draws the dash for null and says "no figure". */
+              <KpiRow tiles items={[
+                { label: 'Volume', tone: 'orange', value: vol == null ? fig(null) : num(vol), unit: vol == null ? undefined : wu },
+                { label: 'Sets', tone: 'blue', value: num(all.setCount) },
+              ]} />
             );
           })() : null}
 
@@ -1657,7 +1669,7 @@ export default function LogSession() {
           {sessionId ? (
             <Section>
               <SectionHead title="This Session" />
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                 {pickedName || 'Your client'}
               </Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -1734,7 +1746,7 @@ export default function LogSession() {
                       accessibilityLabel={on ? `${c.name}, chosen` : `Log this session against ${c.name}`}
                       hitSlop={{ top: hitSlopFor(34), bottom: hitSlopFor(34), left: 0, right: 0 }}
                       style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
                     </Pressable>
                   );
                 })}
@@ -1802,7 +1814,7 @@ export default function LogSession() {
                     accessibilityLabel={on ? `${d.label}, chosen` : `File this session under ${d.label}`}
                     hitSlop={{ top: hitSlopFor(34), bottom: hitSlopFor(34), left: 0, right: 0 }}
                     style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{d.label}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: on ? t.brandInk : t.ink2 }}>{d.label}</Text>
                   </Pressable>
                 );
               })}
@@ -1826,7 +1838,7 @@ export default function LogSession() {
                   style={{ paddingHorizontal: 14, paddingVertical: 10 }}>
                   <Icon name="minus" size={15} color={t.ink2} />
                 </Pressable>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, minWidth: 64, textAlign: 'center' }}>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink, minWidth: 64, textAlign: 'center' }}>
                   {hourLabel(logHour)}
                 </Text>
                 <Pressable onPress={() => setChosenHour((logHour + 1) % 24)} hitSlop={8}
@@ -1892,7 +1904,7 @@ export default function LogSession() {
                             : `Choose ${d.label}, ${d.exercises} exercise${d.exercises === 1 ? '' : 's'}.`}
                           hitSlop={{ top: hitSlopFor(34), bottom: hitSlopFor(34), left: 0, right: 0 }}
                           style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                          <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>
+                          <Text style={{ ...ty.label, ...font('500'), color: on ? t.brandInk : t.ink2 }}>
                             {d.label} · {d.exercises}
                           </Text>
                         </Pressable>
@@ -1974,9 +1986,9 @@ export default function LogSession() {
                       name beside it is the label, and a picture of a squat
                       announced before "Back Squat" is the same thing twice. */}
                   <View accessible={false} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-                    <ExerciseThumb uri={thumbFor(stillFor(r.name) ?? { thumbPath: null })} t={t} size={44} />
+                    <ExerciseThumb uri={thumbFor(stillFor(r.name) ?? { thumbPath: null })} t={t} size={56} />
                   </View>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{movement(r.name)}</Text>
+                  <Text style={{ ...ty.head, color: t.ink, flex: 1 }}>{movement(r.name)}</Text>
                   <Pressable onPress={() => removeRow(r.key)} hitSlop={8} accessibilityRole="button"
                     accessibilityLabel={`Remove ${movement(r.name)}`}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 }}>
@@ -2063,8 +2075,23 @@ export default function LogSession() {
                 </View>
                 {r.sets.map((s, i) => (
                   <View key={i}>
-                    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
-                      <Text style={{ ...ty.caption, color: t.ink3, width: 24 }}>{i + 1}</Text>
+                    {/* A done set is a TONED row, not only a filled circle at
+                        its far end: the accent's pale plate across the whole
+                        row and its number in the accent's text colour, so a
+                        coach glancing down mid-session sees how far through
+                        the movement they are without reading a column. The
+                        test is the tick's own — `willSave` and not held — so
+                        the plate and the tick cannot disagree. The negative
+                        margin gives the plate its inset without moving the
+                        columns off the header row above. */}
+                    <View style={{
+                      flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center',
+                      marginHorizontal: -sp.xs, paddingHorizontal: sp.xs, borderRadius: radius.md,
+                      backgroundColor: willSave(sheetTick(s.target, s.reps)) && !s.held ? t.brandSoft : 'transparent',
+                    }}>
+                      <Text style={willSave(sheetTick(s.target, s.reps)) && !s.held
+                        ? { ...ty.caption, ...font('700'), color: t.brandText, width: 24 }
+                        : { ...ty.caption, color: t.ink3, width: 24 }}>{i + 1}</Text>
                       {/* The same set, last time. A dash means there was no set
                           in that position — nothing about the read, which the
                           line above the table says in words when it is the
@@ -2244,7 +2271,7 @@ export default function LogSession() {
                 ))}
                 <Pressable onPress={() => addSet(r.key)} hitSlop={8} accessibilityRole="button"
                   style={{ paddingVertical: sp.sm, marginTop: 2 }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Add a set</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.brand }}>Add a set</Text>
                 </Pressable>
               </View>
               );
@@ -2398,7 +2425,7 @@ export default function LogSession() {
                     paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1 }}>
                     <ExerciseThumb uri={thumbFor(stillFor(x.name) ?? { thumbPath: null })} t={t} size={40} />
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{movement(x.name)}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{movement(x.name)}</Text>
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{x.group}</Text>
                 </Pressable>
@@ -2431,8 +2458,10 @@ function SessionClock({ from, ink }: { from: number; ink: string }) {
   const hrs = Math.floor(secs / 3600);
   const face = hrs > 0 ? `${hrs}:${restClock(secs % 3600).padStart(5, '0')}` : restClock(secs);
   return (
-    <Text accessibilityLabel={`Session clock, ${face}`}
-      style={{ ...ty.title, color: ink, ...numeric }}>{face}</Text>
+    // The hero figure, shrinking to one line rather than wrapping: "1:15:03"
+    // at a large text size is wider than the strip's text column.
+    <Text accessibilityLabel={`Session clock, ${face}`} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
+      style={{ ...ty.hero, color: ink, ...numeric }}>{face}</Text>
   );
 }
 
@@ -2465,6 +2494,12 @@ function RestBar({ t, endsAt, title, note, onAdd, onSkip, onDone }: {
   doneRef.current = onDone;
   const prevLeft = useRef<number | null>(null);
   const over = useRef(false);
+  // What the bar drains FROM. This component is keyed by the rest's generation,
+  // so the first reading is the whole rest; +15s can push `left` past it, and
+  // then the longer figure is the whole — a bar over 100% is a full bar that
+  // does not move for fifteen seconds, which reads as a stuck timer.
+  const total = useRef(Math.max(1, left));
+  if (left > total.current) total.current = left;
   useEffect(() => {
     const id = setInterval(() => {
       if (over.current) return;
@@ -2483,18 +2518,26 @@ function RestBar({ t, endsAt, title, note, onAdd, onSkip, onDone }: {
     return () => clearInterval(id);
   }, []);
   return (
+    /* Night, like the session clock it belongs to, with the rest as a BRIGHT
+       bar that drains: the digits say how long, the bar says how much of it is
+       left, and the second is what is read from two metres away. The bar is a
+       picture of the digits beside it and is hidden from a screen reader, which
+       is given the sentence. */
     <View style={{
       flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.md,
-      paddingHorizontal: layout.gutter, paddingVertical: sp.sm,
-      backgroundColor: t.surface, borderTopWidth: hairline, borderTopColor: t.ring,
+      paddingHorizontal: layout.gutter, paddingTop: sp.sm, paddingBottom: sp.md,
+      backgroundColor: t.night,
     }}>
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+        style={{ width: '100%', height: 8, borderRadius: 4, backgroundColor: t.night2, overflow: 'hidden' }}>
+        <View style={{ width: `${Math.round((left / total.current) * 100)}%`, height: 8, borderRadius: 4, backgroundColor: t.brandBright }} />
+      </View>
       <View accessible accessibilityLabel={`Rest, ${restClock(left)} left. ${title}. ${note}.`}
         style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1, minWidth: 160 }}>
-        <Icon name="clock" size={18} color={t.brand} />
-        <Text style={{ ...ty.title, color: t.ink, ...numeric }}>{restClock(left)}</Text>
+        <Text style={{ ...ty.display, color: t.nightInk, ...numeric }}>{restClock(left)}</Text>
         <View style={{ flex: 1 }}>
-          <Text style={{ ...ty.caption, color: t.ink2 }}>Rest · {title}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>{note}</Text>
+          <Text style={{ ...ty.caption, ...font('600'), color: t.nightInk }}>Rest · {title}</Text>
+          <Text style={{ ...ty.caption, color: t.nightInk2 }}>{note}</Text>
         </View>
       </View>
       <Ghost label="+15s" a11yLabel="Add fifteen seconds to this rest" onPress={() => { onAdd(); tapLight(); }} />

@@ -28,8 +28,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Field } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, value, fontScale } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Field, Ring, Meter, TonedChip, IconPlate, fig } from '../../src/ui/kit';
+import { sharePercent } from '../../src/lib/sharePercent';
+import { sp, layout, radius, hairline, type as ty, value, fontScale, font } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { useMyGymKit } from '../../src/ui/coachKit';
 import { GymKitRegister } from '../../src/ui/GymKitRegister';
@@ -720,7 +721,7 @@ export default function TrainerClasses() {
     <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}
       accessibilityState={{ selected: active }}
       style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: active ? t.brand : t.surface2 }}>
-      <Text style={{ ...ty.label, fontWeight: '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font('500'), color: active ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
   /**
@@ -739,7 +740,7 @@ export default function TrainerClasses() {
           <Pressable key={String(k)} onPress={() => onPick(k)} accessibilityRole="tab" accessibilityState={{ selected: on }}
             style={{ flex: 1, minHeight: 40, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
-              style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
+              style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{label}</Text>
           </Pressable>
         );
       })}
@@ -772,9 +773,54 @@ export default function TrainerClasses() {
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <PageHead
           title="Classes"
-          subtitle="Schedule group classes across your branches. Members book and waitlist automatically."
           trailing={<Ghost icon="plus" a11yLabel={createOpen ? 'Close the new class form' : 'Schedule a class'} onPress={() => setCreateOpen((open) => !open)} />}
         />
+
+        {/* ── how full the timetable is, as a picture ──────────────────────
+            The page opened on a form heading and a list of "8/12"s. The one
+            question a coach brings here — are my classes filling — was twenty
+            fractions to add up. This is that sum: places taken over places
+            offered, across the classes still going ahead.
+
+            Gated the way every count on this screen is. `countsKnown` false
+            means `booked` is a 0 standing in for a failed read, and a status
+            other than 'ready' means the list itself is short or missing — in
+            either case the ring draws its track and a dash, and the line
+            beside it says which. The share goes through `sharePercent`, so one
+            booking in two hundred places is not "0%". A cancelled class offers
+            no places and is left out of both halves. */}
+        {(() => {
+          const live = upcoming.filter((c) => c.status !== 'cancelled');
+          const whole = status === 'ready' && countsKnown;
+          const places = live.reduce((a, c) => a + c.capacity, 0);
+          const taken = live.reduce((a, c) => a + c.booked, 0);
+          const waiting = live.reduce((a, c) => a + (c.waiting ?? 0), 0);
+          const drawn = whole && places > 0;
+          const share = drawn ? sharePercent(taken, places) : null;
+          return (
+            <Section>
+              <SectionHead title="Places Filled" note="Upcoming classes" />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
+                <Ring tone="purple" size={112} value={drawn ? taken / places : null} figure={share}
+                  spoken={drawn ? `${share ?? 'An unknown share'} of places filled, ${taken} of ${places}` : 'Places filled, not counted'} />
+                <View style={{ flex: 1, minWidth: 140, gap: sp.xs }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>
+                    {drawn ? `${taken} of ${places} places` : fig(null)}
+                  </Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    {status === 'loading' ? 'Reading your timetable…'
+                      : status === 'error' ? 'Your timetable could not be read, so nothing is counted.'
+                        : status === 'partial' ? 'Only part of your timetable loaded, so nothing is counted.'
+                          : !countsKnown ? 'How many have booked could not be read — this is not a count of none.'
+                            : places === 0 ? 'No classes scheduled yet.'
+                              : `Across ${live.length} ${live.length === 1 ? 'class' : 'classes'}`}
+                  </Text>
+                  {drawn && waiting > 0 ? <TonedChip tone="amber" label={`${waiting} waiting`} /> : null}
+                </View>
+              </View>
+            </Section>
+          );
+        })()}
 
         {/* ── new class ──────────────────────────────────────────────────── */}
         <Section>
@@ -785,9 +831,6 @@ export default function TrainerClasses() {
           <SectionHead title="Create a Class" note={createOpen ? 'Close' : 'New'} onPress={() => setCreateOpen((open) => !open)} />
           {!createOpen ? (
             <View>
-              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                Your timetable stays in view until you are ready to add a one-off class or a repeating series.
-              </Text>
               <Ghost label="Schedule a Class" icon="plus" onPress={() => setCreateOpen(true)} />
             </View>
           ) : (<>
@@ -864,7 +907,7 @@ export default function TrainerClasses() {
                   accessibilityState={{ selected: m === minute }}
                   accessibilityLabel={fmtClock(hour, m)}
                   style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === minute ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: m === minute ? '500' : '400', color: m === minute ? t.brandInk : t.ink2 }}>
+                  <Text style={{ ...ty.label, ...font(m === minute ? '500' : '400'), color: m === minute ? t.brandInk : t.ink2 }}>
                     :{String(m).padStart(2, '0')}
                   </Text>
                 </Pressable>
@@ -911,8 +954,10 @@ export default function TrainerClasses() {
             <View style={{ marginBottom: sp.md }}>
               <Text style={lbl}>Same Again runs for</Text>
               {seg([[4, '4 more weeks'], [8, '8 more weeks'], [12, '12 more weeks']] as const, againWeeks, setAgainWeeks)}
+              {/* One line. It states what the write will and will not do, which
+                  is data about an act; the paragraph arguing for it was prose. */}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Counted from the last class in that series rather than from today, so a term that is nearly over carries straight on. Dates already on the timetable, and any that fall in the past, are skipped rather than doubled.
+                Counted from the last class in the series · dates already scheduled or past are skipped
               </Text>
             </View>
           ) : null}
@@ -944,57 +989,58 @@ export default function TrainerClasses() {
                 flexDirection: stackControls ? 'column' : 'row', alignItems: stackControls ? 'stretch' : 'center', gap: sp.md, paddingVertical: sp.md,
                 borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
               }}>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    {/* A 6pt mark and the word, never coloured text: t.warn does
-                        not clear 4.5:1 on the light palettes and "Cancelled" is
-                        the most important word in this row. */}
-                    {off ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-                    <Text style={{ ...ty.body, fontWeight: '500', color: off ? t.ink2 : t.ink }}>{c.title}</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    {/* The class plate: purple, the class colour on the calendar
+                        and in the day sheet. A called-off class goes grey — it
+                        is still on the record and no longer on the timetable. */}
+                    <IconPlate icon="people" tone={off ? 'neutral' : 'purple'} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={{ ...ty.head, color: off ? t.ink2 : t.ink }}>{c.title}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.branch} · {dayShort(c.startsAt)} {timeLabel(c.startsAt)} · {c.kind}</Text>
+                    </View>
                   </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.branch} · {dayShort(c.startsAt)} {timeLabel(c.startsAt)} · {c.kind}</Text>
-                  {off ? (
-                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>
-                      Cancelled. {c.cancelReason?.trim() ? c.cancelReason.trim() : 'No reason was recorded.'} It stays here with its bookings so the gym keeps the record.
-                    </Text>
-                  ) : null}
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    {full ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn }} /> : null}
-                    <Text style={{ ...value(16), color: t.ink }}>{countsKnown ? c.booked : '—'}/{c.capacity}</Text>
-                  </View>
-                  {/* ── the six people nobody could see ────────────────────
-                      `class_counts()` counted a waitlister as a booking until
-                      part 210, so this class read "17/12" and the queue was
-                      folded into a number that made no sense. Now they are
-                      separate, and the queue is the more valuable of the two: a
-                      full class is a full class, and a full class with six
-                      waiting is a second session on Thursday.
+                  {/* States as chips: the word on a plate in that hue's ink.
+                      t.warn as TEXT does not clear 4.5:1 on the light palettes
+                      and "Cancelled" is the most important word in this row —
+                      the chip's ink is measured to, which is why it may now be
+                      coloured where the old line could not. */}
+                  {off || full || (countsKnown && c.waiting != null && c.waiting > 0) ? (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.xs, marginTop: sp.sm }}>
+                      {off ? <TonedChip tone="amber" label="Cancelled" /> : null}
+                      {!off && full ? <TonedChip tone="amber" label="Full" /> : null}
+                      {/* ── the six people nobody could see ──────────────────
+                          `class_counts()` counted a waitlister as a booking
+                          until part 210, so this class read "17/12" and the
+                          queue was folded into a number that made no sense.
+                          Now they are separate, and the queue is the more
+                          valuable of the two: a full class is a full class, and
+                          a full class with six waiting is a second session on
+                          Thursday.
 
-                      Only drawn when there IS one. A "0 waiting" under every
-                      class in the timetable is furniture, and the line that
-                      matters would be lost in it. A NULL waiting draws nothing
-                      either — that is the counts read having failed or a
-                      database without part 210, and "nobody is waiting" is
-                      exactly the claim that would stop the second session. The
-                      dash on the booked figure beside it already says the
-                      numbers are unknown. */}
-                  {countsKnown && c.waiting != null && c.waiting > 0 ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      {/* The tone is the dot, the count is ink. t.warn measures
-                          3.87–4.08:1 on the three light palettes — under the
-                          4.5:1 a word needs and over the 3:1 a mark needs, so
-                          it draws the mark and never the number. The word
-                          "waiting" is on the line regardless, so colour is not
-                          carrying the meaning on its own. */}
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} />
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>
-                        {c.waiting} waiting
-                      </Text>
+                          Only drawn when there IS one. A "0 waiting" under
+                          every class is furniture. A NULL waiting draws nothing
+                          either — that is the counts read having failed or a
+                          database without part 210, and "nobody is waiting" is
+                          exactly the claim that would stop the second session.
+                          The dash on the meter below already says the numbers
+                          are unknown. */}
+                      {countsKnown && c.waiting != null && c.waiting > 0 ? <TonedChip tone="orange" label={`${c.waiting} waiting`} /> : null}
                     </View>
                   ) : null}
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{!countsKnown ? 'capacity' : full ? 'full' : 'booked'}</Text>
+                  {off ? (
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+                      {c.cancelReason?.trim() ? c.cancelReason.trim() : 'No reason was recorded.'} Kept with its bookings for the record.
+                    </Text>
+                  ) : (
+                    /* The fill as a bar, not a fraction to be divided in the
+                       head. Unknown is not "not full": without the counts
+                       `booked` is 0 for every class, so `val` is null — no
+                       fill, and a dash where the figure goes. */
+                    <Meter label="Booked" tone={full ? 'amber' : 'purple'}
+                      val={countsKnown ? c.booked : null} target={c.capacity}
+                      unit="" note={countsKnown ? `${c.booked} of ${c.capacity}` : undefined} />
+                  )}
                 </View>
                 <View style={{ gap: 6, flexDirection: stackControls ? 'row' : 'column', flexWrap: stackControls ? 'wrap' : 'nowrap' }}>
                   {/* Neither verb is offered on a class that was called off.
@@ -1151,7 +1197,7 @@ export default function TrainerClasses() {
                                 accessibilityState={{ selected: m === mMinute }}
                                 accessibilityLabel={fmtClock(mHour, m)}
                                 style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === mMinute ? t.brand : t.surface2 }}>
-                                <Text style={{ ...ty.label, fontWeight: m === mMinute ? '500' : '400', color: m === mMinute ? t.brandInk : t.ink2 }}>
+                                <Text style={{ ...ty.label, ...font(m === mMinute ? '500' : '400'), color: m === mMinute ? t.brandInk : t.ink2 }}>
                                   :{String(m).padStart(2, '0')}
                                 </Text>
                               </Pressable>
@@ -1202,7 +1248,7 @@ export default function TrainerClasses() {
                     <Rule />
 
                     {/* ── calling it off ────────────────────────────────────── */}
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Call it off</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Call it off</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.sm }}>
                       The class stays on the timetable marked as cancelled, and keeps its bookings, its check-ins and its waiting list. That is the evidence the hour was wanted.
                     </Text>

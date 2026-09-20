@@ -12,10 +12,20 @@
 // integration. Every note is
 // composed by the screen, which is the only thing that knows the read states
 // behind them — this component draws what it is handed and decides nothing.
-import { Text } from 'react-native';
-import { ListRow, Section, SectionHead } from '../kit';
+//
+// Folded. The approved Calendar is a month, a day and its rows; seven settings
+// rows a coach needs a few times a month were the longest block on a screen
+// opened several times a day. They are one tap away behind the kit's
+// `Expandable`, and the sentence that introduced them is now its one-line
+// note. Nothing here is a warning — the "nobody can book you" Notice that does
+// need to be seen is drawn by the screen, outside this fold, with its own
+// button to the same sheet.
+//
+// The plates are toned by what a row touches, in the screen's own colours:
+// teal is open time, amber is blocked time, purple is classes, blue is a
+// calendar that is not Repple's.
+import { Expandable, ListRow } from '../kit';
 import { useTheme } from '../components';
-import { sp, type as ty } from '../../theme/scale';
 
 export function ScheduleOperations({
   selectedDay,
@@ -57,23 +67,19 @@ export function ScheduleOperations({
   const t = useTheme();
 
   return (
-    <Section>
-      <SectionHead title="Schedule Tools" />
-      <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-        Availability, time off, calendars and classes — the settings behind the days above.
-      </Text>
-      <ListRow icon="clock" title="Weekly Availability" note={availabilityNote} onPress={onAvailability} />
-      <ListRow icon="clock" title="Block Out Time" note={`Mark ${selectedDay} as unavailable so nobody can book it`} onPress={onBlockTime} />
-      <ListRow icon="calendar" title="Block Time From Your Calendar" tone={deviceCalendarAvailable ? undefined : t.ink3}
+    <Expandable title="Schedule Tools" note="Availability, time off, calendars and classes">
+      <ListRow icon="clock" tone="teal" title="Weekly Availability" note={availabilityNote} onPress={onAvailability} />
+      <ListRow icon="lock" tone="amber" title="Block Out Time" note={`Mark ${selectedDay} as unavailable so nobody can book it`} onPress={onBlockTime} />
+      <ListRow icon="calendar" title="Block Time From Your Calendar" tone={deviceCalendarAvailable ? 'blue' : t.ink3}
         note={deviceCalendarNote} onPress={onDeviceCalendar} />
       {googleCalendarNote != null ? (
-        <ListRow icon="calendar" title="Google Calendar" note={googleCalendarNote} onPress={onGoogleCalendar} />
+        <ListRow icon="calendar" tone="blue" title="Google Calendar" note={googleCalendarNote} onPress={onGoogleCalendar} />
       ) : null}
-      <ListRow icon="check" title="Session Outcomes" note="Mark completed, missed and cancelled sessions in one queue" onPress={onSessionOutcomes} />
-      <ListRow icon="people" title="Group Classes" note="Schedule and fill classes across branches" onPress={onClasses} />
+      <ListRow icon="check" tone="orange" title="Session Outcomes" note="Mark completed, missed and cancelled sessions in one queue" onPress={onSessionOutcomes} />
+      <ListRow icon="people" tone="purple" title="Group Classes" note="Schedule and fill classes across branches" onPress={onClasses} />
       {canExport ? (
-        <ListRow icon="share" title="Export Schedule" note="Send your booked sessions to your calendar app" onPress={onExport} />
+        <ListRow icon="share" tone="brand" title="Export Schedule" note="Send your booked sessions to your calendar app" onPress={onExport} />
       ) : null}
-    </Section>
+    </Expandable>
   );
 }

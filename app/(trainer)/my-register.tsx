@@ -36,8 +36,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, fig, Ring, KpiRow, DayBars, IconPlate, TonedChip } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { num } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
@@ -232,7 +232,7 @@ export default function MyRegister() {
               <Pressable key={d} onPress={() => setRange(d)}
                 accessibilityRole="tab" accessibilityState={{ selected: on }}
                 accessibilityLabel={`The last ${d} days`} style={seg(on)}>
-                <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{`${d} Days`}</Text>
+                <Text style={{ ...ty.label, ...numeric, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{`${d} Days`}</Text>
               </Pressable>
             );
           })}
@@ -256,38 +256,54 @@ export default function MyRegister() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your classes…</Text>
           ) : (
             <>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.xl, marginTop: sp.sm }}>
-                <View>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Classes</Text>
-                  <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                    {countable ? num(rows.length) : fig(null)}
-                  </Text>
-                </View>
-                <View>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Of booked, here</Text>
-                  <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                    {countable ? pct(rates.show) : fig(null)}
-                  </Text>
-                </View>
-                <View>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>People marked in</Text>
-                  <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                    {countable && headcount != null ? num(headcount) : fig(null)}
-                  </Text>
-                </View>
-                <View>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Off the waitlist</Text>
-                  <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                    {countable && rates.waitlistAttended != null ? num(rates.waitlistAttended) : fig(null)}
+              {/* The rate as a RING — the one figure on this page that is a
+                  share of something — and the three counts as toned tiles under
+                  the card. Same figures and the same gates as the four grey
+                  columns they replace: nothing is drawn unless `countable`, and
+                  `rates.show` stays null all the way to the ring when no class
+                  in the window has a denominator, so the arc is absent and the
+                  middle is a dash, never 0%. */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg, marginTop: sp.sm }}>
+                <Ring size={112} value={countable ? rates.show : null} figure={countable && rates.show != null ? pct(rates.show) : null}
+                  spoken={countable && rates.show != null ? `Of the people booked, ${pct(rates.show)} were marked here` : 'Of booked, here: no figure'} />
+                <View style={{ flex: 1, minWidth: 140 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>Of Booked, Here</Text>
+                  {/* One line: what is NOT in the rate is a fact about the
+                      figure. The paragraph defining it is in the help above. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {countable
+                      ? 'Booked people marked present · walk-ins are counted beside it, never in it'
+                      : 'No figures while the read is incomplete — a rate over part of a term may not be yours.'}
                   </Text>
                 </View>
               </View>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                {countable
-                  ? `“Of booked, here” is the people who held a place and were marked present, over the people who held a place — and nothing else is folded into it. Walk-ins are the column beside it, and they are in “People marked in” because that is the headcount a gym pays a per-person class on.`
-                  : 'No figures while the read is incomplete. A rate over part of a term is a number about classes that may not be yours.'}
-              </Text>
+              {/* ── the register, class by class, as bars ─────────────────
+                  The last seven classes in the window, oldest first, each bar
+                  that class's own show rate against a ceiling of everyone
+                  booked. A class whose register was never taken — or that
+                  nobody booked — has NO bar: `showRateOf` is null there and an
+                  unregistered class is forced to null, because a grey stub is
+                  "measured, and nobody came", which nobody measured. */}
+              {countable && rows.length > 1 ? (() => {
+                const recent = [...rows].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)).slice(-7);
+                const days = recent.map((c) => {
+                  const taken = !(c.attended === 0 && (c.waitlistAttended ?? 0) === 0 && c.booked > 0);
+                  const d = new Date(c.startsAt);
+                  return {
+                    label: Number.isNaN(d.getTime()) ? fig(null) : d.toLocaleDateString(appLocale(), { day: 'numeric' }),
+                    value: taken ? showRateOf(c) : null,
+                    tone: 'purple' as const,
+                  };
+                });
+                return (
+                  <View style={{ marginTop: sp.lg }}>
+                    <Text style={{ ...ty.caption, ...font('700'), color: t.ink, marginBottom: sp.sm }}>{`Last ${recent.length} Classes`}</Text>
+                    <DayBars days={days} max={1}
+                      spoken={`Show rate for your last ${recent.length} classes: ${recent.map((c, i) => `${whenLabel(c.startsAt)}, ${days[i].value == null ? 'no register' : pct(days[i].value)}`).join('; ')}`} />
+                  </View>
+                );
+              })() : null}
 
               {countable && gap ? (
                 <View style={{ marginTop: sp.md }}>
@@ -297,6 +313,17 @@ export default function MyRegister() {
             </>
           )}
         </Section>
+
+        {/* On the ground, under the card: a count is blue, the headcount a
+            per-person class is paid on is the accent, the waitlist is orange
+            as it is on the timetable. A null is the tile's dash. */}
+        {status !== 'loading' ? (
+          <KpiRow tiles items={[
+            { label: 'Classes', tone: 'blue', value: countable ? num(rows.length) : fig(null) },
+            { label: 'People Marked In', tone: 'brand', value: countable && headcount != null ? num(headcount) : fig(null) },
+            { label: 'Off the Waitlist', tone: 'orange', value: countable && rates.waitlistAttended != null ? num(rates.waitlistAttended) : fig(null) },
+          ]} />
+        ) : null}
 
 
         {/* ── the registers that are still open, and the tap that closes one ──
@@ -350,18 +377,20 @@ export default function MyRegister() {
                     paddingVertical: sp.md, minHeight: MIN_TARGET,
                     borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
                   }}>
-                  {/* A 6pt mark, not coloured words. The sentence beside it
+                  {/* An amber plate, not coloured words. The sentence beside it
                       carries the meaning on its own — a status hue as text ink
                       does not clear 4.5:1 on the light palettes. */}
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>
+                  <IconPlate icon="check" tone="amber" />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.head, color: t.ink }}>{g.title}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                       {whenLabel(g.startsAt)}{g.branch ? ` · ${g.branch}` : ''}
                     </Text>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{g.title}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{gapLine(g)}</Text>
                   </View>
-                  <Text style={{ ...ty.label, color: t.brand }}>Take it</Text>
+                  {/* `brandText`, not `brand`: the accent as TEXT, which is ink
+                      on a palette where the gym's colour cannot be read. */}
+                  <Text style={{ ...ty.label, ...font('700'), color: t.brandText }}>Take It</Text>
                 </Pressable>
               ))}
             </Section>
@@ -391,16 +420,20 @@ export default function MyRegister() {
                 <View key={c.classId} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View accessible accessibilityRole="text"
                     accessibilityLabel={`${whenLabel(c.startsAt)}. ${c.title}. ${classLine(c)}`}>
-                    <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>
-                      {whenLabel(c.startsAt)}{c.branch ? ` · ${c.branch}` : ''}
-                    </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: 3 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{c.title}</Text>
-                      {/* A dash on an unregistered class, never a nought. The
-                          rate has no numerator anybody recorded. */}
-                      <Text style={{ ...ty.body, ...numeric, color: unregistered ? t.ink3 : t.ink }}>
-                        {unregistered ? fig(null) : pct(rate)}
-                      </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                      <IconPlate icon="people" tone={unregistered ? 'amber' : 'purple'} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ ...ty.head, color: t.ink }}>{c.title}</Text>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+                          {whenLabel(c.startsAt)}{c.branch ? ` · ${c.branch}` : ''}
+                        </Text>
+                      </View>
+                      {/* A word on an unregistered class, never a nought: the
+                          rate has no numerator anybody recorded. A class nobody
+                          booked has no rate either, and keeps the dash. */}
+                      {unregistered ? <TonedChip tone="amber" label="No Register" />
+                        : rate == null ? <Text style={{ ...ty.body, ...numeric, color: t.ink3 }}>{fig(null)}</Text>
+                          : <TonedChip tone="brand" label={pct(rate)} />}
                     </View>
                     {/* The colour is a 6pt MARK and the words carry the meaning
                         on their own — a status hue as text ink does not clear
@@ -429,21 +462,13 @@ export default function MyRegister() {
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{TAUGHT_SCOPE_NOTE}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            There are no amounts on this page. What your gym pays you to teach is set on their side,
-            in their currency, and a figure worked out here from a rate nobody told this app would be
-            money nobody agreed.
+            No amounts here — what your gym pays you is set on their side, in their currency.
           </Text>
           <View style={{ marginTop: sp.lg }}>
             <Ghost label="Take a Register" onPress={() => router.push('/(trainer)/classes')} />
           </View>
         </Section>
 
-        {/* What this page is, said once and below the figures: the board
-            opens on the figure, not on a paragraph. */}
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          What the registers you took actually say. These are the same figures your gym reads off
-          your check-ins, in front of the person who took them.
-        </Text>
       </ScrollView>
     </SafeAreaView>
   );

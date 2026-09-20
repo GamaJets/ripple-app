@@ -36,12 +36,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, KpiRow, fig, Flag, Ghost, Cta, Notice, SyncBadge } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, fig, Flag, Ghost, Cta, Notice, SyncBadge, FigureCard, TonedChip, type Tone } from '../../src/ui/kit';
 // The zone every time on this screen is drawn in — `when` formats in the phone's
 // own — so a coach marking Tuesday's sessions from another country can see whose
 // Tuesday it is. The same reader the Schedule tab names its zone with.
 import { deviceTimeZone } from '../../src/ui/availability';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 // The instant `awaitingOutcome`, `pastSessions` and `windowStart` are ALL judged
 // against, recomputed at local midnight, on foreground and on focus — never
@@ -185,17 +185,15 @@ const requestWhen = (iso: string): string | null => {
   });
 };
 
-/** The mark beside a past session. A 6pt dot; the words stay in ink beside it,
- *  because `crit`/`warn`/`good` are marks in this app and never text colour. */
-const stateTone = (t: Theme, s: PastState): string => {
-  switch (s) {
-    case 'delivered': return t.brand;
-    case 'missed': return t.crit;
-    case 'late_cancelled': return t.s3;
-    case 'cancelled': return t.ink3;
-    case 'unmarked': return t.warn;
-  }
+/** The same five states as chip tones, by NAME — the kit picks the plate and the
+ *  ink, so nothing here colours text. Green delivered, red not attended, orange
+ *  a late cancellation (a fee may ride on it), grey a clean one, amber unmarked. */
+const STATE_TONE: Record<PastState, Tone> = {
+  delivered: 'brand', missed: 'red', late_cancelled: 'orange', cancelled: 'neutral', unmarked: 'amber',
 };
+/** `PAST_STATE_LABEL` is written to sit inside a sentence, so it is lower case;
+ *  standing alone on a chip it takes a capital. Same words, one source. */
+const chipWord = (s: PastState) => PAST_STATE_LABEL[s].charAt(0).toUpperCase() + PAST_STATE_LABEL[s].slice(1);
 
 /** A bare day, through `appLocale()` — a hardcoded tag is what `check:locale`
  *  refuses, and this string names the edge of what has been read. */
@@ -928,10 +926,9 @@ export default function TrainerSessions() {
             the ring, the 44pt target and `BACK_ICON`, so it mirrors correctly
             in RTL without this screen knowing about direction at all — which
             is the whole point of src/ui/direction. */}
-        <PageHead
-          title="Mark Sessions"
-          subtitle="Clear outstanding outcomes first, then review what already happened."
-        />
+        {/* No subtitle: "clear outstanding outcomes first, then review…" was
+            the page describing its own order, which the order already says. */}
+        <PageHead title="Mark Sessions" />
         {(() => {
           const tz = deviceTimeZone();
           return (
@@ -947,20 +944,26 @@ export default function TrainerSessions() {
             under. Same figure and the same rule: a dash unless the read came
             back, because a failed read is not a queue of zero — and this is
             the screen a gym settles payroll from. */}
-        <Section>
-          <SectionHead title="Waiting on an Outcome" />
-          <Text accessibilityLabel={`Waiting on an outcome, ${loaded ? rows.length : 'not read'}`}
-            style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(loaded ? rows.length : null)}</Text>
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
-            {failed
-              ? 'Could not be read — this is not a count of zero.'
-              : !loaded
-                ? 'Reading your sessions…'
-                : rows.length === 0
-                  ? (hasGym ? 'Nothing outstanding — payroll can be settled.' : 'Nothing outstanding — every session you have delivered is on the record.')
-                  : (hasGym ? 'Payroll cannot be worked out until every one of these is marked.' : 'Your delivered-sessions count is incomplete until every one of these is marked.')}
-          </Text>
-        </Section>
+        {/* The kit's FigureCard now — the hand-built version of it this was —
+            with the look's verdict beside the figure: amber while anything is
+            waiting, because an unmarked session is "slipping" and not yet
+            wrong, and the accent once the queue is clear. The mark sits beside
+            WORDS ("Holding payroll up", "All marked"), never alone, and there
+            is no mark at all over a read that did not come back. */}
+        <FigureCard
+          title="Waiting on an Outcome"
+          figure={loaded ? fig(rows.length) : null}
+          unit={loaded ? (rows.length === 1 ? 'session' : 'sessions') : undefined}
+          comparison={!loaded ? undefined : rows.length === 0 ? 'All marked' : (hasGym ? 'Holding payroll up' : 'Holding your record up')}
+          tone={!loaded ? undefined : rows.length === 0 ? t.brand : t.data.amber}
+          detail={failed
+            ? 'Could not be read — this is not a count of zero.'
+            : !loaded
+              ? 'Reading your sessions…'
+              : rows.length === 0
+                ? (hasGym ? 'Nothing outstanding — payroll can be settled.' : 'Nothing outstanding — every session you have delivered is on the record.')
+                : (hasGym ? 'Payroll cannot be worked out until every one of these is marked.' : 'Your delivered-sessions count is incomplete until every one of these is marked.')}
+        />
 
 
         {/* ── asked, and not yet answered ─────────────────────────────────
@@ -1027,7 +1030,7 @@ export default function TrainerSessions() {
                         {i ? <Rule /> : null}
                         <View style={{ paddingVertical: sp.md }}>
                           <Text style={{ ...ty.micro, color: t.ink3 }}>{OUTCOME_LABEL.asked}</Text>
-                          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: 2 }}>
+                          <Text style={{ ...ty.body, ...font('600'), color: t.ink, marginTop: 2 }}>
                             {r.clientName ? `${r.clientName} · ${rWhen}` : rWhen}
                           </Text>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -1201,7 +1204,7 @@ export default function TrainerSessions() {
                         accessibilityRole="tab" accessibilityState={{ selected: on }}
                         accessibilityLabel={st ? `Show only sessions ${label}, ${counts[st]} of them` : `Show every outcome, ${history.length} sessions`}
                         style={{ flexGrow: 1, minHeight: 40, paddingHorizontal: sp.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
-                        <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', ...numeric, color: on ? t.bg : t.ink2, textTransform: 'capitalize' }}>
+                        <Text numberOfLines={1} style={{ ...ty.label, ...font(on ? '600' : '500'), ...numeric, color: on ? t.bg : t.ink2, textTransform: 'capitalize' }}>
                           {label} · {st ? counts[st] : history.length}
                         </Text>
                       </Pressable>
@@ -1234,7 +1237,7 @@ export default function TrainerSessions() {
             <Pressable onPress={() => void load(loadedDays)} hitSlop={8}
               accessibilityRole="button" accessibilityLabel="Try reading your sessions again"
               style={{ marginTop: sp.lg, borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
+              <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
             </Pressable>
           </View>
         ) : !loaded ? (
@@ -1292,10 +1295,16 @@ export default function TrainerSessions() {
                 <View key={s.id}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ paddingVertical: sp.md, opacity: busy === s.id ? 0.5 : 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>
-                      {s.clientName ?? 'Client'}
-                    </Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {/* The name in the heading face, and the row's state as the
+                        amber chip the record below uses for the same state —
+                        one colour for "nobody has said" on both lists. */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: sp.md, rowGap: 2 }}>
+                      <Text style={{ ...ty.head, color: t.ink, flex: 1, minWidth: 120 }}>
+                        {s.clientName ?? 'Client'}
+                      </Text>
+                      <TonedChip label={chipWord('unmarked')} tone={STATE_TONE.unmarked} />
+                    </View>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                       {when(s.startsAt)} · {s.durationMin} min
                       {s.trainerName ? ` · ${s.trainerName}` : ''}
                     </Text>
@@ -1305,7 +1314,7 @@ export default function TrainerSessions() {
                           accessibilityRole="button" accessibilityLabel={`${s.clientName ?? 'Client'}: ${o.label}`}
                           accessibilityState={{ disabled: busy === s.id, busy: busy === s.id }}
                           style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8 }}>
-                          <Text style={{ ...ty.label, fontWeight: '600', color: o.tone(t) }}>{o.short}</Text>
+                          <Text style={{ ...ty.label, ...font('600'), color: o.tone(t) }}>{o.short}</Text>
                         </Pressable>
                       ))}
                     </View>
@@ -1363,7 +1372,7 @@ export default function TrainerSessions() {
                         </View>
                       ) : null}
                     </View>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>Undo</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.ink3 }}>Undo</Text>
                   </Pressable>
                 </View>
               ))}
@@ -1417,9 +1426,11 @@ export default function TrainerSessions() {
                           <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>
                             {s.clientName ?? 'Client'}
                           </Text>
-                          {/* The tone is the dot. The label is ink beside it. */}
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateTone(t, v.state) }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>{PAST_STATE_LABEL[v.state]}</Text>
+                          {/* The state as a toned chip: the word on its own
+                              plate, in that hue's INK — so the colour still
+                              never stands without the word, and the word is
+                              never drawn in a mark colour. */}
+                          <TonedChip label={chipWord(v.state)} tone={STATE_TONE[v.state]} />
                         </View>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                           {when(s.startsAt)} · {s.durationMin} min
@@ -1503,7 +1514,7 @@ export default function TrainerSessions() {
                   accessibilityState={{ disabled: widening, busy: widening }}
                   accessibilityLabel={`Read the ${MARK_WINDOW_DAYS} days before ${dayOnly(windowFrom)}`}
                   style={{ borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm, opacity: widening ? 0.5 : 1 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>
                     {widening ? 'Reading…' : 'Read Another 90 Days'}
                   </Text>
                 </Pressable>
