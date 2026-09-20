@@ -69,8 +69,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { isWhole } from '../../src/ui/loadStatus';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead, DayBars, Expandable, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { num, fmtClock, fmtAxisDay } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
@@ -392,7 +392,7 @@ export default function ClientAttendanceScreen() {
             <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>
               {dayLabel(e.at)}{e.at && e.source === 'class' ? ` · ${timeLabel(e.at)}` : ''}
             </Text>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{title}</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink, marginTop: 3 }}>{title}</Text>
             {where ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{where}</Text> : null}
             <Text style={{ ...ty.caption, color: o.tone === 'good' ? t.ink2 : t.ink3, marginTop: 4 }}>{o.label}</Text>
             {e.source === 'class' && mins != null ? (
@@ -515,7 +515,7 @@ export default function ClientAttendanceScreen() {
                       and `perWeek` is null until there is a finished week to
                       average; either way a rate nobody can stand behind is
                       not drawn as a rate. */}
-                  <Text style={{ ...value(32), color: t.ink }}>
+                  <Text style={{ ...ty.hero, color: t.ink }}>
                     {countable && a.rhythm.perWeek != null ? a.rhythm.perWeek : fig(null)}
                   </Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
@@ -528,32 +528,30 @@ export default function ClientAttendanceScreen() {
                         : `Averaged over the ${a.rhythm.countedWeeks} finished week${a.rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(a.rhythm.firstDay as string)}. This week is left out — it is not over.`}
                   </Text>
 
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 76, marginTop: sp.lg }}>
-                    {strip.map((w) => {
-                      // An uncovered week is a hollow slot, not a zero bar. A bar
-                      // of height zero claims they came in no times that week;
-                      // before the first row on record there is no such claim.
-                      const h = w.covered && busiest > 0 ? Math.max(3, Math.round((w.days / busiest) * 64)) : 3;
-                      return (
-                        <View key={w.start} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
-                          <View style={{
-                            width: '100%', height: h, borderRadius: radius.sm / 2,
-                            backgroundColor: !w.covered ? 'transparent' : w.days ? t.brand : t.surface2,
-                            borderWidth: w.covered ? 0 : hairline,
-                            borderColor: t.ring,
-                            borderStyle: 'dashed',
-                            opacity: w.complete || !w.covered ? 1 : 0.55,
-                          }} />
-                          <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>
-                            {w.covered ? (w.days || '') : ''}
-                          </Text>
-                        </View>
-                      );
-                    })}
+                  {/* The kit's bars, one per week. An uncovered week is a
+                      week before the record starts: its value is null and
+                      NOTHING is drawn — a bar of height zero would claim they
+                      came in no times that week. A covered week with no days
+                      is the grey stub, which is that claim and is true. The
+                      count sits under each bar; the unfinished week is grey
+                      so it is not read against the finished ones. */}
+                  <View style={{ marginTop: sp.lg }}>
+                    <DayBars h={64} max={busiest || undefined}
+                      days={strip.map((w) => ({
+                        label: w.covered ? String(w.days) : '',
+                        value: w.covered ? w.days : null,
+                        tone: w.complete ? 'brand' as const : 'neutral' as const,
+                      }))}
+                      spoken={`Days at a gym in each of the last ${RHYTHM_WEEKS} weeks, oldest first: ${strip.map((w) => (w.covered ? w.days : 'before your record')).join(', ')}`} />
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    {`Days they were recorded at a gym, week by week, over the last ${RHYTHM_WEEKS} weeks. A dashed slot is a week before your record of them starts — not a week they stayed away. The last bar is this week and is not finished.`}
+                    The grey bar is this week, which is not finished.
                   </Text>
+                  <Expandable title="About These Weeks">
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      {`Days they were recorded at a gym, week by week, over the last ${RHYTHM_WEEKS} weeks. A week with no bar at all is a week before your record of them starts — not a week they stayed away.`}
+                    </Text>
+                  </Expandable>
                 </>
               )}
             </Section>

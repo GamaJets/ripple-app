@@ -68,7 +68,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Notice, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, DayBars, IconPlate, Expandable, type Tone } from '../../src/ui/kit';
+import { weekdayNameShort } from '../../src/lib/format';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -120,14 +121,12 @@ const WORKOUT_COLS = 'id, performed_at, exercise, sets, feel, cardio, kcal, sess
  *  text: the scale reserves status colour for status and none of these clears
  *  AA as type. Training and deload are both sessions and read as the brand;
  *  the two days without one are deliberately quiet. */
-function markFor(type: PlannedDayType, t: ReturnType<typeof useTheme>): string {
-  switch (type) {
-    case 'training': return t.brand;
-    case 'deload': return t.s3;
-    case 'rest': return t.ink3;
-    case 'off': return t.ink3;
-  }
-}
+const TYPE_TONE: Record<PlannedDayType, Tone> = { training: 'brand', deload: 'amber', rest: 'neutral', off: 'neutral' };
+const TYPE_ICON = { training: 'dumbbell', deload: 'trending', rest: 'moon', off: 'calendar' } as const;
+/** How tall a marked day stands in the week's bars. Not a quantity — a
+ *  session, a lighter session, and no session: a rest or an off day is the
+ *  kit's grey stub, which is "known to be nothing" and exactly what it is. */
+const TYPE_BAR: Record<PlannedDayType, number> = { training: 1, deload: 0.55, rest: 0, off: 0 };
 
 export default function ClientWeek() {
   const t = useTheme();
@@ -484,6 +483,20 @@ export default function ClientWeek() {
   /** One marked day. Past days are drawn quieter than future ones; that is the
    *  only difference, because it is the only difference we can honestly draw —
    *  a day that has gone is still nothing more than what they intended. */
+  // Today and the six days after it, each with the mark they put on it (or
+  // none). Built off `board.ahead`, the same rows the list below draws.
+  const [ty0, tm0, td0] = todayISO.split('-').map(Number);
+  const nextSeven = Array.from({ length: 7 }, (_, i) => {
+    const at = new Date(ty0, tm0 - 1, td0 + i);
+    const mark = board.ahead.find((d) => d.plan.dateISO === isoToday(at))?.plan.type ?? null;
+    return {
+      label: weekdayNameShort(at.getDay()),
+      value: mark ? TYPE_BAR[mark] : null,
+      tone: mark ? TYPE_TONE[mark] : undefined,
+      said: mark ? DAY_TYPE_LABEL[mark].toLowerCase() : 'not marked',
+    };
+  });
+
   const dayRow = (d: CoachPlanDay, i: number) => {
     const past = d.side === 'gone';
     const note = planNote(d);
@@ -492,9 +505,9 @@ export default function ClientWeek() {
         <Text style={{ ...ty.micro, color: t.ink3 }}>
           {dayHeading(d.plan.dateISO)} · {whenLabel(d.plan.dateISO, todayISO)}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.xs }}>
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: markFor(d.plan.type, t) }} />
-          <Text style={{ ...ty.body, fontWeight: '600', color: past ? t.ink2 : t.ink }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.xs }}>
+          <IconPlate icon={TYPE_ICON[d.plan.type]} tone={past ? 'neutral' : TYPE_TONE[d.plan.type]} size={38} />
+          <Text style={{ ...ty.head, color: past ? t.ink2 : t.ink, flex: 1, minWidth: 0 }}>
             {DAY_TYPE_LABEL[d.plan.type]}
           </Text>
         </View>
@@ -627,6 +640,21 @@ export default function ClientWeek() {
                       </Section>
                     ) : null}
 
+                    {/* ── the seven days from today, as a picture ────────────
+                        The page opens on it. A marked training day stands
+                        full, a deload lower, a rest or off day is the grey
+                        stub, and a day they have not marked draws NOTHING —
+                        unmarked is not rest. Only from a whole read: under a
+                        truncated one a missing bar could be a mark that was
+                        cut off, and the rows below still show what arrived. */}
+                    {isWhole(status) ? (
+                      <Section>
+                        <SectionHead title="Next Seven Days" />
+                        <DayBars days={nextSeven} max={1}
+                          spoken={`The next seven days: ${nextSeven.map((d) => `${d.label} ${d.said}`).join(', ')}`} />
+                      </Section>
+                    ) : null}
+
                     <Section>
                       <SectionHead
                         title="Ahead"
@@ -635,11 +663,13 @@ export default function ClientWeek() {
                         // it would be a subtotal presented as a total.
                         note={isWhole(status) ? `${board.ahead.length} marked` : undefined}
                       />
+                      <Expandable title="What Ahead Covers">
                       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                         Today and the next {DAYS_AHEAD - 1} days. Far enough out to hold the whole of
                         next week, which is where a deload or a week away needs catching — after it
                         starts is too late to reprogramme it.
                       </Text>
+                      </Expandable>
                       {board.ahead.length ? board.ahead.map(dayRow) : (
                         // Reaching here means the board is 'planned' and Ahead
                         // is empty, so everything it holds is behind today —

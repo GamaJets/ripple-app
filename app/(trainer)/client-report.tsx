@@ -43,8 +43,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, grown, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Notice, Flag, IconPlate, type Tone } from '../../src/ui/kit';
+import type { IconName } from '../../src/ui/Icon';
+import { sp, layout, radius, grown, type as ty, value as sora } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
 import { useBrand } from '../../src/ui/brand';
@@ -553,16 +554,16 @@ export default function ClientReport() {
 
             <Section>
               <SectionHead title="What Will Be on It" note={`Printed in ${pick.unit} and ${lengthUnit}`} />
-              <Row t={t} label="Sessions booked with you"
+              <Row t={t} icon="calendar" tone="brand" label="Sessions booked with you"
                 value={reads.sessions.status === 'error' ? 'not read'
                   : reads.sessions.status === 'loading' ? '…'
                   : tally.booked == null ? 'more than could be read'
                   : String(tally.booked)} />
-              <Row t={t} label="Of those, with no outcome recorded"
+              <Row t={t} icon="clock" tone="amber" label="Of those, with no outcome recorded"
                 value={reads.sessions.status === 'error' ? 'not read'
                   : reads.sessions.status === 'loading' ? '…'
                   : tally.unrecorded == null ? '—' : String(tally.unrecorded)} />
-              <Row t={t} label="Days trained"
+              <Row t={t} icon="dumbbell" tone="purple" label="Days trained"
                 value={reads.training.status === 'error' ? 'not read'
                   : reads.training.status === 'loading' ? '…'
                   : board.dayCount == null ? '—' : String(board.dayCount)} />
@@ -577,17 +578,17 @@ export default function ClientReport() {
                   states on its front page that what it holds is not all of it.
                   'more than could be read' is the sentence the Sessions row two
                   above has always used for the same silence. */}
-              <Row t={t} label="Body-composition scans"
+              <Row t={t} icon="scale" tone="blue" label="Body-composition scans"
                 value={reads.scans.status === 'error' ? 'not read'
                   : reads.scans.status === 'loading' ? '…'
                   : scanCount == null ? 'more than could be read'
                   : String(scanCount)} />
-              <Row t={t} label="Days with tape measurements"
+              <Row t={t} icon="ruler" tone="teal" label="Days with tape measurements"
                 value={reads.measures.status === 'error' ? 'not read'
                   : reads.measures.status === 'loading' ? '…'
                   : measureDayCount == null ? 'more than could be read'
                   : String(measureDayCount)} />
-              <Row t={t} label="Injuries they have disclosed"
+              <Row t={t} icon="heart" tone="red" label="Injuries they have disclosed"
                 value={reads.client.status === 'error' ? 'not read'
                   : reads.client.status === 'loading' ? '…' : String(injuries.length)} />
               {tally.unrecorded != null && tally.unrecorded > 0 ? (
@@ -741,14 +742,17 @@ export default function ClientReport() {
 
 /** One "what will be on it" line. A value that could not be read says so in
  *  words rather than showing a zero — a zero here is a claim. */
-function Row({ t, label, value }: { t: ReturnType<typeof useTheme>; label: string; value: string }) {
+function Row({ t, label, value, icon, tone }: { t: ReturnType<typeof useTheme>; label: string; value: string; icon: IconName; tone: Tone }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, paddingVertical: 6 }}>
+      {/* The plate names the section of the document the count is about, in
+          the colour that section's record page uses. */}
+      <IconPlate icon={icon} tone={tone} size={34} />
       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{label}</Text>
       {/* "not read" says it in words; crit goes in the dot beside it. crit as
           label text is 3.03–4.05:1 on every one of the ten palettes. */}
       {value === 'not read' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit, marginEnd: 6 }} /> : null}
-      <Text style={{ ...ty.label, color: value === 'not read' ? t.ink2 : t.ink }}>{value}</Text>
+      <Text style={{ ...(/^\d/.test(value) ? sora(17) : ty.label), color: value === 'not read' ? t.ink2 : t.ink }}>{value}</Text>
     </View>
   );
 }

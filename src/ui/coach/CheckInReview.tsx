@@ -18,7 +18,7 @@
 // bounded row. This file does no reading and no arithmetic beyond n / 5.
 import { View, Text } from 'react-native';
 import { useTheme } from '../components';
-import { Cta } from '../kit';
+import { Cta, Meter, type Tone } from '../kit';
 import { sp, radius, type as ty, value } from '../../theme/scale';
 import { RATING_MAX, ratingLabel, type CoachCheckIn } from '../../lib/coachCheckins';
 import { weightLabel, type WeightUnit } from '../../lib/units';
@@ -38,6 +38,14 @@ const spoken = (label: string, v: number | null): string =>
  */
 function Faces({ label, v }: { label: string; v: number | null }) {
   const t = useTheme();
+  // The lit answer takes the colour of what it says — red for the bottom two,
+  // amber for the middle, the accent for the top two — as the hue's pale plate
+  // ringed in its mark with the numeral in its ink, which is the pairing the
+  // contrast gate measures. The numeral still says it without the colour.
+  const lit = v == null ? null
+    : v <= 2 ? { soft: t.data.redSoft, mark: t.data.red, ink: t.data.redInk }
+    : v === 3 ? { soft: t.data.amberSoft, mark: t.data.amber, ink: t.data.amberInk }
+    : { soft: t.brandSoft, mark: t.brand, ink: t.brandText };
   return (
     <View accessible accessibilityLabel={spoken(label, v)} style={{ marginTop: sp.lg }}>
       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{label}</Text>
@@ -45,8 +53,8 @@ function Faces({ label, v }: { label: string; v: number | null }) {
         {STEPS.map((n) => {
           const on = v === n;
           return (
-            <View key={n} style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-              <Text style={{ ...value(18), color: on ? t.brandInk : t.ink3 }}>{n}</Text>
+            <View key={n} style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on && lit ? lit.soft : t.surface2, borderWidth: on ? 2 : 0, borderColor: on && lit ? lit.mark : undefined }}>
+              <Text style={{ ...value(18), color: on && lit ? lit.ink : t.ink3 }}>{n}</Text>
             </View>
           );
         })}
@@ -57,29 +65,17 @@ function Faces({ label, v }: { label: string; v: number | null }) {
 }
 
 /**
- * The board's slider, drawn and not draggable: a track filled to n/5 with the
- * knob at the end of the fill, and the figure stated beside the label so the
- * track never has to be measured by eye. Empty and unfilled when unanswered.
+ * A rating as the kit's Meter, in the colour that names it everywhere else:
+ * filled to n/5 with the figure at the trailing edge, so the bar never has to
+ * be measured by eye. It was a drawn slider with a knob — a control's shape on
+ * something nobody here can move. Unanswered is no fill and the words "Not
+ * answered" (the Meter draws nothing for a null), never a nought. The wrapper
+ * keeps the sentence for the ear: "4 out of 5", not "4 slash 5".
  */
-function Track({ label, v }: { label: string; v: number | null }) {
-  const t = useTheme();
-  const share = v == null ? 0 : v / RATING_MAX;
+function Track({ label, v, tone }: { label: string; v: number | null; tone: Tone }) {
   return (
-    <View accessible accessibilityLabel={spoken(label, v)} style={{ marginTop: sp.lg }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, marginBottom: sp.md }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
-        <Text style={{ ...ty.caption, color: t.ink3 }}>{ratingLabel(v) ?? 'Not answered'}</Text>
-      </View>
-      <View style={{ height: 20, justifyContent: 'center' }}>
-        <View style={{ height: 4, borderRadius: radius.pill, backgroundColor: t.surface2, overflow: 'hidden' }}>
-          <View style={{ height: 4, width: `${share * 100}%`, backgroundColor: t.brand }} />
-        </View>
-        {v != null ? (
-          // The knob sits at the end of the fill. `start` rather than `left`
-          // so a mirrored layout carries the knob with the fill.
-          <View style={{ position: 'absolute', start: `${share * 100}%`, marginStart: -10, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.ink }} />
-        ) : null}
-      </View>
+    <View accessible accessibilityLabel={spoken(label, v)}>
+      <Meter label={label} tone={tone} val={v} target={RATING_MAX} note={ratingLabel(v) ?? 'Not answered'} />
     </View>
   );
 }
@@ -98,12 +94,12 @@ export function CheckInReview({ checkIn, who, weightUnit, onReply }: {
   return (
     <View>
       <Faces label="Mood" v={checkIn.mood} />
-      <Track label="Energy Level" v={checkIn.energy} />
-      <Track label="Sleep Quality" v={checkIn.sleep} />
+      <Track label="Energy Level" tone="orange" v={checkIn.energy} />
+      <Track label="Sleep Quality" tone="purple" v={checkIn.sleep} />
       {/* Not on the board's page, kept because it is on the form. Stated on
           the scale it is on — the roster shows the same column as a
           percentage, and the day the two were confused a 4 became 4%. */}
-      <Track label="Adherence" v={checkIn.adherence} />
+      <Track label="Adherence" tone="brand" v={checkIn.adherence} />
       {weight ? (
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, marginTop: sp.lg }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Weight</Text>

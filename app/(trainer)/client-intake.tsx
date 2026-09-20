@@ -34,8 +34,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Notice, Ghost, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Notice, Ghost, Flag, Ring, Expandable, fig } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, font } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useRoster } from '../../src/ui/roster';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
@@ -213,17 +213,32 @@ export default function ClientIntakeScreen() {
             {ci.status === 'error' ? (
               <Flag tone={t.warn}>{intakeLine(ci.state, ci.progress, who)}</Flag>
             ) : (
-              <Text style={{ ...ty.body, color: t.ink2 }}>
-                {ci.state === 'unknown' && ci.status === 'loading'
-                  ? `Reading ${who}'s intake.`
-                  : intakeLine(ci.state, ci.progress, who)}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+                {/* How much of the form is done, as a ring — and only once the
+                    read has landed and said which state this is. `progress` is
+                    worked out over NO intake while the read is out, and a ring
+                    of nought-of-seven then would be "they have not started"
+                    said about a form nobody has looked at yet. */}
+                {ci.status === 'ready' && ci.state !== 'unknown' ? (
+                  <Ring size={96} tone={ci.progress.complete ? 'brand' : 'amber'}
+                    value={ci.progress.of ? ci.progress.done / ci.progress.of : null}
+                    figure={`${ci.progress.done}/${ci.progress.of}`} sub="sections"
+                    spoken={`${ci.progress.done} of ${ci.progress.of} sections of the intake finished`} />
+                ) : null}
+                <Text style={{ ...ty.body, color: t.ink2, flex: 1, minWidth: 0 }}>
+                  {ci.state === 'unknown' && ci.status === 'loading'
+                    ? `Reading ${who}'s intake.`
+                    : intakeLine(ci.state, ci.progress, who)}
+                </Text>
+              </View>
             )}
             {intake && intake.updatedAt ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Last changed by {who} on {fmtDay(intake.updatedAt)}. Only they can change it — you
-                cannot, deliberately, because an intake a coach can edit is not a disclosure.
-              </Text>
+              <Expandable title="Who Can Change This">
+                <Text style={{ ...ty.caption, color: t.ink3 }}>
+                  Last changed by {who} on {fmtDay(intake.updatedAt)}. Only they can change it — you
+                  cannot, deliberately, because an intake a coach can edit is not a disclosure.
+                </Text>
+              </Expandable>
             ) : null}
           </Section>
         )}
@@ -245,7 +260,7 @@ export default function ClientIntakeScreen() {
                 <View style={{ marginTop: sp.lg }}>
                   {disclosed.map((d, i) => (
                     <View key={d.id} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{d.prompt}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{d.prompt}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>Answered yes</Text>
                       {d.note ? (
                         <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>“{d.note}”</Text>
@@ -367,7 +382,7 @@ export default function ClientIntakeScreen() {
                     <Text style={{ ...ty.micro, color: t.ink3 }}>Number</Text>
                     <Text style={{ ...ty.body, color: t.brand, marginTop: sp.xs }}>{intake.emergency.phone.trim()}</Text>
                   </View>
-                  <Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Call</Text>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.brandText }}>Call</Text>
                 </Pressable>
               ) : (
                 <Line t={t} label="Number" value={intake.emergency.phone} />

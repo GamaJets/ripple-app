@@ -57,8 +57,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Flag, PartialRead, DayBars, Meter, Expandable, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAuth } from '../../src/ui/auth';
 import { useSettings } from '../../src/ui/settings';
@@ -72,7 +72,7 @@ import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { setsSummary } from '../../src/lib/ownTraining';
 import { liftLabel, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { num, fmtTime, fmtRelativeDay } from '../../src/lib/format';
+import { num, fmtTime, fmtRelativeDay, weekdayNameShort } from '../../src/lib/format';
 import { dayLabel } from '../../src/lib/adherence';
 import {
   sessionsOf, attributionOf, attributionLabel, trainingBoard, unitFor,
@@ -440,6 +440,19 @@ export default function ClientTraining() {
    */
   const today = useToday();
   const nowMs = useNow().getTime();
+
+  // The last seven local days ending today, oldest first, each with how many
+  // exercises the log holds for it — the DayBars under the Days Trained
+  // figure. A day the board does not hold is 0, and that is only DRAWN under a
+  // whole read (see the card), where absence from the log is a fact.
+  const lastSeven = useMemo(() => {
+    const [y, m, d] = today.split('-').map(Number);
+    const byDay = new Map(board.days.map((day) => [day.day, day.exercises]));
+    return Array.from({ length: 7 }, (_, i) => {
+      const at = new Date(y, m - 1, d - (6 - i));
+      return { label: weekdayNameShort(at.getDay()), value: byDay.get(isoToday(at)) ?? 0, tone: 'purple' as const };
+    });
+  }, [today, board]);
 
   const position = useMemo(
     () => blockPosition(startsOn, today, weekCount(program)),
@@ -836,7 +849,7 @@ export default function ClientTraining() {
     return (
       <View key={`${e.id ?? e.exercise}-${i}`}
         style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(e.exercise)}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{movement(e.exercise)}</Text>
         {lifted ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{lifted}</Text> : null}
         {cardio ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{cardio}</Text> : null}
         {!lifted && !cardio ? (
@@ -1012,7 +1025,7 @@ export default function ClientTraining() {
                         <Pressable key={rg.label} onPress={() => setRangeDays(rg.days)}
                           accessibilityRole="tab" accessibilityState={{ selected: on }}
                           accessibilityLabel={rg.label} style={seg(on)}>
-                          <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{rg.short}</Text>
+                          <Text style={{ ...ty.label, ...numeric, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{rg.short}</Text>
                         </Pressable>
                       );
                     })}
@@ -1083,7 +1096,7 @@ export default function ClientTraining() {
                         ? `week ${position.week} of ${position.weeks}`
                         : undefined}
                     />
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{program.title || 'An untitled programme'}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{program.title || 'An untitled programme'}</Text>
 
                     {/* The block, and the honesty about what a start date does.
                         A coach who believes the date is enforced and assigns a
@@ -1418,7 +1431,7 @@ export default function ClientTraining() {
                           ? 'Their training came back at the row limit, so how much of it there is cannot be counted from here.'
                           : board.newestDay ? `Last trained ${dayLabel(board.newestDay)}.` : 'Nothing on record carries a date this build can read.'}`}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                          <Text style={{ ...value(32), color: t.ink }}>{fig(board.dayCount)}</Text>
+                          <Text style={{ ...ty.hero, color: t.ink }}>{fig(board.dayCount)}</Text>
                           {board.dayCount != null ? (
                             <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{board.dayCount === 1 ? 'day' : 'days'}</Text>
                           ) : null}
@@ -1438,6 +1451,18 @@ export default function ClientTraining() {
                           </Text>
                         </View>
                       </View>
+                      {/* The last seven days as bars: how many exercises were
+                          logged on each. Only from a WHOLE read — under a
+                          truncated one the sentence above already says why
+                          nothing is counted, and a bar is a count. A day with
+                          nothing logged is a grey stub, which under a whole
+                          read is a fact about the day. */}
+                      {isWhole(status) ? (
+                        <View style={{ marginTop: sp.lg, marginBottom: sp.md }}>
+                          <DayBars days={lastSeven}
+                            spoken={`Exercises logged on each of the last seven days: ${lastSeven.map((d) => `${d.label} ${d.value}`).join(', ')}`} />
+                        </View>
+                      ) : null}
                       <KpiRow items={[
                         { label: 'Sets', value: num(board.sets) },
                         {
@@ -1447,7 +1472,8 @@ export default function ClientTraining() {
                         },
                         { label: 'Last', value: board.newestDay ? dayLabel(board.newestDay) : '—' },
                       ]} />
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      <Expandable title="About These Totals">
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>
                         {board.dayCount == null
                           ? 'Every total here is a dash on purpose: the read came back at its row limit, so a sum over what arrived would be a subtotal wearing a total’s label.'
                           : board.volumeKg == null
@@ -1457,6 +1483,7 @@ export default function ClientTraining() {
                           ? ` Those ${board.dayCount} day${board.dayCount === 1 ? '' : 's'} were logged in ${board.entryCount} separate entries — some days hold more than one, and the days that do say so.`
                           : ''}
                       </Text>
+                      </Expandable>
                       {pick.note ? (
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{pick.note}</Text>
                       ) : null}
@@ -1518,17 +1545,11 @@ export default function ClientTraining() {
                         {muscles.groups.map((g) => {
                           const most = muscles.groups[0].sets;
                           return (
-                            <View key={g.group} style={{ marginTop: sp.md }}>
-                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{g.group}</Text>
-                                <Text style={{ ...ty.caption, color: t.ink3 }}>
-                                  {g.sets} set{g.sets === 1 ? '' : 's'}
-                                  {g.volumeKg != null ? ` \u00b7 ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}
-                                </Text>
-                              </View>
-                              <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-                                <View style={{ height: 3, borderRadius: 2, width: `${most ? Math.round((g.sets / most) * 100) : 0}%`, backgroundColor: t.brand }} />
-                              </View>
+                            <View key={g.group}>
+                              {/* The kit's Meter, against the busiest group and
+                                  never against a target — see the note above. */}
+                              <Meter label={g.group} tone="purple" val={g.sets} target={most}
+                                note={`${g.sets} set${g.sets === 1 ? '' : 's'}${g.volumeKg != null ? ` \u00b7 ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}`} />
                               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                                 {/* Names in the reader's language, joined in the
                                     sentence's — see the same note in
@@ -1812,7 +1833,7 @@ export default function ClientTraining() {
                   {hist.entries.map((e, i) => (
                     <View key={e.key} style={{ marginTop: sp.md, paddingTop: i ? sp.md : 0, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-                        <Text style={{ ...ty.body, fontWeight: e.current ? '600' : '400', color: e.current ? t.ink : t.ink2, flex: 1 }}>
+                        <Text style={{ ...ty.body, ...font(e.current ? '600' : '400'), color: e.current ? t.ink : t.ink2, flex: 1 }}>
                           {e.title}
                         </Text>
                         <Text style={{ ...ty.micro, color: e.current ? t.brand : t.ink3 }}>

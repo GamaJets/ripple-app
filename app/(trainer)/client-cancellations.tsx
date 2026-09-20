@@ -76,8 +76,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { isWhole } from '../../src/ui/loadStatus';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, PartialRead, Donut, Legend, Meter, Expandable, fig, type Slice } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { num } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
@@ -187,6 +187,15 @@ export default function ClientCancellationsScreen() {
   // gate, and it is the gate scripts/check-whole.mjs exists to keep.
   const countable = isWhole(c.status);
   const tally = c.tally;
+  // Who ended them, as the donut's slices and its legend. The client amber
+  // (their diary slipping), the coach blue, anybody else purple, and the hours
+  // nobody was signed in for grey.
+  const whoSlices: Slice[] = [
+    { label: who, value: tally.byClient, tone: 'amber', shown: num(tally.byClient) },
+    { label: 'You', value: tally.byCoach, tone: 'blue', shown: num(tally.byCoach) },
+    { label: 'Somebody Else', value: tally.byOther, tone: 'purple', shown: num(tally.byOther) },
+    { label: 'Not Recorded', value: tally.unattributed, tone: 'neutral', shown: num(tally.unattributed) },
+  ];
 
   const chip = (on: boolean) => ({
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
@@ -277,7 +286,7 @@ export default function ClientCancellationsScreen() {
               <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>
                 {dayLabel(a.cancelledAt)}{timeLabel(a.cancelledAt) ? ` · ${timeLabel(a.cancelledAt)}` : ''}
               </Text>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{said}</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink, marginTop: 3 }}>{said}</Text>
               {together ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{together}</Text>
               ) : null}
@@ -393,7 +402,7 @@ export default function ClientCancellationsScreen() {
                 <Text style={{ ...ty.label, color: t.ink3 }}>Reading their cancellations…</Text>
               ) : (
                 <>
-                  <Text style={{ ...value(32), color: t.ink }}>
+                  <Text style={{ ...ty.hero, color: t.ink }}>
                     {countable ? num(tally.actions) : fig(null)}
                   </Text>
 
@@ -411,23 +420,41 @@ export default function ClientCancellationsScreen() {
                     </Text>
                   </View>
 
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    {!countable
-                      ? 'No figures while the record is incomplete. A count over part of it is a subtotal printed as a total.'
-                      : tally.sessions === tally.actions
+                  {!countable ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      No figures while the record is incomplete. A count over part of it is a subtotal printed as a total.
+                    </Text>
+                  ) : (
+                  <Expandable title="Hours and the Middle Notice">
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    {tally.sessions === tally.actions
                         ? 'One hour per cancellation — nothing here removed several at once. The middle notice is the middle of them, not the average: one cancellation made months ahead would drag an average past every real value in this list.'
                         : 'Hours and cancellations differ because one decision can remove several hours at once — pausing a standing appointment for a fortnight is one action. Each is counted once below.'}
                   </Text>
+                  </Expandable>
+                  )}
 
                   {/* ── who, split four ways and never added up ───────────── */}
                   <View style={{ marginTop: sp.xl }}>
                     <Text style={{ ...ty.micro, color: t.ink3 }}>Who Ended Them</Text>
-                    <Text style={{ ...ty.body, color: t.ink, marginTop: sp.sm }}>
-                      {countable
-                        ? `${who}: ${num(tally.byClient)} · You: ${num(tally.byCoach)} · Somebody else: ${num(tally.byOther)} · Not recorded: ${num(tally.unattributed)}`
-                        : fig(null)}
-                    </Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    {/* The split as a donut, and ONLY under a whole read: a
+                        slice is a share of a total, and a total over a
+                        truncated page is the subtotal this screen refuses
+                        everywhere else. The hole holds the hours figure the
+                        card's head already prints, not a new sum. Each slice
+                        keeps its own count beside its name, so the picture
+                        never stands in for the four numbers. */}
+                    {countable ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, marginTop: sp.md }}>
+                        <Donut slices={whoSlices} centre={num(tally.sessions)} sub={tally.sessions === 1 ? 'hour' : 'hours'}
+                          spoken={`Hours cancelled, by who ended them: ${whoSlices.map((x) => `${x.label} ${x.shown}`).join(', ')}`} />
+                        <Legend items={whoSlices} />
+                      </View>
+                    ) : (
+                      <Text style={{ ...ty.body, color: t.ink, marginTop: sp.sm }}>{fig(null)}</Text>
+                    )}
+                    <Expandable title="Why It Is Split">
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
                       Hours, split by who performed the cancellation. It is on the face of this page and
                       not added into one number because the one number is the one that misleads: a total
                       says nothing about whose diary changed.
@@ -435,22 +462,34 @@ export default function ClientCancellationsScreen() {
                         ? ' Where it says not recorded, nobody was signed in when it happened — a job or the gym’s own system — so it is not known which of you it was.'
                         : ''}
                     </Text>
+                    </Expandable>
                   </View>
 
                   {/* ── how close to the hour ─────────────────────────────── */}
                   <View style={{ marginTop: sp.xl }}>
                     <Text style={{ ...ty.micro, color: t.ink3 }}>How Much Notice</Text>
-                    <Text style={{ ...ty.body, color: t.ink, marginTop: sp.sm }}>
-                      {countable
-                        ? `A day or more: ${num(tally.over24h)} · Under a day: ${num(tally.under24h)} · After it started: ${num(tally.after)}${tally.noticeUnknown ? ` · Not known: ${num(tally.noticeUnknown)}` : ''}`
-                        : fig(null)}
-                    </Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    {/* Parts of the whole as meters, each against the hours
+                        cancelled; green is notice given, amber is short, red
+                        is after the hour began. The words carry it — the
+                        colour is not a verdict on a fee, see below. */}
+                    {countable ? (
+                      <>
+                        <Meter label="A Day or More" tone="brand" val={tally.over24h} target={tally.sessions} note={num(tally.over24h)} />
+                        <Meter label="Under a Day" tone="amber" val={tally.under24h} target={tally.sessions} note={num(tally.under24h)} />
+                        <Meter label="After It Started" tone="red" val={tally.after} target={tally.sessions} note={num(tally.after)} />
+                        {tally.noticeUnknown ? <Meter label="Not Known" tone="neutral" val={tally.noticeUnknown} target={tally.sessions} note={num(tally.noticeUnknown)} /> : null}
+                      </>
+                    ) : (
+                      <Text style={{ ...ty.body, color: t.ink, marginTop: sp.sm }}>{fig(null)}</Text>
+                    )}
+                    <Expandable title="What This Does Not Judge">
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
                       Measured between the two times on the record and nothing else. Whether any of these
                       was inside your notice period, and whether a fee was charged, is on the charge
                       itself — your notice period today is not the one that priced a cancellation last
                       spring, and this page will not judge one against the other.
                     </Text>
+                    </Expandable>
                   </View>
                 </>
               )}

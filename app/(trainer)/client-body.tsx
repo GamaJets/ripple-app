@@ -111,9 +111,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Notice, Flag, Spark, fig, Segmented } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, Spark, fig, Segmented, KpiTile, Legend, TonedChip, type Slice, type Tone } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric, font, fontScale } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
 import { supabase } from '../../src/lib/supabase';
@@ -559,6 +559,9 @@ export default function ClientBody() {
 
   /** The mark in the circle at the start of each row: the instrument the
    *  metric is read off, not a judgement about the reading. */
+  /** Each metric's colour, the same wherever it is drawn on this page: the
+   *  line, its tile. A name for the metric, not a verdict on the reading. */
+  const METRIC_TONE: Record<BodyMetricKey, Exclude<Tone, 'brand' | 'neutral'>> = { weight: 'blue', bodyfat: 'orange', muscle: 'purple' };
   const ROW_ICON: Record<BodyMetricKey, 'scale' | 'target' | 'dumbbell'> = { weight: 'scale', bodyfat: 'target', muscle: 'dumbbell' };
 
   /**
@@ -580,7 +583,7 @@ export default function ClientBody() {
    * The movement across everything that came back is `readingLine`, under the
    * chart, where the span is what is being looked at.
    */
-  const heroSection = (s: MetricSeries, scans: number) => {
+  const heroSection = (s: MetricSeries, scans: number, h: BodyHistory) => {
     const unit = metricUnit(s.key, wu);
     const stale = isSeriesStale(s, todayISO);
     const readings = s.readings;
@@ -618,12 +621,17 @@ export default function ClientBody() {
             <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: sp.sm }}>
               {/* A dash, never a zero. A metric nobody has measured has no
                   figure, and "0 kg" is a specific and false claim about a body. */}
-              <Text style={{ ...value(32), color: t.ink }}>{fig(figure)}</Text>
+              <Text style={{ ...ty.hero, color: t.ink }}>{fig(figure)}</Text>
               {latest ? (
                 <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{unit}</Text>
               ) : null}
             </View>
-            <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{moved}</Text>
+            {/* A chip when it is a step against the reading before, and the
+                grey one: see the note above on why a change gets a sign and
+                no colour. `readingLine`'s sentence stays a sentence. */}
+            {latest && prior
+              ? <View style={{ marginTop: sp.xs }}><TonedChip label={moved} tone="neutral" /></View>
+              : <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{moved}</Text>}
             {/* seriesAgeLine already says how old the reading is. warn as micro
                 ink is 3.87–4.08:1 on the light palettes, so it goes in the dot. */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: sp.xs }}>
@@ -639,7 +647,7 @@ export default function ClientBody() {
               the line. */}
           {vals.length > 1 ? (
             <View style={{ marginTop: sp.lg }}>
-              <Spark data={vals} labels={inRange.map(({ p }) => p.atISO)} unit={` ${unit}`} />
+              <Spark area tone={METRIC_TONE[s.key]} data={vals} labels={inRange.map(({ p }) => p.atISO)} unit={` ${unit}`} />
               {/* The whole span that came back, not the window: `readingLine`
                   words it "since ⟨date⟩" rather than "since their first scan"
                   because under a truncated read the oldest scans are the ones
@@ -669,6 +677,69 @@ export default function ClientBody() {
               { key: '1Y', label: '1Y', a11yLabel: 'Last year' },
             ] as const} />
         </Section>
+
+        {/* ── the latest of each, and what the body is made of ────────────
+            The client's own Progress page, read the coach's way: three tiles
+            on the ground — the newest reading of each metric over its own
+            trend, and a tap picks the one the card above draws — then the
+            composition bar.
+
+            The bar is only drawn when the newest weight, body fat and muscle
+            came off ONE scan. A fat share from March against a weight from
+            June is a picture of nobody; when the dates disagree the card says
+            so in a line and draws nothing. Fat is the scan's own percentage;
+            muscle is its kilograms over that scan's weight; the rest is
+            whatever is neither, and is labelled as that rather than as water
+            or bone, which these three columns do not say. */}
+        <View style={{ flexDirection: 'row', flexWrap: fontScale >= 1.35 ? 'wrap' : 'nowrap', gap: sp.md, marginTop: 14 }}>
+          {BODY_METRICS.map(({ key, label }) => {
+            const ms = seriesOf(h, key);
+            const last = ms.readings[ms.readings.length - 1] ?? null;
+            return (
+              <View key={key} style={{ flexGrow: 1, flexBasis: fontScale >= 1.35 ? '40%' : 0, minWidth: 0, flexDirection: 'row' }}>
+                <KpiTile label={label} tone={METRIC_TONE[key]}
+                  value={last ? plain(metricValue(last.v, key, wu)) : null} unit={last ? metricUnit(key, wu) : undefined}
+                  trend={ms.readings.map((p) => metricValue(p.v, key, wu))}
+                  onPress={() => setMetric(key)} />
+              </View>
+            );
+          })}
+        </View>
+        {(() => {
+          const w = h.weight.readings[h.weight.readings.length - 1] ?? null;
+          const f = h.bodyfat.readings[h.bodyfat.readings.length - 1] ?? null;
+          const m = h.muscle.readings[h.muscle.readings.length - 1] ?? null;
+          if (!w || !f || !m) return null;
+          const sameScan = w.atISO === f.atISO && w.atISO === m.atISO;
+          const fatPct = f.v, musclePct = (m.v / w.v) * 100, restPct = 100 - fatPct - musclePct;
+          const sane = sameScan && w.v > 0 && fatPct > 0 && musclePct > 0 && restPct >= 0;
+          const parts: Slice[] = [
+            { label: 'Muscle', value: musclePct, tone: 'purple', shown: `${plain(musclePct, 1)}%` },
+            { label: 'Fat', value: fatPct, tone: 'orange', shown: `${plain(fatPct, 1)}%` },
+            { label: 'Everything Else', value: restPct, tone: 'neutral', shown: `${plain(restPct, 1)}%` },
+          ];
+          return (
+            <Section>
+              <SectionHead title="Body Composition" note={sane ? dayHeading(w.atISO) : undefined} />
+              {sane ? (
+                <>
+                  <View accessible accessibilityRole="image"
+                    accessibilityLabel={`Of their weight on ${dayHeading(w.atISO)}: ${parts.map((p) => `${p.label} ${p.shown}`).join(', ')}`}
+                    style={{ flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', gap: 2, marginBottom: sp.md }}>
+                    <View style={{ flex: musclePct, backgroundColor: t.data.purple }} />
+                    <View style={{ flex: fatPct, backgroundColor: t.data.orange }} />
+                    <View style={{ flex: Math.max(restPct, 0.01), backgroundColor: t.surface3 }} />
+                  </View>
+                  <Legend items={parts} />
+                </>
+              ) : (
+                <Text style={{ ...ty.caption, color: t.ink3 }}>
+                  Their newest weight, body fat and muscle are not off one scan, so there is no single body to divide — no bar rather than a mixed one.
+                </Text>
+              )}
+            </Section>
+          );
+        })()}
 
         {/* ── every reading in the window, newest first ──────────────────
             The board's dated list. Each row is one scan's figure for this
@@ -703,7 +774,7 @@ export default function ClientBody() {
                   <Icon name={ROW_ICON[s.key]} size={17} color={t.ink2} />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{v} {unit}</Text>
+                  <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{v} {unit}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dayHeading(p.atISO)}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
@@ -753,7 +824,7 @@ export default function ClientBody() {
           {it.def.label}{canOpen ? (open ? '  \u25B4' : '  \u25BE') : ''}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{figure}</Text>
+          <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink }}>{figure}</Text>
           {it.delta == null ? (
             <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: END_ALIGN }}>1 reading</Text>
           ) : (
@@ -818,8 +889,8 @@ export default function ClientBody() {
     return (
       <View key={h.key} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-          <Text style={{ ...ty.body, color: t.ink, fontWeight: '600' }}>{h.label}</Text>
-          <Text style={{ ...ty.body, ...numeric, color: t.ink, fontWeight: '500' }}>
+          <Text style={{ ...ty.body, color: t.ink, ...font('600') }}>{h.label}</Text>
+          <Text style={{ ...ty.body, ...numeric, color: t.ink, ...font('500') }}>
             {fig(lengthLabel(h.latest.cm, lu))}
           </Text>
         </View>
@@ -960,7 +1031,7 @@ export default function ClientBody() {
                   </Section>
                 ) : (
                   <>
-                    {heroSection(seriesOf(board.history, metric), board.history.scans)}
+                    {heroSection(seriesOf(board.history, metric), board.history.scans, board.history)}
 
                     {/* ── the rest of the sheet ─────────────────────────────
                         Three columns is not a body composition. Everything
@@ -1032,7 +1103,7 @@ export default function ClientBody() {
                                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
                                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand, marginTop: 6 }} />
                                   <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
-                                    <Text style={{ fontWeight: '500', color: t.ink }}>Improving  </Text>
+                                    <Text style={{ ...font('500'), color: t.ink }}>Improving  </Text>
                                     {compInsights.improving.join('  \u00B7  ')}
                                   </Text>
                                 </View>
@@ -1041,7 +1112,7 @@ export default function ClientBody() {
                                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 6 }}>
                                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, marginTop: 6 }} />
                                   <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
-                                    <Text style={{ fontWeight: '500', color: t.ink }}>Watch  </Text>
+                                    <Text style={{ ...font('500'), color: t.ink }}>Watch  </Text>
                                     {compInsights.watch.join('  \u00B7  ')}
                                   </Text>
                                 </View>

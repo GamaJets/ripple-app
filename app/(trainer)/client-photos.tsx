@@ -102,7 +102,7 @@ import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { isWhole } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -480,7 +480,7 @@ export default function ClientPhotos() {
                               ? 'Order by when each photo was sent to you'
                               : 'Order by when each photo was taken'}
                             style={seg(on)}>
-                            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{label}</Text>
+                            <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{label}</Text>
                           </Pressable>
                         );
                       })}

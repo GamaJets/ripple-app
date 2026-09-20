@@ -68,11 +68,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, PageHead, Cta, Notice, Flag, Meter, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
-// The board's targets are four small rings. Drawn the way the client's Meals
-// tab draws its one big ring, so the two apps share a shape.
-import Svg, { Circle } from 'react-native-svg';
+import { Rule, Section, SectionHead, Ghost, PageHead, Cta, Notice, Flag, Meter, Ring, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -125,6 +122,10 @@ const asNum = (v: unknown): number | null => {
   const n = typeof v === 'string' ? Number(v) : v;
   return typeof n === 'number' && Number.isFinite(n) ? n : null;
 };
+
+/** The macro colours, the same on the rings and the meters and the same as
+ *  the client's own Meals tab. Keyed by the ring's label. */
+const MACRO_TONE: Record<string, Tone> = { Calories: 'orange', Protein: 'blue', Carbs: 'amber', Fat: 'purple' };
 
 export default function ClientNutrition() {
   const t = useTheme();
@@ -499,7 +500,7 @@ export default function ClientNutrition() {
    * which read is missing, and a ring drawn around a figure this screen does
    * not have would be the placeholder body the header refuses.
    */
-  const rings: { label: string; figure: string; arc: number | null; spoken: string }[] = built
+  const rings: { label: string; figure: string | null; arc: number | null; spoken: string }[] = built
     ? [
       { label: 'Calories', figure: num(built.target.kcal), arc: built.tot.K / (built.target.kcal || 1),
         spoken: `Calories, target ${num(built.target.kcal)} kcal a day. The day you have composed comes to ${num(Math.round(built.tot.K))}` },
@@ -511,7 +512,7 @@ export default function ClientNutrition() {
         spoken: `Fat, target ${num(built.target.fat)} grams. The day you have composed comes to ${num(Math.round(built.tot.F))}` },
     ]
     : ['Calories', 'Protein', 'Carbs', 'Fat'].map((label) => ({
-      label, figure: fig(null), arc: null, spoken: `${label} target not known yet`,
+      label, figure: null, arc: null, spoken: `${label} target not known yet`,
     }));
 
   /**
@@ -582,15 +583,15 @@ export default function ClientNutrition() {
               <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
                 <Pressable accessibilityRole="tab" accessibilityState={{ selected: view === 'plan' }} accessibilityLabel="Plan"
                   onPress={() => setView('plan')} style={seg(view === 'plan')}>
-                  <Text style={{ ...ty.label, fontWeight: view === 'plan' ? '600' : '500', color: view === 'plan' ? t.bg : t.ink2 }}>Plan</Text>
+                  <Text style={{ ...ty.label, ...font(view === 'plan' ? '600' : '500'), color: view === 'plan' ? t.bg : t.ink2 }}>Plan</Text>
                 </Pressable>
                 <Pressable accessibilityRole="tab" accessibilityState={{ selected: view === 'targets' }} accessibilityLabel="Targets"
                   onPress={() => setView('targets')} style={seg(view === 'targets')}>
-                  <Text style={{ ...ty.label, fontWeight: view === 'targets' ? '600' : '500', color: view === 'targets' ? t.bg : t.ink2 }}>Targets</Text>
+                  <Text style={{ ...ty.label, ...font(view === 'targets' ? '600' : '500'), color: view === 'targets' ? t.bg : t.ink2 }}>Targets</Text>
                 </Pressable>
                 <Pressable accessibilityRole="tab" accessibilityState={{ selected: false, disabled: !built }} accessibilityLabel="Recipes"
                   disabled={!built} onPress={() => { if (built?.plan[0]) choose(0, built.plan[0].slot); }} style={seg(false)}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: built ? t.ink2 : t.ink3 }}>Recipes</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: built ? t.ink2 : t.ink3 }}>Recipes</Text>
                 </Pressable>
               </View>
             ) : null}
@@ -696,14 +697,32 @@ export default function ClientNutrition() {
                         by this coach's deltas — or a dash. */}
                     <Section>
                       <SectionHead title="Daily Targets" note={built ? (adjusted ? 'your adjustment applied' : 'unadjusted') : undefined} />
+                      {/* The kit's Ring, each macro in the colour it has
+                          everywhere in the app. Half the card wide so four
+                          fall two by two. The arc is the COMPOSED day against
+                          the target — not what the client ate, which this
+                          screen does not read — and there is no arc and a dash
+                          where there is no target: a ring drawn round a figure
+                          this screen does not have is a figure invented to
+                          fill a slot. */}
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                        {rings.map((ring) => <TargetRing key={ring.label} {...ring} />)}
+                        {rings.map((ring) => (
+                          <View key={ring.label} style={{ width: '50%', alignItems: 'center', paddingVertical: sp.md }}>
+                            <Ring size={104} tone={MACRO_TONE[ring.label] ?? 'brand'} value={ring.arc} figure={ring.figure} sub={ring.label} spoken={ring.spoken} />
+                          </View>
+                        ))}
                       </View>
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
-                        {built
-                          ? 'Worked out from their weight, body fat, activity level and goal, then moved by the adjustment you set. The green is how much of each the day below supplies.'
-                          : 'A dash is a target this screen cannot work out yet; the notes above say which read is missing.'}
-                      </Text>
+                      {built ? (
+                        <Expandable title="How These Are Worked Out">
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>
+                            Worked out from their weight, body fat, activity level and goal, then moved by the adjustment you set. Each arc is how much of that target the day below supplies.
+                          </Text>
+                        </Expandable>
+                      ) : (
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                          A dash is a target this screen cannot work out yet; the notes above say which read is missing.
+                        </Text>
+                      )}
                     </Section>
 
                     {/* ── Meal Plan: the day's slots, one row each ──────────
@@ -747,11 +766,11 @@ export default function ClientNutrition() {
                               {/* The dish's own glyph in a circle where the board
                                   puts a photograph. There is no photography of a
                                   generated meal, and none is invented. */}
-                              <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                              <View style={{ width: 48, height: 48, borderRadius: radius.md, backgroundColor: t.data.orangeSoft, alignItems: 'center', justifyContent: 'center' }}>
                                 <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
                               </View>
                               <View style={{ flex: 1, minWidth: 0 }}>
-                                <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{m.slot}</Text>
+                                <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{m.slot}</Text>
                                 <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{m.n}</Text>
                                 <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                                   {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} · {m.servings}× serving
@@ -828,9 +847,9 @@ export default function ClientNutrition() {
                             {planServingNote(built.plan[0]?.servings ?? 1, planDayBaseKcal(draft, dayIdx), built.target.kcal)}
                           </Text>
                           <View style={{ marginTop: sp.md }}>
-                            <Meter label="Protein" val={built.tot.P} target={built.target.protein} />
-                            <Meter label="Carbs" val={built.tot.C} target={built.target.carbs} />
-                            <Meter label="Fat" val={built.tot.F} target={built.target.fat} />
+                            <Meter label="Protein" tone="blue" val={built.tot.P} target={built.target.protein} />
+                            <Meter label="Carbs" tone="amber" val={built.tot.C} target={built.target.carbs} />
+                            <Meter label="Fat" tone="purple" val={built.tot.F} target={built.target.fat} />
                           </View>
                         </Section>
                       </>
@@ -965,8 +984,8 @@ export default function ClientNutrition() {
                     <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{g.ico}</Text>
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{g.n}</Text>
-                    {inPlan ? <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand, marginTop: 2 }}>In the plan</Text> : null}
+                    <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{g.n}</Text>
+                    {inPlan ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the plan</Text> : null}
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                       {num(g.k)} kcal · P{num(g.p)} · C{num(g.c)} · F{num(g.f)} — per serving, before
                       their day is scaled to target
@@ -987,43 +1006,5 @@ export default function ClientNutrition() {
         </View>
       </Modal>
     </SafeAreaView>
-  );
-}
-
-/**
- * One of the board's four small rings: the target inside it, what it is a
- * target for under that, and an arc for how much of that target the day the
- * coach has composed supplies.
- *
- * The arc is the composed day against the target — the ratio the Meters under
- * Targets draw as bars — and NOT how far the client has eaten today. What they
- * logged is theirs and this screen does not read it (see the header). No arc
- * at all, and a dash inside, when there is no target: a ring drawn around a
- * figure this screen does not have is a figure invented to fill a slot, which
- * is the defect the client's own Meals tab was fixed for.
- *
- * Half the card wide so four of them fall two by two, as the board draws them.
- */
-function TargetRing({ label, figure, arc, spoken }: { label: string; figure: string; arc: number | null; spoken: string }) {
-  const t = useTheme();
-  const S = 96, R = 40, W = 8, C = 2 * Math.PI * R;
-  return (
-    <View accessible accessibilityLabel={spoken} style={{ width: '50%', alignItems: 'center', paddingVertical: sp.md }}>
-      <View style={{ width: S, height: S, alignItems: 'center', justifyContent: 'center' }}>
-        <Svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} style={{ position: 'absolute' }}
-          accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          <Circle cx={S / 2} cy={S / 2} r={R} fill="none" stroke={t.surface3} strokeWidth={W} />
-          {arc != null ? (
-            <Circle cx={S / 2} cy={S / 2} r={R} fill="none" stroke={t.brand} strokeWidth={W} strokeLinecap="round"
-              strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, arc)))}
-              transform={`rotate(-90 ${S / 2} ${S / 2})`} />
-          ) : null}
-        </Svg>
-        {/* Shrunk to fit inside the ring rather than wrapped: a target broken
-            across two lines inside a 96pt circle is a figure read wrong. */}
-        <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(18), color: t.ink, maxWidth: S - 2 * W - 10, textAlign: 'center' }}>{figure}</Text>
-        <Text numberOfLines={1} style={{ ...ty.caption, color: t.ink3, marginTop: 1, maxWidth: S - 2 * W - 10 }}>{label}</Text>
-      </View>
-    </View>
   );
 }

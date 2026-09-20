@@ -92,8 +92,9 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useGlucose } from '../../src/ui/glucoseData';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, KpiRow, ListRow, QuickRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, ListRow, QuickRow, Cta, Ghost, Notice, Flag, fig, PageHead, Ring, TonedChip, IconPlate, Expandable, type Tone } from '../../src/ui/kit';
+import Svg, { Polygon, Polyline } from 'react-native-svg';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, font, value as sora, grown, fontScale } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useSettings } from '../../src/ui/settings';
@@ -155,7 +156,7 @@ import { coachWeek, planWindow, type ScheduledFocus } from '../../src/lib/coachW
 import { recentWindow, summariseAdherence, type ChecklistRow, type TickRow } from '../../src/lib/adherence';
 import { fetchSharedInbox } from '../../src/lib/photoShare';
 import { type Inbox } from '../../src/lib/photoInbox';
-import { weightDeltaIn } from '../../src/lib/units';
+import { weightDeltaIn, weightIn, weightLabel } from '../../src/lib/units';
 import { deltaLabel, deltaMoved } from '../../src/lib/deltaLabel';
 import { bodyLine } from '../../src/lib/clientBody';
 import {
@@ -276,8 +277,43 @@ function Chip({ t, label, on, busy, onPress }: {
     <Pressable onPress={busy ? undefined : onPress} accessibilityRole="button"
       accessibilityState={{ selected: on, disabled: busy }}
       style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2, opacity: busy && !on ? 0.5 : 1 }}>
-      <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font(on ? '500' : '400'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
+  );
+}
+
+/**
+ * A figure with its trend beside it — the approved profile's "Weight 78.4 kg"
+ * and its little line. Built here because the kit's `Spark` is the full chart
+ * (a touch readout, an axis, 74pt) and `KpiTile` is a card of its own; this is
+ * a row INSIDE a card. It draws nothing it was not given: fewer than two
+ * readings is a figure with no line, and a null figure is the dash. The line
+ * is decoration over a number already printed, so it is hidden from a screen
+ * reader and the row is spoken once.
+ */
+function TrendFigure({ t, label, shown, note, trend, tone }: {
+  t: Theme; label: string; shown: string | null; note?: string;
+  trend: (number | null)[] | null; tone: Exclude<Tone, 'brand' | 'neutral'>;
+}) {
+  const W = 84, H = 30, pad = 3;
+  const pts = (trend ?? []).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const min = Math.min(...pts), rng = (Math.max(...pts) - min) || 1;
+  const xy = pts.map((v, i) => `${(i / Math.max(1, pts.length - 1)) * W},${pad + (H - pad * 2) * (1 - (v - min) / rng)}`).join(' ');
+  return (
+    <View accessible accessibilityLabel={[label, shown ?? 'no figure', note].filter(Boolean).join(', ')}
+      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm }}>
+      <View style={{ flexShrink: 1, minWidth: 0 }}>
+        <Text style={{ ...ty.micro, ...font('400'), color: t.ink3 }}>{label}</Text>
+        <Text style={{ ...sora(19), color: t.ink }}>{fig(shown)}</Text>
+        {note ? <Text style={{ ...ty.micro, color: t.data[`${tone}Ink`] }}>{note}</Text> : null}
+      </View>
+      {pts.length >= 2 ? (
+        <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <Polygon fill={t.data[`${tone}Soft`]} points={`${xy} ${W},${H} 0,${H}`} />
+          <Polyline points={xy} fill="none" stroke={t.data[tone]} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      ) : null}
+    </View>
   );
 }
 
@@ -679,6 +715,22 @@ export default function ClientScreen() {
     [trainedStatus, trained],
   );
 
+  // Days trained in each of the last eight weeks, oldest first — the trend
+  // beside the Days Trained figure. Only from a WHOLE read: a week drawn from
+  // a truncated log is a dip nobody trained through. A nought here is a week
+  // the whole log says they did not train, which is a fact.
+  const weeklyTrained = useMemo(() => {
+    if (!isWhole(trainedStatus) || trainingBoardValue.state === 'unreadable') return null;
+    const dayNo = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return Math.floor(Date.UTC(y, m - 1, d) / 86400000); };
+    const today = dayNo(todayISO);
+    const weeks: number[] = Array(8).fill(0);
+    for (const d of trainingBoardValue.days) {
+      const back = Math.floor((today - dayNo(d.day)) / 7);
+      if (back >= 0 && back < 8) weeks[7 - back] += 1;
+    }
+    return weeks;
+  }, [trainedStatus, trainingBoardValue, todayISO]);
+
   /* ── their list, and the days they were in the app ──────────────────────── */
 
   const [uid, setUid] = useState<string | null>(null);
@@ -1032,29 +1084,44 @@ export default function ClientScreen() {
   // sentence would be a worse answer to the same question, and a count computed
   // here would be a second place that could disagree with client-body.tsx about
   // how many scans somebody has.
+  //
+  // Twelve now, and the weight with the date. The approved profile draws their
+  // weight as a figure with a trend beside the adherence ring, and a trend is
+  // a handful of points, not a history: the newest dozen is a window that says
+  // what it is (each point keeps its own date), never a total, so no cap
+  // arithmetic rides on it. client-body.tsx still owns every figure taken off
+  // the whole set.
   const [scanTop, setScanTop] = useState<{ newestISO: string | null; hasEarlier: boolean } | null>(null);
+  /** Oldest first, kilograms as stored. A scan with no readable weight is
+   *  dropped rather than drawn at zero. Null until the read lands. */
+  const [scanWeights, setScanWeights] = useState<number[] | null>(null);
   const [scansFailed, setScansFailed] = useState(false);
   useEffect(() => {
     if (!canRead || !id) return;
     let live = true;
-    setScanTop(null); setScansFailed(false);
+    setScanTop(null); setScanWeights(null); setScansFailed(false);
     (async () => {
       // `taken_at` is a DATE and nothing stops two scans sharing one, so the id
       // settles the ties — otherwise which of them is "the newest" can change
       // between reads, and so can the date printed under this client's name.
-      const { data, error } = await supabase.from('scans').select('taken_at')
+      const { data, error } = await supabase.from('scans').select('taken_at, weight_kg')
         .eq('client_id', id)
         .order('taken_at', { ascending: false }).order('id', { ascending: false })
-        .limit(2);
+        .limit(12);
       if (!live) return;
       if (error) {
         // Null, never an empty answer. A refused read must not tell a coach
         // their client has never been scanned.
         reportError('client.scans', error);
-        setScanTop(null); setScansFailed(true); return;
+        setScanTop(null); setScanWeights(null); setScansFailed(true); return;
       }
-      const rows = (data ?? []) as { taken_at: string }[];
+      const rows = (data ?? []) as { taken_at: string; weight_kg: number | string | null }[];
       setScanTop({ newestISO: rows[0]?.taken_at ?? null, hasEarlier: rows.length > 1 });
+      // `weight_kg` is a numeric and arrives as a string from PostgREST; a
+      // null one is a scan without a weight, which is a hole and not a nought.
+      setScanWeights(rows.slice().reverse()
+        .map((row) => (row.weight_kg == null ? NaN : Number(row.weight_kg)))
+        .filter((kg) => Number.isFinite(kg) && kg > 0));
     })();
     return () => { live = false; };
   }, [canRead, id, readNonce]);
@@ -1405,12 +1472,6 @@ export default function ClientScreen() {
    *  and the two must not read the same. */
   const checkInGap = unasked ?? checkInGapLine(ciStatus, checkIns ? checkIns.length : 0, who);
 
-  const driftTone = !drift ? t.ink3
-    : drift.status === 'at_risk' ? t.crit
-    : drift.status === 'idle' ? t.s5
-    : drift.status === 'watch' ? t.warn
-    : t.brand;
-
   // Weight moves in kilograms on the wire and is read in whichever unit the
   // coach set. Converted as a SPAN rather than as two rounded ends — the reason
   // `weightDeltaIn` exists — and a dash where no second scan has ever been
@@ -1598,6 +1659,62 @@ export default function ClientScreen() {
     );
   };
 
+  /* ── the infographic card's figures ─────────────────────────────────────── */
+
+    // Off the roster row, and a dash where it cannot answer: a client
+  // with no submitted check-in is not at 0% adherence. It led a
+  // second strip under the name — Adherence · Last Active · Unread —
+  // that stood over this one, so the page opened on six figures in
+  // two rows and two of them were the same Unread. One strip now,
+  // the review's "compact outcome/adherence summary": how well they
+  // stuck to it, what it did to the scale, and whether they are
+  // showing up. Last Active is the line under their name and the
+  // status row beneath it; Unread leads Needs You when there is
+  // one and rides on the Message action.
+  const adherencePct = client?.adherence ?? null;
+
+    // The unit rides on the FIGURE, so it only appears when there is
+  // one. `deltaLabel` drops the unit itself when nothing moved —
+  // "No change", not "No change kg" — and this cell was appending
+  // `wu` beside it in a separate element, putting the unit back and
+  // printing "No change kg" for every client whose two scans came
+  // out within a rounded 0.1. `deltaMoved` is the same rounding
+  // deltaLabel judges on, so the two cannot disagree.
+  // The newest scan that carries a weight; null while the read is out or when
+  // it failed, which draws the dash.
+  const latestKg = scanWeights && scanWeights.length ? scanWeights[scanWeights.length - 1] : null;
+
+    // `unasked` first, and it was the one figure on this screen that
+  // did not have it. The caption under this row already defers to
+  // `unasked`; the FIGURE did not, so a hand-added client could be
+  // shown "In the App 0 / 28 days" with "Nothing of theirs can be
+  // read until they join Repple" printed underneath it.
+  //
+  // It is reachable rather than theoretical: `handAdded` is
+  // three-valued and is `undefined` until the roster lands, which
+  // is the honest default (src/lib/clientRecord.ts) — so on a cold
+  // launch from Check In the thirteen reads all start, the ticks
+  // read comes back with zero rows and NO error because
+  // `is_my_client()` finds no `clients` row, and `summariseAdherence`
+  // over no ticks is a truthful 0 out of 28 about a set nobody was
+  // entitled to ask for. When the roster then says the person was
+  // typed in by hand, `canRead` goes false and every effect returns
+  // at its guard WITHOUT clearing what it already stored.
+  //
+  // Zero days in the app is the sentence a coach acts on. It must
+  // never be manufactured by a read that was never entitled to an
+  // answer — the third state, not the empty one.
+  const seenDays = unasked || !seen ? null : seen.seenDays;
+
+  // The drift band as a NAME from the data palette, for the chip and the ring:
+  // green on track, amber slipping, red needs you — and grey for idle, which is
+  // nothing to report rather than a warning.
+  const driftName: Tone = !drift ? 'neutral'
+    : drift.status === 'at_risk' ? 'red'
+    : drift.status === 'watch' ? 'amber'
+    : drift.status === 'idle' ? 'neutral'
+    : 'brand';
+
   const G = layout.gutter;
   // Where the Check-in card sits in the scroll, for the action that goes to
   // it. Null until it has been laid out, and the action does nothing then
@@ -1609,68 +1726,109 @@ export default function ClientScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* ── the record's head, the board's way ──────────────────────────
-            Back and the message control on one line; under it the client
-            centred — initials, name, and the one line the roster already
-            holds about them. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} a11yLabel="Back to clients" onPress={() => router.back()} />
-          {id ? <Ghost icon="message" a11yLabel={`Message ${who}`} onPress={go('/(trainer)/chat')} /> : null}
-        </View>
-        <View style={{ alignItems: 'center', paddingTop: sp.md }}>
-          <View style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}
+        {/* ── the record's head, the approved way ─────────────────────────
+            The pushed-page head with the message control in its trailing
+            slot; under it the identity ROW — a 68pt toned monogram, the name
+            in Sora, and what the roster already holds about them as chips:
+            the drift band (a colour beside its word) and their goal. */}
+        <PageHead title="Client Profile" backLabel="Back to clients"
+          trailing={id ? <Ghost icon="message" a11yLabel={`Message ${who}`} onPress={go('/(trainer)/chat')} /> : undefined} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: sp.lg, paddingHorizontal: sp.xs }}>
+          <View style={{ width: grown(68), height: grown(68), borderRadius: radius.pill, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
             accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <Text style={{ ...ty.head, color: t.brand }}>
+            <Text style={{ ...sora(24), color: t.brandText }}>
               {(fullName || 'Client').split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}
             </Text>
           </View>
-          <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', textAlign: 'center', marginTop: sp.md }} numberOfLines={1}>
-            {fullName || 'Client'}
-          </Text>
-          {/* `next` is NOT here, and its absence is the point: `RosterClient.next`
-              is the literal '—' everywhere it is built. The real answer is a
-              section of its own below — src/lib/nextUp.ts. */}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }} numberOfLines={2}>
-            {client ? `${client.goal} · ${COACHED_MODE_SHORT[client.mode]} · ${/\bago$/.test(client.lastActive) ? `last active ${client.lastActive}` : client.lastActive}` : 'Your book'}
-          </Text>
-          {/* A manual lead is not an app user, and the head has to say so before
-              anything under it is read: every dash below means "there is no
-              account to ask", not "they have done nothing". The Notice further
-              down explains it and offers the invitation; this is the mark that
-              makes the two kinds of client look different at a glance, in
-              words as well as colour. */}
-          {client?.handAdded ? (
-            <View style={{ marginTop: sp.sm }}>
-              <Flag tone={t.s5}>Added by hand · no Repple account</Flag>
+          <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+            <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }} numberOfLines={2}>
+              {fullName || 'Client'}
+            </Text>
+            {/* The band is the roster's own verdict in the roster's own words.
+                No drift read, no chip: an unknown is said in the line under
+                the ring, not dressed as a grey "on track". */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {!unasked && drift ? <TonedChip label={DRIFT_LABEL[drift.status]} tone={driftName} /> : null}
+              {client ? <TonedChip label={client.goal} tone="blue" /> : null}
+              {/* A manual lead is not an app user, and the head has to say so
+                  before anything under it is read: every dash below means
+                  "there is no account to ask", not "they have done nothing".
+                  The Notice further down explains it and offers the
+                  invitation; this is the mark that makes the two kinds of
+                  client look different at a glance, in words as well as
+                  colour. */}
+              {client?.handAdded ? <TonedChip label="Added by Hand · No Account" tone="neutral" /> : null}
             </View>
-          ) : null}
+            {/* `next` is NOT here, and its absence is the point: `RosterClient.next`
+                is the literal '—' everywhere it is built. The real answer is a
+                section of its own below — src/lib/nextUp.ts. */}
+            <Text style={{ ...ty.caption, color: t.ink3 }} numberOfLines={2}>
+              {client ? `${COACHED_MODE_SHORT[client.mode]} · ${/\bago$/.test(client.lastActive) ? `last active ${client.lastActive}` : client.lastActive}` : 'Your book'}
+            </Text>
+          </View>
         </View>
 
-        {/* ── the one thing worth knowing first ───────────────────────────
-            Led with, before the administration behind it. This was a hero
-            figure halfway down the page; it is the same real drift read the
-            roster ranks by, as a status row under the record's head. Unknown,
-            refused and partial reads stay unknown rather than becoming a
-            reassuring zero. */}
-        <View accessible
-          accessibilityLabel={drift?.quietDays == null
-            ? `Activity status unknown. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`
-            : `Activity status, ${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
-          <View style={{ width: 9, height: 9, borderRadius: radius.pill, backgroundColor: driftTone }} />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ ...ty.caption, color: t.ink3 }}>Activity status</Text>
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.ink, marginTop: 2 }}>
+        {/* ── how they are doing, as a picture ────────────────────────────
+            The approved profile's infographic card: the adherence ring beside
+            their weight and their training, each a figure with its trend. It
+            was a strip of three figures third on the page over a paragraph
+            explaining them; the paragraph is behind "About These Figures".
+
+            Every mark obeys the read behind it. No adherence on the roster
+            row is a ring with no arc and a dash, never 0%. The weight is the
+            newest scan's and its trend the last dozen scans'; one scan is a
+            figure with no line. Days Trained is `trainingBoard`'s count, which
+            is null unless the read was whole, and its trend is drawn only
+            from a whole read. */}
+        <Section>
+          <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+            <Ring size={108} tone={driftName === 'red' || driftName === 'amber' ? driftName : 'brand'}
+              value={adherencePct == null ? null : adherencePct / 100}
+              figure={adherencePct == null ? null : `${adherencePct}%`} sub="adherence"
+              spoken={adherencePct == null ? 'Adherence, no check-in to read it from' : `Adherence ${adherencePct} percent, from their latest check-in`} />
+            <View style={{ flex: 1, minWidth: 0, alignSelf: 'stretch', justifyContent: 'center', gap: sp.md }}>
+              <TrendFigure t={t} label="Weight" tone="blue"
+                shown={unasked || latestKg == null ? null : weightLabel(latestKg, wu)}
+                note={delta == null ? undefined : `${deltaLabel(delta, { since: null, noChange: 'No change' })}${deltaMoved(delta) ? ` ${wu}` : ''}`}
+                trend={unasked || !scanWeights ? null : scanWeights.map((kg) => weightIn(kg, wu))} />
+              <TrendFigure t={t} label="Days Trained" tone="purple"
+                shown={unasked || trainingBoardValue.dayCount == null ? null : String(trainingBoardValue.dayCount)}
+                trend={unasked ? null : weeklyTrained} />
+            </View>
+          </View>
+          {/* The one line that qualifies the picture, and it is the drift
+              read's own: how long since anything was on record, or why that is
+              not known. Unknown, refused and partial reads stay unknown rather
+              than becoming a reassuring zero. */}
+          <View accessible
+            accessibilityLabel={drift?.quietDays == null
+              ? `Activity status unknown. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`
+              : `Activity status, ${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record. ${unasked ?? lastSeenLine(drift, driftFailed, who)}`}
+            style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+            <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>
               {drift?.quietDays == null ? 'Recent activity unknown' : `${drift.quietDays} ${drift.quietDays === 1 ? 'day' : 'days'} since anything on record`}
+              {!unasked && seenDays != null && seen ? ` · in the app ${seenDays} / ${seen.windowDays} days` : ''}
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{unasked ?? lastSeenLine(drift, driftFailed, who)}</Text>
           </View>
-        </View>
-        {!unasked && drift && drift.status !== 'on_track' ? (
-          <Flag tone={driftTone}>
-            {DRIFT_LABEL[drift.status]} — check-ins, logged workouts, completed sessions and gym visits, over the last {DEFAULT_WINDOWS.historyDays} days.
-          </Flag>
-        ) : null}
+          <Expandable title="About These Figures">
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {adherencePct != null ? 'Adherence is from their latest check-in. ' : `No check-in carries an adherence rating for ${who}, so the ring is empty rather than at nought. `}
+              {deltaKg == null
+                ? `No second scan on record for ${who}, so there is no change to state — a dash rather than a nil movement nobody measured. `
+                : `The weight change is across the scans on record; the line is the last dozen. `}
+              Days Trained counts days with anything logged, and its line is the last eight weeks.
+              {unasked
+                ? ''
+                : seen == null
+                ? ' Their ticks could not be read, so the days they were in the app are unknown rather than none.'
+                : ` In the app is days out of the last ${seen.windowDays} they ticked something — evidence they stood in front of their list, not a score.`}
+              {!unasked && drift && drift.status !== 'on_track'
+                ? ` ${DRIFT_LABEL[drift.status]} is judged on check-ins, logged workouts, completed sessions and gym visits over the last ${DEFAULT_WINDOWS.historyDays} days.`
+                : ''}
+            </Text>
+          </Expandable>
+        </Section>
 
 
         {/* ── the order of this page ───────────────────────────────────────
@@ -1682,10 +1840,10 @@ export default function ClientScreen() {
             departure: the review lists them seventh and also says they must
             be met before a program is changed and must never sit under
             money, so they stand directly under the plan, above every summary.
-            It ran: head · a strip · status · Needs You · twelve rows · book
-            and program · injuries · intake · paperwork · release · blood
-            sugar · a second strip · attendance · money · credits · history ·
-            check-in · delivery. Nothing was removed; every block below is the
+            The approved look puts the picture first: head · the infographic
+            card (the compact summary, with the status line inside it) · NEEDS
+            YOU · actions · plan · injuries · next session · Their Record.
+            Nothing was removed; every block below is the
             block it was. */}
 
         {/* ── what is outstanding ─────────────────────────────────────────── */}
@@ -1712,12 +1870,10 @@ export default function ClientScreen() {
               highest-priority issue and reads as one — at body size, in ink;
               the rest follow as the quieter list they are. */}
           {(unasked ? [] : attn.items).map((line, i) => (
-            <View key={line} style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-              {i === 0 ? (
-                <Flag tone={t.crit}><Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{line}</Text></Flag>
-              ) : (
-                <Flag tone={t.warn}>{line}</Flag>
-              )}
+            <View key={line} accessible accessibilityLabel={line}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+              <IconPlate icon="bell" tone={i === 0 ? 'red' : 'amber'} size={38} />
+              <Text style={{ ...(i === 0 ? { ...ty.body, ...font('600') } : ty.label), color: i === 0 ? t.ink : t.ink2, flex: 1, minWidth: 0 }}>{line}</Text>
             </View>
           ))}
           {/* An empty list above cannot be allowed to read as an all-clear when
@@ -1810,76 +1966,6 @@ export default function ClientScreen() {
           </Section>
         ) : null}
 
-        {/* ── three figures, and a dash wherever the record cannot answer ───
-            Third on the page, under who they are and what needs the coach:
-            the review's order, and the board's Progress card. It sat under
-            the paperwork and the blood sugar. */}
-        <Section>
-          <SectionHead title="Where They Are" />
-          <KpiRow items={[
-            // Off the roster row, and a dash where it cannot answer: a client
-            // with no submitted check-in is not at 0% adherence. It led a
-            // second strip under the name — Adherence · Last Active · Unread —
-            // that stood over this one, so the page opened on six figures in
-            // two rows and two of them were the same Unread. One strip now,
-            // the review's "compact outcome/adherence summary": how well they
-            // stuck to it, what it did to the scale, and whether they are
-            // showing up. Last Active is the line under their name and the
-            // status row beneath it; Unread leads Needs You when there is
-            // one and rides on the Message action.
-            { label: 'Adherence', value: client == null || client.adherence == null ? fig(null) : String(client.adherence), unit: client == null || client.adherence == null ? undefined : '%' },
-            {
-              // The unit rides on the FIGURE, so it only appears when there is
-              // one. `deltaLabel` drops the unit itself when nothing moved —
-              // "No change", not "No change kg" — and this cell was appending
-              // `wu` beside it in a separate element, putting the unit back and
-              // printing "No change kg" for every client whose two scans came
-              // out within a rounded 0.1. `deltaMoved` is the same rounding
-              // deltaLabel judges on, so the two cannot disagree.
-              label: 'Weight Change',
-              value: delta == null ? '—' : deltaLabel(delta, { since: null, noChange: 'No change' }),
-              unit: deltaMoved(delta) ? wu : undefined,
-            },
-            {
-              // `unasked` first, and it was the one figure on this screen that
-              // did not have it. The caption under this row already defers to
-              // `unasked`; the FIGURE did not, so a hand-added client could be
-              // shown "In the App 0 / 28 days" with "Nothing of theirs can be
-              // read until they join Repple" printed underneath it.
-              //
-              // It is reachable rather than theoretical: `handAdded` is
-              // three-valued and is `undefined` until the roster lands, which
-              // is the honest default (src/lib/clientRecord.ts) — so on a cold
-              // launch from Check In the thirteen reads all start, the ticks
-              // read comes back with zero rows and NO error because
-              // `is_my_client()` finds no `clients` row, and `summariseAdherence`
-              // over no ticks is a truthful 0 out of 28 about a set nobody was
-              // entitled to ask for. When the roster then says the person was
-              // typed in by hand, `canRead` goes false and every effect returns
-              // at its guard WITHOUT clearing what it already stored.
-              //
-              // Zero days in the app is the sentence a coach acts on. It must
-              // never be manufactured by a read that was never entitled to an
-              // answer — the third state, not the empty one.
-              label: 'In the App',
-              value: fig(unasked || !seen ? null : seen.seenDays),
-              unit: !unasked && seen ? `/ ${seen.windowDays} days` : undefined,
-            },
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {client && client.adherence != null ? 'Adherence is from their latest check-in. ' : ''}
-            {deltaKg == null
-              ? `No second scan on record for ${who}, so there is no change to state — a dash rather than a nil movement nobody measured. `
-              : `Across the scans on record. `}
-            {unasked
-              ? unasked
-              : seen == null
-              ? 'Their ticks could not be read, so the days they were in the app are unknown rather than none.'
-              : `Days out of the last ${seen.windowDays} they ticked something — evidence they stood in front of their list, not a score.`}
-          </Text>
-        </Section>
-
-
         {/* ── the four things a coach comes here to DO ─────────────────────
             The review's fourth slot: message, log a session, update the
             program, review the check-in. All four existed — as the tenth and
@@ -1928,11 +2014,11 @@ export default function ClientScreen() {
                 + (client?.injuries && client.injuries.length
                   ? ` ${client.injuries.length === 1 ? 'One injury is' : `${client.injuries.length} injuries are`} disclosed — they are the next card down; read ${client.injuries.length === 1 ? 'it' : 'them'} before you change this.`
                   : '')}
-              tone={ap.status === 'error' ? t.warn : undefined}
+              tone={ap.status === 'error' ? t.warn : 'brand'}
               onPress={() => { if (id) router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient' } } as any); }} />
             <ListRow icon="target" title="What They're Working Toward"
               note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
-              tone={goalStatus === 'error' ? t.warn : undefined}
+              tone={goalStatus === 'error' ? t.warn : 'blue'}
               onPress={go('/(trainer)/client-goals')} />
           </Section>
         ) : null}
@@ -2007,7 +2093,7 @@ export default function ClientScreen() {
                 {client.injuries.map((inj, i) => (
                   <View key={`${inj.area}-${i}`} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{areaLabel(inj.area)}</Text>
+                      <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{areaLabel(inj.area)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{inj.severity}</Text>
                       {inj.isNew ? <Flag tone={t.warn}>New</Flag> : null}
                     </View>
@@ -2083,7 +2169,7 @@ export default function ClientScreen() {
             <SectionHead title="Next Session" />
             <View style={{ marginBottom: sp.md }}>
               {diary.startsAt ? (
-                <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: 2 }}>
+                <Text style={{ ...ty.body, ...font('600'), color: t.ink, marginTop: 2 }}>
                   {new Date(diary.startsAt).toLocaleString(appLocale(), {
                     weekday: 'short', day: 'numeric', month: 'short',
                     hour: 'numeric', minute: '2-digit',
@@ -2125,8 +2211,9 @@ export default function ClientScreen() {
               manual lead the roster does not hold: the sheet is drawn from
               the roster row, and without one it has nothing to open on. */}
           {id && client ? (
-            <ListRow icon="pencil" title="Notes and Coaching Tools"
-              note={`Your private notes on ${who}, the feedback you send them, tags, meal targets and the weekly summary.`}
+            // No caption: this page does not read the notes, and a row's
+            // caption is a fact off a read or it is nothing.
+            <ListRow icon="pencil" title="Notes and Coaching Tools" tone="amber"
               onPress={() => router.push({ pathname: '/(trainer)/dashboard', params: { sheet: id } } as any)} />
           ) : null}
 
@@ -2135,16 +2222,19 @@ export default function ClientScreen() {
               against — the goals themselves are in Current Plan and Goal,
               directly above this card — and because "how is this person
               actually going" is the same question asked twice. */}
-          <ListRow icon="chart" title="Their Body Composition"
-            note={unasked ?? bodyLine(
+          <ListRow icon="ruler" title="Measurements"
+            // The healthy case is one fact — "Last scan Wed 2 Sep". Every
+            // other state keeps `bodyLine`'s sentence, because failed, loading
+            // and never-scanned are three different things to tell a coach.
+            note={unasked ?? (scanTop?.newestISO && scanTop.hasEarlier && !scansFailed ? `Last scan ${fmtDay(scanTop.newestISO)}` : bodyLine(
               scansFailed,
               scanTop == null && !scansFailed,
               scanTop?.newestISO ?? null,
               scanTop?.hasEarlier ?? false,
               todayISO,
               who,
-            )}
-            tone={scansFailed ? t.warn : undefined}
+            ))}
+            tone={scansFailed ? t.warn : 'blue'}
             onPress={go('/(trainer)/client-body')} />
 
           {/* Directly under the body composition and above the plan, because
@@ -2152,9 +2242,9 @@ export default function ClientScreen() {
               happened. Everything else here is an intention — a goal, a marked
               day, a list, a programme — and a coach standing in front of
               somebody wants the record before the plan. */}
-          <ListRow icon="train" title="What They've Actually Done"
+          <ListRow icon="dumbbell" title="Training"
             note={unasked ?? trainingLine(trainedStatus, trainingBoardValue, who)}
-            tone={trainedStatus === 'error' ? t.warn : undefined}
+            tone={trainedStatus === 'error' ? t.warn : 'purple'}
             onPress={go('/(trainer)/client-training')} />
 
           {/* Directly under "What They've Actually Done", because these two are
@@ -2165,29 +2255,29 @@ export default function ClientScreen() {
               applied and read by nothing at all, which left the one person who
               acts on it unable to see it.
 
-              The note is DESCRIPTIVE and carries no figure. This screen does
-              not read that table, and a count summarised from a read that has
-              not happened is the shape every other row here avoids by owning
-              its own status. The screen behind the row gates its figures on
+              There is NO caption, where there was a sentence describing the
+              screen. This screen does not read that table, and a count
+              summarised from a read that has not happened is the shape every
+              other row here avoids by owning its own status. The screen behind the row gates its figures on
               `isWhole` and says which of loading, failed and empty it is. */}
-          <ListRow icon="calendar" title="Sessions They Cancelled"
-            note={`Hours booked with you that were cancelled — who ended each one, and how much notice there was.`}
+          <ListRow icon="calendar" title="Cancelled Sessions" tone="red"
             onPress={go('/(trainer)/client-cancellations')} />
 
-          <ListRow icon="calendar" title="The Week They've Planned"
+          <ListRow icon="calendar" title="Planned Week"
             note={unasked ?? weekLine(weekStatus, week, who)}
-            tone={weekStatus === 'error' ? t.warn : undefined}
+            tone={weekStatus === 'error' ? t.warn : 'teal'}
             onPress={go('/(trainer)/client-week')} />
 
           {/* Beside the training week rather than under it, because the two are
               the same week seen from either side of the plate: what they are
-              lifting and what they are eating while they do it. Pushed with the
+              lifting and what they are eating while they do it. No caption:
+              their targets are read by the screen behind the row, not by this
+              one. Pushed with the
               id like every row here — client-nutrition falls back to its own
               roster picker when it is opened without one, so a coach who
               arrives from Explore is asked who they mean, and a coach who
               arrives from here is not asked twice. */}
-          <ListRow icon="meals" title="What They're Eating"
-            note={`${who}'s calorie and macro targets, and the week of meals you write them.`}
+          <ListRow icon="meals" title="Nutrition" tone="orange"
             onPress={go('/(trainer)/client-nutrition')} />
 
           {/* This carried a comment saying `checklists.tsx` "starts on its own
@@ -2207,15 +2297,32 @@ export default function ClientScreen() {
               screen or left the row alone believing it was broken. Half the
               defects in this codebase's own roadmap are comments that outlived
               the code they described. */}
-          <ListRow icon="check" title="Their Daily Checklist"
+          <ListRow icon="check" title="Daily Checklist"
             note={unasked ?? listLine(itemStatus, activeLines, seen, who)}
-            tone={worstStatus(itemStatus, tickStatus) === 'error' ? t.warn : undefined}
+            tone={worstStatus(itemStatus, tickStatus) === 'error' ? t.warn : 'teal'}
             onPress={go('/(trainer)/checklists')} />
 
-          <ListRow icon="camera" title="Progress Photos They Sent You"
+          <ListRow icon="camera" title="Progress Photos"
             note={unasked ?? photosLine(inbox, photosFailed, who)}
-            tone={photosFailed ? t.warn : undefined}
+            tone={photosFailed ? t.warn : 'pink'}
             onPress={go('/(trainer)/client-photos')} />
+
+          {/* The approved profile's last two rows. Neither is a new
+              destination: Check-ins is the review further down THIS page (the
+              same scroll the action row does) and Messages is the thread. Each
+              caption is the read this page already holds — how old the newest
+              check-in is, how many messages are unread — and is left off
+              rather than written as a nought when there is nothing to say. */}
+          {id ? (
+            <ListRow icon="check" title="Check-ins" tone="brand"
+              note={unasked ? undefined : latestCheckIn && !checkInGap ? checkInAge(latestCheckIn.at, nowMs) ?? undefined : undefined}
+              onPress={() => { if (checkInY != null) scroller.current?.scrollTo({ y: Math.max(0, checkInY - sp.lg), animated: true }); }} />
+          ) : null}
+          {id ? (
+            <ListRow icon="message" title="Messages" tone="purple"
+              note={client && client.unread != null && client.unread > 0 ? `${client.unread} unread` : undefined}
+              onPress={go('/(trainer)/chat')} />
+          ) : null}
 
         </Section>
 

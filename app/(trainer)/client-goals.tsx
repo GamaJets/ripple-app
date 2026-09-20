@@ -57,8 +57,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Notice, Flag, Ring, IconPlate, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
 import { supabase } from '../../src/lib/supabase';
@@ -521,9 +521,20 @@ export default function ClientGoals() {
     const proj = kind && isWhole(readingStatus(kind))
       ? projectionLine(g, seriesFor(series, kind), wu, who, nowMs)
       : null;
+    // The ring beside the goal: how far along it is, and ONLY where
+    // `measuredLine` below would print a percentage — a measured goal, a whole
+    // read of its series, and a reading to hold it against. Everything else
+    // gets a plate and its sentence; an empty ring beside "could not be read"
+    // would look like a goal nobody has started.
+    const ringProg = kind && !g.achievedAtISO && isWhole(readingStatus(kind)) ? progressOf(g, seriesFor(series, kind)) : null;
+    const ringPct = ringProg ? Math.round(Math.max(0, Math.min(100, ringProg.pct))) : null;
     return (
-      <View key={g.id} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-        <Text style={{ ...ty.body, color: g.achievedAtISO ? t.ink3 : t.ink, fontWeight: '600' }}>
+      <View key={g.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+        {ringPct != null
+          ? <Ring size={64} tone={overdue ? 'amber' : 'brand'} value={ringPct / 100} figure={`${ringPct}%`} spoken={`${goalLabel(g)}, ${ringPct} percent of the way`} />
+          : <IconPlate icon={g.achievedAtISO ? 'check' : 'target'} tone={g.achievedAtISO ? 'brand' : overdue ? 'amber' : 'blue'} />}
+        <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ ...ty.body, color: g.achievedAtISO ? t.ink3 : t.ink, ...font('600') }}>
           {goalLabel(g)}
           {kind && g.targetValue != null ? ` · ${fig(goalValue(g.targetValue, kind, wu))} ${unit}` : ''}
         </Text>
@@ -549,6 +560,7 @@ export default function ClientGoals() {
             : `In their words, and nothing measures it. Only ${who} can say when this one is done.`}
         </Text>
         {proj ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{proj}</Text> : null}
+        </View>
       </View>
     );
   };
@@ -569,8 +581,8 @@ export default function ClientGoals() {
     return (
       <View key={h.key} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-          <Text style={{ ...ty.body, color: t.ink, fontWeight: '600' }}>{h.label}</Text>
-          <Text style={{ ...ty.body, ...numeric, color: t.ink, fontWeight: '500' }}>
+          <Text style={{ ...ty.body, color: t.ink, ...font('600') }}>{h.label}</Text>
+          <Text style={{ ...ty.body, ...numeric, color: t.ink, ...font('500') }}>
             {fig(lengthLabel(h.latest.cm, lu))}
           </Text>
         </View>
@@ -665,9 +677,9 @@ export default function ClientGoals() {
                       /* ── the board's figure card ─────────────────────────
                          The goal to lead with, as one card: the goal's name
                          over the current reading at the board's figure size,
-                         how far along it is as a bar, and what is left. The
-                         Hero's ring said the same percentage; the bar says it
-                         in the pill idiom the rest of the board uses. `lead`
+                         how far along it is as a ring beside it, and what is
+                         left. It was a bar for a round; the approved look
+                         draws progress against a target as a ring. `lead`
                          is already gated on a WHOLE read of the series, so
                          the percentage is never a figure off a truncated
                          page. */
@@ -680,16 +692,15 @@ export default function ClientGoals() {
                           <SectionHead title={goalLabel(lead.goal)} note={`${pct}% of the way`} />
                           {/* One stop for the ear: goal, reading, how far, what
                               is left. Four Texts were four unrelated facts. */}
-                          <View accessible accessibilityLabel={`${goalLabel(lead.goal)}, ${figure} ${unit}. ${pct}% of the way to the goal, ${left}.`}>
-                            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                              <Text style={{ ...value(32), color: t.ink }}>{figure}</Text>
+                          <View accessible accessibilityLabel={`${goalLabel(lead.goal)}, ${figure} ${unit}. ${pct}% of the way to the goal, ${left}.`}
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+                            {/* The approved look's ring, where the bar was: the
+                                same percentage, off the same whole read. */}
+                            <Ring size={108} value={pct / 100} figure={`${pct}%`} sub="of the way" spoken={`${pct} percent of the way`} />
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                              <Text style={{ ...ty.hero, color: t.ink }}>{figure}</Text>
                               <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{unit}</Text>
-                            </View>
-                            <View
-                              accessibilityRole="progressbar"
-                              accessibilityValue={{ min: 0, max: 100, now: pct }}
-                              style={{ height: 8, borderRadius: radius.pill, backgroundColor: t.surface2, marginTop: sp.md, overflow: 'hidden' }}>
-                              <View style={{ width: `${pct}%`, height: '100%', borderRadius: radius.pill, backgroundColor: t.brand }} />
                             </View>
                             {/* The same strip of figures the goal rows print —
                                 "58% of the way · 4 kg to go" — off a progress
@@ -698,6 +709,7 @@ export default function ClientGoals() {
                               {`${pct}% of the way · ${fig(Math.abs(goalDelta(lead.prog.remaining, lead.kind, wu)))} ${unit} to go`}
                               {lead.goal.targetValue != null ? ` · target ${fig(goalValue(lead.goal.targetValue, lead.kind, wu))} ${unit}` : ''}
                             </Text>
+                            </View>
                           </View>
                         </Section>
                       );
