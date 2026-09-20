@@ -85,13 +85,13 @@ export interface NoKitPlan {
  *  figure `buildProgram` writes — not facts read off the row. A stretch is a
  *  hold, in the spelling `prescribedSeconds` already reads (see
  *  src/lib/timedSets.ts); everything else is a rep range. */
-const isStretch = (r: NoKitRow) => /stretch/i.test(String(r.category || ''));
-const setsFor = (r: NoKitRow) => (isStretch(r) ? 2 : 3);
-const repsFor = (r: NoKitRow) => (isStretch(r) ? '30 sec' : '10-15');
+export const isStretch = (r: { category?: string | null }) => /stretch/i.test(String(r.category || ''));
+export const setsFor = (r: { category?: string | null }) => (isStretch(r) ? 2 : 3);
+export const repsFor = (r: { category?: string | null }) => (isStretch(r) ? '30 sec' : '10-15');
 
 /** Evenly spread across the week, and always inside it. Three days land on the
  *  first, third and sixth weekday of whatever the member's week starts on. */
-const dayNameAt = (i: number, days: number) =>
+export const dayNameAt = (i: number, days: number) =>
   WEEK_DAYS[Math.min(6, Math.round(i * (7 / Math.max(1, days))))];
 
 /**
@@ -214,7 +214,7 @@ export function noKitProgram(
 }
 
 /** 'a, b and c'. */
-const list = (xs: string[]): string =>
+export const list = (xs: string[]): string =>
   (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
 /**

@@ -3437,6 +3437,14 @@ export default function Train() {
             // the fifteen behind it are written for nobody. The screen itself
             // says so again at the top.
             ['grid', 'Ready-Made Programs', '/(client)/programs'],
+            // The third answer to "what do I do today", beside the Library's
+            // six hundred movements with no order and the fifteen plans
+            // written for nobody: name the muscle and have one written now.
+            // Reported by a member — "i want to train triceps" — and the
+            // reason it is its own row rather than a filter inside the
+            // Library is that the Library finds a movement and this composes
+            // a session.
+            ['dumbbell', 'Build a Workout', '/(client)/build-workout'],
             ['calendar', 'This Week', '/(client)/week'],
             ['trending', 'Targets', '/(client)/progression'],
             // Sits with the training tools rather than three levels down inside

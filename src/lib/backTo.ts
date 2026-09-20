@@ -34,6 +34,11 @@ export const BACK_TO = {
   // the tab history reorders away, because a member reads three movements out
   // of one workout in a row.
   clientPrograms: '/(client)/programs',
+  // The workout a member built for themselves by picking muscles. Same path as
+  // the program library above and the same reason: the movements are opened
+  // from a generated day, and behind them is a screen holding the targets the
+  // member chose — which is not state a navigator's history can restore.
+  clientBuildWorkout: '/(client)/build-workout',
   clientWorkouts: '/(client)/workouts',
   ownerLibrary: '/(owner)/library',
   trainerBuilder: '/(trainer)/builder',

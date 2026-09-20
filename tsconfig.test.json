@@ -743,6 +743,8 @@
     "src/lib/equipmentFacet.test.ts",
     "src/lib/noKitProgram.ts",
     "src/lib/noKitProgram.test.ts",
+    "src/lib/targetedWorkout.ts",
+    "src/lib/targetedWorkout.test.ts",
     "src/lib/clipSources.ts",
     "src/lib/clipSources.test.ts",
     "src/lib/outcomeAuthor.ts",

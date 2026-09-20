@@ -49,7 +49,7 @@ import { sp, grown, font, type as ty } from '../theme/scale';
  * Not a lookup and not sorted: the order is by how many of the 615 rows carry
  * each one, so the group a coach most often wants is the first chip.
  */
-const MUSCLE_GROUPS: readonly string[] = [
+export const MUSCLE_GROUPS: readonly string[] = [
   'Full body', 'Back', 'Shoulders', 'Core', 'Chest', 'Legs',
   'Arms', 'Hamstrings', 'Glutes', 'Lower back', 'Calves',
 ];
