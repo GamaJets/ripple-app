@@ -1,4 +1,6 @@
 import { Stack, useRouter } from 'expo-router';
+import { LogBox } from 'react-native';
+import * as Device from 'expo-device';
 import { useEffect } from 'react';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -66,6 +68,25 @@ import { OutboxProvider } from '../src/ui/outbox';
 import { ReachabilityProbe } from '../src/ui/reachability';
 import { OfflineFlush } from '../src/ui/offlineFlush';
 import { MessageOutboxHandler } from '../src/ui/messaging';
+
+// ── one dev-only warning the SIMULATOR cannot avoid ──────────────────────────
+//
+// expo-notifications keeps its push registration in the iOS keychain and reads
+// it back as the module loads. A simulator dev build is ad-hoc signed with no
+// keychain access group, so that read fails with
+// ERR_NOTIFICATIONS_KEYCHAIN_ACCESS and the library logs it with console.error —
+// which the dev overlay pins over the tab bar on every launch. Nothing is wrong
+// with the app: a simulator cannot receive remote pushes at all, and a signed
+// device or TestFlight build has the entitlement and never sees it.
+//
+// Silenced for exactly that case and no wider: development only, simulator
+// only, this one message only. On a real device the same line WOULD mean
+// something (a provisioning profile without keychain sharing), so it stays
+// loud there.
+if (__DEV__ && !Device.isDevice) {
+  LogBox.ignoreLogs(['[expo-notifications] Error reading persisted server registration info']);
+}
+
 
 // The splash stays up until the two families have loaded or failed — see
 // RootLayout. Asked for at module load because the native splash hides itself
