@@ -745,6 +745,8 @@
     "src/lib/noKitProgram.test.ts",
     "src/lib/targetedWorkout.ts",
     "src/lib/targetedWorkout.test.ts",
+    "src/lib/builtWorkout.ts",
+    "src/lib/builtWorkout.test.ts",
     "src/lib/clipSources.ts",
     "src/lib/clipSources.test.ts",
     "src/lib/outcomeAuthor.ts",

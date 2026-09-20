@@ -89,6 +89,10 @@ import { isTimedPrescription, prescribedSeconds, readHold, holdLabel, timedSetLa
 // The set row itself, which used to be a local component and so was reachable
 // from this screen and nowhere else. See src/ui/LogSetRow.tsx.
 import { LogSetRow, SetKindChip, type LoggedSet } from '../../src/ui/LogSetRow';
+// The rest between two sets on the PLAN rows. The runner has counted one down
+// since it was written; the three ways to log a set without opening the runner
+// had none. Same `restTimer` arithmetic, no second copy of it.
+import { RestAfterSet } from '../../src/ui/RestAfterSet';
 // ── ticking a planned set off, rather than typing it out ──────────────────
 //
 // "A tick box to send feedback/log sets been completed." — TestFlight, 8
@@ -170,6 +174,9 @@ import { groupTone, groupsOf } from '../../src/ui/groupTone';
 import { DidYouKnow } from '../../src/ui/DidYouKnow';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
+// "A, B and C". The one comma-and-and in this app, so a list of movements left
+// undone reads the way the coverage notes already read.
+import { list } from '../../src/lib/noKitProgram';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { startGate } from '../../src/lib/startGate';
 import { hrColor, hrZoneNo, zoneColor, zoneName, ZONE_NOS, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, zonesFromSamples, hrStats, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
@@ -2321,6 +2328,20 @@ export default function Train() {
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{start.note}</Text>
         ) : null}
         </View>
+        {/* ── directly under Start Workout, and moved here on purpose ──────
+            Asked for by the owner, passed on from a member: "build work out
+            should be just below the start workout tab." It was a row in the
+            destinations list at the foot of this screen, five sections down,
+            beside Ready-Made Programs.
+
+            The reason it belongs here rather than there is the question it
+            answers. Start Workout runs the session the coach wrote. The member
+            who does not want that one — wrong day, wrong equipment, wants arms
+            — is looking at that button at the moment they decide, and this is
+            the other answer to the same question. A member who has no coach
+            plan at all sees Start Workout withheld with its reason, and this
+            immediately under it. */}
+        <View style={{ marginTop: sp.sm }}><Ghost label="Build a Workout" icon="dumbbell" onPress={() => router.push('/(client)/build-workout')} /></View>
         <View style={{ marginTop: sp.sm }}><Ghost label="View Program" icon="grid" onPress={() => router.push('/(client)/week')} /></View>
 
         {/* ── whose copy of the coach's plan is being trained ──────────────
@@ -2953,6 +2974,33 @@ export default function Train() {
                           {/* Opened on the hold box for a movement the plan
                               prescribes in seconds. See src/ui/LogSetRow.tsx. */}
                           <LogSetRow t={t} unit={wu} timedDefault={isTimedPrescription(e.reps)} onLog={(set) => logSet(e, set)} />
+                          {/* ── the rest between two sets, on the path that
+                              had none ──────────────────────────────────────
+                              All three ways to log a set on this row — the
+                              checklist tick, the one-tap beside the
+                              suggestion, and the boxes above — go through
+                              `logSet`, and none of them opened the runner, so
+                              none of them started a rest. The runner's own
+                              arithmetic, keyed on the count of sets so the
+                              next one restarts it. See src/ui/RestAfterSet.tsx.
+
+                              The method of the set JUST LOGGED decides the
+                              length, the same way the runner asks
+                              `methodAt(done.length)`: a drop set rests for
+                              nothing, which is what makes it one, and
+                              `restAfter` returns 0 for it so nothing is
+                              drawn. */}
+                          {sets.length > 0 ? (() => {
+                            const m = planned[sets.length - 1]?.method ?? e.method ?? null;
+                            const secs = restAfter(m, restSecondsFor(e));
+                            const byMethod = typeof methodFor(m).method.restsAfter === 'number';
+                            return (
+                              <RestAfterSet key={sets.length} seconds={secs}
+                                note={byMethod ? `part of the ${methodFor(m).method.label.toLowerCase()}`
+                                  : e.restSec != null ? 'set by your coach'
+                                  : `app default of ${DEFAULT_REST_SEC} seconds`} />
+                            );
+                          })() : null}
                         </View>
                       ) : null}
                     </View>
@@ -3437,14 +3485,11 @@ export default function Train() {
             // the fifteen behind it are written for nobody. The screen itself
             // says so again at the top.
             ['grid', 'Ready-Made Programs', '/(client)/programs'],
-            // The third answer to "what do I do today", beside the Library's
-            // six hundred movements with no order and the fifteen plans
-            // written for nobody: name the muscle and have one written now.
-            // Reported by a member — "i want to train triceps" — and the
-            // reason it is its own row rather than a filter inside the
-            // Library is that the Library finds a movement and this composes
-            // a session.
-            ['dumbbell', 'Build a Workout', '/(client)/build-workout'],
+            // Build a Workout was here, beside the two rows above — the third
+            // answer to "what do I do today". It is now directly under Start
+            // Workout at the top of this screen and NOT in both places: a
+            // destination reachable from two rows on one page is a member
+            // wondering whether the two are the same thing.
             ['calendar', 'This Week', '/(client)/week'],
             ['trending', 'Targets', '/(client)/progression'],
             // Sits with the training tools rather than three levels down inside
@@ -5623,11 +5668,34 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
    * through is a real thing to want; ending it silently is not, and the useful
    * half of it — saving what they did do — was not offered at all.
    */
+  /**
+   * The movements this session has nothing logged against, by the name on
+   * screen.
+   *
+   * Said out loud when somebody ends early, and again on the finish screen.
+   * `buildEntries` writes ONE ENTRY PER MOVEMENT THAT HAS SETS and drops the
+   * rest — which is right, because an untouched movement has no reps, no load
+   * and no time under a bar, and writing a row of zeroes for it would put
+   * training in the log that nobody did and count it against the member's
+   * tonnage, their records and their coach's dashboard.
+   *
+   * But dropping a thing silently and not doing it are different, and only one
+   * of them is what happened. So they are named rather than written: the member
+   * ending on exercise three of five is told which two are not going in, at the
+   * moment they decide and again after it is done.
+   */
+  const notDoneNames = (): string[] =>
+    exercises.map((e, i) => ((results[i] || []).length ? null : shownName(e)))
+      .filter((x): x is string => !!x);
   const endSession = () => {
     if (!loggedSets) { onClose(); return; }
+    const undone = notDoneNames();
     Alert.alert(
       'End This Session?',
-      `${loggedSets} set${loggedSets === 1 ? '' : 's'} logged so far. Save them to your log, or discard the session.`,
+      `${loggedSets} set${loggedSets === 1 ? '' : 's'} logged so far. Save them to your log, or discard the session.`
+      + (undone.length
+        ? ` ${list(undone)} ${undone.length === 1 ? 'has' : 'have'} nothing logged and will be recorded as not done — not as zeroes, and not counted.`
+        : ''),
       [
         { text: 'Keep Going', style: 'cancel' },
         { text: 'Save and End', onPress: () => finish() },
@@ -5785,6 +5853,22 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 {unpricedSets === 1 ? 'One bodyweight set is' : `${num(unpricedSets)} bodyweight sets are`} not in the volume above, because your own weight is not recorded for today. Add your weight and {unpricedSets === 1 ? 'it counts' : 'they count'}.
               </Text>
             ) : null}
+            {/* ── the movements that were not done ─────────────────────────
+                "3/5" above is the whole of what this screen used to say about
+                the other two, and a member reading it a week later has no way
+                to tell which. They are not in the log — `buildEntries` writes
+                a row only for a movement with sets, because a row of zeroes is
+                training nobody did — so this is the only place they are named,
+                and being named is the difference between recorded as not done
+                and quietly dropped. */}
+            {(() => {
+              const undone = notDoneNames();
+              return undone.length ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {list(undone)} {undone.length === 1 ? 'has' : 'have'} no sets and {undone.length === 1 ? 'is' : 'are'} recorded as not done. {undone.length === 1 ? 'It is' : 'They are'} not in your log as zeroes and {undone.length === 1 ? 'does' : 'do'} not count against your figures — the session you did is the session above.
+                </Text>
+              ) : null;
+            })()}
             {/* Only when there is something to explain. A member who warmed up
                 did the work and it is saved; this says where it went rather
                 than leaving them to find the arithmetic themselves. */}
@@ -6445,6 +6529,33 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     </View>
   );
 
+  /* ── finishing a session you did not finish ──────────────────────────────
+     Passed on by the owner from a member: "need to be able to finish a workout
+     even if you didn't do all the exercises in the workout."
+
+     It was already possible and it was not findable. `endSession` — the round
+     control at the top of the page, labelled "End the session" — has offered
+     "Save and End" beside "Discard" ever since the End button stopped throwing
+     a half-finished session away. But the only word on the page that says
+     "finish" appears on the LAST exercise, so a member standing on exercise
+     three of five, done for the day, is looking at Next Exercise and Skip and
+     a back arrow. Skipping forward twice to reach a Finish Session button is
+     the workaround people were doing, and it walks them past two movements
+     they have to decide about again.
+
+     So the same door, in the place the decision is made, and only when there is
+     something to save: nothing logged is `onClose` and needs no ceremony. The
+     alert it opens is the one that names the sets and the movements left
+     undone. */
+  const finishEarlyRow = !paused && idx < exercises.length - 1 && loggedSets > 0 ? (
+    <Pressable accessibilityRole="button"
+      accessibilityLabel={`Finish here, keeping the ${loggedSets} set${loggedSets === 1 ? '' : 's'} you have logged`}
+      onPress={endSession}
+      style={{ alignSelf: 'stretch', alignItems: 'center', paddingVertical: sp.md, marginTop: sp.sm, minHeight: MIN_TARGET, justifyContent: 'center' }}>
+      <Text style={{ ...ty.body, ...font('600'), color: t.nightInk2 }}>Finish Here</Text>
+    </Pressable>
+  ) : null;
+
   /* Which clock is the figure. A resting member and a working member are
      looking at the same digits, so the word above them says which. */
   const resting = rest > 0;
@@ -6703,6 +6814,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 <Text style={{ ...ty.body, ...font('600'), color: t.nightInk2 }}>{pastPlan ? 'Complete Set' : last ? 'Finish Session' : 'Skip'}</Text>
               </Pressable>
             ) : null}
+            {finishEarlyRow}
 
             {/* Directly under the control it changed: the green button reads
                 Resume Session while this is up, and the sentence saying what a
@@ -6969,6 +7081,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 ? <CtaBright label={nextLabel} onPress={next} />
                 : <Ghost label={nextLabel} onPress={next} />}
             </View>
+            {finishEarlyRow}
             {pauseRow}
             {liveBlock}
           </>

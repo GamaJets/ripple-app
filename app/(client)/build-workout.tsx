@@ -39,15 +39,21 @@
 // error. "There are no triceps exercises" must never be what a member is told
 // about a read that did not happen.
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useBackFromHub } from '../../src/ui/backTo';
 import {
-  Cta, Flag, Notice, PageHead, PartialRead, Rule, Section, SectionHead, Segmented, TonedChip,
+  Cta, Flag, Ghost, Notice, PageHead, PartialRead, Rule, Section, SectionHead, Segmented, TonedChip,
 } from '../../src/ui/kit';
+import { useClientData } from '../../src/ui/clientData';
+// The injury check and the swap, both of them out of src/lib/builtWorkout.ts
+// rather than written again here. `checkInjury` will not answer "nothing is
+// flagged" without being handed the status the disclosure arrived under, which
+// is the one thing this screen must not get wrong.
+import { checkInjury, nextAlternative } from '../../src/lib/builtWorkout';
 import { groupTone } from '../../src/ui/groupTone';
 import { MUSCLE_GROUPS } from '../../src/ui/MuscleGroupPicker';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
@@ -125,6 +131,11 @@ export default function BuildWorkout() {
    *  chip must not silently rewrite the workout already on screen underneath
    *  it, which is a page that changes while it is being read. */
   const [built, setBuilt] = useState<{ targets: string[]; noKit: boolean } | null>(null);
+  /** One movement swapped for another, by the generated row's own key. Cleared
+   *  whenever a new workout is built, because a key from the last build names a
+   *  row that is no longer on screen. */
+  const [swaps, setSwaps] = useState<Record<string, string>>({});
+  const cd = useClientData();
 
   const toggle = (x: Target) => {
     const k = keyOf(x);
@@ -214,17 +225,48 @@ export default function BuildWorkout() {
           a11yLabel={chosen.length === 0
             ? 'Build my workout. Pick at least one muscle or muscle group first'
             : `Build a workout for ${chosen.map((k) => parse(k).name).join(', ')}`}
-          onPress={() => setBuilt({ targets: chosen, noKit: kit === 'none' })}
+          onPress={() => { setSwaps({}); setBuilt({ targets: chosen, noKit: kit === 'none' }); }}
         />
       </Section>
     </>
   );
+
+  /* ── what a built workout IS, and therefore what deleting one means ──────
+     Nothing on this screen is saved and nothing is assigned. `built` is state
+     in this component — the targets the member asked for and the equipment
+     answer — and `plan` is recomputed from it. There is no row in any table,
+     nothing on a coach's dashboard and nothing on this phone's disk; the
+     session exists while the screen is open.
+
+     So "delete" is honest here as a discard and would be dishonest as
+     anything more: nothing is being removed from a record, because the record
+     was never written. What it does destroy is real all the same — the built
+     session and every replacement made in it — so it is confirmed first and
+     the confirm says what goes. */
+  const discard = () => {
+    Alert.alert(
+      'Delete This Workout?',
+      'The session below goes, along with any movements you replaced in it. It was never saved to your log or sent to your coach, so there is nothing else to remove. Your picks stay on screen and you can build it again.',
+      [
+        { text: 'Keep It', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => { setSwaps({}); setBuilt(null); } },
+      ],
+    );
+  };
 
   /* ── the workout it built ────────────────────────────────────────────── */
   const result = () => {
     if (!plan) return null;
     const { program, coverage } = plan;
     const note = targetedCoverageNote(coverage);
+    /* Whether the disclosure these rows are checked against actually arrived.
+       `cd.injuries` is `[]` under a failed read exactly as it is for a member
+       who has disclosed nothing, and `injuryFlag` returns null for both — so
+       without this the screen draws a checked, clear session for the member it
+       knows least about. Same two arms the Train screen draws, in the same
+       order, and 'partial' counts as unread there and here. */
+    const injLoading = cd.profileStatus === 'loading';
+    const injRead = isWhole(cd.profileStatus);
     return (
       <>
         <Rule />
@@ -247,6 +289,21 @@ export default function BuildWorkout() {
               quietly replaced with a muscle nobody asked for. */}
           {note ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{note}</Flag> : null}
 
+          {/* Above the movements, because it is a fact about every one of
+              them. Three answers and not two: a read still in flight, a read
+              that failed, and a read that landed — and only the third one
+              lets a missing caution below mean anything at all. */}
+          {injLoading ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
+              Reading what you have disclosed — nothing below has been checked against your injuries yet.
+            </Flag>
+          ) : !injRead ? (
+            <View style={{ marginTop: sp.md }}>
+              <Notice tone={t.crit} kicker="Injury" title="Your Injuries Could Not Be Read"
+                note="So no movement below has been checked against them, and none carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or leave it out, and pull down to try again." />
+            </View>
+          ) : null}
+
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
             Movements from the exercise catalogue · sets and reps are a starting point, not a
             prescription from a coach
@@ -262,18 +319,34 @@ export default function BuildWorkout() {
                 note={`${d.exercises.length === 1 ? '1 movement' : `${d.exercises.length} movements`} · ${d.exercises.reduce((n, e) => n + e.sets, 0)} sets`}
               />
               {d.exercises.map((e, ei) => {
-                const row = byName.get(e.name);
-                const label = row?.display.text ?? e.name;
+                // The movement this row currently holds: the generated one, or
+                // the one the member replaced it with. English either way — it
+                // is the identity the exercise screen resolves.
+                const name = swaps[e.key] || e.name;
+                const row = byName.get(name);
+                const label = row?.display.text ?? name;
+                // The catalogue's group for the movement ACTUALLY on the row.
+                // A replacement can sit under a different group from the one it
+                // replaced, and the injury check has to be asked about the
+                // movement in front of the member.
+                const group = (row?.group || '').trim() || e.group;
+                // Everything the day currently holds, so a second replacement
+                // out of a two-deep pool cannot put the same movement on the
+                // day twice.
+                const used = d.exercises.map((x) => swaps[x.key] || x.name);
+                const alt = nextAlternative(e.alternatives, used, group, cd.injuries, cd.profileStatus);
+                const chk = checkInjury(name, group, cd.injuries, cd.profileStatus);
                 const alts = e.alternatives
+                  .filter((a) => !used.some((u) => u.trim().toLowerCase() === a.trim().toLowerCase()))
                   .map((a) => byName.get(a)?.display.text ?? a)
                   .join(', ');
                 return (
+                  <View key={e.key} style={{ borderTopWidth: ei === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <Pressable
-                    key={e.key}
                     // The ENGLISH name is the identity and is what the exercise
                     // screen resolves; `display` is only ever what the line
                     // says. A push carrying a translated name finds nothing.
-                    onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: e.name, from: 'clientBuildWorkout' } })}
+                    onPress={() => router.push({ pathname: '/(client)/exercise', params: { name, from: 'clientBuildWorkout' } })}
                     accessibilityRole="button"
                     // The label REPLACES every line beneath it, so the sets,
                     // the reps, the group and the alternatives are all in it.
@@ -281,7 +354,8 @@ export default function BuildWorkout() {
                     accessibilityLabel={[
                       label,
                       `${e.sets} sets of ${e.reps}`,
-                      e.group,
+                      group,
+                      chk.state === 'flagged' ? chk.reason : null,
                       alts ? `Or instead: ${alts}` : null,
                       'Opens how to do it',
                     ].filter(Boolean).join('. ')}
@@ -289,13 +363,18 @@ export default function BuildWorkout() {
                     style={{
                       flexDirection: 'row', alignItems: 'center', gap: sp.md,
                       paddingVertical: sp.md, minHeight: MIN_TARGET,
-                      borderTopWidth: ei === 0 ? 0 : hairline, borderTopColor: t.ring,
                     }}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{label}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{label}</Text>
+                        {/* The same mark the Train screen puts on a flagged
+                            movement, in the same colour. One visual language
+                            for one fact. */}
+                        {chk.state === 'flagged' ? <Icon name="heart" size={13} color={t.s3} /> : null}
+                      </View>
                       <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
-                        {e.sets} × {e.reps} · {e.group}
+                        {e.sets} × {e.reps} · {group}
                       </Text>
                       {/* Real sibling movements from the same pool. Absent,
                           rather than padded, when the pool had none left. */}
@@ -305,11 +384,59 @@ export default function BuildWorkout() {
                     </View>
                     <Text style={{ ...ty.label, color: t.ink3 }}>{FORWARD_CHAR}</Text>
                   </Pressable>
+
+                  {/* ── the caution, and what it does and does not claim ──
+                      Drawn only when the disclosure was READ and something in
+                      it is loaded by this movement. It says the movement loads
+                      an area the member reported; it never says a movement is
+                      safe, approved or fine, and an unflagged row says nothing
+                      at all rather than saying it is clear. `injuryFlag`'s own
+                      sentence, unsoftened. The banner above covers the two
+                      cases where there is no check to report. */}
+                  {chk.state === 'flagged' ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.md }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
+                      <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+                        {chk.reason}. Ease off, keep it pain-free{alt ? ', or replace it' : ''}.
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {/* Replace, out of THIS target's own pool — the movements
+                      `targetedProgram` attached, which are real catalogue rows
+                      for the same muscle and were never already prescribed. A
+                      pool the day has exhausted gets the sentence rather than a
+                      button that would do nothing. */}
+                  <View style={{ marginBottom: sp.md, alignSelf: 'flex-start' }}>
+                    {alt ? (
+                      <Ghost label="Replace" icon="swap"
+                        a11yLabel={`Replace ${label} with ${byName.get(alt)?.display.text ?? alt}`}
+                        onPress={() => setSwaps((prev) => ({ ...prev, [e.key]: alt }))} />
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>
+                        No other {d.focus.toLowerCase()} movement left in the catalogue to swap this for.
+                      </Text>
+                    )}
+                  </View>
+                  </View>
                 );
               })}
             </Section>
           </View>
         ))}
+
+        {/* ── getting rid of it ───────────────────────────────────────────
+            Last, under the whole session, because it is about the whole
+            session and not about any one movement. */}
+        <Rule />
+        <Section>
+          <Ghost label="Delete This Workout" icon="minus" onPress={discard}
+            a11yLabel="Delete this workout. Asks first" />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            This session was built on your phone and has not been saved anywhere. Deleting it clears
+            it from this screen and nothing else.
+          </Text>
+        </Section>
       </>
     );
   };
