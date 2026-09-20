@@ -124,9 +124,17 @@ export interface RecipeSearch {
  * params may be a fresh object every render; they are compared by value.
  *
  * Called by the member's Meals list (app/(client)/nutrition.tsx), behind its
- * "Search Real Recipes" row. The coach's Nutrition Plan does not call it yet:
- * what a coach saves for a client has to be a `RecipeRef`, and the plan column
- * cannot hold one — see docs/RECIPES-SPOONACULAR.md.
+ * "Search Real Recipes" row, and by the coach's Nutrition Plan
+ * (app/(trainer)/client-nutrition.tsx), behind the Recipes segment of its meal
+ * sheet. What a coach saves for a client is a `RecipeRef` and nothing else:
+ * `coach_nutrition.recipe_refs` holds the four keys the licence allows and a
+ * CHECK refuses the rest — see src/lib/coachRecipeRefs.ts, which is the only
+ * way in or out of that column, and docs/RECIPES-SPOONACULAR.md.
+ *
+ * The coach's call is gated by `coachRecipeSearch`, which hands this hook
+ * `null` unless the client's profile was read WHOLE. An allergen list that did
+ * not come back is not a client with no allergens, so nothing is searched and
+ * nothing is spent until it has.
  */
 export function useRecipeSearch(params: RecipeSearchParams | null): RecipeSearch {
   const [result, setResult] = useState<RecipeSearchResult | null>(null);

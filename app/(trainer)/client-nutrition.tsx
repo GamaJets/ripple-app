@@ -63,7 +63,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // The instant the energy plan's deadline is measured against, recomputed at
 // local midnight, on foreground and on focus. See the memo below.
 import { useNow } from '../../src/ui/today';
-import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
@@ -91,6 +91,16 @@ import {
   planDayOverride, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
   type CoachMealPlan,
 } from '../../src/lib/mealPlan';
+import {
+  RECIPE_ATTRIBUTION, RECIPE_DISCLAIMER, portionRecipe,
+} from '../../src/lib/recipes';
+import {
+  coachRecipeRefAt, coachRecipeSearch, copyCoachRecipeDay, hasCoachRecipes,
+  withCoachRecipeAt, withoutCoachRecipeAt, type CoachRecipeRefs,
+} from '../../src/lib/coachRecipeRefs';
+import { useRecipeSearch } from '../../src/ui/useRecipeSearch';
+import { GuardedImage } from '../../src/ui/GuardedImage';
+import { hitSlopFor } from '../../src/lib/a11y';
 import type { Diet, Goal } from '../../src/lib/types';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { FORWARD_ARROW, FORWARD_ICON } from '../../src/ui/direction';
@@ -104,6 +114,10 @@ const DIETS: readonly Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const GOALS: readonly Goal[] = ['fatloss', 'tone', 'muscle'];
 const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
 const ALLERGEN_LABEL = new Map(ALLERGENS.map((a) => [a.id, a.label]));
+
+/** The recipe library's backlink. Reported rather than swallowed, so a handset
+ *  with no browser for it is a line in telemetry and not a dead tap. */
+const openLink = (where: string, url: string) => { Linking.openURL(url).catch((e) => reportError(where, e)); };
 
 /** The client's row, as much of it as this screen can use. Every field is
  *  nullable because every one of them is nullable in the table, and a missing
@@ -196,6 +210,14 @@ export default function ClientNutrition() {
   const [draft, setDraft] = useState<CoachMealPlan | null>(null);
   const [dayIdx, setDayIdx] = useState<number>(() => planDayIndex(isoToday(new Date())) ?? 0);
   const [pick, setPick] = useState<{ pos: number; slot: Slot } | null>(null);
+  // The real recipes pinned into the draft week, day → position. Null until
+  // the client's row has been read, exactly as `draft` is null until then: an
+  // unread column is not a client with no recipes, and seeding `{}` over one
+  // would send an empty map back and unpin what the coach had chosen.
+  const [refs, setRefs] = useState<CoachRecipeRefs | null>(null);
+  // A search costs money, so it takes a tap. False on every open of the sheet
+  // and on every change of slot — see `choose`.
+  const [recipesOpen, setRecipesOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [sending, setSending] = useState(false);
 
@@ -208,7 +230,7 @@ export default function ClientNutrition() {
   const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setProfileStatus('loading'); setGoalStatus('loading');
-    setProfile(null); setSeries(null); setGoals([]); setDraft(null);
+    setProfile(null); setSeries(null); setGoals([]); setDraft(null); setRefs(null);
     const today = isoToday(new Date());
 
     // A client the coach typed in by hand has a `coach_clients` row and no user
@@ -365,7 +387,7 @@ export default function ClientNutrition() {
     if (!USE_SUPABASE) return;
     if (!picked) {
       wanted.current = null;
-      setProfile(null); setSeries(null); setGoals([]); setDraft(null);
+      setProfile(null); setSeries(null); setGoals([]); setDraft(null); setRefs(null);
       setProfileStatus('ready'); setGoalStatus('ready');
       return;
     }
@@ -433,10 +455,15 @@ export default function ClientNutrition() {
   // failure as printing "no plan set" over a read that never came back. Under
   // a failed read there is no draft at all and the notice above says why.
   const stored = adjust?.plan ?? null;
+  const storedRefs = adjust?.recipeRefs;
   useEffect(() => {
     if (!input || cn.status !== 'ready') return;
     setDraft((d) => d ?? stored ?? seedPlan(input, new Date().toISOString()));
-  }, [input, stored, cn.status]);
+    // Seeded beside the week it belongs to and under the same status rule.
+    // `?? x` and not an assignment, so a recipe the coach has just pinned is
+    // not thrown away by a read that was already in flight when they did.
+    setRefs((x) => x ?? storedRefs ?? {});
+  }, [input, stored, storedRefs, cn.status]);
 
   const stale = useMemo(
     () => (stored && profile?.diet && profile.mealsPerDay
@@ -465,10 +492,60 @@ export default function ClientNutrition() {
     return searchMeals(profile.diet, pick.slot, query, 30, profile.avoid);
   }, [pick, query, profile]);
 
+  /** The row the sheet is about to replace. Its `K` is the slot's share, so it
+   *  is what the recipe search is narrowed by and what a result is portioned
+   *  to. It stays the GENERATED row even where a recipe is already pinned:
+   *  a pinned recipe leaves the plan's own meal underneath it, which is what
+   *  the client's app falls back to when the recipe cannot be read. */
+  const picking = pick && built ? built.plan[pick.pos] ?? null : null;
+
+  // ── Real recipes, searched on the CLIENT's restrictions ─────────────────
+  //
+  // `coachRecipeSearch` decides whether to ask at all, and it is tested in
+  // src/lib/coachRecipeRefs.test.ts because the answer has to be "no" whenever
+  // this client's profile did not come back whole. A search filtered by an
+  // empty `avoid` would list dishes as chosen for somebody whose allergens
+  // nobody has read — the same substitution `guardPlan` withholds the send
+  // for, made one step earlier so it is never even drawn.
+  //
+  // Null is also what costs nothing. Spoonacular's Cook plan BILLS an overrun
+  // at $0.005 a point rather than refusing it, so every avoidable request is a
+  // charge: nothing is asked until the coach taps Recipes, the 500 ms debounce
+  // and the three-character minimum are the hook's, and a failed search is
+  // repeated only by a tap on Try Again.
+  const recipeParams = coachRecipeSearch({
+    open: recipesOpen,
+    profileStatus,
+    slot: pick?.slot ?? null,
+    diet: profile?.diet ?? null,
+    // Null is UNREAD. An empty array is a client who was read and avoids
+    // nothing, and only that one may be searched against.
+    avoid: profile ? profile.avoid : null,
+    query,
+    targetKcal: picking?.K ?? null,
+    number: 8,
+  });
+  const recipes = useRecipeSearch(recipeParams);
+  const found = recipes.result;
+  const recipeRows = found && (found.status === 'ready' || found.status === 'partial')
+    ? found.meals.map((m) => portionRecipe(m, picking?.K ?? null, pick?.pos ?? 0))
+    : [];
+  /** What the coach pinned at this day's slot, drawn instead of the generated
+   *  meal's name. The ref carries a title and an image and no figures — that
+   *  is the whole licence — so nothing here is re-fetched to draw a row. */
+  const refAt = (pos: number) => coachRecipeRefAt(refs ?? {}, dayIdx, pos);
+  const dayRecipes = Object.keys(refs?.[dayIdx] ?? {}).length;
+  const weekHasRecipes = hasCoachRecipes(refs ?? {});
+
   const send = async () => {
     if (!picked || !draft || !guard.allowed || sending) return;
     setSending(true);
-    const ok = await cn.setPlan(picked, { ...draft, writtenAt: new Date().toISOString() });
+    // The refs go WITH the week, in the one statement that writes it, under
+    // the one guard that allows it. There is deliberately no other way to put
+    // a recipe on a client: a second write here would be a second door past
+    // `guardPlan`, and a recipe assigned over an allergen list that could not
+    // be read is the assignment this screen exists to refuse.
+    const ok = await cn.setPlan(picked, { ...draft, writtenAt: new Date().toISOString() }, refs ?? {});
     setSending(false);
     if (ok) Alert.alert('Sent', `${who} has the week on their Meals tab.`);
     else Alert.alert('Not Sent', 'The plan did not reach the server, so nothing has changed on their phone. Check your connection and try again.');
@@ -499,17 +576,24 @@ export default function ClientNutrition() {
    * and no arc while there is no `built`: the notices above the rings say
    * which read is missing, and a ring drawn around a figure this screen does
    * not have would be the placeholder body the header refuses.
+   *
+   * A day holding a pinned recipe has no arc either, and for the same rule.
+   * The target inside the ring is the client's own and stands; the arc is the
+   * COMPOSED day, and a recipe's figures are not stored — they are read from
+   * the library when the dish is opened. Drawing `built.tot` over a slot the
+   * recipe has replaced would total a meal the client is not going to eat.
    */
+  const composedWhole = !!built && dayRecipes === 0;
   const rings: { label: string; figure: string | null; arc: number | null; spoken: string }[] = built
     ? [
-      { label: 'Calories', figure: num(built.target.kcal), arc: built.tot.K / (built.target.kcal || 1),
-        spoken: `Calories, target ${num(built.target.kcal)} kcal a day. The day you have composed comes to ${num(Math.round(built.tot.K))}` },
-      { label: 'Protein', figure: `${num(built.target.protein)} g`, arc: built.tot.P / (built.target.protein || 1),
-        spoken: `Protein, target ${num(built.target.protein)} grams. The day you have composed comes to ${num(Math.round(built.tot.P))}` },
-      { label: 'Carbs', figure: `${num(built.target.carbs)} g`, arc: built.tot.C / (built.target.carbs || 1),
-        spoken: `Carbs, target ${num(built.target.carbs)} grams. The day you have composed comes to ${num(Math.round(built.tot.C))}` },
-      { label: 'Fat', figure: `${num(built.target.fat)} g`, arc: built.tot.F / (built.target.fat || 1),
-        spoken: `Fat, target ${num(built.target.fat)} grams. The day you have composed comes to ${num(Math.round(built.tot.F))}` },
+      { label: 'Calories', figure: num(built.target.kcal), arc: composedWhole ? built.tot.K / (built.target.kcal || 1) : null,
+        spoken: `Calories, target ${num(built.target.kcal)} kcal a day${composedWhole ? `. The day you have composed comes to ${num(Math.round(built.tot.K))}` : ''}` },
+      { label: 'Protein', figure: `${num(built.target.protein)} g`, arc: composedWhole ? built.tot.P / (built.target.protein || 1) : null,
+        spoken: `Protein, target ${num(built.target.protein)} grams${composedWhole ? `. The day you have composed comes to ${num(Math.round(built.tot.P))}` : ''}` },
+      { label: 'Carbs', figure: `${num(built.target.carbs)} g`, arc: composedWhole ? built.tot.C / (built.target.carbs || 1) : null,
+        spoken: `Carbs, target ${num(built.target.carbs)} grams${composedWhole ? `. The day you have composed comes to ${num(Math.round(built.tot.C))}` : ''}` },
+      { label: 'Fat', figure: `${num(built.target.fat)} g`, arc: composedWhole ? built.tot.F / (built.target.fat || 1) : null,
+        spoken: `Fat, target ${num(built.target.fat)} grams${composedWhole ? `. The day you have composed comes to ${num(Math.round(built.tot.F))}` : ''}` },
     ]
     : ['Calories', 'Protein', 'Carbs', 'Fat'].map((label) => ({
       label, figure: null, arc: null, spoken: `${label} target not known yet`,
@@ -545,7 +629,7 @@ export default function ClientNutrition() {
    * rows open it on their own slot; the Recipes segment opens it on the first,
    * which is what the client's own Recipes segment does.
    */
-  const choose = (pos: number, slot: Slot) => { setQuery(''); setPick({ pos, slot }); };
+  const choose = (pos: number, slot: Slot) => { setQuery(''); setRecipesOpen(false); setPick({ pos, slot }); };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -713,11 +797,20 @@ export default function ClientNutrition() {
                         ))}
                       </View>
                       {built ? (
-                        <Expandable title="How These Are Worked Out">
-                          <Text style={{ ...ty.caption, color: t.ink3 }}>
-                            Worked out from their weight, body fat, activity level and goal, then moved by the adjustment you set. Each arc is how much of that target the day below supplies.
-                          </Text>
-                        </Expandable>
+                        <>
+                          {dayRecipes > 0 ? (
+                            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                              {PLAN_WEEKDAYS[dayIdx]} has {num(dayRecipes)} real {dayRecipes === 1 ? 'recipe' : 'recipes'} in it, so there is no arc:
+                              a recipe&rsquo;s figures are read from the library when it is opened and are not stored here.
+                              The targets inside the rings are still theirs.
+                            </Text>
+                          ) : null}
+                          <Expandable title="How These Are Worked Out">
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              Worked out from their weight, body fat, activity level and goal, then moved by the adjustment you set. Each arc is how much of that target the day below supplies.
+                            </Text>
+                          </Expandable>
+                        </>
                       ) : (
                         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
                           A dash is a target this screen cannot work out yet; the notes above say which read is missing.
@@ -754,32 +847,80 @@ export default function ClientNutrition() {
                           {profile?.avoid.length ? ` without ${profile.avoid.map((a) => (ALLERGEN_LABEL.get(a) ?? a).toLowerCase()).join(', ')}` : ''}.
                           Tap a meal to choose another.
                         </Text>
-                        {built.plan.map((m, i) => (
+                        {built.plan.map((m, i) => {
+                          // What the coach pinned here, read back off the
+                          // column. Four keys — a title and an image address
+                          // — which is exactly enough to draw the row and is
+                          // all the licence lets Repple keep. Nothing is
+                          // fetched to paint this, so a week of recipes opens
+                          // for nothing.
+                          const ref = refAt(i);
+                          return (
                           <View key={`${dayIdx}-${i}`}>
                             <Rule />
                             <Pressable onPress={() => choose(i, m.slot)} accessibilityRole="button"
                               // Assembled for the ear: a label on a Pressable
                               // REPLACES its children, and the macros are why a
                               // coach opens the row.
-                              accessibilityLabel={`${m.slot}: ${m.n}. ${num(m.K)} kcal, ${num(m.P)} protein, ${num(m.C)} carbs, ${num(m.F)} fat at ${m.servings} servings. Choose a different meal`}
+                              accessibilityLabel={ref
+                                ? `${m.slot}: ${ref.title}, a recipe. Its figures are read from the recipe library on their phone. Choose a different meal`
+                                : `${m.slot}: ${m.n}. ${num(m.K)} kcal, ${num(m.P)} protein, ${num(m.C)} carbs, ${num(m.F)} fat at ${m.servings} servings. Choose a different meal`}
                               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                               {/* The dish's own glyph in a circle where the board
                                   puts a photograph. There is no photography of a
-                                  generated meal, and none is invented. */}
-                              <View style={{ width: 48, height: 48, borderRadius: radius.md, backgroundColor: t.data.orangeSoft, alignItems: 'center', justifyContent: 'center' }}>
+                                  generated meal, and none is invented — but a
+                                  real recipe HAS one, drawn OVER the tile so the
+                                  glyph shows while it loads and if it fails.
+                                  `memory`, not `disk`: the terms let the image
+                                  URL be kept and say nothing that lets the
+                                  bytes be. */}
+                              <View style={{ width: 48, height: 48, borderRadius: radius.md, backgroundColor: t.data.orangeSoft, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                                 <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
+                                {ref?.image ? (
+                                  <GuardedImage source={{ uri: ref.image }} contentFit="cover" cachePolicy="memory"
+                                    style={{ position: 'absolute', width: 48, height: 48 }} />
+                                ) : null}
                               </View>
                               <View style={{ flex: 1, minWidth: 0 }}>
                                 <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{m.slot}</Text>
-                                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{m.n}</Text>
-                                <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
-                                  {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} · {m.servings}× serving
-                                </Text>
+                                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{ref ? ref.title : m.n}</Text>
+                                {ref ? (
+                                  // No macros on a recipe row. They are not
+                                  // stored — the client's app reads them from
+                                  // the library when they open the dish — and
+                                  // the generated meal's figures drawn under a
+                                  // recipe's name would be a number for a plate
+                                  // nobody is serving.
+                                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                                    Recipe · its own figures and ingredients are read on their phone
+                                  </Text>
+                                ) : (
+                                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+                                    {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} · {m.servings}× serving
+                                  </Text>
+                                )}
                               </View>
                               <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                             </Pressable>
                           </View>
-                        ))}
+                          );
+                        })}
+                        {/* Wherever a recipe is drawn: the library's backlink
+                            as a link (their terms ask for it on the free plan
+                            and it is drawn on every plan — see
+                            RECIPE_ATTRIBUTION), and the disclaimer their terms
+                            make Repple's job, beside the figures and allergen
+                            marks it is about. */}
+                        {weekHasRecipes ? (
+                          <View style={{ marginTop: sp.md }}>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>{RECIPE_DISCLAIMER}</Text>
+                            <Pressable onPress={() => openLink('clientNutrition.recipeAttribution', RECIPE_ATTRIBUTION.url)}
+                              accessibilityRole="link" accessibilityLabel={`${RECIPE_ATTRIBUTION.text}. Opens spoonacular.com`}
+                              hitSlop={hitSlopFor(20)} style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                              <Text style={{ ...ty.caption, ...font('600'), color: t.brand }}>{RECIPE_ATTRIBUTION.text}</Text>
+                            </Pressable>
+                          </View>
+                        ) : null}
                       </Section>
                     ) : null}
 
@@ -789,7 +930,13 @@ export default function ClientNutrition() {
                           <SectionHead title="Fill the Week" note="from this day" />
                           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                             {PLAN_WEEKDAYS.map((d, i) => i === dayIdx ? null : (
-                              <Pressable key={d} onPress={() => setDraft(copyPlanDay(draft, dayIdx, i))}
+                              <Pressable key={d} onPress={() => {
+                                setDraft(copyPlanDay(draft, dayIdx, i));
+                                // The recipes go with the meals. Copying only
+                                // the meals would leave the target day showing
+                                // the generated dish the coach had replaced.
+                                setRefs((x) => copyCoachRecipeDay(x ?? {}, dayIdx, i));
+                              }}
                                 accessibilityRole="button" accessibilityLabel={`Copy ${PLAN_WEEKDAYS[dayIdx]} to ${d}`}
                                 style={chip(false)}>
                                 <Text style={{ ...ty.micro, color: t.ink2 }}>{FORWARD_ARROW} {d}</Text>
@@ -961,6 +1108,10 @@ export default function ClientNutrition() {
                 const cur = pick && built ? built.plan[pick.pos] : null;
                 if (!draft || !pick || !cur || !profile?.diet) return;
                 setDraft(setPlanMeal(draft, dayIdx, pick.pos, swapIndex(profile.diet, cur.slot, cur.idx, profile.avoid)));
+                // Stepping to the next catalogue dish means this slot is a
+                // catalogue dish again. Leaving the pin on would show the
+                // recipe and send the swap, which is two different dinners.
+                setRefs((x) => withoutCoachRecipeAt(x ?? {}, dayIdx, pick.pos));
                 setPick(null);
               }} />
               <Ghost label="Close" onPress={() => setPick(null)} />
@@ -972,18 +1123,136 @@ export default function ClientNutrition() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2, marginTop: sp.lg }}>
               <Icon name="search" size={17} color={t.ink3} />
               <TextInput
-                value={query} onChangeText={setQuery} placeholder="Search this slot" placeholderTextColor={t.ink3}
-                autoCorrect={false} accessibilityLabel="Search meals" returnKeyType="search" clearButtonMode="while-editing"
+                value={query} onChangeText={setQuery} placeholder={recipesOpen ? 'Search recipes' : 'Search this slot'} placeholderTextColor={t.ink3}
+                autoCorrect={false} accessibilityLabel={recipesOpen ? 'Search recipes' : 'Search meals'} returnKeyType="search" clearButtonMode="while-editing"
                 style={{ flex: 1, ...ty.label, color: t.ink, paddingVertical: 0 }}
               />
             </View>
+            {/* ── Catalogue or Recipes ────────────────────────────────
+                The third word on the board's bar, here rather than on the
+                screen behind it: a recipe is chosen for ONE slot, and this is
+                the sheet that slot opens. Recipes is an ACT — tapping it is
+                what spends the first points, and every open of this sheet
+                starts back on Catalogue (see `choose`) so a coach walking
+                down a day is not billed for six searches nobody asked for. */}
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+              {([['Catalogue', false], ['Recipes', true]] as const).map(([label, on]) => (
+                <Pressable key={label} onPress={() => setRecipesOpen(on)} accessibilityRole="button"
+                  accessibilityState={{ selected: recipesOpen === on }}
+                  accessibilityLabel={on ? 'Search real recipes' : 'Meals from their catalogue'}
+                  style={chip(recipesOpen === on)}>
+                  <Text style={{ ...ty.micro, color: recipesOpen === on ? t.brandInk : t.ink2 }}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
-              {pick && profile?.diet
-                ? `${num(catalogSize(profile.diet, pick.slot, profile.avoid))} meals in this slot for them. ${query.trim() ? `${num(results.length)} shown for “${query.trim()}”.` : `${num(results.length)} listed, spread across the whole catalogue.`}`
-                : ''}
+              {recipesOpen
+                ? 'Real recipes, filtered by their diet and what they avoid, and portioned to this slot. A search waits until you stop typing and needs three letters, because each one costs the gym a little.'
+                : (pick && profile?.diet
+                  ? `${num(catalogSize(profile.diet, pick.slot, profile.avoid))} meals in this slot for them. ${query.trim() ? `${num(results.length)} shown for “${query.trim()}”.` : `${num(results.length)} listed, spread across the whole catalogue.`}`
+                  : '')}
             </Text>
             <ScrollView style={{ marginTop: sp.md }} showsVerticalScrollIndicator={false}>
-              {results.map((g) => {
+              {recipesOpen ? (
+                <>
+                  {/* THE REFUSAL. `coachRecipeSearch` handed the hook null,
+                      so nothing was asked and nothing was spent. Said in
+                      words rather than drawn as an empty list, which would
+                      read as "the library has nothing for them". */}
+                  {!recipeParams ? (
+                    <Notice tone={t.warn} kicker="Recipes" title="Nothing Has Been Searched"
+                      note={`${who}'s diet and what they avoid have not been read, so there is nothing to filter a recipe search by. A list that could not be filtered is not a list of dishes that are safe for them.`} />
+                  ) : null}
+                  {recipeParams && recipes.loading ? (
+                    <Text style={{ ...ty.body, color: t.ink3, paddingVertical: sp.lg }}>Searching the recipe library…</Text>
+                  ) : null}
+                  {found && (found.status === 'limited' || found.status === 'error') ? (
+                    <View style={{ paddingVertical: sp.sm }}>
+                      <Notice tone={t.warn} kicker="Recipes" title="Nothing Has Been Listed" note={found.message} />
+                      {/* The ONLY thing that repeats a failed search. There
+                          are no automatic retries: one against a spent quota
+                          cannot succeed and one against a rate limit makes it
+                          worse, and both are billed. */}
+                      <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                        <Ghost label="Try Again" onPress={recipes.refresh} />
+                      </View>
+                    </View>
+                  ) : null}
+                  {found?.status === 'not-configured' ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.lg }}>{found.message}</Text>
+                  ) : null}
+                  {recipeRows.map((m) => {
+                    const pinnedHere = !!pick && refAt(pick.pos)?.sourceId === m.sourceId;
+                    return (
+                      <Pressable key={`r${m.sourceId}`} accessibilityRole="button"
+                        accessibilityLabel={`${m.n}${pinnedHere ? ', in the plan' : ''}. ${num(m.K)} kcal, ${num(m.P)} protein, ${num(m.C)} carbs, ${num(m.F)} fat at ${m.servings} servings${m.flagged.length ? `. Contains ${m.flagged.map((a) => (ALLERGEN_LABEL.get(a) ?? a).toLowerCase()).join(' and ')}` : ''}. Put this recipe in their plan`}
+                        onPress={() => {
+                          if (!pick) return;
+                          // The DISH goes in and the reference comes out:
+                          // `withCoachRecipeAt` keeps the four keys the
+                          // licence allows and drops the figures, the
+                          // ingredients and the method on the floor. The
+                          // generated meal stays in `draft` underneath, which
+                          // is what the client's app shows if the recipe
+                          // cannot be read. Nothing is sent until Send.
+                          setRefs((x) => withCoachRecipeAt(x ?? {}, dayIdx, pick.pos, m));
+                          setPick(null);
+                        }}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                        <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                          <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
+                          {m.image ? (
+                            <GuardedImage source={{ uri: m.image }} contentFit="cover" cachePolicy="memory"
+                              style={{ position: 'absolute', width: 48, height: 48 }} />
+                          ) : null}
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{m.n}</Text>
+                          {pinnedHere ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the Plan</Text> : null}
+                          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+                            {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} — at {m.servings}× serving
+                          </Text>
+                          {/* The library's own filter let this through and
+                              Repple's re-check did not. On the ROW somebody
+                              is about to pin, not only at the top of the
+                              sheet: crit in the mark, the words in ink, so
+                              colour is never the only channel. */}
+                          {m.flagged.length ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                              <Text style={{ ...ty.caption, color: t.ink2 }}>
+                                Contains {m.flagged.map((a) => (ALLERGEN_LABEL.get(a) ?? a).toLowerCase()).join(' and ')}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+                      </Pressable>
+                    );
+                  })}
+                  {found?.status === 'partial' ? (
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
+                      {num(found.dropped)} {found.dropped === 1 ? 'recipe' : 'recipes'} could not be read and {found.dropped === 1 ? 'is' : 'are'} not listed.
+                    </Text>
+                  ) : null}
+                  {found?.status === 'ready' && !recipeRows.length ? (
+                    <Text style={{ ...ty.body, color: t.ink3, paddingVertical: sp.lg }}>
+                      No recipes matched that for their diet with their allergens taken out.
+                    </Text>
+                  ) : null}
+                  {recipeRows.length ? (
+                    <View style={{ marginTop: sp.md }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{RECIPE_DISCLAIMER}</Text>
+                      <Pressable onPress={() => openLink('clientNutrition.recipeAttribution', RECIPE_ATTRIBUTION.url)}
+                        accessibilityRole="link" accessibilityLabel={`${RECIPE_ATTRIBUTION.text}. Opens spoonacular.com`}
+                        hitSlop={hitSlopFor(20)} style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                        <Text style={{ ...ty.caption, ...font('600'), color: t.brand }}>{RECIPE_ATTRIBUTION.text}</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </>
+              ) : null}
+              {!recipesOpen ? results.map((g) => {
                 /** Whether this is the dish already in the slot — said in words
                  *  on the row, the way the client's list marks its plan. */
                 const inPlan = !!(pick && built && built.plan[pick.pos]?.idx === g.idx);
@@ -995,6 +1264,9 @@ export default function ClientNutrition() {
                   onPress={() => {
                     if (!draft || !pick) return;
                     setDraft(setPlanMeal(draft, dayIdx, pick.pos, g.idx));
+                    // Choosing from the catalogue takes any pinned recipe off
+                    // the slot — the same object back when there was none.
+                    setRefs((x) => withoutCoachRecipeAt(x ?? {}, dayIdx, pick.pos));
                     setPick(null);
                   }}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
@@ -1012,8 +1284,8 @@ export default function ClientNutrition() {
                   <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                 </Pressable>
                 );
-              })}
-              {!results.length ? (
+              }) : null}
+              {!recipesOpen && !results.length ? (
                 <Text style={{ ...ty.body, color: t.ink3, paddingVertical: sp.lg }}>
                   Nothing in this slot matches that. Clear the search to see what is available for
                   their diet with their allergens taken out.

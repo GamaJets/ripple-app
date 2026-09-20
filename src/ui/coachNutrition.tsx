@@ -26,6 +26,14 @@
 // screen has to remember to validate it and no two screens can validate it
 // differently. `parsePlan` returning null means the column held nothing this
 // build understands; `status` is still what says whether it was read at all.
+//
+// `recipe_refs` (part 3210) rides on the same row and is parsed the same way,
+// by `readCoachRecipeRefs`. It holds the REFERENCE to a real recipe the coach
+// pinned into a slot — four keys: source, id, title and image address — and
+// never the recipe, whose figures, ingredients and method are fetched again
+// through the `recipes` function every time. src/lib/coachRecipeRefs.ts is the
+// only way in or out, because a spread of a whole dish type-checks as a
+// reference and would write a cache the licence forbids.
 import { createContext, useCallback, useMemo, useRef, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { CoachAdjust } from '../lib/nutrition';
 import { supabase } from '../lib/supabase';
@@ -36,6 +44,7 @@ import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { parsePlan, type CoachMealPlan } from '../lib/mealPlan';
+import { readCoachRecipeRefs, coachRecipeRefsJson, type CoachRecipeRefs } from '../lib/coachRecipeRefs';
 import { reportError } from '../lib/reportError';
 import { writeFailure } from '../lib/wroteRows';
 
@@ -48,6 +57,12 @@ export interface NutritionAdjust extends CoachAdjust {
   /** The week the coach composed, already parsed. Undefined means the row was
    *  never read; null means it was read and holds no plan this build knows. */
   plan?: CoachMealPlan | null;
+  /** The real recipes the coach pinned into that week, day → position. Parsed
+   *  on the way in like `plan`, and for the same reason: no screen should have
+   *  to remember that the column holds a reference and never a recipe. Empty
+   *  is "they pinned none"; UNDEFINED is "the row was never read", and
+   *  `status` is still what tells the two apart. */
+  recipeRefs?: CoachRecipeRefs;
 }
 
 interface CoachNutritionValue {
@@ -61,10 +76,12 @@ interface CoachNutritionValue {
   setAdjust: (clientId: string, patch: Partial<NutritionAdjust>) => Promise<boolean>;
   /** Resolves true only when the adjustment was actually removed server-side. */
   clear: (clientId: string) => Promise<boolean>;
-  /** Send a composed week to the client. Resolves true only when the server
-   *  confirmed a row — a PostgREST write that matched nothing resolves with no
-   *  error at all, so the returned row is the only proof it landed. */
-  setPlan: (clientId: string, plan: CoachMealPlan) => Promise<boolean>;
+  /** Send a composed week to the client, with the recipes pinned into it.
+   *  Resolves true only when the server confirmed a row — a PostgREST write
+   *  that matched nothing resolves with no error at all, so the returned row is
+   *  the only proof it landed. The refs travel WITH the plan, in one statement,
+   *  so a week and the recipes in it cannot half-arrive. */
+  setPlan: (clientId: string, plan: CoachMealPlan, recipeRefs: CoachRecipeRefs) => Promise<boolean>;
   /** Read the adjustments again. Under 'error' every get() null means unknown,
    *  and the screens above then have to withhold the coach's plan entirely —
    *  so there has to be a way to ask a second time. */
@@ -138,7 +155,7 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
         if (error) { setStatus('error'); return; }
         const page = capped(data);
         const m: Record<string, NutritionAdjust> = {};
-        for (const r of page.rows as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined, mealOverride: r.meal_override ?? undefined, plan: parsePlan(r.plan) };
+        for (const r of page.rows as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined, mealOverride: r.meal_override ?? undefined, plan: parsePlan(r.plan), recipeRefs: readCoachRecipeRefs(r.recipe_refs) };
         if (Object.keys(m).length) setMap((prev) => ({ ...prev, ...m }));
         setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); /* stay in-memory, but say so */ }
@@ -220,12 +237,19 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
    * coach whose relationship had ended would otherwise watch this succeed and
    * send nothing.
    */
-  const setPlan = async (clientId: string, plan: CoachMealPlan): Promise<boolean> => {
-    setMap((m) => ({ ...m, [clientId]: { kcalDelta: 0, proteinDelta: 0, carbDelta: 0, fatDelta: 0, ...(m[clientId] ?? {}), plan, mealOverride: undefined } }));
+  const setPlan = async (clientId: string, plan: CoachMealPlan, recipeRefs: CoachRecipeRefs): Promise<boolean> => {
+    // `coachRecipeRefsJson` and not the map: it rebuilds every entry down to
+    // the four keys `coach_nutrition_recipe_refs_shape_ck` allows, and the
+    // CHECK is the licence — Spoonacular's terms let Repple keep a recipe's
+    // id, title and image address and nothing else. A fifth key does not
+    // silently persist, it makes the whole statement fail, and the coach is
+    // told the week did not send.
+    const refs = coachRecipeRefsJson(recipeRefs);
+    setMap((m) => ({ ...m, [clientId]: { kcalDelta: 0, proteinDelta: 0, carbDelta: 0, fatDelta: 0, ...(m[clientId] ?? {}), plan, recipeRefs: readCoachRecipeRefs(refs), mealOverride: undefined } }));
     if (!USE_SUPABASE || !uid) return false;
     try {
       const { data, error } = await supabase.from('coach_nutrition')
-        .upsert({ client_id: clientId, coach_id: uid, plan, meal_override: null }, { onConflict: 'client_id' })
+        .upsert({ client_id: clientId, coach_id: uid, plan, recipe_refs: refs, meal_override: null }, { onConflict: 'client_id' })
         .select('client_id');
       if (error) { reportError('coachNutrition.setPlan', error, { clientId }); return false; }
       if (!data || data.length === 0) {

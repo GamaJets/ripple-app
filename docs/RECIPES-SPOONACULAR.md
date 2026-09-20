@@ -270,13 +270,31 @@ Three things the wiring must respect:
 3. **`recipeSearchOpen`** should be a deliberate act (a "Recipes" segment or the
    search box gaining focus), not the tab mounting. Every search is ~2 points.
 
-**Coach's Nutrition Plan.** The meal picker modal (`pick = { pos, slot }`, rows
-from `searchMeals(profile.diet, pick.slot, query, 30, profile.avoid)`) takes the
-same hook with the CLIENT's `profile.diet` and `profile.avoid`, and
-`targetKcal` = the `K` of the row being replaced. What the coach saves for the
-client must be the `RecipeRef` — the plan column may hold `{ pos → RecipeRef }`
-beside `mealOverride`, never the recipe's figures — and the client's screen
-rehydrates it as above. That is a schema change and was not made here.
+**Coach's Nutrition Plan (built).** The meal picker modal (`pick = { pos, slot }`,
+rows from `searchMeals(profile.diet, pick.slot, query, 30, profile.avoid)`) now
+carries a Catalogue/Recipes segment, and Recipes takes the same hook with the
+CLIENT's `profile.diet` and `profile.avoid` and `targetKcal` = the `K` of the
+row being replaced, rounded to 50.
+
+`src/lib/coachRecipeRefs.ts` is the whole of it, and is the only way in or out
+of `coach_nutrition.recipe_refs` (`supabase/parts/3210-a-coach-can-put-a-real-recipe-in-a-clients-plan.sql`):
+
+- `coachRecipeSearch` returns the params or `null`, and `null` is what an
+  unread client profile gets. A search filtered by an empty `avoid` would list
+  dishes as chosen for somebody whose allergens nobody read — the substitution
+  `guardPlan` withholds the SEND for, refused one step earlier so it is never
+  drawn. `src/lib/coachRecipeRefs.test.ts` is that assertion.
+- `withCoachRecipeAt` takes the DISH and keeps the ref; `coachRecipeRefsJson`
+  rebuilds every entry down to the four keys the CHECK allows, so a
+  `PlannedRecipe` spread cannot reach the column. The refs ride on the same
+  `upsert` as the plan, under the same guard, so there is no second door.
+- The generated meal stays in `plan` underneath a pinned recipe — what the
+  client's app falls back to when the recipe cannot be read — and the coach's
+  day rings lose their arcs while any slot of that day holds one, because a
+  recipe's figures are not stored and `built.tot` would be totalling a plate
+  nobody is serving.
+
+The client's screen rehydrating `recipe_refs` as above is lane 2's.
 
 ## Verifying
 
