@@ -2773,7 +2773,7 @@ export default function Train() {
                               ],
                             )}
                             style={{ paddingHorizontal: 4 }}>
-                            <Text style={{ ...ty.caption, color: t.ink3 }}>clear</Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>Clear</Text>
                           </Pressable>
                         </View>
                       ) : null}
