@@ -375,6 +375,7 @@
     "src/lib/calendarSync.test.ts",
     "src/lib/groupVersions.test.ts",
     "src/lib/timedSets.test.ts",
+    "src/lib/performedTempo.test.ts",
     "src/lib/holdTrend.test.ts",
     "src/lib/muscleVolume.test.ts",
     "src/lib/planEdits.test.ts",

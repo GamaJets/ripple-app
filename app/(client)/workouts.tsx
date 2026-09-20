@@ -64,7 +64,12 @@ import { useClientWeek } from '../../src/ui/clientWeek';
 // the set; `intensityMeaning` is the same thing in words, which is what a
 // client reading "@8" for the first time needs. Neither turns a percentage into
 // a weight — see the header of src/lib/setIntensity.ts.
-import { intensityLine, intensityMeaning, intensityOf } from '../../src/lib/setIntensity';
+import { intensityLine, intensityMeaning, intensityOf, readTempo, tempoMeaning } from '../../src/lib/setIntensity';
+// The other half of that prescription: what the member actually moved at.
+// `packTempos` writes the column, `tempoVerdict` says what a set's tempo means
+// against what was asked for, and `tempoSummary` is a saved entry's one line.
+// See src/lib/performedTempo.ts — absence is never rendered as zero or as met.
+import { packTempos, tempoSummary, tempoVerdict } from '../../src/lib/performedTempo';
 import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
@@ -3711,6 +3716,17 @@ export default function Train() {
                             ) : l.cardio ? (
                               <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 5 }}>{[`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null, l.cardio.hrAvg ? `♥ ${l.cardio.hrAvg} avg / ${l.cardio.hrHigh ?? l.cardio.hrAvg} hi` : null].filter(Boolean).join(' · ')}</Text>
                             ) : null}
+                            {/* ── the speed those sets were moved at ─────────
+                                A saved entry's tempos, in the words that stop
+                                the four digits being ambiguous. On its own line
+                                because it is a sentence rather than a figure in
+                                a chip — and drawn only where somebody recorded
+                                one, because a set with no tempo is a set nobody
+                                was asked about, and printing "0-0-0-0" under it
+                                would invent a rep nobody did. */}
+                            {(() => { const tl = tempoSummary(l); return tl ? (
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5 }}>{tl}</Text>
+                            ) : null; })()}
                             {l.kcal ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 6 }}>{num(l.kcal)} kcal</Text> : null}
                             {/* Who put this in the log, and what the member is
                                 allowed to say about it. Absent when they logged
@@ -4870,7 +4886,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // `bw` marks a set the member did with their own body; `kg` is then what
   // they ADDED to it. Optional, so a guided draft restored from a build that
   // predates the flag reads back as the ordinary sets it recorded.
-  const [results, setResults] = useState<{ reps: number; kg: number; bw?: boolean; timed?: boolean }[][]>(() => exercises.map(() => []));
+  // `tempo` is the speed the member says they actually moved at, and it is
+  // present only on a set where a tempo was PRESCRIBED — see `tempoBlock`
+  // below for why this screen never asks for one otherwise. Absent is not a
+  // tempo of zero and not the prescription met.
+  const [results, setResults] = useState<{ reps: number; kg: number; bw?: boolean; timed?: boolean; tempo?: string }[][]>(() => exercises.map(() => []));
   // `load` is TEXT in the member's own unit; `results` is kilograms. The
   // conversion happens at this one keyboard, so everything downstream of the
   // runner — the PR check, the warm-up ramp, the entries written to the log —
@@ -4889,6 +4909,18 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // a runner that opens on a reps box for a set written as '45 sec' is asking
   // the member to fix the app before they can record what it told them to do.
   const [timedOn, setTimedOn] = useState(false);
+  /* ── the tempo this set was actually performed at ─────────────────────────
+     Three pieces of state for one question, and only ever asked where a coach
+     wrote a tempo down.
+
+     `tempoHit` is the one tap: the prescribed tempo, confirmed. `tempoOpen`
+     reveals the box for the other answer, and `tempoText` is what goes in it.
+     All three are cleared after every set, because each set is its own claim —
+     a member who hit the tempo on set 1 has said nothing yet about set 2, and
+     carrying the confirmation forward would record a tempo nobody confirmed. */
+  const [tempoHit, setTempoHit] = useState(false);
+  const [tempoOpen, setTempoOpen] = useState(false);
+  const [tempoText, setTempoText] = useState('');
   /* WHAT A BIKE DID, WHICH REPS AND KILOGRAMS CANNOT SAY.
    *
    * A cardio movement inside a plan came through here and left as sets. The
@@ -5314,6 +5346,24 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
    * did something real and it is an ordinary set unless something says else.
    */
   const methodAt = (i: number) => plan[i]?.method ?? ex?.method ?? null;
+  /**
+   * The tempo PRESCRIBED for one set of this movement, canonical, or null.
+   *
+   * Per set and not per movement, for the reason the method badge and the
+   * intensity line already give: set 1 can be a warm-up at no tempo inside an
+   * exercise whose top set is a four-second eccentric. Past the end of the
+   * plan there is no row left, so the movement's own is used — a member doing a
+   * fifth set of a four-set plan is still doing this movement.
+   *
+   * Canonicalised through `readTempo`, which is the only thing in this app
+   * allowed to decide that a coach's "311" and a member's "3-1-1-0" are the
+   * same instruction.
+   */
+  const prescribedTempoAt = (i: number): string | null => {
+    const spec = plan[i] ? plan[i].intensity : (ex ? intensityOf(ex, null) : null);
+    const r = readTempo(spec?.tempo);
+    return r.ok ? r.tempo : null;
+  };
   const logSet = () => {
     // Reps, or SECONDS when this movement is a hold. Read through `readHold`
     // rather than parsed here, so the runner and src/ui/LogSetRow.tsx accept
@@ -5367,6 +5417,26 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
    */
   const record = (r: number, wkg: number, bw: boolean, timed: boolean) => {
     const name = nameOf(exercises[idx]);
+    /* ── what speed this was moved at ───────────────────────────────────────
+       Read here rather than in `logSet`, because the checklist's one-tap tick
+       comes through `record` too and a set logged by tapping the plan must
+       carry the same claim as the same set typed out. The whole point of
+       recording a tempo is that the prescription becomes falsifiable, and two
+       routes disagreeing about whether one was confirmed would un-falsify it.
+
+       Refused rather than dropped. A member who typed something into the box
+       said something, and silently storing nothing for it would tell their
+       coach the tempo went unrecorded when in fact it was answered. */
+    let tempo: string | null = null;
+    if (prescribedTempoAt(done.length)) {
+      if (tempoOpen && tempoText.trim()) {
+        const said = readTempo(tempoText);
+        if (!said.ok) { Alert.alert('Check That Tempo', said.why); return; }
+        tempo = said.tempo;
+      } else if (tempoHit) {
+        tempo = prescribedTempoAt(done.length);
+      }
+    }
     // Zero for a bodyweight set, on purpose. The PR banner below is a claim
     // about everything this person has ever lifted, and the thing it is checked
     // against — `priorBest1RM` in src/lib/progression.ts — reads a set's second
@@ -5413,7 +5483,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       // fires is src/lib/prNotify.ts's problem, not this branch's.
       void announcePersonalBest(preferTrainerId, clientId, { movement: name, kg: wkg, reps: r }, clientName);
     }
-    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg, ...(bw ? { bw: true } : {}), ...(timed ? { timed: true } : {}) }); return n; });
+    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg, ...(bw ? { bw: true } : {}), ...(timed ? { timed: true } : {}), ...(tempo ? { tempo } : {}) }); return n; });
+    // The tempo question is asked again for the next set, from scratch. A
+    // confirmation is a claim about ONE set; inheriting it would record a
+    // four-second eccentric on a set nobody was asked about.
+    setTempoHit(false); setTempoOpen(false); setTempoText('');
     // The demonstration used to open itself here, after the first set, on the
     // argument that the first rest is when somebody has 90 seconds and a
     // reason to look. It no longer needs to: the board's ready page carries
@@ -5513,6 +5587,12 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         // session logged before holds could be recorded is not a session of
         // repetitions, it is a session nobody was asked about.
         timed: sets.some((s) => s.timed) ? sets.map((s) => s.timed === true) : undefined,
+        // And the speed they were moved at, where anybody said — through
+        // `packTempos`, which returns undefined rather than a list of nulls
+        // when nobody did. A set that was never asked about carries null at its
+        // own index and is read back as "no tempo recorded", never as a tempo
+        // of zero and never as the prescription met.
+        tempos: packTempos(sets.map((s) => s.tempo)),
         ...(mins > 0 ? { sessionMins: mins } : {}),
         feel: (rpes[i] && rpes[i].length) ? rpes[i] : undefined,
         // No `kcal`. It used to carry `volume / 60 + sets * 8` — an expression
@@ -6300,6 +6380,62 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     </View>
   ) : null;
 
+  /* ── the tempo this set is about to be recorded at ────────────────────────
+     Offered ONLY where a coach prescribed one. A tempo box on every ordinary
+     set is friction on every set of every session for a number nobody asked
+     for; where a tempo WAS asked for it is the one thing the set exists to
+     change, and until now the log could not say whether it happened. That
+     makes the prescription falsifiable, which is the whole point.
+
+     One tap confirms it. Saying something else takes more, and should: the
+     notation is the part a member is least likely to have at their fingertips,
+     so the box carries the prescribed value as its placeholder and the words
+     underneath say what those four numbers mean — this app's own order, which
+     is the defence against the minority convention that reads them backwards.
+
+     Nothing confirmed records nothing. Neither control is a default: a set
+     logged without touching either carries no tempo, and no screen may read
+     that as a tempo of zero or as the prescription met. */
+  const askTempo = prescribedTempoAt(done.length);
+  const tempoBlock = askTempo ? (
+    <View style={{ marginTop: sp.sm, alignItems: 'center', alignSelf: 'stretch' }}>
+      <SetKindChip t={nt} on={tempoHit && !tempoOpen}
+        onToggle={() => { setTempoOpen(false); setTempoText(''); setTempoHit((v) => !v); }}
+        label={`Hit the ${askTempo} Tempo`}
+        onLabel={`Hit the ${askTempo} Tempo — recorded as ${askTempo}`}
+        a11yHint={`Your coach asked for ${tempoMeaning(askTempo)}. Tick this to record that you did it. Leave it alone and this set is logged with no tempo.`} />
+      <Pressable accessibilityRole="button"
+        accessibilityLabel={tempoOpen ? 'Cancel the tempo you were typing' : 'Record a different tempo'}
+        accessibilityHint="For a set you did at a speed other than the one your coach asked for."
+        hitSlop={hitSlopFor(24)}
+        onPress={() => { setTempoOpen((v) => { if (!v) setTempoHit(false); else setTempoText(''); return !v; }); tapLight(); }}>
+        <Text style={{ ...ty.caption, color: nt.ink3, textDecorationLine: 'underline' }}>
+          {tempoOpen ? 'Never mind' : 'I did a different tempo'}
+        </Text>
+      </Pressable>
+      {tempoOpen ? (
+        <View style={{ alignItems: 'center', marginTop: sp.sm }}>
+          <TextInput
+            value={tempoText}
+            onChangeText={setTempoText}
+            autoCapitalize="characters"
+            placeholder={askTempo}
+            placeholderTextColor={t.nightInk2}
+            accessibilityLabel="The tempo you actually did"
+            accessibilityHint="Down, pause, up, and a pause at the top if there was one. Like 3-1-1 or 3-0-X-1."
+            style={{ ...value(24), ...numeric, color: t.nightInk, textAlign: 'center', minWidth: 120, padding: 0 }} />
+          {/* What those four numbers mean, as they are typed — the same
+              sentence the builder prints under the coach's own box. A member
+              reading the other convention sees this one disagree with them
+              here, rather than after the set is in the log. */}
+          <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: 2, textAlign: 'center' }}>
+            {tempoMeaning(tempoText) ?? 'Down, pause, up — and a pause at the top if there was one.'}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  ) : null;
+
   /* The caution under the movement the member is about to perform, and the
      sentence that has to stand in for it when there is nothing to compute it
      from. `injuries` is `[]` under a failed read as well as under a member who
@@ -6391,6 +6527,29 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             ? timedSetLabel(s.reps, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null, s.bw === true)
             : s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, ...font('600'), color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
       </View>
+      {/* ── the tempo, asked for against done ───────────────────────────────
+          On its own lines under the chips rather than inside them, because a
+          tempo is a sentence: "3-1-1-0" beside "8×60 kg" is four digits a
+          member may be reading for the first time, and only `tempoMeaning`
+          says which way round they go.
+
+          A set that was asked for a tempo and recorded none says so in those
+          words. It is NOT drawn as a miss and NOT drawn as a match — nobody
+          answered, and the one thing this feature must never do is turn
+          silence into either. Sets nobody asked about draw nothing at all. */}
+      {done.map((s, i) => {
+        const v = tempoVerdict(prescribedTempoAt(i), s.tempo);
+        if (v.state === 'none') return null;
+        // The tick is a MARK and the words carry the claim on their own — a
+        // green sentence would be the colour saying it, which fails both the
+        // contrast floor and anybody reading it in sunlight.
+        return (
+          <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 2 }}>
+            {v.state === 'met' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good, marginTop: 5 }} /> : null}
+            <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{`Set ${i + 1}: ${v.line}`}</Text>
+          </View>
+        );
+      })}
       <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
         <Pressable accessibilityRole="button"
           accessibilityLabel={`Undo set ${done.length} of ${shownName(ex)}`}
@@ -6710,6 +6869,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                   ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
                   : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'} />
             </View>
+            {/* Beside the two flags, because it is the third thing this set
+                is — and, unlike them, present only where somebody asked. */}
+            {tempoBlock}
 
             {/* ── which plates make that ─────────────────────────────────────
                 Present only when there is a load in the box that a bar could

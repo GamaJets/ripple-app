@@ -24,6 +24,10 @@ export interface WorkoutRow {
   /** Which sets were held rather than repeated, aligned to `sets`. On such a
    *  set the first number of the pair is SECONDS. See WorkoutEntry.timed. */
   timed?: boolean[] | null;
+  /** The tempo each set was PERFORMED at, aligned to `sets`, absent where
+   *  nobody recorded one. See WorkoutEntry.tempos — null at an index is not a
+   *  tempo of zero and not a prescription met. */
+  tempos?: WorkoutEntry['tempos'] | null;
   feel?: WorkoutEntry['feel'] | null;
   cardio?: WorkoutEntry['cardio'] | null;
   kcal?: number | null;
@@ -58,9 +62,9 @@ export interface WorkoutRow {
  * and are not touched here — three copies of a column list is a drift waiting
  * to happen and pointing them at this one is a separate, mechanical change.
  *
- * Deliberately NOT the whole row: `bw` and `timed` are omitted because the
- * screens reading this show repped work, and `user_id` because the filter
- * already names it.
+ * Deliberately NOT the whole row: `bw`, `timed` and `tempos` are omitted
+ * because the screens reading this show repped work, and `user_id` because the
+ * filter already names it.
  */
 export const WORKOUT_COLS =
   'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
@@ -72,6 +76,7 @@ export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   sets: r.sets ?? undefined,
   bw: r.bw ?? undefined,
   timed: r.timed ?? undefined,
+  tempos: r.tempos ?? undefined,
   feel: r.feel ?? undefined,
   cardio: r.cardio ?? undefined,
   kcal: r.kcal ?? undefined,
@@ -89,6 +94,7 @@ export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
   sets: e.sets ?? null,
   bw: e.bw ?? null,
   timed: e.timed ?? null,
+  tempos: e.tempos ?? null,
   feel: e.feel ?? null,
   cardio: e.cardio ?? null,
   kcal: e.kcal ?? null,
@@ -102,7 +108,7 @@ export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
 /** Every field of an entry that is meant to survive a trip to the database.
  *  `id` is excluded: the server assigns it, so a new entry has none yet. */
 export const PERSISTED_FIELDS: (keyof WorkoutEntry)[] =
-  ['t', 'exercise', 'sets', 'bw', 'timed', 'feel', 'cardio', 'kcal', 'zones', 'sessionMins', 'loggedBy'];
+  ['t', 'exercise', 'sets', 'bw', 'timed', 'tempos', 'feel', 'cardio', 'kcal', 'zones', 'sessionMins', 'loggedBy'];
 // `amendedAt` is deliberately absent, for the same reason `id` is: the server
 // assigns it. It comes back on the way in and is never sent on the way out.
 //

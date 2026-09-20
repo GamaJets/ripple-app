@@ -9,7 +9,7 @@ is paid again on every turn of the session that opened it.
 
 | lines | ~tok | file |
 | ----: | ---: | ---- |
-| 7,653 | 122k | `app/(client)/workouts.tsx` |
+| 7,657 | 122k | `app/(client)/workouts.tsx` |
 | 5,311 | 82k | `app/(trainer)/builder.tsx` |
 | 5,229 | 87k | `src/lib/coverage.test.ts` |
 | 5,161 | 78k | `app/(trainer)/calendar.tsx` |
@@ -56,11 +56,11 @@ is paid again on every turn of the session that opened it.
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 
-Total: 46 files, 116,622 lines, ~1685k tokens if every one were read whole.
+Total: 46 files, 116,626 lines, ~1685k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
-7,653 lines · ~122k tokens · 167 anchors
+7,657 lines · ~122k tokens · 167 anchors
 
 ```
 54-100        §        the block, the week of it this client is on, and the three fields a set
@@ -220,16 +220,16 @@ Total: 46 files, 116,622 lines, ~1685k tokens if every one were read whole.
 6136-6153     fn         tickPlanned
 6154-6301     fn         untickLast
 6302-6335     fn         nav
-6336-7302     fn         repsWord
-7303-7321     §        What was already here, and what the report actually asked for
-7322-7341     §        What happens to the sets, and to a PR
-7342-7360     §        The unit
-7361-7404     fn       EditEntrySheet
-7405-7406     fn         setAt
-7407-7424     fn         flagAt
-7425-7431     fn         dayLabel
-7432-7471     fn         save
-7472-7653     fn         setCount
+6336-7306     fn         repsWord
+7307-7325     §        What was already here, and what the report actually asked for
+7326-7345     §        What happens to the sets, and to a PR
+7346-7364     §        The unit
+7365-7408     fn       EditEntrySheet
+7409-7410     fn         setAt
+7411-7428     fn         flagAt
+7429-7435     fn         dayLabel
+7436-7475     fn         save
+7476-7657     fn         setCount
 ```
 
 ## `app/(trainer)/builder.tsx`

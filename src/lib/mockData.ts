@@ -83,6 +83,24 @@ export interface WorkoutEntry {
    *  See src/lib/timedSets.ts for why a hold contributes no tonnage and no
    *  estimated 1RM, and what it is worth instead. */
   timed?: boolean[];
+  /** The tempo each of those sets was PERFORMED at, aligned to `sets` the same
+   *  way, in the order a prescribed tempo is written in — eccentric · pause at
+   *  the bottom · concentric · pause at the top, with `X` in the concentric
+   *  slot for "as fast as you can".
+   *
+   *  This is the other half of a prescription that has only ever had one.
+   *  src/lib/setIntensity.ts has read, named and spelled out a tempo since it
+   *  was written, and nothing in the app could record one — so a coach could
+   *  ask for a four-second eccentric and the log could not say whether they got
+   *  it.
+   *
+   *  Null AT AN INDEX is not a tempo of zero and not a prescription met: it is
+   *  a set nobody was asked about, which is the ordinary case, because the
+   *  member is only asked where a tempo was prescribed. Absent ENTIRELY is the
+   *  same answer for the whole entry. Read it through `recordedTempo` in
+   *  src/lib/performedTempo.ts, which is also what stops a short array sliding
+   *  one set's tempo onto another. */
+  tempos?: (string | null)[];
   feel?: ('easy' | 'ok' | 'hard')[]; // per-set perceived effort (RPE), aligned to sets
   cardio?: { mins: number; dist: number; unit: string; watts?: number; hrAvg?: number; hrHigh?: number };
   /** Seconds per heart-rate zone during the session. Absent when no HR source

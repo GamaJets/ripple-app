@@ -103,6 +103,19 @@ if (fixed.ok) {
   ok(!('id' in fixed.value) && !('loggedBy' in fixed.value), 'identity and attribution are not editable here');
 }
 
+// The tempo each set was PERFORMED at is aligned to `sets` the same way the
+// effort is, and it fails the same way: deleting the middle set of three would
+// otherwise file set 3's four-second eccentric against set 2. An entry left
+// with no recorded tempo at all clears the column rather than keeping a list of
+// nulls, because a set nobody was asked about is not a set performed at zero.
+const tempoed: WorkoutEntry = { ...lift, tempos: [null, '2-0-X-0', '4-1-1-0'] };
+const tempoCut = readWorkoutEdit(tempoed, { name: 'Squat', sets: [{ reps: 8, kg: 60 }, { reps: 0, kg: 0 }, { reps: 6, kg: 70 }], mins: '', dist: '', watts: '', kcal: '' });
+ok(tempoCut.ok && JSON.stringify(tempoCut.value.tempos) === JSON.stringify([null, '4-1-1-0']),
+  'a removed set takes its own tempo with it and leaves every other set’s where it was');
+const cleared = readWorkoutEdit(tempoed, { name: 'Squat', sets: [{ reps: 8, kg: 60 }], mins: '', dist: '', watts: '', kcal: '' });
+ok(cleared.ok && 'tempos' in cleared.value && cleared.value.tempos === undefined,
+  'and an entry whose last recorded tempo was edited away clears the column rather than keeping nulls');
+
 // Blank calories means unknown, and unknown is null — not zero.
 const noKcal = readWorkoutEdit(lift, { name: 'Squat', sets: [{ reps: 8, kg: 60 }], mins: '', dist: '', watts: '', kcal: '' });
 ok(noKcal.ok && 'kcal' in noKcal.value && noKcal.value.kcal === undefined, 'blank calories must clear the figure, not zero it');

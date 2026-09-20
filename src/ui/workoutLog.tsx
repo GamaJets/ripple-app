@@ -556,6 +556,11 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     // is sent as null so clearing the last bodyweight set really clears it.
     if ('bw' in next) patch.bw = next.bw ?? null;
     if ('timed' in next) patch.timed = next.timed ?? null;
+    // And `tempos` for the same reason (supabase/parts/3220): it is aligned to
+    // `sets`, so an edit that removes a set must be able to rewrite it, and an
+    // undefined must reach the server as null rather than leaving a tempo list
+    // describing sets that are no longer there.
+    if ('tempos' in next) patch.tempos = next.tempos ?? null;
     if ('feel' in next) patch.feel = next.feel ?? null;
     if ('cardio' in next) patch.cardio = next.cardio ?? null;
     if ('kcal' in next) patch.kcal = next.kcal ?? null;

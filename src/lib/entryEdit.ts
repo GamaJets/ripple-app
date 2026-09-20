@@ -275,6 +275,17 @@ export function readWorkoutEdit(entry: WorkoutEntry, draft: WorkoutDraft): Edit<
     // not keep carrying somebody's answer for it — and a surviving set must
     // keep its own.
     if (entry.feel) patch.feel = keptIdx.map((i) => entry.feel![i]).filter((f) => f !== undefined);
+    // And the tempo each surviving set was performed at, carried by INDEX for
+    // the same reason. The sheet does not edit a tempo — it edits reps, load
+    // and the two flags — but deleting a set here would otherwise leave set
+    // 4's four-second eccentric filed against set 3. A hole stays a hole: an
+    // unrecorded set carries null, never a tempo it borrowed from a neighbour,
+    // and an entry left with no recorded tempo at all clears the column rather
+    // than keeping a list of nulls describing sets nobody was asked about.
+    if (entry.tempos) {
+      const keptTempos = keptIdx.map((i) => entry.tempos![i] ?? null);
+      patch.tempos = keptTempos.some((x) => x != null) ? keptTempos : undefined;
+    }
   }
 
   if (draft.kcal.trim() === '') {
