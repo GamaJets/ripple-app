@@ -32,8 +32,8 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) =>
   ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
-const target = (name: string, onProgramme: boolean): AssignTarget =>
-  ({ clientId: name.toLowerCase(), name, onProgramme });
+const target = (name: string, onProgram: boolean): AssignTarget =>
+  ({ clientId: name.toLowerCase(), name, onProgram });
 
 /* ── namesWithRest: a truncated list of names is a false sentence ─────────── */
 

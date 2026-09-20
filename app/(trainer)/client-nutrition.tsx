@@ -45,7 +45,7 @@
 // `guardPlan` withholds the send until that read has landed. Composing a plan
 // over an allergen list that did not load is exactly how a disclosed allergen
 // reaches a client, and it is the same refusal `guardInjuries` makes on the
-// programme builder.
+// program builder.
 //
 // ── The client's food log is read, never written ───────────────────────────
 //
@@ -88,7 +88,7 @@ import { maintenanceFor, DIET_LABEL } from '../../src/lib/nutrition';
 import { buildPlan, catalogSize, searchMeals, swapIndex, ALLERGENS, type Allergen, type PlanInput, type Slot } from '../../src/lib/meals';
 import {
   PLAN_DAYS, PLAN_WEEKDAYS, copyPlanDay, guardPlan, planDayBaseKcal, planDayIndex,
-  planDayOverride, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
+  planDayOverride, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
   type CoachMealPlan,
 } from '../../src/lib/mealPlan';
 import type { Diet, Goal } from '../../src/lib/types';
@@ -843,21 +843,39 @@ export default function ClientNutrition() {
 
                         <Section>
                           <SectionHead title="What Their App Will Do with This" note={PLAN_WEEKDAYS[dayIdx]} />
+                          {/* Every plate's servings, not `plan[0]`'s. buildPlan
+                              sizes each plate on its own now — it moves one by a
+                              quarter serving at a time to close the day's last
+                              hundred calories — so breakfast's multiplier is no
+                              longer the day's. */}
                           <Text style={{ ...ty.body, color: t.ink2 }}>
-                            {planServingNote(built.plan[0]?.servings ?? 1, planDayBaseKcal(draft, dayIdx), built.target.kcal)}
+                            {planServingNote(built.plan.map((m) => m.servings), planDayBaseKcal(draft, dayIdx), built.target.kcal)}
                           </Text>
                           <View style={{ marginTop: sp.md }}>
                             <Meter label="Protein" tone="blue" val={built.tot.P} target={built.target.protein} />
                             <Meter label="Carbs" tone="amber" val={built.tot.C} target={built.target.carbs} />
                             <Meter label="Fat" tone="purple" val={built.tot.F} target={built.target.fat} />
                           </View>
+                          {/* The meters are drawn from `tot`, which is what the
+                              meals contain, against a target worked out from the
+                              client's body. Carbs and fat follow the calories
+                              this screen does control; protein does not follow
+                              anything a coach can reach from here, so when it
+                              lands away from the target the screen says so in
+                              words rather than leaving a blue bar to disagree
+                              with the number printed two sections above it. */}
+                          {planProteinNote(built.tot.P, built.target.protein) ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                              {planProteinNote(built.tot.P, built.target.protein)}
+                            </Text>
+                          ) : null}
                         </Section>
                       </>
                     ) : null}
 
                     {/* ── what they will not eat ──────────────────────────────
                         This sat first, above everything, for the same reason
-                        the programme builder puts injuries above the exercises:
+                        the program builder puts injuries above the exercises:
                         a plan that ignores a disclosed allergen is worse than no
                         plan. The board opens on the rings instead, so the full
                         list lives here under Targets and the Plan segment names
@@ -961,7 +979,7 @@ export default function ClientNutrition() {
             </View>
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
               {pick && profile?.diet
-                ? `${num(catalogSize(profile.diet, pick.slot, profile.avoid))} meals in this slot for them. The first ${num(results.length)} matching are listed.`
+                ? `${num(catalogSize(profile.diet, pick.slot, profile.avoid))} meals in this slot for them. ${query.trim() ? `${num(results.length)} shown for “${query.trim()}”.` : `${num(results.length)} listed, spread across the whole catalogue.`}`
                 : ''}
             </Text>
             <ScrollView style={{ marginTop: sp.md }} showsVerticalScrollIndicator={false}>

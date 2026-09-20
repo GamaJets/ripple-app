@@ -272,12 +272,12 @@ export default function Templates() {
     if (!assignTpl || !plan.allowed || assignBusy) return;
     const tpl = assignTpl;
     // Only reachable once `guardOverwrite` has passed inside planFanOut, which
-    // is what licenses `onProgramme` being a boolean at all: under any status
+    // is what licenses `onProgram` being a boolean at all: under any status
     // but a whole read, a null from getProgram means "we did not find out" and
     // this sentence would be counting silence.
     const targets: AssignTarget[] = plan.send.map((id) => {
       const c = roster.find((r) => r.id === id);
-      return { clientId: id, name: c?.name.split(' ')[0] ?? 'This client', onProgramme: !!getProgram(id) };
+      return { clientId: id, name: c?.name.split(' ')[0] ?? 'This client', onProgram: !!getProgram(id) };
     });
     const brief = overwriteBrief(targets, tpl.name);
     // The moment of decision, so the third fact is said here too and not only

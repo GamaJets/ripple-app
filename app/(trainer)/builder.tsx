@@ -2345,7 +2345,7 @@ export default function Builder() {
       // Only sayable because `planFanOut` has already passed the overwrite
       // guard: under any status but a whole read a null from getProgram means
       // "we did not find out", and this sentence would be counting silence.
-      onProgramme: !!getProgram(id),
+      onProgram: !!getProgram(id),
     }));
     const brief = overwriteBrief(targets, title.trim() || 'this program');
     // The moment of decision, so the third fact is said here too and not only
@@ -2471,7 +2471,7 @@ export default function Builder() {
     const targets: AssignTarget[] = pickedIds.map((id) => ({
       clientId: id,
       name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
-      onProgramme: !!getProgram(id),
+      onProgram: !!getProgram(id),
     }));
     const brief = unassignBrief(targets);
     if (!brief.replacing.length) { Alert.alert(brief.title, brief.body); return; }

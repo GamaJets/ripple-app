@@ -8,10 +8,10 @@
 import {
   PLAN_DAYS, PLAN_VERSION, PLAN_WEEKDAYS,
   capturePlanMeal, copyPlanDay, guardPlan, parsePlan, planDayBaseKcal, planDayIndex,
-  planDayOverride, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
+  planDayOverride, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
   type CoachMealPlan,
 } from './mealPlan';
-import { buildPlan, catalogSize, mealAt, slotsFor, type Allergen, type PlanInput } from './meals';
+import { buildPlan, catalogSize, mealAt, planWeek, searchMeals, slotsFor, swapIndex, type Allergen, type PlanInput } from './meals';
 import { WEEK_DAYS, jsDayForIndex } from './weekStart';
 
 const errors: string[] = [];
@@ -309,16 +309,57 @@ eq(planDayBaseKcal(seeded, 0), seeded.days[0].meals.reduce((a, m) => a + m.k, 0)
   'a day base is its meals at one serving each');
 eq(planDayBaseKcal(seeded, 99), 0, 'a day that is not in the week has no base');
 
-ok(planServingNote(1, 2000, 2000).includes('as written'), 'a day that lands on target is served as written');
-const up = planServingNote(1.75, 1400, 2450);
+ok(planServingNote([1, 1, 1], 2000, 2000).includes('as written'), 'a day that lands on target is served as written');
+const up = planServingNote([1.75, 1.75, 1.75], 1400, 2450);
 ok(up.includes('1.75') && up.includes('up'), 'a short day says the plates are scaled up, and by how much');
 ok(up.includes('1,400') && up.includes('2,450'), 'with both figures separated');
-ok(planServingNote(0.75, 3200, 2400).includes('down'), 'and a long one, down');
+ok(planServingNote([0.75, 0.75, 0.75], 3200, 2400).includes('down'), 'and a long one, down');
+
+// `buildPlan` moves individual plates by a quarter serving to close the last of
+// the calorie gap, so the day's plates are no longer one number. The note took
+// one, and the screen was passing breakfast's.
+const mixed = planServingNote([1.5, 1.25, 1.5], 1800, 2600);
+ok(mixed.includes('1.25') && mixed.includes('1.5'),
+  'a day whose plates differ names the range rather than one plate');
+ok(!mixed.includes('every plate'), 'and does not claim every plate is the same');
+ok(planServingNote([], 2000, 2000).includes('as written'), 'an empty day does not throw');
+
 // No verdict on either figure. This screen records a coaching decision; it does
 // not grade one.
-for (const s of [planServingNote(1, 2000, 2000), up, planServingNote(0.5, 4000, 1800)]) {
+for (const s of [planServingNote([1], 2000, 2000), up, mixed, planServingNote([0.5, 0.5], 4000, 1800)]) {
   ok(!/safe|unsafe|healthy|unhealthy|too (low|high)|should eat/i.test(s),
     'the serving note offers no clinical judgement');
+}
+
+/* ── and what the portions cannot do ───────────────────────────────────── */
+
+// Scaling multiplies every macro by the same number, so protein is whatever the
+// chosen meals contain. The screen drew that as a meter beside a target it
+// disagreed with and said nothing.
+eq(planProteinNote(100, 100), null, 'a day on its protein target says nothing');
+eq(planProteinNote(105, 100), null, 'nor does a few grams either way');
+const over = planProteinNote(150, 100);
+ok(over !== null && over.includes('150') && over.includes('100') && over.includes('above'),
+  'a day half again over target says so, with both figures');
+ok(over !== null && /swap/i.test(over), 'and names the only lever that moves it');
+const under = planProteinNote(70, 100);
+ok(under !== null && under.includes('below'), 'a day under target says that instead');
+eq(planProteinNote(150, 0), null, 'no target is nothing to be off by');
+eq(planProteinNote(Number.NaN, 100), null, 'and a figure that is not a number is not a finding');
+for (const s of [over, under]) {
+  ok(!/safe|unsafe|healthy|unhealthy|too (low|high)|should eat/i.test(s ?? ''),
+    'the protein note offers no clinical judgement either');
+}
+
+// The note is true of what buildPlan actually produces: a real day off its
+// protein target gets the sentence, and the sentence carries that day's figure.
+{
+  const body = { id: 'pn', weightKg: 60, bodyFatPct: 25, activity: 1.55, goal: 'tone' as const, diet: 'meat' as const, mealsPerDay: 3 as const, avoid: [] };
+  const built = buildPlan(body);
+  const note = planProteinNote(built.tot.P, built.target.protein);
+  const off = Math.abs(built.tot.P - built.target.protein) / built.target.protein;
+  eq(note === null, off < 0.1, 'the note appears exactly when the day is off target');
+  if (note) ok(note.includes(String(built.tot.P)), 'and it quotes the day the plan actually built');
 }
 
 /* ── capture ───────────────────────────────────────────────────────────── */
@@ -329,6 +370,85 @@ eq(cap.n, mealAt('meat', 'Dinner', 5, []).n, 'and its name is the catalogue’s'
 eq(cap.k, mealAt('meat', 'Dinner', 5, []).k, 'and its per-serving calories');
 eq(capturePlanMeal('meat', 'Dinner', -1, []).idx, catalogSize('meat', 'Dinner', []) - 1,
   'a negative index wraps to the end rather than to zero');
+
+/* ── a week is seven meals, not one meal seven ways ────────────────────── */
+//
+// The test that was missing. `planWeek`, `seedPlan` and `swapIndex` all stepped
+// the index by 1, and the LAST component pool varies fastest — FLAVORS for a
+// main, and for Breakfast a six-entry style pool that is literally '', 'warm',
+// 'chilled', 'with cinnamon'. So a generated week was one dinner with seven
+// spice rubs and seven breakfasts that differed by an adverb, and every
+// assertion in this file passed anyway. They all route through `variantStep`
+// now; these assert the thing the owner would look at.
+
+const eater = client({ weightKg: 82, mealsPerDay: 3, diet: 'meat' });
+
+for (const [slotIdx, slot] of slotsFor(eater.mealsPerDay).entries()) {
+  const week = planWeek(eater).map((day) => day[slotIdx]);
+  const names = new Set(week.map((m) => m.n));
+  ok(names.size === week.length, `${slot} is seven different meals across the week — got ${names.size}`);
+  // Not just different NAMES: a different dish. Two meals built from the same
+  // components with a different spice rub have the same ingredient list head.
+  const heads = new Set(week.map((m) => m.ing[0]?.[0] ?? ''));
+  ok(heads.size >= 5, `${slot} varies its main ingredient across the week, not its seasoning — got ${heads.size} of 7`);
+}
+
+// And a day is not the same protein twice: `mealSeed` spaces the slots by 7,
+// which is a fine dimension, so Lunch and Dinner drew the same protein.
+for (const day of planWeek(eater)) {
+  const [, lunch, dinner] = day;
+  ok(lunch.ing[0]?.[0] !== dinner.ing[0]?.[0],
+    `lunch and dinner are not the same protein — got ${lunch.n} then ${dinner.n}`);
+}
+
+// A swap moves the substantive component too, for the same reason.
+{
+  const size = catalogSize('meat', 'Breakfast', []);
+  const before = mealAt('meat', 'Breakfast', 0, []);
+  const after = mealAt('meat', 'Breakfast', swapIndex('meat', 'Breakfast', 0, []), []);
+  ok(size > 1, 'the breakfast catalogue has something to swap to');
+  // Compared with the style suffix stripped: 'Berry oats — warm' and
+  // 'Berry oats — with vanilla' are the same breakfast, which is the bug.
+  const dish = (n: string) => n.split(' — ')[0];
+  ok(dish(before.n) !== dish(after.n),
+    `a swapped breakfast is a different dish — got ${before.n} then ${after.n}`);
+}
+
+/* ── the picker can find what is in the pool ───────────────────────────── */
+//
+// `searchMeals` scanned the first 800 CONSECUTIVE indices, and for meat/Dinner
+// the protein changes every 1,560 — so the picker could only ever return
+// grilled chicken, and a coach typing any other protein got nothing from a
+// screen that told them the slot held ten thousand meals.
+
+for (const q of ['beef', 'salmon', 'turkey', 'prawns', 'sweet potato', 'broccoli', 'teriyaki']) {
+  const hits = searchMeals('meat', 'Dinner', q, 40, []);
+  ok(hits.length > 0, `the dinner picker finds "${q}", which is in the pool`);
+  ok(hits.every((m) => m.n.toLowerCase().includes(q)), `and every row it returns really contains "${q}"`);
+}
+for (const q of ['pancake', 'shakshuka', 'omelette']) {
+  ok(searchMeals('meat', 'Breakfast', q, 40, []).length > 0, `the breakfast picker finds "${q}"`);
+}
+for (const q of ['tofu', 'lentils', 'chickpeas']) {
+  ok(searchMeals('vegan', 'Dinner', q, 40, []).length > 0, `the vegan dinner picker finds "${q}"`);
+}
+ok(searchMeals('meat', 'Dinner', 'pemmican', 40, []).length === 0,
+  'and finds nothing for something that is not in the pool');
+
+// An empty query opens on dishes that differ, not forty seasonings of one.
+{
+  const open = searchMeals('meat', 'Dinner', '', 20, []);
+  const proteins = new Set(open.map((m) => m.ing[0]?.[0] ?? ''));
+  ok(open.length === 20, 'an empty query fills the list');
+  ok(proteins.size >= 5, `and opens on different proteins — got ${proteins.size}`);
+}
+
+// Allergen filtering still holds: nothing the member excluded comes back.
+{
+  const dairyFree = searchMeals('vegetarian', 'Dinner', 'halloumi', 40, ['dairy']);
+  ok(dairyFree.every((m) => !m.ing.some(([item]) => /halloumi/i.test(item))),
+    'a dairy-free search does not compose a meal out of halloumi');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('mealPlan: ok');

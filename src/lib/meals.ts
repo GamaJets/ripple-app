@@ -379,11 +379,11 @@ const FLAVORS: Comp[] = [
 // ── BREAKFAST components ──
 const BREK_BASE: Comp[] = [
   { n: 'oats', ico: '🥣', k: 240, p: 8, c: 44, f: 5,  ing: [['Rolled oats', 60, 'g', 'Grains & Bread'], ['Milk', 200, 'ml', 'Dairy & Eggs']], step: 'Cook the oats with milk.', d: ['meat', 'vegetarian'] },
-  { n: 'overnight oats', ico: '🥣', k: 250, p: 9, c: 45, f: 6, ing: [['Rolled oats', 60, 'g', 'Grains & Bread'], ['Soy milk', 200, 'ml', 'Dairy & Eggs']], step: 'Soak the oats overnight.', d: ['vegetarian', 'vegan', 'meat'] },
+  { n: 'overnight oats', ico: '🥣', k: 250, p: 9, c: 45, f: 6, ing: [['Rolled oats', 60, 'g', 'Grains & Bread'], ['Soy milk', 200, 'ml', 'Pantry & Other']], step: 'Soak the oats overnight.', d: ['vegetarian', 'vegan', 'meat'] },
   { n: 'Greek yogurt bowl', ico: '🥣', k: 200, p: 20, c: 14, f: 6, ing: [['Greek yogurt', 200, 'g', 'Dairy & Eggs']], step: 'Spoon the yogurt into a bowl.', d: ['vegetarian', 'meat'] },
   { n: 'omelette', ico: '🍳', k: 230, p: 19, c: 2, f: 16, ing: [['Eggs', 3, '', 'Dairy & Eggs']], step: 'Whisk and cook the eggs into an omelette.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
   { n: 'tofu scramble', ico: '🍳', k: 190, p: 20, c: 6, f: 10, ing: [['Firm tofu', 150, 'g', 'Pantry & Other'], ['Turmeric', 1, 'pinch', 'Pantry & Other']], step: 'Scramble the tofu with turmeric.', d: ['vegan', 'vegetarian'] },
-  { n: 'chia pudding', ico: '🍮', k: 220, p: 8, c: 20, f: 12, ing: [['Chia seeds', 30, 'g', 'Nuts & Seeds'], ['Soy milk', 200, 'ml', 'Dairy & Eggs']], step: 'Set the chia in milk overnight.', d: ['vegan', 'vegetarian', 'keto', 'paleo'] },
+  { n: 'chia pudding', ico: '🍮', k: 220, p: 8, c: 20, f: 12, ing: [['Chia seeds', 30, 'g', 'Nuts & Seeds'], ['Soy milk', 200, 'ml', 'Pantry & Other']], step: 'Set the chia in milk overnight.', d: ['vegan', 'vegetarian', 'keto', 'paleo'] },
   { n: 'protein pancakes', ico: '🥞', k: 280, p: 24, c: 30, f: 6, ing: [['Oat flour', 50, 'g', 'Grains & Bread'], ['Egg', 1, '', 'Dairy & Eggs'], ['Whey protein', 1, 'scoop', 'Pantry & Other']], step: 'Blend and griddle the pancake batter.', d: ['vegetarian', 'meat'] },
   { n: 'cottage cheese bowl', ico: '🥣', k: 180, p: 22, c: 8, f: 6, ing: [['Cottage cheese', 200, 'g', 'Dairy & Eggs']], step: 'Spoon the cottage cheese into a bowl.', d: ['vegetarian', 'meat', 'keto'] },
   { n: 'avocado & eggs', ico: '🥑', k: 320, p: 15, c: 8, f: 26, ing: [['Avocado', 1, '', 'Fruits'], ['Eggs', 2, '', 'Dairy & Eggs']], step: 'Serve sliced avocado with the eggs.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
@@ -419,7 +419,7 @@ const SNACK_A: Comp[] = [
   { n: 'Greek yogurt', ico: '🥣', ing: [['Greek yogurt', 150, 'g', 'Dairy & Eggs']], k: 130, p: 15, c: 9, f: 4, d: ['vegetarian', 'meat', 'keto'] },
   { n: 'cottage cheese', ico: '🧀', ing: [['Cottage cheese', 150, 'g', 'Dairy & Eggs']], k: 130, p: 17, c: 6, f: 4, d: ['vegetarian', 'meat', 'keto'] },
   { n: 'protein shake', ico: '🥤', ing: [['Whey protein', 1, 'scoop', 'Pantry & Other'], ['Milk', 200, 'ml', 'Dairy & Eggs']], k: 230, p: 32, c: 14, f: 4, d: ['vegetarian', 'meat'] },
-  { n: 'pea-protein shake', ico: '🥤', ing: [['Pea protein', 1, 'scoop', 'Pantry & Other'], ['Soy milk', 200, 'ml', 'Dairy & Eggs']], k: 210, p: 28, c: 14, f: 3, d: ['vegan', 'vegetarian'] },
+  { n: 'pea-protein shake', ico: '🥤', ing: [['Pea protein', 1, 'scoop', 'Pantry & Other'], ['Soy milk', 200, 'ml', 'Pantry & Other']], k: 210, p: 28, c: 14, f: 3, d: ['vegan', 'vegetarian'] },
   { n: 'hummus', ico: '🫓', ing: [['Hummus', 80, 'g', 'Pantry & Other']], k: 180, p: 6, c: 14, f: 11, d: ['vegan', 'vegetarian', 'meat'] },
   { n: 'boiled eggs', ico: '🥚', ing: [['Eggs', 2, '', 'Dairy & Eggs']], k: 140, p: 12, c: 1, f: 10, d: ['vegetarian', 'paleo', 'keto', 'meat'] },
   { n: 'edamame', ico: '🫛', ing: [['Edamame', 120, 'g', 'Vegetables']], k: 120, p: 11, c: 9, f: 5, d: ['vegan', 'vegetarian'] },
@@ -581,14 +581,64 @@ export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnTy
   const avoid = c.avoid ?? [];
   let plan: PlannedMeal[] = slots.map((slot, i) => {
     const size = catalogSize(c.diet, slot, avoid);
-    const idx = (override[i] != null ? override[i] : mealSeed(c, i)) % size;
+    // `+ i * variantStep` for the same reason the week steps by it: `mealSeed`
+    // spaces the slots by 7, which is a FINE dimension, so Lunch and Dinner —
+    // which draw from the same pools — came out as the same protein twice a
+    // day with a different sauce on it.
+    const seeded = mealSeed(c, i) + i * variantStep(c.diet, slot, avoid);
+    const idx = (override[i] != null ? override[i] : seeded) % size;
     const meal = mealAt(c.diet, slot, idx, avoid);
     return { ...meal, pos: i, servings: 1, K: meal.k, P: meal.p, C: meal.c, F: meal.f };
   });
   const base = plan.reduce((a, x) => a + x.k, 0) || 1;
-  const scale = target.kcal / base;
-  plan = plan.map((x) => {
-    const s = Math.max(0.5, Math.round(scale * 4) / 4);
+  // ── portions, per plate rather than per day ──────────────────────────────
+  //
+  // This was ONE multiplier for the whole day, `Math.round(scale * 4) / 4`
+  // applied to every plate. A day-wide quarter step is a quarter of the WHOLE
+  // day, so the only totals reachable were multiples of `base / 4` — around
+  // 250 kcal apart on a three-meal day — and the plan landed wherever the
+  // nearest one happened to be. Measured against the live engine that was
+  // −7% to −9% on real bodies: a client following the plan exactly ate two
+  // hundred calories away from the figure the same screen showed them as
+  // their target.
+  //
+  // So: start from that day-wide multiplier, then move ONE plate at a time by
+  // a quarter serving, each time onto whichever plate brings the day's total
+  // nearest the target, and stop when no single move improves it. A quarter of
+  // one plate is 40–150 kcal instead of 250–500, so the reachable totals are
+  // several times finer, and the step stays a quarter serving because that is
+  // the portion a person can actually measure out.
+  //
+  // It closes CALORIES and only calories. Protein is not a lever here and
+  // cannot be made into one: scaling multiplies every macro by the same
+  // number, so the plan's protein-per-calorie is whatever the meals that were
+  // chosen happen to contain, and no portion size moves it toward the target.
+  // That gap belongs to meal SELECTION. `planProteinNote` in ./mealPlan.ts is
+  // what says so on the screen rather than letting a meter disagree with the
+  // number printed above it in silence.
+  const QUARTER = 0.25;
+  const MIN_SERVING = 0.5;
+  const serv = plan.map(() => Math.max(MIN_SERVING, Math.round((target.kcal / base) * 4) / 4));
+  let running = plan.reduce((a, x, i) => a + x.k * serv[i], 0);
+  // At most four quarter-steps per plate, which is the whole span a residual
+  // smaller than one day-wide quarter can need. Bounded so this cannot spin.
+  for (let pass = 0; pass < plan.length * 4; pass++) {
+    const dir = target.kcal > running ? QUARTER : -QUARTER;
+    let best = -1;
+    let bestErr = Math.abs(target.kcal - running);
+    for (let i = 0; i < plan.length; i++) {
+      if (serv[i] + dir < MIN_SERVING) continue;
+      const err = Math.abs(target.kcal - (running + plan[i].k * dir));
+      // Strictly better, so a move that only ties is not taken and the loop
+      // cannot oscillate between two plates forever.
+      if (err < bestErr) { bestErr = err; best = i; }
+    }
+    if (best < 0) break;
+    running += plan[best].k * dir;
+    serv[best] += dir;
+  }
+  plan = plan.map((x, i) => {
+    const s = serv[i];
     return { ...x, servings: s, K: Math.round(x.k * s), P: Math.round(x.p * s), C: Math.round(x.c * s), F: Math.round(x.f * s) };
   });
   const tot = {
@@ -649,21 +699,107 @@ export const SNACK_SHARE = 0.125;
 /** A slot index no real plan uses, so snack seeds never track a meal's. */
 const SNACK_SEED_SLOT = 97;
 
-/** Next meal in the catalog for a slot (the "swap" action). */
-export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = []): number {
-  return (currentIdx + 1) % catalogSize(diet, slot, avoid);
+/**
+ * ONE index step, for every place that moves along the catalogue.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * `mealAt` decomposes an index mixed-radix with the LAST pool varying fastest,
+ * and the last pool is the least substantial thing about a meal: FLAVORS for a
+ * main, and for Breakfast and Snack it is BREK_STYLE / SNACK_PREP, which carry
+ * no calories and no ingredients at all. Three callers stepped by exactly 1 —
+ * the week (`planWeek`), the coach's seed week (`seedPlan`) and the member's
+ * "swap this meal" (`swapIndex`) — so a generated week was one dinner with
+ * seven spice rubs, and swapping a breakfast moved you from "with cinnamon" to
+ * "with vanilla".
+ *
+ * The step is the SUM of every dimension's stride, which advances all of them
+ * at once: one step is a different protein AND a different carb AND a
+ * different vegetable AND a different flavouring. Stepping only the slowest
+ * dimension would fix the spice-rub week and leave seven days of jasmine rice
+ * and kale behind it, which is the same complaint one pool along.
+ *
+ * It lives here, once, because three callers stepping by their own arithmetic
+ * is how this happened. A pool with one member in it simply contributes
+ * nothing to move — there is no second dish in this diet and slot to move to.
+ */
+export function variantStep(diet: Diet, slot: Slot, avoid: Allergen[] = []): number {
+  const sizes = dims(diet, slot, avoid).map((p) => Math.max(1, p.length));
+  // stride[i] — how far one step of dimension i moves the index.
+  return sizes.reduce((sum, _, i) => sum + sizes.slice(i + 1).reduce((a, b) => a * b, 1), 0);
 }
 
-/** Search a slot's catalog by name (used by the "choose a meal" picker). */
-export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, avoid: Allergen[] = []): GeneratedMeal[] {
+/** Next meal in the catalog for a slot (the "swap" action). */
+export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = []): number {
   const size = catalogSize(diet, slot, avoid);
-  const scan = Math.min(size, 800);
-  const q = (query || '').toLowerCase();
+  const next = currentIdx + variantStep(diet, slot, avoid);
+  return ((next % size) + size) % size;
+}
+
+/** How far a name-less search will walk the catalogue for a query that spans
+ *  two components. Bounded because this runs on every keystroke. */
+const SEARCH_SWEEP = 1200;
+/** Alternatives shown per matching component, so "beef" is not one beef. */
+const SEARCH_VARIANTS = 6;
+
+/**
+ * Search a slot's catalog by name (used by the "choose a meal" picker).
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * This scanned the first 800 CONSECUTIVE indices. The catalogue is mixed-radix
+ * with the protein as the SLOWEST dimension: for meat/Dinner it changes every
+ * 1,560 indices, so 0–799 are entirely protein #0. An empty query returned
+ * forty grilled chickens, and "beef", "salmon", "tofu" and "lentils" — all of
+ * them in the pool, all of them on the screen that says the slot holds 10,920
+ * meals — each returned nothing at all.
+ *
+ * So the query is matched against the component POOLS and the indices are
+ * COMPOSED from the hits, rather than hoping a match falls in the first 800.
+ * The composed name is still the final filter, so a row that comes back really
+ * does contain what was typed.
+ */
+export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, avoid: Allergen[] = []): GeneratedMeal[] {
+  const pools = dims(diet, slot, avoid);
+  const sizes = pools.map((p) => Math.max(1, p.length));
+  const total = sizes.reduce((a, b) => a * b, 1);
+  // stride[i] is how far one step of dimension i moves the index.
+  const stride = sizes.map((_, i) => sizes.slice(i + 1).reduce((a, b) => a * b, 1));
+  const q = (query || '').trim().toLowerCase();
+  const step = variantStep(diet, slot, avoid);
+
   const rows: GeneratedMeal[] = [];
-  for (let i = 0; i < scan && rows.length < limit; i++) {
-    const m = mealAt(diet, slot, i, avoid);
-    if (!q || m.n.toLowerCase().includes(q)) rows.push(m);
+  const seen = new Set<number>();
+  const take = (raw: number) => {
+    if (rows.length >= limit) return;
+    const idx = ((raw % total) + total) % total;
+    if (seen.has(idx)) return;
+    seen.add(idx);
+    const m = mealAt(diet, slot, idx, avoid);
+    if (q && !m.n.toLowerCase().includes(q)) return;
+    rows.push(m);
+  };
+
+  // No query: walk a substantive component at a time, so the list opens on
+  // dishes that differ rather than on one dish seasoned forty ways.
+  if (!q) {
+    for (let n = 0; n < total && rows.length < limit; n++) take(n * step);
+    return rows;
   }
+  // Every component whose own name matches, with the other dimensions varied.
+  for (let i = 0; i < pools.length && rows.length < limit; i++) {
+    for (let j = 0; j < pools[i].length && rows.length < limit; j++) {
+      if (!pools[i][j].n.toLowerCase().includes(q)) continue;
+      for (let v = 0; v < SEARCH_VARIANTS && rows.length < limit; v++) {
+        let idx = 0;
+        for (let k = 0; k < sizes.length; k++) idx += (k === i ? j : v % sizes[k]) * stride[k];
+        take(idx);
+      }
+    }
+  }
+  // A query that spans two components ("cajun chicken") matches no single one.
+  // ponytail: bounded sweep, not an index — build one if the catalogue grows.
+  for (let n = 0; n < Math.min(total, SEARCH_SWEEP) && rows.length < limit; n++) take(n * step);
   return rows;
 }
 
@@ -698,7 +834,7 @@ export function planWeek(
   coachDay?: (d: number) => Record<number, number> | null,
 ): PlannedMeal[][] {
   // Day zero of the synthetic week is the plan as it stands, overrides and
-  // swaps included — `idx + d` steps from what is on screen rather than from a
+  // swaps included — the week steps from what is on screen rather than from a
   // seed nobody can see.
   const today = buildPlan(c).plan;
   const out: PlannedMeal[][] = [];
@@ -706,7 +842,9 @@ export function planWeek(
     const written = coachDay ? coachDay(d) : null;
     if (written) { out.push(buildPlan({ ...c, mealOverride: written }).plan); continue; }
     const ov: Record<number, number> = {};
-    today.forEach((m) => { ov[m.pos] = m.idx + d; });
+    // `variantStep`, not `+ d` — see its comment. Day 3 is a different protein,
+    // not the same chicken under a different sauce.
+    today.forEach((m) => { ov[m.pos] = m.idx + d * variantStep(c.diet, m.slot, c.avoid ?? []); });
     out.push(buildPlan({ ...c, mealOverride: ov }).plan);
   }
   return out;

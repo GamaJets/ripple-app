@@ -102,7 +102,7 @@ export interface AssignTarget {
    * control rather than letting a screen mark some rows and shrug at others.
    * A caller that has not passed that guard must not be building these at all.
    */
-  onProgramme: boolean;
+  onProgram: boolean;
 }
 
 export interface OverwriteBrief {
@@ -157,8 +157,8 @@ export function overwriteBrief(
   targets: readonly AssignTarget[],
   templateName: string,
 ): OverwriteBrief {
-  const replacing = targets.filter((x) => x.onProgramme);
-  const fresh = targets.filter((x) => !x.onProgramme);
+  const replacing = targets.filter((x) => x.onProgram);
+  const fresh = targets.filter((x) => !x.onProgram);
   const n = targets.length;
   const r = replacing.length;
 
@@ -232,7 +232,7 @@ export function overwriteBrief(
  * would make the count wrong in the direction that raises a false alarm.
  */
 export function unassignBrief(targets: readonly AssignTarget[]): OverwriteBrief {
-  const on = targets.filter((x) => x.onProgramme);
+  const on = targets.filter((x) => x.onProgram);
   const n = on.length;
   const who = namesWithRest(on.map((x) => x.name));
 
@@ -667,6 +667,6 @@ export function endCoachingBrief(targets: readonly EndTarget[]): OverwriteBrief 
     confirmLabel: n === 1 ? 'Remove Them' : `Remove All ${num(n)}`,
     // Everybody, because every one of them loses something. `replacing` is what
     // the caller styles the button destructive on.
-    replacing: targets.map((x) => ({ clientId: x.clientId, name: x.name, onProgramme: false })),
+    replacing: targets.map((x) => ({ clientId: x.clientId, name: x.name, onProgram: false })),
   };
 }

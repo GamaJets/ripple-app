@@ -51,7 +51,7 @@
 // exists for. It is the same shape as the injury acknowledgement in
 // ./injuryGate.ts and is answered the same way: the coach is stopped by news.
 import type { Diet } from './types';
-import { buildPlan, catalogSize, mealAt, slotsFor, type Allergen, type PlanInput, type Slot } from './meals';
+import { buildPlan, catalogSize, mealAt, slotsFor, variantStep, type Allergen, type PlanInput, type Slot } from './meals';
 import { weekdayOfIso } from './dayPlan';
 import { WEEK_DAYS, dayIndexInWeek, jsDayForIndex } from './weekStart';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -142,10 +142,12 @@ export function capturePlanMeal(diet: Diet, slot: Slot, idx: number, avoid: read
  * A week to start editing from: the day the client is already being shown,
  * then six variations of it.
  *
- * Stepping each index by the day number is exactly what the client's Meals tab
- * does for its own week preview, so a coach who opens this screen and saves
- * without touching anything has committed the week the client could already
- * see. A seed that invented a different week would make "send" a change the
+ * Stepping each index by `variantStep` per day is exactly what the client's
+ * Meals tab does for its own week preview, so a coach who opens this screen and
+ * saves without touching anything has committed the week the client could
+ * already see. The step has to be the SAME step — an increment of 1 here and a
+ * variant step there would be two different weeks again, which is the whole
+ * reason that arithmetic lives in one function in src/lib/meals.ts. A seed that invented a different week would make "send" a change the
  * coach did not make.
  */
 export function seedPlan(input: PlanInput, writtenAtISO: string): CoachMealPlan {
@@ -155,7 +157,8 @@ export function seedPlan(input: PlanInput, writtenAtISO: string): CoachMealPlan 
   const days: PlanDay[] = [];
   for (let d = 0; d < PLAN_DAYS; d++) {
     days.push({
-      meals: slots.map((slot, i) => capturePlanMeal(input.diet, slot, (day0[i]?.idx ?? 0) + d, avoid)),
+      meals: slots.map((slot, i) =>
+        capturePlanMeal(input.diet, slot, (day0[i]?.idx ?? 0) + d * variantStep(input.diet, slot, avoid), avoid)),
     });
   }
   return { v: PLAN_VERSION, diet: input.diet, avoid, mealsPerDay: input.mealsPerDay, days, writtenAt: writtenAtISO };
@@ -450,22 +453,61 @@ export function guardPlan(
 /**
  * What the client's app will do with the servings, in words.
  *
- * `buildPlan` scales every meal in a day by one shared multiplier so the day
- * lands on the client's target, so a coach who composes 1,400 kcal of food
- * against a 2,500 kcal target has not written a 1,400 kcal day — they have
- * written one where every plate is served at 1.75×. That is a consequence of
- * the choice worth reading before it is sent, and it is arithmetic rather than
- * advice: no judgement is offered about either figure.
+ * `buildPlan` scales the meals in a day so the day lands on the client's
+ * target, so a coach who composes 1,400 kcal of food against a 2,500 kcal
+ * target has not written a 1,400 kcal day — they have written one where every
+ * plate is served at 1.75×. That is a consequence of the choice worth reading
+ * before it is sent, and it is arithmetic rather than advice: no judgement is
+ * offered about either figure.
+ *
+ * The WHOLE DAY'S servings, not one plate's. This took a single number while
+ * `buildPlan` applied a single day-wide multiplier, and it no longer does —
+ * it now moves individual plates by a quarter serving to close the last of the
+ * gap, so the plates can differ. The caller was passing `plan[0].servings`,
+ * which after that change is breakfast's portion presented as the day's.
  */
-export function planServingNote(servings: number, baseKcal: number, targetKcal: number): string {
+export function planServingNote(servings: readonly number[], baseKcal: number, targetKcal: number): string {
+  const list = servings.length ? servings : [1];
+  const lo = Math.min(...list);
+  const hi = Math.max(...list);
   // `toFixed(2)` here wrote an English full stop and then trimmed a trailing
   // zero that a comma locale never produces, so a German coach read "1.75×"
   // beside figures this app writes with a comma. numUpTo does both jobs in the
   // reader's own language.
-  const mult = numUpTo(servings, 2);
-  if (servings === 1) {
+  const mult = numUpTo(lo, 2);
+  if (lo !== hi) {
+    return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app sizes each plate on its own, between ${numUpTo(lo, 2)}× and ${numUpTo(hi, 2)}×, to land the day on that number — pick differently if that is not the portion you mean.`;
+  }
+  const servings0 = lo;
+  if (servings0 === 1) {
     return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, which is what their target asks for. Their app serves them as written.`;
   }
-  const dir = servings > 1 ? 'up' : 'down';
+  const dir = servings0 > 1 ? 'up' : 'down';
   return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app scales every plate ${dir} to ${mult}× to close the gap — pick differently if that is not the portion you mean.`;
+}
+
+/**
+ * What the portions CANNOT do, in words — the protein gap, said out loud.
+ *
+ * `buildPlan` closes the day's CALORIES and nothing else. Scaling multiplies
+ * every macro by the same number, so a day's protein-per-calorie is fixed by
+ * which meals were chosen and no portion size moves it: measured across the
+ * catalogue a plan can sit 50% or more above its own protein target, or below
+ * it, with the coach holding no control that changes the figure.
+ *
+ * The screen drew that as a meter, beside the target it disagreed with, and
+ * said nothing. A meter reading 150 against a 100 printed two lines above it
+ * is not a disclosure — it looks like the plan, and a coach reads it as one.
+ * So this is the sentence, and it names the only lever there is: swap a meal.
+ *
+ * Null when the day is within `TOL` of its target, because a note on every
+ * plan is a note nobody reads, and a few grams is not a finding.
+ */
+const PROTEIN_NOTE_TOL = 0.1;
+export function planProteinNote(planProtein: number, targetProtein: number): string | null {
+  if (!Number.isFinite(planProtein) || !Number.isFinite(targetProtein) || targetProtein <= 0) return null;
+  const off = (planProtein - targetProtein) / targetProtein;
+  if (Math.abs(off) < PROTEIN_NOTE_TOL) return null;
+  const dir = off > 0 ? 'above' : 'below';
+  return `The portions above are sized by calories, which is the only thing they can be sized by. This day's protein is what these particular meals contain: ${Math.round(planProtein).toLocaleString()} g, ${dir} the ${Math.round(targetProtein).toLocaleString()} g target. Swapping a meal moves it; changing the portions does not.`;
 }

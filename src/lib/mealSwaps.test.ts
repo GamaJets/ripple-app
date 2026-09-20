@@ -5,6 +5,7 @@ import {
   mealSwapsKey, isMealSwapsKey, readMealSwaps, writeMealSwaps,
 } from './mealSwaps';
 import { PERSONAL_DEVICE_KEYS, KEPT_ON_SIGN_OUT, ACCOUNT_SCOPED_PREFIXES } from './signOutState';
+import { swapIndex, mealAt, catalogSize, mealAllergens, type Allergen } from './meals';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -72,6 +73,55 @@ same(readMealSwaps(writeMealSwaps({} as Record<number, number>)), {}, 'no swaps 
 // worse than what a reader will accept back.
 same(readMealSwaps(writeMealSwaps({ 0: 5, 1: NaN } as unknown as Record<number, number>)), { 0: 5 },
   'a NaN index is not written out to be read back as a meal');
+
+/* ── a swap is taken in the member's OWN index space ────────────────────────
+   The header above is about one number meaning two dinners in two catalogues.
+   The same confusion had a second door: app/(client)/nutrition.tsx called
+   `swapIndex(diet, slot, idx)` and let the `avoid` parameter default to `[]`,
+   so Swap stepped along the UNFILTERED catalogue and wrote the result into
+   `override` — which `buildPlan` then resolves with `idx % size` against the
+   FILTERED pools. The member pressed Swap and got a meal nobody's arithmetic
+   had chosen, drawn from a space their exclusions were never applied to.
+   These pin the rule the call site must obey. */
+
+const SWAP_AVOID: Allergen[] = ['dairy', 'nuts'];
+
+ok(catalogSize('meat', 'Dinner', SWAP_AVOID) < catalogSize('meat', 'Dinner', []),
+  'the exclusions really do shrink the dinner pool, so the two index spaces differ');
+
+// Every step taken with the list lands on a meal the member may eat. This is
+// the property the screen depends on and the one the missing argument broke.
+{
+  const size = catalogSize('meat', 'Dinner', SWAP_AVOID);
+  let clean = true;
+  for (let i = 0; i < size; i++) {
+    const m = mealAt('meat', 'Dinner', swapIndex('meat', 'Dinner', i, SWAP_AVOID), SWAP_AVOID);
+    if (mealAllergens(m, SWAP_AVOID).length) { clean = false; break; }
+  }
+  ok(clean, 'swapping from any index in the filtered catalogue stays inside it');
+  // Whatever stride the step uses, it lands inside the FILTERED catalogue —
+  // it is that size the result is taken modulo, not the unfiltered one.
+  let inRange = true;
+  for (let i = 0; i < size; i++) {
+    const n = swapIndex('meat', 'Dinner', i, SWAP_AVOID);
+    if (!Number.isInteger(n) || n < 0 || n >= size) { inRange = false; break; }
+  }
+  ok(inRange, 'and it wraps at the FILTERED size, not the unfiltered one');
+}
+
+// And the two spaces are not interchangeable: somewhere in the filtered
+// catalogue, forgetting the list picks a different dinner. One index is
+// enough — it is the same defect however many there are.
+{
+  const size = catalogSize('meat', 'Dinner', SWAP_AVOID);
+  let diverged = false;
+  for (let i = 0; i < size; i++) {
+    const withList = mealAt('meat', 'Dinner', swapIndex('meat', 'Dinner', i, SWAP_AVOID), SWAP_AVOID);
+    const without = mealAt('meat', 'Dinner', swapIndex('meat', 'Dinner', i), SWAP_AVOID);
+    if (withList.n !== without.n) { diverged = true; break; }
+  }
+  ok(diverged, 'dropping the avoid list changes which meal a swap lands on');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`mealSwaps.test.ts — ok`);

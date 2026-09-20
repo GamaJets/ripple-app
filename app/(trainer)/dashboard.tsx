@@ -82,7 +82,6 @@ import { hitSlopFor } from '../../src/lib/a11y';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
-import { slotsFor, searchMeals, mealAt, type Slot } from '../../src/lib/meals';
 import { useCoachNotes } from '../../src/ui/coachNotes';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
@@ -728,8 +727,6 @@ export default function TrainerClients() {
   // note does — `addFeedback` resolves false and the client never sees it.
   const [fbBusy, setFbBusy] = useState(false);
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri, status: nutriStatus, reload: reloadNutri } = useCoachNutrition();
-  const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
-  const [mealQuery, setMealQuery] = useState('');
   const { getNotes, addNote, removeNote, status: notesStatus, reload: reloadNotes } = useCoachNotes();
   // Saving a private note is now a round trip (see src/ui/coachNotes.tsx: it
   // used to be a `useState` that lost every note on relaunch), so the Save
@@ -845,12 +842,6 @@ export default function TrainerClients() {
   const [fb, setFb] = useState('');
   const [nnote, setNnote] = useState('');
   const [sel, setSel] = useState<RosterClient | null>(null);
-  // The meal picker is a slot on ONE client, so it cannot outlive the sheet
-  // that named them. Closing the client sheet while it is open leaves
-  // `mealPick` set, and the next client opened would have the picker spring up
-  // unasked — on their breakfast, ready to write a meal to somebody the coach
-  // had not chosen it for.
-  useEffect(() => { if (!sel) setMealPick(null); }, [sel]);
   const [addOpen, setAddOpen] = useState(false);
 
   // ── bringing a whole book across ─────────────────────────────────────────
@@ -1588,10 +1579,10 @@ export default function TrainerClients() {
    *  captioned a fragment as the whole book. The segment still SELECTS in both
    *  cases — filtering what did load is honest — it just cannot say how many.  */
   const segN = (n: number): number | null => (isWhole(rosterStatus) ? n : null);
-  /** Nobody has written this client a programme — as opposed to "this phone has
+  /** Nobody has written this client a program — as opposed to "this phone has
    *  not been told what they are on", which is what a null means under any
    *  status but 'ready'. Only ever asked behind `isWhole(programStatus)`. */
-  const noProgramme = (c: RosterClient): boolean => getProgram(c.id) == null;
+  const noProgram = (c: RosterClient): boolean => getProgram(c.id) == null;
   // `band` marks the four that are a STATE rather than a kind of client, with
   // the state's hue by name. The mockups draw those as a row of toned chips
   // under the segment bar and the rest in the bar; both rows set the one `seg`,
@@ -1642,9 +1633,9 @@ export default function TrainerClients() {
      *
      * The chip a coach opens a roster to find and the one this screen did not
      * have. TrueCoach, Trainerize and PT Distinction all surface "no active
-     * programme" on the roster, because it is the difference between somebody
+     * program" on the roster, because it is the difference between somebody
      * who is coached and somebody who is merely listed — and it is invisible
-     * from every other signal here: a client with no programme at all can be
+     * from every other signal here: a client with no program at all can be
      * training four times a week off their own bat, so they are `on_track` in
      * drift, unflagged on adherence, and nothing on this screen ever mentions
      * that the coach has written them nothing.
@@ -1656,14 +1647,14 @@ export default function TrainerClients() {
      * src/ui/assignedPrograms.tsx is explicit that `getProgram` serves this
      * DEVICE's cache when no read has landed — deliberately — and that serving
      * the cache does not make anything 'ready'. So under 'loading' and under
-     * 'error' a null programme means "this phone has not been told", and a chip
+     * 'error' a null program means "this phone has not been told", and a chip
      * built on it would list every client the cache happens not to hold under a
      * heading asserting the coach has programmed none of them. The drift chips
      * two entries above appear on exactly the same condition and for exactly
      * the same reason; this one is absent rather than wrong.
      */
     ...(isWhole(programStatus)
-      ? [{ key: 'noprogramme', label: 'No Programme', n: segN(roster.filter(noProgramme).length) }]
+      ? [{ key: 'noprogram', label: 'No Program', n: segN(roster.filter(noProgram).length) }]
       : []),
     ...COACHED_MODES.map((m) => ({ key: m, label: COACHED_MODE_SHORT[m], n: segN(roster.filter((c) => c.mode === m).length) })),
   ];
@@ -1677,9 +1668,9 @@ export default function TrainerClients() {
     : seg === 'nodata' ? driftFor(c)?.status === 'idle'
     : seg === 'below' ? lowAdherence(c)
     // Only reachable while the chip is on screen, which is only while the
-    // programme read was whole — see AUTO_SEGS. `segLive` drops the selection
+    // program read was whole — see AUTO_SEGS. `segLive` drops the selection
     // back to the whole book if that stops being true underneath the coach.
-    : seg === 'noprogramme' ? noProgramme(c)
+    : seg === 'noprogram' ? noProgram(c)
     // A row whose unread count could not be read is NOT in this list. The
     // segment is a queue a coach works through, and a client who may or may not
     // have written is not something to answer — the chip's own dash says the
@@ -1691,13 +1682,13 @@ export default function TrainerClients() {
   // A drift segment cannot be honoured once the read is gone; fall back to the
   // whole book rather than showing an empty list that reads as "none of these".
   //
-  // The same for 'noprogramme': a programme read that stops being whole — a
+  // The same for 'noprogram': a program read that stops being whole — a
   // refresh that fails, a sign-out and back — leaves `getProgram` serving a
   // cache, and a segment computed off that would quietly become a list of the
   // clients this handset has forgotten rather than the ones nobody has written
   // to. It falls back to the whole book, which is visibly not a filtered list.
   const segLive = !((!bands && (seg === 'drifting' || seg === 'nodata' || seg === 'watch' || seg === 'steady'))
-    || (seg === 'noprogramme' && !isWhole(programStatus)));
+    || (seg === 'noprogram' && !isWhole(programStatus)));
   const segRoster = segLive ? roster.filter(matchSeg) : roster;
   // What is on screen, and therefore what every control under the list acts on.
   //
@@ -1908,7 +1899,7 @@ export default function TrainerClients() {
    *
    * ASSIGN. It fanned a template over the segment with no confirmation, no
    * overwrite guard and no injury gate — so the fastest way in this app to
-   * replace thirty training programmes without seeing one of them was to pick
+   * replace thirty training programs without seeing one of them was to pick
    * a segment here rather than open the template library, which withholds the
    * same control until `assigned_programs` has been read whole. Both guards
    * are consulted now, and the write is preceded by a sentence saying how many
@@ -1931,11 +1922,11 @@ export default function TrainerClients() {
   const segStatus: LoadStatus =
     seg === 'drifting' || seg === 'nodata' || seg === 'watch' || seg === 'steady'
       ? (driftErr ? 'error' : drift ? 'ready' : 'loading')
-      : seg === 'noprogramme'
+      : seg === 'noprogram'
         // Bulk message and bulk assign both act on "everybody in this segment",
-        // and this segment IS the programme read. `guardRecipients` refuses the
+        // and this segment IS the program read. `guardRecipients` refuses the
         // pair outright on anything but 'ready' — which matters most here,
-        // because the obvious next gesture after filtering to No Programme is
+        // because the obvious next gesture after filtering to No Program is
         // to assign one to all of them.
         ? programStatus
       : seg === 'all' || seg === 'below' || (COACHED_MODES as readonly string[]).includes(seg)
@@ -1995,10 +1986,10 @@ export default function TrainerClients() {
   };
 
   /** One assign here is as many overwrites as there are people in the segment,
-   *  so it waits until the programmes it would replace have actually been read.
+   *  so it waits until the programs it would replace have actually been read.
    *  `getProgram` returns null both for a client on nothing and for a client
    *  whose row did not come back, and this screen had no way to tell. */
-  const bulkGuard = guardOverwrite(programStatus, 'the programmes these clients are currently on');
+  const bulkGuard = guardOverwrite(programStatus, 'the programs these clients are currently on');
   const bulkAssign = async (tpl: ProgramTemplate) => {
     if (bulkBusy) return;
     if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
@@ -2006,7 +1997,7 @@ export default function TrainerClients() {
     const list = shownRoster;
     if (!list.length) return;
     const targets: AssignTarget[] = list.map((c) => ({
-      clientId: c.id, name: c.name.split(' ')[0], onProgramme: !!getProgram(c.id),
+      clientId: c.id, name: c.name.split(' ')[0], onProgram: !!getProgram(c.id),
     }));
     const brief = overwriteBrief(targets, tpl.name);
     const go = await new Promise<boolean>((resolve) => {
@@ -2205,15 +2196,15 @@ export default function TrainerClients() {
           ? 'their food log could not be read — do not comment on their food logging'
           : `${mealsThisWeek} in the last 7 days`,
       // One literal used to serve two different states: this client is on
-      // nothing, and the assigned programmes did not come back. `noProgramme`
+      // nothing, and the assigned programs did not come back. `noProgram`
       // at :1394 states the rule this now keeps — `getProgram` returning null
       // is only an answer behind `isWhole(programStatus)` — and the question
       // this prompt asks is what to focus on next week, which a model told the
-      // client is on nothing answers by writing them a programme.
+      // client is on nothing answers by writing them a program.
       programTitle: !isWhole(programStatus)
-        ? 'unknown — their assigned programmes could not be read, so do not say they are on nothing and do not '
-          + 'write them a new programme on the strength of it'
-        : getProgram(client.id)?.title ?? 'no coach-assigned programme',
+        ? 'unknown — their assigned programs could not be read, so do not say they are on nothing and do not '
+          + 'write them a new program on the strength of it'
+        : getProgram(client.id)?.title ?? 'no coach-assigned program',
     };
     const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only — you have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
     setAiBusy(false);
@@ -2907,7 +2898,7 @@ export default function TrainerClients() {
               reads the endings, and this file's own history (see its header)
               is of the same table read twice by two hands — so the bar holds
               the kinds of client this book actually has: everybody on it, who
-              is waiting on a reply, who has no programme, how each is coached,
+              is waiting on a reply, who has no program, how each is coached,
               and the coach's own tags. "Active" is the whole roster, which is
               what the Active Clients tile counts. It is the kit's `Segmented`
               in its scrolling form, because the length of the set is the
@@ -3724,6 +3715,26 @@ export default function TrainerClients() {
                 <SheetHead t={t} title="Meal Plan Targets" />
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Shape {sel.name.split(' ')[0]}'s daily calories, protein, carbs & fat — applies to their Meals tab live.</Text>
 
+                {/* The deltas below are safe to set from here: they are numbers
+                    against the client's own computed targets and depend on
+                    nothing this sheet failed to read. Picking their MEALS is
+                    not, and a picker that did it used to sit under them. A meal
+                    is an index into a catalogue that `avoid` has already
+                    filtered, `useRoster` only selects `diet, avoid` for LINKED
+                    clients and selects neither when the read comes back short —
+                    so `sel.avoid ?? []` turned "we could not read what they
+                    avoid" into "they avoid nothing" and assigned food out of an
+                    unfiltered catalogue. It also wrote the superseded flat
+                    `meal_override`. client-nutrition.tsx reads that profile
+                    itself, holds its own LoadStatus for it, withholds the send
+                    behind `guardPlan`, and writes the weekday-carrying `plan`.
+                    Above the adjustment gate rather than inside it: opening a
+                    screen writes nothing, so a coach whose ADJUSTMENT could not
+                    be read is still one tap from the job. */}
+                <ListRow icon="meals" title="Write Their Week of Meals" tone="orange"
+                  note={`Pick ${sel.name.split(' ')[0]}'s meals against what they avoid`}
+                  onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/client-nutrition', params: { clientId: id, name: nm } }); }} />
+
                 {/* The controls are withheld, not just annotated, when the
                     adjustment could not be read.
                     `getNutri(id)?.[key] ?? 0` cannot tell "no adjustment set"
@@ -3760,24 +3771,6 @@ export default function TrainerClients() {
                     </View>
                   </View>
                 ))}
-                <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6, marginTop: 4 }}>Set Specific Meals</Text>
-                {slotsFor(sel.mealsPerDay || 3).map((slot, pos) => {
-                  const ovIdx = getNutri(sel.id)?.mealOverride?.[pos];
-                  const dietForPick = (sel.diet || 'meat') as any;
-                  const picked = ovIdx != null ? mealAt(dietForPick, slot, ovIdx, (sel.avoid ?? []) as any) : null;
-                  return (
-                    <View key={pos} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                      <View style={{ flex: 1, marginEnd: sp.sm }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>{slot}</Text>
-                        <Text style={{ ...ty.label, ...font(picked ? '500' : '400'), color: picked ? t.ink : t.ink3, marginTop: 2 }} numberOfLines={1}>{picked ? picked.n : 'Auto (client picks)'}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', gap: 6 }}>
-                        {picked ? <Ghost label="Clear" onPress={() => setNutri(sel.id, { mealOverride: (() => { const mm = { ...(getNutri(sel.id)?.mealOverride ?? {}) }; delete mm[pos]; return mm; })() })} /> : null}
-                        <Cta label={picked ? 'Change' : 'Choose'} onPress={() => { setMealQuery(''); setMealPick({ pos, slot }); }} />
-                      </View>
-                    </View>
-                  );
-                })}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                   <TextInput value={nnote} onChangeText={setNnote} placeholder="Note on the plan (optional)…" placeholderTextColor={t.ink3} accessibilityLabel="Note on the plan, optional" style={{ ...field(t), flex: 1 }} />
                   <Cta label="Save" onPress={() => { setNutri(sel.id, { note: nnote.trim() }); }} />
@@ -4055,44 +4048,19 @@ export default function TrainerClients() {
         ) : null}
       </Modal>
 
-      {/* ── coach meal picker ─────────────────────────────────────────────
-          Nested in the client sheet on purpose. "Choose" is only ever tapped
-          on a meal row above, and the picker reads `sel` for the diet, the
-          allergens and the name it writes to — it has no meaning without this
-          sheet open. As a sibling `<Modal>` at the screen root it was worse
-          than meaningless: iOS presents each modal in its own window and puts
-          one opened from the root beneath the sheet already showing, so
-          "Choose" set `mealPick`, mounted the picker out of sight behind the
-          client sheet, and left a coach tapping a button that never did
-          anything. Nested here it presents above the sheet it belongs to. */}
-      <Modal visible={!!mealPick} transparent animationType="slide" onRequestClose={() => setMealPick(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={SCRIM} onPress={() => setMealPick(null)}
-          accessibilityRole="button" accessibilityLabel="Close" />
-        <View style={sheet(t, { maxHeight: '80%' })}>
-          {mealPick && sel ? (
-            <>
-              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>Pick a {mealPick.slot.toLowerCase()}</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>For {sel.name.split(' ')[0]} · {sel.diet || 'meat'} plan · tap to assign</Text>
-              <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} accessibilityLabel="Search meals" style={{ ...field(t), marginBottom: sp.md }} />
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-                {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40, (sel.avoid ?? []) as any).map((m) => (
-                  <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }}
-                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                    <View style={{ flex: 1, marginEnd: sp.md }}>
-                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{m.n}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.k} kcal · P{m.p} / C{m.c} / F{m.f}</Text>
-                    </View>
-                    <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </>
-          ) : null}
-        </View>
-              </KeyboardAvoidingView>
-      </Modal>
-      {/* ── end of the client sheet, which the meal picker sits inside ──── */}
+      {/* ── the coach meal picker used to sit here ────────────────────────
+          It searched the catalogue with `sel.avoid ?? []` and `sel.diet ||
+          'meat'`. `useRoster` only selects diet and avoid for LINKED clients,
+          and under a 'partial' or 'error' roster read it does not select them
+          at all — so those two fallbacks turned "we could not read what they
+          avoid" into "they avoid nothing", and a coach assigned a meal from an
+          UNFILTERED catalogue to somebody whose exclusions had never been
+          read. It also wrote `coach_nutrition.meal_override`, the superseded
+          flat pos → idx map with no weekday on it (see src/ui/coachNutrition.tsx).
+          app/(trainer)/client-nutrition.tsx does this job properly: it reads
+          `clients.diet, avoid` itself with its own LoadStatus and withholds
+          the send behind `guardPlan` until that read has landed. The row above
+          opens it on this client, so the job is still one tap from here. */}
       </Modal>
 
       {/* ── add a client ─────────────────────────────────────────────────── */}
@@ -4888,8 +4856,8 @@ export default function TrainerClients() {
             {(() => {
               const on = shownRoster.filter((c) => !!getProgram(c.id));
               return on.length === 0
-                ? 'None of them are on a coach-assigned programme, so nothing here is replaced.'
-                : `${on.length} of them are on a programme now — ${listNames(on.slice(0, 4).map((c) => c.name.split(' ')[0]))}${on.length > 4 ? ` and ${on.length - 4} more` : ''}. Whichever template you pick replaces what they are training.`;
+                ? 'None of them are on a coach-assigned program, so nothing here is replaced.'
+                : `${on.length} of them are on a program now — ${listNames(on.slice(0, 4).map((c) => c.name.split(' ')[0]))}${on.length > 4 ? ` and ${on.length - 4} more` : ''}. Whichever template you pick replaces what they are training.`;
             })()}
           </Text>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>

@@ -949,8 +949,18 @@ export default function Nutrition() {
     && !(todayPlan[pos] && isRecipeMeal(todayPlan[pos]));
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => {
     // `swapIndex` steps along the catalogue FROM an index. See `choose`.
+    //
+    // `c.avoid` is not optional here even though the parameter is. The index
+    // written goes into `override`, which `buildPlan` resolves with `idx %
+    // size` against the pools `avoid` has FILTERED — so without it the step
+    // was taken in the unfiltered space and landed back in the filtered one as
+    // a different meal. The coach's swap on client-nutrition.tsx has always
+    // passed the list; this one defaulted to `[]`, which is the index-space
+    // confusion src/lib/mealSwaps.ts is written about. The profile read is
+    // already gated above: nothing on this board draws until `c.avoid` is
+    // known, so this is the member's real list and never an empty stand-in.
     if (!Number.isInteger(idx) || idx < 0) return;
-    setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
+    setOverride({ ...override, [pos]: swapIndex(diet, slot, idx, c.avoid) });
   };
   // ── the recipe search, and only when asked ─────────────────────────────
   //
