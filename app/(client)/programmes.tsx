@@ -44,7 +44,7 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { Rule, Section, SectionHead, PageHead, Notice, PartialRead, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useProgrammeLibrary } from '../../src/ui/workoutTemplates';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
@@ -89,7 +89,7 @@ function Chip({ label, on, onPress, spoken }: {
         backgroundColor: on ? t.brand : t.surface2,
       }}
     >
-      <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 }
@@ -241,9 +241,21 @@ export default function Programmes() {
             <View key={`${x.id}-day-${di}`}>
               <Rule />
               <Section>
+                {/* The day's card is about the day: its own name (or its place,
+                    where the programme gives none), its own counts. The set
+                    total is drawn only when EVERY movement in the day states a
+                    set count — a sum over the rows that happen to carry one
+                    would be a smaller number passing for the day's. There are
+                    no muscle-group chips here, unlike Train and This Week: a
+                    ready-made programme's rows hold a catalogue id and the
+                    library read brings back names only, so there is no group
+                    on this screen to draw one from. */}
                 <SectionHead
                   title={dayName?.text ?? `Day ${di + 1}`}
-                  note={d.exercises.length ? `${d.exercises.length === 1 ? '1 exercise' : `${d.exercises.length} exercises`}` : undefined}
+                  note={d.exercises.length
+                    ? `${d.exercises.length === 1 ? '1 exercise' : `${d.exercises.length} exercises`}${d.exercises.every((e) => e.sets != null)
+                      ? ` · ${d.exercises.reduce((n, e) => n + (e.sets as number), 0)} sets` : ''}`
+                    : undefined}
                 />
                 {d.exercises.length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>
@@ -286,7 +298,7 @@ export default function Programmes() {
                       }}
                     >
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{label}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{label}</Text>
                         {load || rest ? (
                           <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
                             {[load, rest].filter(Boolean).join(' · ')}
@@ -422,7 +434,7 @@ export default function Programmes() {
                     <Icon name="grid" size={18} color={t.brand} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name?.text ?? x.id}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{name?.text ?? x.id}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{metaLine(x)}</Text>
                     {description ? (
                       <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }} numberOfLines={2}>{description.text}</Text>

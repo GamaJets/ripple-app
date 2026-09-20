@@ -13,10 +13,13 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Flag, PartialRead, DayBars } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Flag, PartialRead, DayBars, TonedChip } from '../../src/ui/kit';
+// The same chips, in the same colours, as the day's hero on Train.
+import { groupTone, groupsOf } from '../../src/ui/groupTone';
+import { setCount } from '../../src/lib/setRows';
 import { isWhole } from '../../src/ui/loadStatus';
 import { num } from '../../src/lib/format';
-import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, value, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useCallback, useMemo } from 'react';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -318,7 +321,7 @@ export default function ThisWeek() {
               for them to disagree about which week is open. */}
           {blk.weeks.length > 1 ? (
             <View style={{ marginBottom: sp.lg }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{weekLabel(thisWeek, blk.week.index + 1)}</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{weekLabel(thisWeek, blk.week.index + 1)}</Text>
               {blockLine ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{blockLine}</Text> : null}
               {thisWeek?.note ? (
                 <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs }}>{thisWeek.note}</Text>
@@ -333,22 +336,36 @@ export default function ThisWeek() {
             // A rest day says so and stays tappable — somebody who trains on a
             // day off still wants Train, and the log below still marks it.
             const focus = workout ? workout.focus : 'Rest day';
+            // Counted the way Train's hero counts the same day: the plan's own
+            // rows through `setCount`, so a coach's set table is the sets it
+            // holds and the two screens cannot disagree about one day.
+            const sets = workout ? workout.exercises.reduce((n, e) => n + setCount(e), 0) : 0;
             const sub = workout
-              ? `${workout.exercises.length} exercise${workout.exercises.length === 1 ? '' : 's'}${workout.cardio ? ` · ${workout.cardio}` : ''}`
+              ? `${workout.exercises.length} exercise${workout.exercises.length === 1 ? '' : 's'} · ${sets === 1 ? '1 set' : `${sets} sets`}${workout.cardio ? ` · ${workout.cardio}` : ''}`
               : 'Nothing scheduled — train anyway if you want to';
+            // What THIS day trains, off its own exercise rows and never off its
+            // name — a day called "Push" with a row in it shows Back. Every
+            // part of the row describes the one day; the programme's name is
+            // the page's subtitle and appears on no row.
+            const groups = workout ? groupsOf(workout.exercises) : [];
             return (
               <View key={label}>
                 {i > 0 ? <Rule /> : null}
                 <Pressable onPress={() => router.push(trainIntent('/(client)/workouts') as any)} accessibilityRole="button"
-                  accessibilityLabel={`${label} ${date.getDate()}. ${focus}. ${done ? 'Logged' : isToday ? 'Today' : 'Open Train'}`}
+                  accessibilityLabel={`${label} ${date.getDate()}. ${focus}. ${sub}.${groups.length ? ` ${groups.join(', ')}.` : ''} ${done ? 'Logged' : isToday ? 'Today' : 'Open Train'}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <View style={{ width: 38 }}>
                     <Text style={{ ...ty.micro, color: isToday ? t.ink2 : t.ink3 }}>{label}</Text>
                     <Text style={{ ...value(17), color: isToday ? t.ink : t.ink2, marginTop: 2 }}>{date.getDate()}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: workout ? t.ink : t.ink2, textTransform: 'capitalize' }}>{focus}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: workout ? t.ink : t.ink2, textTransform: 'capitalize' }}>{focus}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sub}</Text>
+                    {groups.length ? (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: sp.sm }}>
+                        {groups.map((g) => <TonedChip key={g} label={g} tone={groupTone(g)} />)}
+                      </View>
+                    ) : null}
                   </View>
                   {done ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -356,7 +373,7 @@ export default function ThisWeek() {
                       <Text style={{ ...ty.label, color: t.ink2 }}>Logged</Text>
                     </View>
                   ) : isToday ? (
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Today</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>Today</Text>
                   ) : (
                     <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                   )}
@@ -429,10 +446,10 @@ export default function ThisWeek() {
           {hist.entries.map((e, i) => (
             <View key={e.key} style={{ marginTop: sp.md, paddingTop: i ? sp.md : 0, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-                <Text style={{ ...ty.body, fontWeight: e.current ? '600' : '400', color: e.current ? t.ink : t.ink2, flex: 1 }}>
+                <Text style={{ ...ty.body, ...font(e.current ? '600' : '400'), color: e.current ? t.ink : t.ink2, flex: 1 }}>
                   {e.title}
                 </Text>
-                <Text style={{ ...ty.micro, color: e.current ? t.brand : t.ink3 }}>
+                <Text style={{ ...ty.micro, color: e.current ? t.brandText : t.ink3 }}>
                   {e.current ? 'Now' : `${e.weeks} wk`}
                 </Text>
               </View>
@@ -455,16 +472,15 @@ export default function ThisWeek() {
         </Section>
 
 
-        <Section>
-          {/* Says what the rows above it say. A plan with no day landing in this
-              week gets its own sentence rather than "runs 0 training days a
-              week", which reads as a plan that asks nothing of anybody. */}
-          <Text style={{ ...ty.caption, color: t.ink3 }}>
-            {trainingDays === 0
-              ? 'None of this program\u2019s days fall in this week. Tap any day to open Train and log a session anyway.'
-              : `This program runs ${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week. Tap any day to open Train and log it.`}
+        {/* The head of The Plan already carries "N training days a week", so the
+            sentence that closed this page saying it again is gone. What is kept
+            is the one case that is a reason rather than a repeat: a plan none
+            of whose days lands in this week. */}
+        {trainingDays === 0 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+            None of this program’s days fall in this week. Tap any day to open Train and log a session anyway.
           </Text>
-        </Section>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

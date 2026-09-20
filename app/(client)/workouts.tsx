@@ -19,7 +19,7 @@ import { lastTime } from '../../src/lib/lastTime';
 import { BRAND } from '../../src/lib/brands';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState, StatusBar } from 'react-native';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SessionSteps } from '../../src/ui/SessionSteps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -69,8 +69,8 @@ import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow, Segmented, TonedChip, Meter, HeroRing, CtaBright, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font, grown } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
@@ -163,12 +163,15 @@ import { videoForExercise, exerciseSlug, type ExerciseRef } from '../../src/lib/
 import { clipOwner, type ClipOwner } from '../../src/lib/clipOwner';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
+// One colour per muscle group, shared with This Week so a chip there and a
+// bar here agree. See src/ui/groupTone.ts.
+import { groupTone, groupsOf } from '../../src/ui/groupTone';
 import { DidYouKnow } from '../../src/ui/DidYouKnow';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { startGate } from '../../src/lib/startGate';
-import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, zonesFromSamples, hrStats, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
+import { hrColor, hrZoneNo, zoneColor, zoneName, ZONE_NOS, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, zonesFromSamples, hrStats, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import { hrKcal, hrKcalNote, hrKcalUnknown, hrKcalUnknownNote } from '../../src/lib/hrKcal';
 import { reportError } from '../../src/lib/reportError';
@@ -368,6 +371,24 @@ const cardioKcal = (type: string, mins: number, weightKg?: number | null): numbe
 };
 
 /** Metric columns divided by a hairline — the KpiRow idiom, where a status dot is needed. */
+/**
+ * The app's theme with its grounds and inks swapped for the night set.
+ *
+ * For the parts of this file that are handed `t` as a PROP and are drawn on
+ * the night ground — the Train hero's picture and the live runner's focus
+ * mode. A part that reads the theme itself (`Notice`, `Flag`, the zone board,
+ * the music bar) cannot be reached this way, which is why the runner sets
+ * those on a day-surface card rather than on the night ground.
+ *
+ * `brandText` becomes the night eyebrow ink: the bright accent is measured as
+ * a MARK on night (3:1), and a word needs more than that.
+ */
+const onNight = (t: Theme): Theme => ({
+  ...t, bg: t.night, surface: t.night2, surface2: t.night2, surface3: t.night2, ring: t.nightInk2,
+  ink: t.nightInk, ink2: t.nightInk2, ink3: t.nightInk2,
+  brand: t.brandBright, brandInk: t.brandDeep, brandText: t.nightInk3,
+});
+
 function MetricCols({ t, items }: { t: Theme; items: { label: string; value: string; dot?: string }[] }) {
   return (
     <View style={{ flexDirection: 'row' }}>
@@ -1785,6 +1806,24 @@ export default function Train() {
   // Presentation only: how much of today's plan is already logged, for the hero ring.
   const doneCount = exercises.filter((e) => (logged[uid(e)] || []).length >= setCount(e)).length;
   const plannedSets = exercises.reduce((n, e) => n + setCount(e), 0);
+  // What the selected day trains, in the order the day meets it, for the chips
+  // under the hero — and what the whole week on screen asks of each group, most
+  // sets first, for the Muscle Focus bars. Both read `group` off the programme's
+  // own rows; a row with none is left out rather than filed under a guess.
+  const dayGroups = groupsOf(exercises);
+  // The selected day's own name, exactly as the programme stores it; a day a
+  // coach left unnamed is "Day n" by its place in the week rather than being
+  // given a name inferred from what is in it.
+  const dayTitle = (workout.focus || '').trim() || `Day ${(dayIdx % (programDays.length || 1)) + 1}`;
+  const blockCounted = blk.week.count > 1 && blk.week.reason === 'counted';
+  const weekFocus = (() => {
+    const by = new Map<string, number>();
+    for (const d of programDays) for (const e of (d.exercises || [])) {
+      const g = (e.group || '').trim();
+      if (g) by.set(g, (by.get(g) ?? 0) + setCount(e));
+    }
+    return [...by.entries()].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  })();
   // WHICH DAY the card and its Start button are about. The day strip that picks
   // it sits under the card, as the board draws it, so the card has to carry the
   // answer itself: a member who tapped Thursday to read it and scrolled back up
@@ -2145,56 +2184,98 @@ export default function Train() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView ref={pageScroll} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
-        {/* ── header ─────────────────────────────────────────────────────── */}
+        {/* ── header ───────────────────────────────────────────────────────
+            Whose plan this is stays the eyebrow here. The programme's own name
+            is the eyebrow ON the hero, and nowhere else on it. */}
         <ScreenHeader eyebrow={coachProgram ? 'Coach plan' : 'Your training'} title="My Program" />
 
-        {/* Current and past, as the board draws them: above the card. Past is
+        {/* Current and past, as the mockup draws them: above the card. Past is
             the training history screen, which already exists and already
-            answers it. */}
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
-          <View accessibilityRole="tab" accessibilityState={{ selected: true }} style={{ flex: 1, minHeight: 38, borderRadius: radius.sm, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Current</Text>
-          </View>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Past workouts" onPress={() => router.push('/(client)/history')}
-            style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.label, color: t.ink3 }}>Past</Text>
-          </Pressable>
-        </View>
+            answers it — so that segment GOES somewhere and never draws as
+            selected, which is what `onPress` on a Segment is for. */}
+        <Segmented
+          options={[
+            { key: 'current', label: 'Current' },
+            { key: 'past', label: 'Past', a11yLabel: 'Past workouts', onPress: () => router.push('/(client)/history') },
+          ]}
+          value="current" onChange={() => {}} style={{ marginTop: sp.lg }} />
 
-        {/* ── the programme, as the board opens it ─────────────────────────
-            The session's first movement as the picture, with the programme's
-            name and the week over it; Start Workout directly under, then the
-            quiet way into the whole block. The demo is the same <SessionDemo>
-            the runner shows, off the same catalogue read, so a movement with
-            no clip draws the same placeholder here as there.
+        {/* ── the hero: the SELECTED DAY, and only that day ─────────────────
+            Everything on this card is about one day — the one picked on the
+            strip below, today until somebody picks another — the way Home's
+            hero is about today. The Sora line is that day's own name as the
+            programme stores it; the picture is that day's first movement that
+            has one; the meta is that day's counts; the chips under it are that
+            day's muscle groups; Start begins that day. They all read `dayIdx`,
+            so they move together.
 
-            The Start block moved up here from under the day strip. It starts
-            the SELECTED day — the strip below still picks — and every gate on
-            it came with it: the unsent-work note, the injury read, and the
-            three reasons it may be withheld. */}
-        <View style={{ marginTop: sp.lg, borderRadius: radius.md, overflow: 'hidden', backgroundColor: t.surface2 }}>
-          {exercises[0] ? (
-            <SessionDemo t={t} name={nameOf(exercises[0])} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} />
+            It used to lead with the PROGRAMME's name, which on "Push · Pull ·
+            Legs" put three day types over a bench press and a row of Push
+            chips — a card contradicting itself. The programme is the eyebrow
+            now and appears nowhere else on the card.
+
+            Every gate on Start came with it: the unsent-work note, the injury
+            read, and the three reasons it may be withheld. */}
+        <View style={{ marginTop: sp.lg, minHeight: grown(210), borderRadius: radius.xl, overflow: 'hidden', backgroundColor: t.night, ...elevation.hero }}>
+          {exercises.length ? (
+            <View style={{ paddingHorizontal: sp.md }}>
+              <DayPicture t={onNight(t)} names={exercises.map(nameOf)} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} />
+            </View>
           ) : (
-            <View style={{ height: 160, alignItems: 'center', justifyContent: 'center' }}
+            <View style={{ height: 120, alignItems: 'center', justifyContent: 'center' }}
               accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <Icon name="train" size={34} color={t.brand} />
+              <Icon name="train" size={34} color={t.brandBright} />
             </View>
           )}
-          {/* The name over the picture, on a scrim, as the board draws it. The
-              scrim is what makes white ink readable over any frame; the same
-              sentence is spoken once, from the group. */}
-          <View accessible accessibilityLabel={`${program.title}. ${cardDay}, ${workout.focus}. ${exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`}, ${heroNote}`}
-            style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: sp.lg, paddingTop: sp.xxl, paddingBottom: sp.lg, backgroundColor: 'rgba(0,0,0,0.55)' }}>
-            <Text style={{ ...ty.head, color: '#ffffff' }} numberOfLines={1}>{program.title}</Text>
-            {/* Two lines allowed: the day, the focus, the two counts and what
-                is already done is five facts, and at large text a single line
-                cut the last of them off — which is the one that changes. */}
-            <Text style={{ ...ty.caption, color: 'rgba(255,255,255,0.82)', marginTop: 2 }} numberOfLines={2}>
-              {cardDay} · {workout.focus} · {exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`} · {heroNote}
+          {/* The words over the picture, on a scrim, as the mockup draws them.
+              The scrim is what makes the night inks readable over any frame;
+              the same sentence is spoken once, from the group. */}
+          <View accessible accessibilityLabel={`${program.title}${blockCounted ? `, week ${blk.week.index + 1} of ${blk.week.count}` : ''}. ${dayTitle}. ${cardDay}, ${exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`}, ${heroNote}`}
+            style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: 18, paddingTop: sp.lg, paddingBottom: sp.lg, backgroundColor: 'rgba(0,0,0,0.62)' }}>
+            {/* The programme, and the week of it — the week only when it was
+                COUNTED from a start date the coach set. A block with no date,
+                an unreadable one or one not yet begun sits on week one by
+                default, and "week 1 of 12" over a progress bar would draw that
+                default as a measured position. The sentence under the block
+                strip below says which of those it is. Capitals because every
+                hero eyebrow in the app is set in them; the locale's own rule,
+                so a dotted i stays one. */}
+            <Text style={{ ...ty.eyebrow, color: t.nightInk3 }} numberOfLines={2}>
+              {program.title.toLocaleUpperCase()}{blockCounted ? ` · WEEK ${blk.week.index + 1} OF ${blk.week.count}` : ''}
+            </Text>
+            <Text style={{ ...ty.title, color: t.nightInk, marginTop: 6 }} numberOfLines={2}>{dayTitle}</Text>
+            {/* The same week as a bar. The words are in the eyebrow, so the bar
+                carries none of its own. */}
+            {blockCounted ? (
+              <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+                style={{ height: 6, borderRadius: 3, backgroundColor: t.night2, overflow: 'hidden', marginTop: sp.sm }}>
+                <View style={{ width: `${Math.round(((blk.week.index + 1) / blk.week.count) * 100)}%`, height: 6, borderRadius: 3, backgroundColor: t.brandBright }} />
+              </View>
+            ) : null}
+            {/* Two lines allowed: the day, the two counts and what is already
+                done is four facts, and at large text a single line cut the
+                last of them off — which is the one that changes. */}
+            <Text style={{ ...ty.caption, ...numeric, color: t.nightInk2, marginTop: sp.sm }} numberOfLines={2}>
+              {cardDay} · {exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`} · {heroNote}
             </Text>
           </View>
         </View>
+
+        {/* What the selected day trains, as chips — and nothing else. No chip
+            repeats the day's name, and no chip names a group that no movement
+            in the day trains: they are read off the day's own exercise rows
+            (the coach's builder writes each row's group from the catalogue
+            when the movement is added), never off the day's title. So a day a
+            coach called "Push" that holds a row shows Back beside Chest — the
+            name stays as the coach wrote it and the chips say what is in it.
+            The 615-row catalogue is still not read on a screen used in
+            basements; see `knownMovements`. A colour per group, the same one
+            its bar takes below, and always beside the word. */}
+        {dayGroups.length ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+            {dayGroups.map((g) => <TonedChip key={g} label={g} tone={groupTone(g)} />)}
+          </View>
+        ) : null}
 
         <View style={{ marginTop: sp.md }}>
         {/* What is on this phone and nowhere else.
@@ -2272,6 +2353,25 @@ export default function Train() {
                 note={`Today’s session below is ${BRAND.label}'s automatic program, not one your coach wrote. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
             )}
           </View>
+        ) : null}
+
+        {/* ── muscle focus this week ───────────────────────────────────────
+            The evidence under the hero: what the week they are on asks of each
+            muscle group, as sets — the plan's own rows through `setCount`, so a
+            coach's set table counts as the sets it holds. PLANNED, and the
+            head says so: what was actually done is a different read (the log,
+            joined to the catalogue) and lives on Your Muscles, which the head
+            opens. The bars are scaled to the week's biggest group, so they
+            compare groups with each other and claim nothing about a target
+            nobody set. Absent on a plan with no grouped movements rather than
+            drawn empty. */}
+        {weekFocus.length ? (
+          <Section>
+            <SectionHead title="Muscle Focus This Week" note="Planned sets" onPress={() => router.push('/(client)/muscles')} />
+            {weekFocus.map(([g, n]) => (
+              <Meter key={g} label={g} val={n} target={weekFocus[0][1]} tone={groupTone(g)} note={n === 1 ? '1 set' : `${n} sets`} />
+            ))}
+          </Section>
         ) : null}
 
         {/* ── day strip ──────────────────────────────────────────────────── */}
@@ -2388,7 +2488,7 @@ export default function Train() {
                     {/* A dot, not a colour on the word: the week that is theirs
                         has to be findable without reading a tint. */}
                     {mine ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} /> : null}
-                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '400', color: on ? t.ink : t.ink3 }}>{label}</Text>
+                    <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.ink : t.ink3 }}>{label}</Text>
                   </Pressable>
                 );
               })}
@@ -2461,7 +2561,7 @@ export default function Train() {
                   accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: on }}
                   style={{ minHeight: 44, paddingHorizontal: sp.md, paddingVertical: 10, borderRadius: radius.pill,
                     alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.ink : t.ink3 }}>{label}</Text>
+                  <Text style={{ ...ty.label, ...font(on ? '500' : '400'), color: on ? t.ink : t.ink3 }}>{label}</Text>
                 </Pressable>
               );
             })}
@@ -2502,7 +2602,7 @@ export default function Train() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                         <Icon name="heart" size={15} color={t.crit} />
                         <View style={{ flex: 1 }}>
-                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, textDecorationLine: 'line-through' }} numberOfLines={1}>{movement(e.name)}</Text>
+                          <Text style={{ ...ty.body, ...font('500'), color: t.ink3, textDecorationLine: 'line-through' }} numberOfLines={1}>{movement(e.name)}</Text>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Hidden to protect your {inj ? areaLabel(inj.injury.area).toLowerCase() : 'injury'} (severe) — no safe swap in your plan.</Text>
                         </View>
                         <Ghost label="Show Anyway" onPress={() => setInjRevealed((prev) => [...prev, _id])} />
@@ -2589,7 +2689,7 @@ export default function Train() {
                       {grp ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5 }}>
                           <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} />
-                          <Text style={{ ...ty.caption, fontWeight: '500', color: t.brand }}>{grp.label} · {grp.position} of {grp.size}</Text>
+                          <Text style={{ ...ty.caption, ...font('500'), color: t.brandText }}>{grp.label} · {grp.position} of {grp.size}</Text>
                         </View>
                       ) : null}
                       {/* The whole row is one button, so anything rendered
@@ -2603,10 +2703,10 @@ export default function Train() {
                         <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             {done ? <Icon name="check" size={15} color={t.brand} /> : null}
-                            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{shownName(e)}</Text>
+                            <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{shownName(e)}</Text>
                             {meth ? (
                               <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2 }}>
-                                <Text style={{ ...ty.caption, fontWeight: '600', color: t.ink2 }}>{meth.short}</Text>
+                                <Text style={{ ...ty.caption, ...font('600'), color: t.ink2 }}>{meth.short}</Text>
                               </View>
                             ) : null}
                             {cd.focusAreas.includes(e.group) ? (
@@ -2729,7 +2829,7 @@ export default function Train() {
                                   return (
                                     <>
                                       {rb ? (
-                                        <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
+                                        <Text accessibilityLabel={rb.label} style={{ ...ty.caption, ...font('600'), color: t.ink3 }}>{rb.short}</Text>
                                       ) : null}
                                       {/* This set's own effort, share and tempo.
                                           A warm-up single at @6 and a top set at
@@ -2799,7 +2899,7 @@ export default function Train() {
                               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                                 <Icon name="target" size={14} color={t.brand} />
                                 <Text style={{ ...value(15), color: t.ink }}>{fig(liftLabel(sug.weight, wu))}</Text>
-                                {sug.up ? <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>↑</Text> : null}
+                                {sug.up ? <Text style={{ ...ty.label, ...font('500'), color: t.brandText }}>↑</Text> : null}
                                 <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{sug.reason}</Text>
                                 {/* Tap the suggestion to take it. The row it
                                     fills in is still below, so a different
@@ -2816,7 +2916,7 @@ export default function Train() {
                                       : `Log ${quickReps(e.reps)} reps at ${fig(liftLabel(sug.weight, wu))} of ${shownName(e)}`}
                                     onPress={() => quickLog(e)}
                                     style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 6 }}>
-                                    <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand }}>Log this</Text>
+                                    <Text style={{ ...ty.caption, ...font('600'), color: t.brandText }}>Log this</Text>
                                   </Pressable>
                                 ) : null}
                               </View>
@@ -2958,7 +3058,7 @@ export default function Train() {
                     style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: buildMins === n ? t.brand : t.surface2 }}>
                     {/* "min" stays lower case — it is a unit and not a word to
                         capitalise, which is written down in coverage.test.ts. */}
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: buildMins === n ? '500' : '400', color: buildMins === n ? t.brandInk : t.ink2 }}>{n} min</Text>
+                    <Text style={{ ...ty.label, ...numeric, ...font(buildMins === n ? '500' : '400'), color: buildMins === n ? t.brandInk : t.ink2 }}>{n} min</Text>
                   </Pressable>
                 ))}
               </ScrollView>
@@ -2969,7 +3069,7 @@ export default function Train() {
                     accessibilityState={{ selected: buildFocus === f.id }}
                     onPress={() => { setBuildFocus(f.id); setBuildSeed(0); tapLight(); }}
                     style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: buildFocus === f.id ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: buildFocus === f.id ? '500' : '400', color: buildFocus === f.id ? t.brandInk : t.ink2 }}>{f.label}</Text>
+                    <Text style={{ ...ty.label, ...font(buildFocus === f.id ? '500' : '400'), color: buildFocus === f.id ? t.brandInk : t.ink2 }}>{f.label}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
@@ -3075,7 +3175,7 @@ export default function Train() {
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
                 {(SESSION_TYPES[(mode as SessionKind)] || CARDIO).map((ct) => (
                   <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: ctype === ct ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: ctype === ct ? '500' : '400', color: ctype === ct ? t.brandInk : t.ink2 }}>{ct}</Text>
+                    <Text style={{ ...ty.label, ...font(ctype === ct ? '500' : '400'), color: ctype === ct ? t.brandInk : t.ink2 }}>{ct}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
@@ -3109,13 +3209,13 @@ export default function Train() {
                       <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${distanceUnitName(unit)}. Switch to ${distanceUnitName(unit === 'km' ? 'mi' : 'km')}`}
                         onPress={() => { touchedUnit.current = true; setUnit(unit === 'km' ? 'mi' : 'km'); }}
                         style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
+                        <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{unit}</Text>
                       </Pressable>
                     </View>
                   </Field>
                 ) : null}
                 <Pressable onPress={() => { void logCardio(); }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 11, justifyContent: 'center' }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.brandInk }}>Log</Text>
                 </Pressable>
               </View>
               {mode !== 'recovery' ? (
@@ -3148,7 +3248,7 @@ export default function Train() {
                     <View key={i}>
                       {i > 0 ? <Rule /> : null}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, paddingVertical: sp.md }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.type}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{c.type}</Text>
                         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{[`${c.mins} min`, c.dist > 0 ? `${c.dist} ${c.unit}` : null, c.watts > 0 ? `${c.watts} W` : null, c.kcal != null ? `${num(c.kcal)} kcal` : null].filter(Boolean).join(' · ')}</Text>
                       </View>
                     </View>
@@ -3194,7 +3294,7 @@ export default function Train() {
                 {i > 0 ? <Rule /> : null}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{movement(l.exercise)}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{movement(l.exercise)}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
                       {/* Through setListLabel: a hold reads as a clock, never as
                           "45×— kg". The draft chips have always got this right
@@ -3209,7 +3309,7 @@ export default function Train() {
                   <Pressable accessibilityRole="button" accessibilityLabel={'Edit or replace ' + movement(l.exercise)} onPress={() => { tapLight(); setEditEntry(l); }} hitSlop={8}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                     <Icon name="pencil" size={14} color={t.ink2} />
-                    <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Edit</Text>
+                    <Text style={{ ...ty.caption, ...font('500'), color: t.ink }}>Edit</Text>
                   </Pressable>
                   <Pressable accessibilityRole="button" accessibilityLabel={'Delete ' + movement(l.exercise)} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4 }}>
                     <Icon name="minus" size={16} color={t.crit} />
@@ -3258,7 +3358,7 @@ export default function Train() {
                 sentence. Same edit at eleven other controls in this app that
                 said their refusal in colour alone. */}
             <Pressable onPress={logWorkoutNL} disabled={!nlw.trim()} accessibilityState={{ disabled: !nlw.trim() }} accessibilityRole="button" accessibilityLabel="Log workout from text" style={{ backgroundColor: nlw.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: nlw.trim() ? t.brandInk : t.ink3 }}>Log</Text>
+              <Text style={{ ...ty.label, ...font('600'), color: nlw.trim() ? t.brandInk : t.ink3 }}>Log</Text>
             </Pressable>
           </View>
         </Section>
@@ -3383,7 +3483,7 @@ export default function Train() {
                   {/* The alternative READS in the reader's language; `alt` is
                       still what gets written into `swaps`, and swaps are read
                       back by `nameOf` as the identity of the movement. */}
-                  <Text style={{ ...ty.body, fontWeight: on ? '500' : '400', color: t.ink, textTransform: 'capitalize' }}>{movement(alt)}</Text>{on && <Icon name="check" size={16} color={t.brand} />}
+                  <Text style={{ ...ty.body, ...font(on ? '500' : '400'), color: t.ink, textTransform: 'capitalize' }}>{movement(alt)}</Text>{on && <Icon name="check" size={16} color={t.brand} />}
                 </Pressable>
               </View>); })}
           </View>)}
@@ -3452,7 +3552,7 @@ export default function Train() {
                     accessibilityLabel={`${new Date(calYear, calMonth, day).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${isToday ? ', today' : ''}${worked ? ', trained' : draftedDay ? ', typed but not saved' : unknownDay ? ', not read' : ''}`}
                     style={{ width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
                     <View style={{ width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: worked ? t.brand : 'transparent', borderWidth: isSel ? 2 : (isToday && !worked) || unknownDay || draftedDay ? hairline : 0, borderColor: isSel ? t.ink : draftedDay ? t.warn : isToday && !worked ? t.brand : t.ink3 }}>
-                      <Text style={{ ...ty.label, ...numeric, fontWeight: worked || isToday ? '600' : '400', color: worked ? t.brandInk : isToday ? t.brand : t.ink2 }}>{day}</Text>
+                      <Text style={{ ...ty.label, ...numeric, ...font(worked || isToday ? '600' : '400'), color: worked ? t.brandInk : isToday ? t.brandText : t.ink2 }}>{day}</Text>
                     </View>
                   </Pressable>
                 );
@@ -3536,7 +3636,7 @@ export default function Train() {
                           {i > 0 ? <Rule /> : null}
                           <View style={{ paddingVertical: sp.md }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize', flex: 1 }}>{movement(l.exercise)}</Text>
+                              <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize', flex: 1 }}>{movement(l.exercise)}</Text>
                               <Pressable accessibilityLabel={'Edit ' + movement(l.exercise)} onPress={() => setEditEntry(l)} hitSlop={8} style={{ padding: 4, marginEnd: sp.sm }}><Icon name="pencil" size={16} color={t.ink3} /></Pressable>
                               {/* Confirmed, then verified. The confirm was already
                                   here; what was missing is that the row left the
@@ -3584,7 +3684,7 @@ export default function Train() {
                             />
                             <Pressable onPress={() => { tapLight(); setHrEntry(l); }} accessibilityRole="button" accessibilityLabel={'Heart rate for ' + movement(l.exercise)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md, alignSelf: 'flex-start', backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                               <Icon name="heart" size={13} color={t.brand} />
-                              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Heart Rate</Text>
+                              <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Heart Rate</Text>
                             </Pressable>
                           </View>
                         </View>
@@ -3655,7 +3755,7 @@ export default function Train() {
                   hitSlop={hitSlopFor(MIN_TARGET)}
                   onPress={() => startRepeat(s)}
                   style={{ minHeight: MIN_TARGET, justifyContent: 'center', backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{when}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{when}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{line}</Text>
                 </Pressable>
               );
@@ -3775,7 +3875,7 @@ export default function Train() {
               accessibilityLabel={`Weight unit: ${cxUnit === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${cxUnit === 'kg' ? 'pounds' : 'kilograms'}`}
               onPress={() => { switchCxUnit(); tapLight(); }}
               style={{ backgroundColor: t.surface3, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 11 }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{cxUnit.toUpperCase()}</Text>
+              <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{cxUnit.toUpperCase()}</Text>
             </Pressable>
           </View>
           <View style={{ marginBottom: sp.lg }}>
@@ -3791,9 +3891,9 @@ export default function Train() {
             )}
           </View>
           <Pressable disabled={!cxName.trim()} onPress={commitCx} style={{ backgroundColor: cxName.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: cxName.trim() ? t.brandInk : t.ink3 }}>{editingKey ? 'Save changes' : 'Add to today'}</Text>
+            <Text style={{ ...ty.label, ...font('600'), color: cxName.trim() ? t.brandInk : t.ink3 }}>{editingKey ? 'Save changes' : 'Add to today'}</Text>
           </Pressable>
-          <Pressable onPress={() => { setAddOpen(false); setEditingKey(null); }} style={{ paddingVertical: sp.md, alignItems: 'center' }}><Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>
+          <Pressable onPress={() => { setAddOpen(false); setEditingKey(null); }} style={{ paddingVertical: sp.md, alignItems: 'center' }}><Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text></Pressable>
         </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -4051,7 +4151,7 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed, reach, onP
   if (!liveZone && !hasZones) {
     return (
       <View style={{ marginTop: sp.xl, paddingVertical: sp.md, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
-        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Heart-rate Zones</Text>
+        <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>Heart-rate Zones</Text>
         {/* rtl-ok: a navigation PATH inside an English sentence — "the screen
             called X, and inside it the thing called Y". The separator belongs to
             the sentence, not to the layout: dropping FORWARD_CHAR into it would
@@ -4075,7 +4175,7 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed, reach, onP
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md, alignSelf: 'flex-start', backgroundColor: t.surface, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8 }}
           >
             <Icon name="heart" size={13} color={t.brand} />
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{pairInviteAction(reach ?? 'none')}</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{pairInviteAction(reach ?? 'none')}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -4292,7 +4392,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
                   <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
                   <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${distanceUnitName(unit)}. Switch to ${distanceUnitName(unit === 'km' ? 'mi' : 'km')}`}
                     onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{unit}</Text>
                   </Pressable>
                 </View>
               </Field>
@@ -4313,7 +4413,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
                   accessibilityLabel={`Use ${hrEstimate} calories, worked out from your heart rate`}
                   onPress={() => { setKcalIn(String(hrEstimate)); tapLight(); }}
                   style={{ marginTop: sp.sm }}>
-                  <Text style={{ ...ty.caption, color: t.brand, fontWeight: '500' }}>
+                  <Text style={{ ...ty.caption, color: t.brandText, ...font('500') }}>
                     Use {plainExact(hrEstimate)} kcal from your heart rate
                   </Text>
                   <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>
@@ -4525,13 +4625,30 @@ function clipCaption(owner: ClipOwner): string {
   }
 }
 
-function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
+function SessionDemo({ t, name, videos, videoStatus, preferTrainerId, onNoMedia }: {
   t: Theme; name: string; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null;
+  /** Told ONCE, when the catalogue row has been read whole and neither it nor
+   *  the coach's library holds anything to show for this movement. Only
+   *  <DayPicture> passes it. Never fired under a failed or pending read: "we
+   *  could not look" is not "there is nothing", and walking on down the day
+   *  would fire a second failing read for every movement in it. */
+  onNoMedia?: () => void;
 }) {
   const { detail, status, signedOut } = useExerciseDetail(name);
   const { frames, animUrl, animCacheKey, equipmentUrl } = useExerciseMedia(detail);
   const clip = useMemo(() => videoForExercise(name, videos, preferTrainerId), [name, videos, preferTrainerId]);
   const caption = demoCaption(detail?.source, frames.length);
+  // Asked of the ROW, not of the signed URLs above: those arrive a round trip
+  // after the row does, and a picture that is merely still being signed would
+  // read as a movement with none.
+  // And only once the coach's library has answered too — a clip that is still
+  // on its way is not a clip that does not exist.
+  const nothingToShow = status === 'ready' && videoStatus !== 'loading' && !clip
+    && !((detail?.imagePaths?.length ?? 0) > 0 || detail?.animationPath || detail?.equipmentIconPath);
+  const told = useRef(false);
+  useEffect(() => {
+    if (nothingToShow && onNoMedia && !told.current) { told.current = true; onNoMedia(); }
+  }, [nothingToShow, onNoMedia]);
 
   if (clip) {
     return (
@@ -4624,6 +4741,35 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
+/**
+ * The Train hero's picture: the selected day's first movement that HAS one.
+ *
+ * A day that opens on a movement nobody has filmed used to lead the whole tab
+ * with "no demonstration for this one yet" while the second movement's clip sat
+ * unread. This walks the day in order, one single-row read at a time and only
+ * as far as it has to — the first movement answers in the ordinary case — and
+ * when none of them has anything it settles back on the FIRST, whose sentence
+ * about why is the honest picture of that day.
+ *
+ * Keyed by name below, so each try mounts fresh: `useExerciseDetail` keeps the
+ * previous movement's row for one render after its name changes, and a "ready,
+ * no media" read off that stale row would skip a movement that has a clip.
+ */
+function DayPicture({ t, names, videos, videoStatus, preferTrainerId }: {
+  t: Theme; names: string[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null;
+}) {
+  const [skipped, setSkipped] = useState(0);
+  const day = names.join('|');
+  useEffect(() => { setSkipped(0); }, [day]);
+  const exhausted = skipped >= names.length;
+  const name = names[exhausted ? 0 : skipped];
+  if (!name) return null;
+  return (
+    <SessionDemo key={`${name}:${exhausted}`} t={t} name={name} videos={videos} videoStatus={videoStatus} preferTrainerId={preferTrainerId}
+      onNoMedia={exhausted ? undefined : () => setSkipped((n) => n + 1)} />
+  );
+}
+
 /** Which of the board's three drawings of the live session is up — client pages 4, 5 and 6. */
 type RunnerView = 'ready' | 'demo' | 'set';
 
@@ -4635,6 +4781,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // reader's own language. See the note beside `shownName` in Train().
   const { textOf: movement } = useMovementName();
   const shownName = (e: ProgramExercise) => movement(nameOf(e));
+  // The unit toggle under the load tile writes the member's own setting, as
+  // <WeightUnitToggle> does; `unit` comes back in through the prop.
+  const settings = useSettings();
   // The day the recap below dates its outing against.
   //
   // `useToday()` rather than a `todayKey()` in the render body, for the reason
@@ -4786,7 +4935,12 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     restAlertId.current = null;
     if (id) void cancelReminders([id]);
   };
+  // How long the rest that is running was WHEN IT STARTED — the whole of the
+  // ring the countdown drains. A ref rather than state: it changes only in the
+  // same call that sets `rest`, which is the render that reads it.
+  const restTotal = useRef(0);
   const startRest = (secs: number) => {
+    restTotal.current = secs;
     restGen.current += 1;
     cancelRestAlert();
     prevLeft.current = null;
@@ -5468,7 +5622,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       ],
     );
   };
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, flex: 1, ...ty.head, fontWeight: '400' } as const;
+  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, flex: 1, ...ty.head, ...font('400') } as const;
 
   if (!exercises || exercises.length === 0) return null;
   if (finished) {
@@ -5925,20 +6079,70 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      own line — which movement this is of how many, and the session clock,
      which the board's page 4 draws small at either side of the name — and the
      strip of movements that has always been here. */
+  /* ── the focus mode's two grounds ─────────────────────────────────────────
+     The whole runner is on night, and everything somebody acts on mid-set is
+     drawn straight onto it in the night inks. What is CONTEXT — the sets done,
+     last time, the coach's note, the watch, the music — sits below on a
+     day-surface card, for a reason that is mechanical rather than aesthetic:
+     `Notice`, `Flag`, the zone board, the written steps and the music bar all
+     read the app's theme themselves, so on a light palette their ink is
+     near-black and would vanish into night. A card gives them the ground
+     their ink was measured against, unchanged. On a dark palette the card is
+     one quiet step off the night and the page reads as one. */
+  const dayCard = { backgroundColor: t.surface, borderRadius: radius.lg, paddingHorizontal: sp.lg, paddingBottom: sp.lg, marginTop: sp.xl } as const;
+  const nt = onNight(t);
+  // The mockup's tile: a night2 card with a 36pt Sora figure and its unit under.
+  const tile = { flex: 1, flexBasis: 0, backgroundColor: t.night2, borderRadius: radius.lg, paddingVertical: 14, paddingHorizontal: sp.sm, alignItems: 'center', gap: 2 } as const;
+  // A live heart rate is one that is MOVING — `freshSample` is null for a
+  // day's average and for a reading that has gone stale, and the third tile
+  // and the zone strip exist only while it is not. No feed, two tiles.
+  const liveBpm = typeof freshSample === 'number' && freshSample > 0 ? freshSample : null;
+  // What the ring is a picture of. Resting, the share of the rest still to
+  // run, so it drains. Working a HOLD, the share of the prescribed seconds
+  // held. Working reps there is no target for a clock to fill towards, so the
+  // ring is its track and the digits — an arc there would be a progress
+  // nobody measured.
+  const holdTarget = timedOn ? prescribedSeconds(nextSet?.reps ?? ex.reps) : null;
+  const ringValue = rest > 0
+    ? (restTotal.current > 0 ? Math.min(1, rest / restTotal.current) : null)
+    : holdTarget ? Math.min(1, setElapsed / holdTarget) : null;
+  /* The rest's provenance and the way out of it, under whichever ring is
+     drawing it. Whose number this is: a client resting three minutes because
+     their coach said so and a client resting because nobody set anything are
+     looking at the same digits, and only one of them is following a programme
+     — so the fallback names itself rather than borrowing the coach's
+     authority. */
+  const restLine = rest > 0 ? (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.sm }}>{restIsMethods ? `Part of the ${methodFor(ex.method).method.label.toLowerCase()}` : ex.restSec != null ? 'Set by your coach' : `App default of ${DEFAULT_REST_SEC} seconds`}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={skipRest}
+        hitSlop={8} style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md, minHeight: MIN_TARGET, justifyContent: 'center' }}>
+        <Text style={{ ...ty.label, ...font('600'), color: t.nightInk3 }}>Skip rest</Text>
+      </Pressable>
+    </View>
+  ) : null;
+
   const nav = (title: string, onBack: () => void, backLabel: string) => (
     <>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-        <Ghost icon={BACK_ICON} a11yLabel={backLabel} onPress={onBack} />
+        {/* The mockup's back control on night: a night2 disc. Built here
+            because `Ghost` draws a white disc from the app's theme, which is
+            the day ground's control and not this one's. 40pt, so it keeps the
+            slop that carries it to a reachable target. */}
+        <Pressable accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack} hitSlop={hitSlopFor(40)}
+          style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: t.night2, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={BACK_ICON} size={20} color={t.nightInk} />
+        </Pressable>
         <Text accessibilityRole="header" numberOfLines={2}
-          style={{ ...ty.head, color: t.ink, flex: 1, textAlign: 'center', textTransform: 'capitalize' }}>{title}</Text>
-        <View style={{ width: 38 }} />
+          style={{ ...ty.page, color: t.nightInk, flex: 1, textAlign: 'center', textTransform: 'capitalize' }}>{title}</Text>
+        <View style={{ width: 40 }} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: sp.md }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>Exercise {idx + 1} of {exercises.length}{paused ? ' · paused' : ''}</Text>
-        <Text accessibilityLabel={`Session time ${sessionClock}`} style={{ ...ty.micro, ...numeric, color: t.ink3 }}>{sessionClock}</Text>
+        <Text style={{ ...ty.micro, color: t.nightInk2 }}>Exercise {idx + 1} of {exercises.length}{paused ? ' · paused' : ''}</Text>
+        <Text accessibilityLabel={`Session time ${sessionClock}`} style={{ ...ty.micro, ...numeric, color: t.nightInk2 }}>{sessionClock}</Text>
       </View>
       <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
-        {exercises.map((_, i) => <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i < idx ? t.good : i === idx ? t.brand : t.surface3 }} />)}
+        {exercises.map((_, i) => <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i < idx ? t.brandBright : i === idx ? t.nightInk : t.night2 }} />)}
       </View>
     </>
   );
@@ -5964,8 +6168,8 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      weight up. */
   const groupLine = exGroup ? (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: sp.xl }}>
-      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-      <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>{exGroup.label} · {exGroup.position} of {exGroup.size}</Text>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brandBright }} />
+      <Text style={{ ...ty.label, ...font('500'), color: t.nightInk3 }}>{exGroup.label} · {exGroup.position} of {exGroup.size}</Text>
     </View>
   ) : null;
   /* How the sets are performed. The short marker is what fits beside a
@@ -5973,10 +6177,10 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      is not a word and nobody should have to know it. */
   const methodLine = exMethod ? (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: sp.sm }}>
-      <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 3 }}>
-        <Text accessibilityLabel={exMethod.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink2 }}>{exMethod.short}</Text>
+      <View style={{ backgroundColor: t.night2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 3 }}>
+        <Text accessibilityLabel={exMethod.label} style={{ ...ty.caption, ...font('600'), color: t.nightInk2 }}>{exMethod.short}</Text>
       </View>
-      <Text style={{ ...ty.label, color: t.ink2 }}>{exMethod.label}</Text>
+      <Text style={{ ...ty.label, color: t.nightInk2 }}>{exMethod.label}</Text>
     </View>
   ) : null;
   /* ── what this set asks for, beyond reps and load ─────────────────────────
@@ -5992,9 +6196,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      estimate is the one thing this feature is not allowed to do. */
   const intensityBlock = nextIntensityLine ? (
     <View style={{ marginTop: sp.md, alignItems: 'center' }}>
-      <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink }}>{nextIntensityLine}</Text>
+      <Text style={{ ...ty.label, ...numeric, ...font('600'), color: t.nightInk }}>{nextIntensityLine}</Text>
       {nextIntensityWords.map((line) => (
-        <Text key={line} style={{ ...ty.caption, color: t.ink2, marginTop: 2, textAlign: 'center' }}>{line}</Text>
+        <Text key={line} style={{ ...ty.caption, color: t.nightInk2, marginTop: 2, textAlign: 'center' }}>{line}</Text>
       ))}
     </View>
   ) : null;
@@ -6005,11 +6209,14 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      has disclosed nothing, so no caution here means two different things and
      only one of them is "this movement is fine for you". The absent line was
      the whole of the safety information in the session, so drawing them the
-     same way is the picture of a checked, clear session. */
+     same way is the picture of a checked, clear session.
+
+     In the night inks: it is drawn in the focus zone of both pages now, beside
+     the movement it is about, rather than a screen below on the context card. */
   const injuryLine = !isWhole(injuryStatus) ? (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: sp.md }}>
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: injuryStatus === 'loading' ? t.ink3 : t.crit, marginTop: 5 }} />
-      <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+      <Text style={{ ...ty.caption, color: t.nightInk2, flex: 1 }}>
         {injuryStatus === 'loading'
           ? 'Still reading what you have disclosed — this movement has not been checked against your injuries yet.'
           : 'Your injuries could not be read, so this movement has not been checked against them. Nothing here has been swapped or held back — go easy if something is hurt.'}
@@ -6018,7 +6225,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   ) : (() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
-      <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{f.reason}. Ease off, keep it pain-free, or swap this move.</Text>
+      <Text style={{ ...ty.caption, color: t.nightInk2, flex: 1 }}>{f.reason}. Ease off, keep it pain-free, or swap this move.</Text>
     </View>
   ) : null; })();
 
@@ -6083,9 +6290,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   const loggedChips = done.length > 0 ? (
     <View style={{ marginTop: sp.xl }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-        {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.timed
+        {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>Set {i + 1}: {s.timed
             ? timedSetLabel(s.reps, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null, s.bw === true)
-            : s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
+            : s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, ...font('600'), color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
         <Pressable accessibilityRole="button"
@@ -6095,7 +6302,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           style={{ minHeight: MIN_TARGET, paddingHorizontal: sp.md, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring,
                    flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name="minus" size={14} color={t.ink2} />
-          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Undo Set {done.length}</Text>
+          <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>Undo Set {done.length}</Text>
         </Pressable>
         <Text style={{ ...ty.caption, color: t.ink3, flex: 1, minWidth: 160 }}>
           Not in your log yet — finishing the session is what saves {done.length === 1 ? 'it' : 'them'}.
@@ -6176,7 +6383,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      sentences, the zone panel and the music bar are the ones this runner has
      always drawn, in the same order. */
   const liveBlock = (
-    <View style={{ marginTop: sp.xl }}>
+    <View style={{ ...dayCard, paddingTop: sp.lg }}>
       <MetricCols t={t} items={liveCols} />
       {liveHr == null ? (
         /* Was the literal "Wear your Apple Watch for live heart rate &
@@ -6230,60 +6437,74 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   const resting = rest > 0;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.night }}>
+      {/* Night is dark on every palette, so the clock and battery over it are
+          light for as long as the runner is up; the bar's own style comes back
+          when this unmounts. */}
+      <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 4 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {view === 'set' ? (
           /* ── page 6: Workout Tracking ───────────────────────────────────── */
           <>
             {nav('Workout Tracking', () => setView('ready'), 'Back to the exercise')}
-            {/* The clock is the figure. One Text, one spoken sentence, and
-                which clock it is said in words above the digits. The rest is
-                the same clock the coach reads while setting it, built by the
-                same function, so the two cannot start disagreeing about what
-                90 seconds looks like. */}
-            <View accessible accessibilityLabel={`${resting ? 'Rest' : 'Set'} ${restClock(resting ? rest : setElapsed)}`}
-              style={{ alignItems: 'center', marginTop: sp.xl }}>
-              <Text style={{ ...ty.micro, color: resting ? t.brand : t.ink3 }}>{resting ? 'Rest' : `Set ${done.length + 1}`}</Text>
-              <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(56), color: resting ? t.brand : t.ink, marginTop: sp.xs }}>
-                {restClock(resting ? rest : setElapsed)}
-              </Text>
+            {/* The clock is the figure, inside the ring. One element, one
+                spoken sentence, and which clock it is said in words under the
+                digits: the set clock counts UP, the rest counts DOWN and its
+                ring drains with it. The rest is the same clock the coach reads
+                while setting it, built by the same function, so the two cannot
+                start disagreeing about what 90 seconds looks like. */}
+            <View style={{ alignItems: 'center', marginTop: sp.lg }}>
+              <HeroRing size={196} value={ringValue}
+                figure={restClock(resting ? rest : setElapsed)}
+                sub={resting ? `rest ${restClock(restTotal.current)}` : holdTarget ? `hold ${restClock(holdTarget)}` : `set ${done.length + 1}`}
+                spoken={`${resting ? 'Rest' : 'Set'} ${restClock(resting ? rest : setElapsed)}`} />
             </View>
-            {resting ? (
-              <View style={{ alignItems: 'center' }}>
-                {/* Whose number this is. A client resting three minutes
-                    because their coach said so and a client resting because
-                    nobody set anything are looking at the same digits, and only
-                    one of them is following a programme — so the fallback names
-                    itself rather than borrowing the coach's authority. */}
-                <Text style={{ ...ty.caption, color: t.ink3 }}>{restIsMethods ? `Part of the ${methodFor(ex.method).method.label.toLowerCase()}` : ex.restSec != null ? 'Set by your coach' : `App default of ${DEFAULT_REST_SEC} seconds`}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={skipRest}
-                  hitSlop={8} style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Skip rest</Text>
-                </Pressable>
-              </View>
-            ) : null}
+            {restLine}
 
             {groupLine}
-            <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: exGroup ? sp.xs : sp.lg, textTransform: 'capitalize' }}>{shownName(ex)}</Text>
+            <Text style={{ ...ty.title, color: t.nightInk, textAlign: 'center', marginTop: exGroup ? sp.xs : sp.md, textTransform: 'capitalize' }}>{shownName(ex)}</Text>
             {methodLine}
-            {/* Which set, of how many the coach asked for — and, on a ramp,
-                what this one asks for, since set 4 has its own reps and its
-                own load and the client should not have to count rows to find
-                them. Nothing is prefilled into the boxes — what goes in the
-                log is what was lifted, not what was planned. */}
-            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
-              {pastPlan
-                ? `All ${plan.length} sets done — set ${done.length + 1} is extra`
-                : plan.length ? `Set ${done.length + 1} of ${plan.length}` : `Set ${done.length + 1}`}
-              {/* The ask, on every plan and not only on a ramp. It was drawn
-                  only where the sets differ, on the argument that the ready
-                  page had already said "3 × 8-10 × 42.5 kg" — but this is the
-                  page somebody is on with the bar in their hands, and the load
-                  box beside it is seeded from their LOG, not from the plan. So
-                  a coach's 42.5 was nowhere on the screen that records the
-                  set. Printed as the coach wrote it, through `repsWord`. */}
-              {nextSet ? ` · ${repsWord(nextSet.reps)}${nextSet.loadKg != null ? ' × ' + fig(liftLabel(nextSet.loadKg, unit)) : ''}` : ''}
-            </Text>
+            {/* Which set, of how many the coach asked for, as the mockup's
+                pips — one per planned set, filled as they are logged, the one
+                being worked in the bright ink. The pips are a picture of the
+                sentence beside them and are hidden from a screen reader, which
+                is read the sentence. Past the plan the words change and the
+                pips are simply all full. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+              {plan.length ? (
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flexDirection: 'row', gap: 6, flexShrink: 1 }}>
+                  {plan.map((_, i) => (
+                    <View key={i} style={{ width: plan.length > 6 ? 16 : 30, height: 8, borderRadius: 4,
+                      backgroundColor: i < done.length ? t.brandBright : i === done.length ? t.nightInk : t.night2 }} />
+                  ))}
+                </View>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.nightInk2 }}>
+                {pastPlan
+                  ? `All ${plan.length} sets done — set ${done.length + 1} is extra`
+                  : plan.length ? `Set ${done.length + 1} of ${plan.length}` : `Set ${done.length + 1}`}
+              </Text>
+            </View>
+            {/* The ask, on every plan and not only on a ramp — on a ramp set 4
+                has its own reps and its own load and the client should not
+                have to count rows to find them. It was once drawn only where
+                the sets differ, on the argument that the ready page had
+                already said "3 × 8-10 × 42.5 kg" — but this is the page
+                somebody is on with the bar in their hands, and the load box
+                under it is seeded from their LOG, not from the plan. So a
+                coach's 42.5 was nowhere on the screen that records the set.
+                Printed as the coach wrote it, through `repsWord`. Nothing is
+                prefilled into the boxes — what goes in the log is what was
+                lifted, not what was planned. */}
+            {nextSet ? (
+              <Text style={{ ...ty.label, ...numeric, color: t.nightInk, textAlign: 'center', marginTop: sp.xs }}>
+                {repsWord(nextSet.reps)}{nextSet.loadKg != null ? ' × ' + fig(liftLabel(nextSet.loadKg, unit)) : ''}
+              </Text>
+            ) : null}
+            {/* The caution, beside the movement it is about and above the
+                boxes — it was under the watch panel's neighbours, a screen
+                below the set it qualifies. */}
+            {injuryLine}
             {intensityBlock}
 
             {/* Reps and load as the two figures. They are boxes, not labels,
@@ -6291,47 +6512,74 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 correct is a figure they will log wrong rather than not log.
                 The plan's own ask is the placeholder and nothing more — grey,
                 and gone the moment a digit is typed. */}
-            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.xl }}>
-              <Section style={{ flex: 1, marginTop: 0, alignItems: 'center' }}>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: sp.lg }}>
+              <View style={tile}>
                 <TextInput
                   value={reps}
                   onChangeText={setReps}
                   keyboardType="numeric"
                   placeholder={nextSet?.reps || fig(null)}
-                  placeholderTextColor={t.ink3}
+                  placeholderTextColor={t.nightInk2}
                   accessibilityLabel={timedOn ? 'How long you held it, in seconds' : 'How many reps you did'}
-                  style={{ ...value(34), color: t.ink, textAlign: 'center', minWidth: 64, padding: 0 }}
+                  style={{ ...value(36), color: t.nightInk, textAlign: 'center', minWidth: 64, padding: 0 }}
                 />
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{timedOn ? 'Seconds' : 'Reps'}</Text>
-              </Section>
-              <Section style={{ flex: 1, marginTop: 0, alignItems: 'center' }}>
+                <Text style={{ ...ty.caption, color: t.nightInk2 }}>{timedOn ? 'seconds' : 'reps'}</Text>
+              </View>
+              <View style={tile}>
                 <TextInput
                   value={load}
                   onChangeText={setLoad}
                   keyboardType="decimal-pad"
                   placeholder={fig(null)}
-                  placeholderTextColor={t.ink3}
+                  placeholderTextColor={t.nightInk2}
                   accessibilityLabel={bwOn
                     ? (unit === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight')
                     : (unit === 'kg' ? 'Load in kilograms' : 'Load in pounds')}
-                  style={{ ...value(34), color: t.ink, textAlign: 'center', minWidth: 64, padding: 0 }}
+                  style={{ ...value(36), color: t.nightInk, textAlign: 'center', minWidth: 64, padding: 0 }}
                 />
                 {/* The unit under the box is the control that flips it — the
-                    same toggle this box has always carried on its label. */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs, marginTop: sp.xs }}>
-                  {bwOn ? <Text style={{ ...ty.label, color: t.ink3 }}>Added</Text> : null}
-                  <WeightUnitToggle compact />
+                    same two-halves toggle this box has always carried, written
+                    out here in the night inks because <WeightUnitToggle> draws
+                    its unlit half in the day theme's quiet ink, which is not
+                    readable on a night tile. Same roles, same write. */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs }}>
+                  {bwOn ? <Text style={{ ...ty.caption, color: t.nightInk2 }}>added</Text> : null}
+                  <View accessibilityRole="radiogroup" accessibilityLabel="Weight unit" style={{ flexDirection: 'row', gap: 2 }}>
+                    {(['kg', 'lb'] as const).map((u) => {
+                      const on = u === unit;
+                      return (
+                        <Pressable key={u} accessibilityRole="radio" accessibilityState={{ selected: on }}
+                          accessibilityLabel={u === 'kg' ? 'Kilograms' : 'Pounds'}
+                          hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }}
+                          onPress={() => { if (!on) settings.set({ weightUnit: u }); }}
+                          style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm, backgroundColor: on ? t.night : 'transparent' }}>
+                          <Text style={{ ...ty.caption, ...font(on ? '700' : '400'), color: on ? t.nightInk : t.nightInk2 }}>{u}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 </View>
-              </Section>
+              </View>
+              {/* Only while a heart rate is STREAMING. The figure takes the red
+                  of the data palette — heart rate's colour across the app — on
+                  the red plate that ink is measured against, because the
+                  palette has no red that clears on night in a light scheme
+                  (#b91c1c on the night tile is 2.2:1). */}
+              {liveBpm != null ? (
+                <View accessible accessibilityLabel={`Heart rate ${liveBpm} beats per minute, live`} style={{ ...tile, backgroundColor: t.data.redSoft }}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(36), color: t.data.redInk }}>{fig(liveBpm)}</Text>
+                  <Text style={{ ...ty.caption, color: t.data.redInk }}>bpm</Text>
+                </View>
+              ) : null}
             </View>
             <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap', justifyContent: 'center' }}>
-              <SetKindChip t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)}
+              <SetKindChip t={nt} on={bwOn} onToggle={() => setBwOn((v) => !v)}
                 label="Bodyweight set"
                 onLabel={`Bodyweight set — the box above is what you added, in ${unit}`}
                 a11yHint={bwOn
                   ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
                   : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'} />
-              <SetKindChip t={t} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
+              <SetKindChip t={nt} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
                 label="Timed set"
                 onLabel="Timed set — the first box is seconds held"
                 a11yHint={timedOn
@@ -6349,7 +6597,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             {barLoad ? (
               <View style={{ marginTop: sp.lg }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Per side</Text>
+                  <Text style={{ ...ty.micro, color: nt.ink3 }}>Per side</Text>
                   {/* The bar, switchable. Two entries in `BARS`, so this is a
                       toggle rather than a picker — and it is a control rather
                       than a caption because the women's bar is on the rack of
@@ -6359,9 +6607,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                     accessibilityRole="button"
                     accessibilityLabel={`Worked out for a ${plain(bar)} ${unit} bar. Tap to use the ${plain(bars[(barIdx + 1) % bars.length])} ${unit} bar instead.`}
                     hitSlop={hitSlopFor(MIN_TARGET)}
-                    style={{ paddingHorizontal: sp.md, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: t.surface2, minHeight: 28, justifyContent: 'center' }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: nt.surface2, minHeight: 28, justifyContent: 'center' }}
                   >
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{plain(bar)} {unit} bar</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: nt.ink2 }}>{plain(bar)} {unit} bar</Text>
                   </Pressable>
                 </View>
                 <Text
@@ -6375,7 +6623,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                         ? `That makes ${plain(barLoad.total)} ${unit} on the bar.`
                         : `The nearest these plates make is ${plain(barLoad.total)} ${unit}.`}`
                     : `Just the bar — ${plain(bar)} ${unit}.`}
-                  style={{ ...ty.body, ...numeric, color: t.ink, marginTop: sp.xs }}
+                  style={{ ...ty.body, ...numeric, color: nt.ink, marginTop: sp.xs }}
                 >
                   {barLoad.plates.length ? barLoad.plates.map((x) => plain(x)).join('  ·  ') : 'Just the bar'}
                 </Text>
@@ -6384,33 +6632,62 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                     drawing the plates for 102.5 under the number somebody typed
                     is how the bar ends up heavier than the set they logged. */}
                 {!barLoad.exact ? (
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  <Text style={{ ...ty.caption, color: nt.ink3, marginTop: 2 }}>
                     These plates do not make that exactly — the nearest under it is {plain(barLoad.total)} {unit}.
                   </Text>
                 ) : null}
               </View>
             ) : null}
 
-            {/* One wide green control and a plain one under it, as the board
-                draws them. Which is which follows the rule this runner has
+            {/* ── the heart-rate zone, while there is one ─────────────────────
+                Only with a streaming sample, for the reason the bpm tile gives:
+                a zone worked out from a stale or averaged reading is a zone the
+                member may have left. The number and the name lead and the
+                colour is a mark beside them — src/lib/hr.ts is firm that a zone
+                is never a bare swatch — and the five bands are the lib's own
+                colours, the one in play drawn taller and the rest held back.
+                The scale's caveat travels with it, as it does on every screen
+                that prints a zone. */}
+            {liveBpm != null && liveZone != null ? (
+              <View style={{ backgroundColor: t.night2, borderRadius: radius.lg, padding: 14, marginTop: sp.md }}>
+                <View accessible accessibilityLabel={`Heart-rate zone ${liveZone} of 5, ${zoneName(liveZone)}`}
+                  style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm }}>
+                  <Text style={{ ...ty.caption, ...font('600'), color: t.nightInk2 }}>Heart-rate Zone</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: zoneColor(liveZone) }} />
+                    <Text style={{ ...ty.caption, ...font('700'), color: t.nightInk }}>Zone {liveZone} · {zoneName(liveZone)}</Text>
+                  </View>
+                </View>
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: 12, marginTop: sp.sm }}>
+                  {ZONE_NOS.map((no) => (
+                    <View key={no} style={{ flex: 1, height: no === liveZone ? 12 : 6, borderRadius: 3, backgroundColor: zoneColor(no), opacity: no === liveZone ? 1 : 0.45 }} />
+                  ))}
+                </View>
+                {hrScaleNote(age) ? <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.sm }}>{hrScaleNote(age)}</Text> : null}
+              </View>
+            ) : null}
+
+            {/* One wide bright control and a quiet one under it, as the mockup
+                draws them on night. Which is which follows the rule this runner has
                 always had: once the plan is ticked off, moving on is the
                 primary action and the extra set is the quiet one. A skip
                 writes nothing, so nothing is asked first; it moves on to the
                 next movement, or on the last one it finishes the session —
                 which does write, and says so in its label. */}
-            <View style={{ marginTop: sp.xl }}>
+            <View style={{ marginTop: sp.lg }}>
               {paused
-                ? <Cta label="Resume Session" wide onPress={resume} />
+                ? <CtaBright label="Resume Session" onPress={resume} />
                 : pastPlan
-                ? <Cta label={nextLabel} wide onPress={next} />
-                : <Cta label="Complete Set" wide a11yLabel={`Complete set ${done.length + 1}${plan.length ? ` of ${plan.length}` : ''}`} onPress={logSet} />}
+                ? <CtaBright label={nextLabel} onPress={next} />
+                : <CtaBright label="Complete Set" a11yLabel={`Complete set ${done.length + 1}${plan.length ? ` of ${plan.length}` : ''}`} onPress={logSet} />}
             </View>
             {!paused ? (
               <Pressable accessibilityRole="button"
                 accessibilityLabel={pastPlan ? `Complete set ${done.length + 1}, beyond the plan` : last ? 'Finish the session' : 'Skip the rest of this exercise'}
                 onPress={pastPlan ? logSet : next}
                 style={{ alignSelf: 'stretch', alignItems: 'center', paddingVertical: sp.md, marginTop: sp.sm, minHeight: MIN_TARGET, justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{pastPlan ? 'Complete Set' : last ? 'Finish Session' : 'Skip'}</Text>
+                <Text style={{ ...ty.body, ...font('600'), color: t.nightInk2 }}>{pastPlan ? 'Complete Set' : last ? 'Finish Session' : 'Skip'}</Text>
               </Pressable>
             ) : null}
 
@@ -6421,45 +6698,47 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             {prBlock}
             {pendingFeel != null ? (
               <View style={{ marginTop: sp.xl }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>How did that set feel?</Text>
+                <Text style={{ ...ty.micro, color: nt.ink3, marginBottom: sp.md }}>How did that set feel?</Text>
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  {(([['easy', 'Easy', t.good], ['ok', 'Just right', t.brand], ['hard', 'Hard', t.crit]]) as ['easy' | 'ok' | 'hard', string, string][]).map(([f, lbl, c]) => (
-                    <Pressable key={f} accessibilityRole="button" accessibilityLabel={`That set felt ${lbl.toLowerCase()}`} onPress={() => chooseFeel(f)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
+                  {(([['easy', 'Easy', t.good], ['ok', 'Just right', t.brandBright], ['hard', 'Hard', t.crit]]) as ['easy' | 'ok' | 'hard', string, string][]).map(([f, lbl, c]) => (
+                    <Pressable key={f} accessibilityRole="button" accessibilityLabel={`That set felt ${lbl.toLowerCase()}`} onPress={() => chooseFeel(f)} style={{ flex: 1, backgroundColor: nt.surface2, borderRadius: radius.sm, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c }} />
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{lbl}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: nt.ink }}>{lbl}</Text>
                     </Pressable>
                   ))}
                 </View>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Tunes your next set — Easy adds weight, Hard eases it back.</Text>
+                <Text style={{ ...ty.caption, color: nt.ink3, marginTop: sp.sm }}>Tunes your next set — Easy adds weight, Hard eases it back.</Text>
               </View>
             ) : null}
-            {loggedChips}
             {/* Back and Pause, above everything that is only context. The
                 review's order for a live set is the set, the rest, what is done
                 and the way between movements — and THEN the watch, the zones
                 and the music. This row was the last thing on the page, under
                 all three. */}
             {pauseRow}
-            {injuryLine}
-            {coachNote}
-            {recallBlock}
-            {rampBlock}
-            {/* The movement, playing here rather than in a browser. A client
-                mid-set who is unsure of their form had no way to see the lift
-                from this screen at all — the only demo in the app was back on
-                the plan, behind leaving the session. The rest keeps counting
-                while they look; it is a wall-clock instant, not a timer on
-                this page. */}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={'See a demonstration of ' + shownName(ex)}
-              onPress={() => openDemo('set')}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.xl, minHeight: MIN_TARGET }}
-            >
-              <Icon name="video" size={14} color={t.ink3} />
-              <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>See how this is done</Text>
-              <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
-            </Pressable>
+            {/* What is only context, on the day card — see `dayCard`. */}
+            <View style={dayCard}>
+              {loggedChips}
+              {coachNote}
+              {recallBlock}
+              {rampBlock}
+              {/* The movement, playing here rather than in a browser. A client
+                  mid-set who is unsure of their form had no way to see the lift
+                  from this screen at all — the only demo in the app was back on
+                  the plan, behind leaving the session. The rest keeps counting
+                  while they look; it is a wall-clock instant, not a timer on
+                  this page. */}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={'See a demonstration of ' + shownName(ex)}
+                onPress={() => openDemo('set')}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.xl, minHeight: MIN_TARGET }}
+              >
+                <Icon name="video" size={14} color={t.ink3} />
+                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>See how this is done</Text>
+                <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
+              </Pressable>
+            </View>
             {liveBlock}
           </>
         ) : view === 'demo' ? (
@@ -6468,8 +6747,8 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             {nav('Exercise Demo', () => setView(demoFrom.current), 'Back')}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{shownName(ex)}</Text>
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: 2 }}>{prescription}</Text>
+                <Text style={{ ...ty.title, color: t.nightInk, textTransform: 'capitalize' }}>{shownName(ex)}</Text>
+                <Text style={{ ...ty.label, color: t.nightInk2, marginTop: 2 }}>{prescription}</Text>
               </View>
               <Ghost icon="dumbbell" a11yLabel={`Start set ${done.length + 1}`} onPress={startSet} />
             </View>
@@ -6479,9 +6758,8 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 the whole session with it. "No demonstration yet" is the honest
                 answer; losing an hour of logged work to a web search is not a
                 fair price for it. */}
-            <View style={{ marginTop: sp.lg }}>
+            <View style={{ ...dayCard, marginTop: sp.lg, paddingTop: sp.sm }}>
               <SessionDemo t={t} name={nameOf(ex)} videos={videos} videoStatus={videoStatus} preferTrainerId={preferTrainerId} />
-            </View>
             {/* The words, under the picture. `exercises.instructions` and
                 `tips` were read by exactly ONE screen — the catalogue's own —
                 so a member standing at the rack got a clip or an animation and
@@ -6494,16 +6772,27 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 nothing and report every movement as having no instructions. */}
             <SessionSteps name={nameOf(ex)} />
             {coachNote}
+            </View>
           </>
         ) : (
           /* ── page 4: Workout View ───────────────────────────────────────── */
           <>
-            {nav(shownName(ex), endSession, 'End the session')}
+            {/* The head names the SESSION and the Sora line under it names the
+                movement. It used to say the movement twice, once in each. */}
+            {nav(focus || 'Workout', endSession, 'End the session')}
             {groupLine}
-            <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: exGroup ? sp.xs : sp.xl, textTransform: 'capitalize' }}>{shownName(ex)}</Text>
+            <Text style={{ ...ty.title, color: t.nightInk, textAlign: 'center', marginTop: exGroup ? sp.xs : sp.xl, textTransform: 'capitalize' }}>{shownName(ex)}</Text>
             {methodLine}
-            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{prescription}</Text>
-            {ex.group ? <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: 2 }}>{ex.group}</Text> : null}
+            <Text style={{ ...ty.label, ...numeric, color: t.nightInk2, textAlign: 'center', marginTop: sp.xs }}>{prescription}</Text>
+            {/* The muscle group as the chip it is on Train, in the same colour. */}
+            {ex.group ? (
+              <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: sp.sm }}>
+                <TonedChip label={ex.group} tone={groupTone(ex.group)} />
+              </View>
+            ) : null}
+            {/* The caution, beside the movement it is about — above the demo
+                and the controls, not under the checklist. */}
+            {injuryLine}
 
             {/* The demonstration, in the first viewport, as the board draws
                 it. It used to sit behind a "See how this is done" toggle, and
@@ -6515,12 +6804,12 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 are reached. What it does not do is send anybody to a browser
                 for a movement nobody filmed: rule 5 stays an honest sentence,
                 in the card, with the movement's name over it. */}
-            <View style={{ marginTop: sp.lg, borderRadius: radius.md, backgroundColor: t.surface2, paddingHorizontal: sp.md }}>
+            <View style={{ ...dayCard, marginTop: sp.lg }}>
               <SessionDemo t={t} name={nameOf(ex)} videos={videos} videoStatus={videoStatus} preferTrainerId={preferTrainerId} />
             </View>
 
-            {/* The board's three round controls: start, in the accent; the
-                demo and the third in ink. The third is Swap while the movement
+            {/* The board's three round controls: start, in the bright accent; the
+                demo and the third as night2 discs. The third is Swap while the movement
                 can still be swapped — see `canSwap` for why that stops the
                 moment a set is logged — and Skip once it cannot: it moves on
                 to the next movement without logging anything for this one, or
@@ -6531,14 +6820,14 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 accessibilityLabel={`Start set ${done.length + 1} of ${shownName(ex)}`}
                 accessibilityHint="Opens the set tracker with a clock, reps and load"
                 onPress={startSet}
-                style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                <View style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: t.brandInk }} />
+                style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.brandBright, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: t.brandDeep }} />
               </Pressable>
               <Pressable accessibilityRole="button" accessibilityLabel="Exercise demo"
                 accessibilityHint="The demonstration with the written steps"
                 onPress={() => openDemo('ready')}
-                style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.ink, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="play" size={20} color={t.bg} />
+                style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.night2, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="play" size={20} color={t.nightInk} />
               </Pressable>
               <Pressable accessibilityRole="button"
                 accessibilityLabel={canSwap ? `Swap ${shownName(ex)} for another movement` : last ? 'Finish the session' : 'Skip this exercise'}
@@ -6546,25 +6835,23 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                   ? 'The rack may be taken. Your session and everything you have logged stay as they are.'
                   : last ? 'Writes the session to your log' : 'Moves on without logging anything for this movement'}
                 onPress={canSwap ? () => { setSwapOpen(true); tapLight(); } : next}
-                style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.ink, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name={canSwap ? 'swap' : FORWARD_ICON} size={20} color={t.bg} />
+                style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.night2, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={canSwap ? 'swap' : FORWARD_ICON} size={20} color={t.nightInk} />
               </Pressable>
             </View>
             {/* Said once a set is in, rather than the control simply changing
                 meaning. A member who used Swap on exercise one and finds Skip
                 on exercise two is owed the reason. */}
             {onSwap && done.length > 0 && (ex.alternatives?.length ?? 0) > 0 ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, textAlign: 'center' }}>
+              <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.lg, textAlign: 'center' }}>
                 You have logged a set of this, so it can no longer be swapped — the sets would end up filed under the movement you swapped to.
               </Text>
             ) : null}
 
             {resting ? (
-              <View style={{ backgroundColor: t.brand, borderRadius: radius.md, padding: sp.xl, alignItems: 'center', marginTop: sp.xl }}>
-                <Text style={{ ...ty.micro, color: t.brandInk }}>Rest</Text>
-                <Text style={{ ...value(40), color: t.brandInk, marginTop: sp.xs }}>{restClock(rest)}</Text>
-                <Text style={{ ...ty.micro, color: t.brandInk, marginTop: sp.xs, opacity: 0.8 }}>{restIsMethods ? `Part of the ${methodFor(ex.method).method.label.toLowerCase()}` : ex.restSec != null ? 'Set by your coach' : `App default of ${DEFAULT_REST_SEC} seconds`}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={skipRest} hitSlop={8} style={{ marginTop: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.brandInk }}>Skip rest</Text></Pressable>
+              <View style={{ alignItems: 'center', marginTop: sp.xl }}>
+                <HeroRing size={136} value={ringValue} figure={restClock(rest)} sub="rest" spoken={`Rest ${restClock(rest)}`} />
+                {restLine}
               </View>
             ) : (
               /* ── Starting a rest yourself ──────────────────────────────────
@@ -6588,10 +6875,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 <Pressable accessibilityRole="button"
                   accessibilityLabel={`Start the ${restClock(plannedRest)} rest`}
                   onPress={() => startRest(plannedRest)}
-                  style={{ borderRadius: radius.md, padding: sp.lg, alignItems: 'center', marginTop: sp.xl,
-                           borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Start rest</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  style={{ borderRadius: radius.lg, padding: sp.lg, alignItems: 'center', marginTop: sp.xl, backgroundColor: t.night2 }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.nightInk }}>Start rest</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.nightInk2, marginTop: 2 }}>
                     {restClock(plannedRest)}{ex.restSec != null ? ' · set by your coach' : ` · app default`}
                   </Text>
                 </Pressable>
@@ -6608,51 +6894,54 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
 
                 Every load is converted at this line, by `liftLabel`, and
                 nowhere earlier. What is stored is kilograms. */}
-            {plan.length ? (
-              <View style={{ marginTop: sp.xl }}>
-                <SetChecklist
-                  t={t} ticks={planTicks} movement={shownName(ex)} line={planLine}
-                  askFor={(n) => {
-                    const r = plan[n - 1];
-                    if (!r) return { text: '', loadText: null };
-                    const loadText = r.loadKg != null ? liftLabel(r.loadKg, unit) : null;
-                    return {
-                      text: `${r.reps}${r.loadKg != null ? ' × ' + fig(liftLabel(r.loadKg, unit)) : ''}`,
-                      loadText,
-                    };
-                  }}
-                  onTick={(_n, rec) => tickPlanned(rec)}
-                  onUntick={() => untickLast()}
-                  extraFor={(n) => {
-                    const r = plan[n - 1];
-                    if (!r) return null;
-                    const rb = badgeFor(r.method);
-                    const line = intensityLine(r.intensity);
-                    if (!rb && !line) return null;
-                    return (
-                      <>
-                        {rb ? (
-                          <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
-                        ) : null}
-                        {/* Each row's own effort, share and tempo — a warm-up
-                            single at @6 and a top set at @9 are two different
-                            instructions and this is the only row that can hold
-                            both. */}
-                        {line ? (
-                          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{line}</Text>
-                        ) : null}
-                      </>
-                    );
-                  }} />
-              </View>
-            ) : null}
-            {injuryLine}
-            {coachNote}
             {prBlock}
             {pausedNotice}
-            {loggedChips}
-            {recallBlock}
-            {rampBlock}
+            {/* The plan to tick, and what is only context, on the day card —
+                see `dayCard`. */}
+            <View style={dayCard}>
+              {plan.length ? (
+                <View style={{ marginTop: sp.xl }}>
+                  <SetChecklist
+                    t={t} ticks={planTicks} movement={shownName(ex)} line={planLine}
+                    askFor={(n) => {
+                      const r = plan[n - 1];
+                      if (!r) return { text: '', loadText: null };
+                      const loadText = r.loadKg != null ? liftLabel(r.loadKg, unit) : null;
+                      return {
+                        text: `${r.reps}${r.loadKg != null ? ' × ' + fig(liftLabel(r.loadKg, unit)) : ''}`,
+                        loadText,
+                      };
+                    }}
+                    onTick={(_n, rec) => tickPlanned(rec)}
+                    onUntick={() => untickLast()}
+                    extraFor={(n) => {
+                      const r = plan[n - 1];
+                      if (!r) return null;
+                      const rb = badgeFor(r.method);
+                      const line = intensityLine(r.intensity);
+                      if (!rb && !line) return null;
+                      return (
+                        <>
+                          {rb ? (
+                            <Text accessibilityLabel={rb.label} style={{ ...ty.caption, ...font('600'), color: t.ink3 }}>{rb.short}</Text>
+                          ) : null}
+                          {/* Each row's own effort, share and tempo — a warm-up
+                              single at @6 and a top set at @9 are two different
+                              instructions and this is the only row that can hold
+                              both. */}
+                          {line ? (
+                            <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{line}</Text>
+                          ) : null}
+                        </>
+                      );
+                    }} />
+                </View>
+              ) : null}
+              {coachNote}
+              {loggedChips}
+              {recallBlock}
+              {rampBlock}
+            </View>
 
             {/* Next, Back and Pause BEFORE the watch panel. They were under it:
                 on a session with a zone board and a music bar, "what do I tap
@@ -6662,9 +6951,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 controls changed; `liveBlock` is simply last now, on both pages. */}
             <View style={{ marginTop: sp.xl }}>
               {paused
-                ? <Cta label="Resume Session" wide onPress={resume} />
+                ? <CtaBright label="Resume Session" onPress={resume} />
                 : done.length >= plan.length
-                ? <Cta label={nextLabel} wide onPress={next} />
+                ? <CtaBright label={nextLabel} onPress={next} />
                 : <Ghost label={nextLabel} onPress={next} />}
             </View>
             {pauseRow}
@@ -6702,7 +6991,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                         onPress={() => { if (!on) onSwap?.(ex, alt); setSwapOpen(false); }}
                         style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md, minHeight: MIN_TARGET }}
                       >
-                        <Text style={{ ...ty.body, color: on ? t.ink : t.ink2, fontWeight: on ? '600' : '400', textTransform: 'capitalize', flex: 1 }}>{movement(alt)}</Text>
+                        <Text style={{ ...ty.body, color: on ? t.ink : t.ink2, ...font(on ? '600' : '400'), textTransform: 'capitalize', flex: 1 }}>{movement(alt)}</Text>
                         {/* A tick, not a colour. The selected row is the one the
                             member is standing at, and a brand-tinted row says
                             nothing to a screen reader or to anybody who cannot
@@ -6905,9 +7194,9 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
           accessibilityRole="button" accessibilityLabel="Close" />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '86%', ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: sp.lg }}>
-          <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>
+          <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, ...font('500'), color: t.ink3 }}>Cancel</Text></Pressable>
           <Text style={{ ...ty.head, color: t.ink }}>Edit entry</Text>
-          <Pressable onPress={save} hitSlop={8} disabled={busy}><Text style={{ ...ty.body, fontWeight: '600', color: busy ? t.ink3 : t.brand }}>{busy ? 'Saving…' : 'Save'}</Text></Pressable>
+          <Pressable onPress={save} hitSlop={8} disabled={busy}><Text style={{ ...ty.body, ...font('600'), color: busy ? t.ink3 : t.brandText }}>{busy ? 'Saving…' : 'Save'}</Text></Pressable>
         </View>
         <ScrollView contentContainerStyle={{ padding: sp.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           {dayLabel ? (
@@ -6925,7 +7214,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
               onPress={() => { setPicking((v) => !v); tapLight(); }}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }}>
               <Icon name="swap" size={14} color={t.ink2} />
-              <Text style={{ ...ty.caption, fontWeight: '600', color: t.ink }}>Replace</Text>
+              <Text style={{ ...ty.caption, ...font('600'), color: t.ink }}>Replace</Text>
             </Pressable>
           </View>
 
@@ -6936,7 +7225,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                   <Pressable key={n} accessibilityRole="button" accessibilityLabel={`Replace with ${n}`}
                     onPress={() => { setName(n); setPicking(false); tapLight(); }}
                     style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                    <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, textTransform: 'capitalize' }}>{n}</Text>
+                    <Text style={{ ...ty.caption, ...font('500'), color: t.ink2, textTransform: 'capitalize' }}>{n}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -6998,7 +7287,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                       hitSlop={hitSlopFor(36)}
                       onPress={() => setDistUnit(distUnit === 'km' ? 'mi' : 'km')}
                       style={{ minHeight: 36, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{distUnit}</Text>
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{distUnit}</Text>
                     </Pressable>
                   </View>
                 </Field>
