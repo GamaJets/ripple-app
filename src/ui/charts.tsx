@@ -15,3 +15,16 @@ import { View, Text } from 'react-native';
 import { useTheme } from './components';
 import { radius, value as figure } from '../theme/scale';
 
+/** A small health score pill (0–100). Tone is a dot beside the score, not on it. */
+export function HealthPill({ score, tone }: { score: number; tone: 'good' | 'moderate' | 'low' }) {
+  const t = useTheme();
+  const c = tone === 'good' ? t.brand : tone === 'moderate' ? t.warn : t.crit;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 4, minWidth: 42 }}>
+      <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: c }} />
+      <Text style={{ ...figure(13), color: t.ink }}>{score}</Text>
+    </View>
+  );
+}
+
+
