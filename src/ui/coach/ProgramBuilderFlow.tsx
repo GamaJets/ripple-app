@@ -59,19 +59,7 @@ export function dayTypeOf(day: { focus?: string | null; cardio?: string | null; 
   return 'Other';
 }
 
-/** The colour a muscle group's bar and chip are drawn in. The hues are names
- *  of groups here and never a verdict, so amber and red — which mean slipping
- *  and needs-you everywhere else in the app — are not in the list. */
-export function groupTone(group: string | null | undefined): Tone {
-  const g = (group ?? '').trim();
-  if (!g) return 'neutral';
-  if (/chest|shoulder/i.test(g)) return 'blue';
-  if (/\bback|\blats?\b/i.test(g)) return 'teal';
-  if (LOWER.test(g)) return 'purple';
-  if (/\barms?\b|bicep|tricep|forearm/i.test(g)) return 'pink';
-  if (/core|\babs?\b|abdom|full/i.test(g)) return 'orange';
-  return 'brand';
-}
+export { groupTone } from '../groupTone';
 
 /** A tone as a FILL with something written on it, and what is written.
  *

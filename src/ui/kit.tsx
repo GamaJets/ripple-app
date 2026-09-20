@@ -423,113 +423,15 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
 /* ── the hero ─────────────────────────────────────────────────────────────── */
 
 /**
- * The single number a screen leads with. One per screen — a second hero means
- * neither is the hero. `arc` draws the value as a ring at 0..1.
+ * The old `Hero` — the single eyebrow-and-figure block a screen used to lead
+ * with — lived here. The approved look replaced it on every screen with
+ * `HeroCard`, `FigureCard` and the rings, and with its last caller gone it was
+ * deleted rather than kept as a second way to open a screen.
  */
 /** A 0–1 arc as a whole percentage, clamped — 103% of a target is still a
  *  full ring, and the figure beside it already says how far over. */
 function arcPct(arc: number): number {
   return Math.round(Math.max(0, Math.min(1, arc)) * 100);
-}
-
-export function Hero({
-  label, figure, unit, note, arc, arcLabel, tone, onPress,
-}: {
-  label: string; figure: string; unit?: string; note?: string;
-  arc?: number;
-  /** What the ring measures, as it would be read aloud after the percentage:
-   *  "of today's calories eaten". The component cannot know — on the Meals
-   *  hero the figure counts DOWN as the ring fills up — and a sentence guessed
-   *  from `label` would confidently say the wrong thing. */
-  arcLabel?: string;
-  tone?: string; onPress?: () => void;
-}) {
-  const t = useTheme();
-  const mark = tone || t.brand;
-  const R = 31, C = 2 * Math.PI * R;
-  // "Weight" / "72.9" / "kg" / "down 400 g since Monday" are one fact and were
-  // four stops. Said as the sentence a person would say. The ring keeps its own
-  // element after it, because it is a different quantity and often a different
-  // subject — see arcLabel.
-  const spoken = [label, [figure, unit].filter(Boolean).join(' '), note].filter(Boolean).join(', ');
-  return (
-    <Pressable onPress={onPress} disabled={!onPress}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xl, paddingTop: sp.xxl, paddingBottom: sp.xl }}>
-      <View style={{ flex: 1 }} accessible accessibilityLabel={spoken}
-        accessibilityRole={onPress ? 'button' : undefined}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: sp.sm }}>
-          {/* ── One line, shrunk to fit, never wrapped and never clipped ──
-              This is the one number on the screen and it had no guard of any
-              kind: 44pt display type, no `flexShrink`, no `numberOfLines`, in a
-              row beside a 72pt ring. On a 375pt phone "AED 1,284,900.00" wraps
-              MID-NUMBER — a money figure broken across two lines is a figure an
-              owner reads wrong — and at iOS Larger Text it wrapped down into the
-              note beneath it.
-
-              `adjustsFontSizeToFit` and not a font-size cap. src/lib/typeScale.ts
-              is explicit that nothing in this app caps the reader's text size,
-              because a ceiling on somebody's text size is a ceiling on whether
-              they can read the app at all; where a fixed box was the problem the
-              box gives way. Here the box cannot give way — the ring is beside it
-              — so the FIGURE gives up points and everything else on the screen
-              still scales.
-
-              `minimumFontScale` is 0.35 rather than the 0.85 used on a chip
-              label, and the low floor is the whole point: below the floor iOS
-              stops shrinking and ELLIPSISES, and "AED 1,284,9…" is not a smaller
-              rendering of a number, it is a different number. 0.35 of 44pt is
-              15pt, which still fits a six-figure sum in a currency with a
-              three-letter code on the narrowest phone the app supports, at an
-              accessibility text size, next to the ring. */}
-          <Text
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.35}
-            style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}
-          >{figure}</Text>
-          {/* The unit is two or three characters and is what the figure MEANS,
-              so it does not shrink and does not get pushed off — the figure
-              yields first. */}
-          {unit ? <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{unit}</Text> : null}
-        </View>
-        {note ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
-            <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>
-          </View>
-        ) : null}
-      </View>
-      {arc != null ? (
-        // The ring is how far through the figure above you are, and it used to
-        // say so nowhere: asked outright, "what does the circle do or what is
-        // it for?". At 0% it is an empty grey track and reads as decoration,
-        // which is the moment it most needs to be legible. The percentage sits
-        // inside it, and screen readers get the same sentence rather than an
-        // unlabelled graphic.
-        <View
-          accessible
-          accessibilityRole="progressbar"
-          accessibilityLabel={arcLabel ? `${arcPct(arc)}% ${arcLabel}` : `${arcPct(arc)}%`}
-          accessibilityValue={{ min: 0, max: 100, now: arcPct(arc) }}
-          // The ring grows with the reader's text because the percentage is
-          // drawn INSIDE it. `viewBox` is unitless, so the whole drawing scales
-          // and the stroke stays proportional; capping the figure instead would
-          // have left the one number this ring exists to state as the only
-          // small text on a screen somebody turned up to read.
-          style={{ width: grown(72), height: grown(72), alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Svg width={grown(72)} height={grown(72)} viewBox="0 0 72 72" style={{ position: 'absolute' }}>
-            <Circle cx="36" cy="36" r={R} fill="none" stroke={t.surface3} strokeWidth={3} />
-            <Circle cx="36" cy="36" r={R} fill="none" stroke={mark} strokeWidth={3} strokeLinecap="round"
-              strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, arc)))}
-              transform="rotate(-90 36 36)" />
-          </Svg>
-          <Text style={{ ...ty.caption, ...numeric, ...font('600'), color: t.ink2 }}>{arcPct(arc)}%</Text>
-        </View>
-      ) : null}
-    </Pressable>
-  );
 }
 
 /* ── chip grid ────────────────────────────────────────────────────────────── */

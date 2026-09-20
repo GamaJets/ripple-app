@@ -13,14 +13,31 @@
 // lower-cased so 'Legs' and 'legs' agree.
 import type { Tone } from './kit';
 
-const GROUP_TONES: Record<string, Tone> = {
-  chest: 'blue', back: 'teal', shoulders: 'purple',
-  arms: 'orange', biceps: 'orange', triceps: 'orange', forearms: 'orange',
-  legs: 'pink', quads: 'pink', hamstrings: 'pink', glutes: 'pink', calves: 'pink',
-  core: 'teal', abs: 'teal',
-};
+// ONE map. Three lanes each wrote their own on the night the look was built —
+// here, in ExerciseMuscles and in the coach's builder — and the same group came
+// out blue on one screen, purple on the next and orange on a third. Both of
+// those now re-export this one.
+//
+// Matched by what the group's name CONTAINS, because the catalogue, a coach's
+// hand-typed clip and a builder's volume bar spell groups differently
+// ("Quadriceps", "quads", "Chest & Shoulders"). First match wins, so a
+// compound name takes the hue of the group it names first.
+const GROUP_RULES: readonly (readonly [RegExp, Tone])[] = [
+  [/chest|pec/, 'blue'],
+  [/shoulder|delt|neck|trap/, 'purple'],
+  [/\bback\b|\blats?\b|rhomboid/, 'teal'],
+  [/\barms?\b|bicep|tricep|forearm/, 'orange'],
+  [/leg|quad|hamstring|glute|calf|calves|hip|adductor|abductor/, 'pink'],
+  [/core|\babs?\b|abdom|oblique/, 'brand'],
+  [/full|cardio|conditioning/, 'brand'],
+];
 
-export const groupTone = (group: string): Tone => GROUP_TONES[group.trim().toLowerCase()] ?? 'neutral';
+export function groupTone(group: string | null | undefined): Tone {
+  const g = (group ?? '').trim().toLowerCase();
+  if (!g) return 'neutral';
+  for (const [re, tone] of GROUP_RULES) if (re.test(g)) return tone;
+  return 'neutral';
+}
 
 /** The groups a list of movements trains, in the order the list meets them,
  *  each once. Read off the rows' own `group`; a row with none is left out

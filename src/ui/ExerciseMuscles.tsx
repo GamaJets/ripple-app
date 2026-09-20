@@ -74,16 +74,9 @@ import { catalogueValue as cap } from '../lib/format';
  * A group nobody has listed — a coach types the clip's group by hand — is
  * 'neutral', never a guess at the nearest one.
  */
-const GROUP_TONES: Readonly<Record<string, Tone>> = {
-  chest: 'blue', back: 'teal', shoulders: 'purple',
-  arms: 'orange', biceps: 'orange', triceps: 'orange', forearms: 'amber',
-  legs: 'pink', quads: 'pink', quadriceps: 'pink', hamstrings: 'purple', glutes: 'red', calves: 'teal',
-  core: 'amber', abs: 'amber', abdominals: 'amber',
-  cardio: 'red', 'full body': 'brand', neck: 'blue',
-};
-export function groupTone(group: string | null | undefined): Tone {
-  return GROUP_TONES[(group || '').trim().toLowerCase()] ?? 'neutral';
-}
+// The group → hue map lives in ./groupTone so every screen agrees; re-exported
+// here because the exercise and library screens already import it from this file.
+export { groupTone } from './groupTone';
 
 /** Intensity a primary mover is drawn at: the top of the ramp. */
 const PRIMARY = 1;

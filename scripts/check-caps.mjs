@@ -174,7 +174,6 @@ const VISIBLE = new Map([
  * their absence above.
  */
 const MICRO = new Map([
-  ['Hero', ['label']],           // kit.tsx:143
   ['Field', ['label']],          // kit.tsx:491
   ['Notice', ['kicker']],        // kit.tsx:850
   ['ActionCard', ['ringLabel', 'ringNote']], // kit.tsx:369, 373
