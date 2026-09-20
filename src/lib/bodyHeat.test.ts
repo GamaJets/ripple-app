@@ -26,7 +26,7 @@ import { contrastRatio, luminance, AA_MARK } from './a11y';
 import { PALETTES } from '../theme/tokens';
 import {
   RAMP_DARK, RAMP_LIGHT, GROUND_MIX, bandOf, bandSpoken, bodyGround, bodySpoken,
-  litLayers, notOnThisSide, rampFor, sayLayer, type Band,
+  busierSide, litLayers, notOnThisSide, rampFor, sayLayer, type Band,
 } from './bodyHeat';
 
 const errors: string[] = [];
@@ -238,6 +238,34 @@ eq(bandSpoken(RAMP_DARK[1]), 'Band 2 of 4, Moderate', 'a legend chip says its nu
   // to look like a rounding artefact to somebody tidying up.
   ok(manifest.sides.front.aspect !== manifest.sides.back.aspect,
     'the two sides have their own aspect ratios and neither may be assumed');
+}
+
+/* ── which way round the body opens ─────────────────────────────────────────
+ *
+ * The screen opened on the front, always. A member whose coach had just given
+ * them leg curls, split squats, hip thrusts and hip abduction — four movements
+ * whose prime movers are all drawn on the BACK — opened Your Muscles, saw an
+ * unlit body, and concluded the app had lost the session.
+ */
+{
+  const FRONT = ['quadriceps', 'abdominals', 'pectoralis_major', 'trapezius'];
+  const BACK = ['gluteus_maximus', 'biceps_femoris', 'erector_spinae', 'trapezius'];
+
+  eq(busierSide({ gluteus_maximus: 1, biceps_femoris: 0.8, quadriceps: 0.2 }, FRONT, BACK), 'back',
+     'a glute and hamstring session opens on the back');
+  eq(busierSide({ pectoralis_major: 1, abdominals: 0.6, trapezius: 0.3 }, FRONT, BACK), 'front',
+     'and a push day still opens on the front');
+
+  // The measure is the work, not the number of lit layers: four light front
+  // muscles must not outvote two hard-worked posterior ones.
+  eq(busierSide({ quadriceps: 0.1, abdominals: 0.1, pectoralis_major: 0.1, trapezius: 0.1, gluteus_maximus: 1, biceps_femoris: 0.9 }, FRONT, BACK), 'back',
+     'four faint fronts do not outweigh two heavy backs');
+
+  eq(busierSide({}, FRONT, BACK), 'front', 'nothing trained changes nothing — the front, as before');
+  eq(busierSide({ trapezius: 1 }, FRONT, BACK), 'front',
+     'a muscle drawn on both views ties, and a tie is the front');
+  eq(busierSide({ soleus: 0 }, FRONT, BACK), 'front',
+     'a layer at zero is not work and does not turn the body round');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

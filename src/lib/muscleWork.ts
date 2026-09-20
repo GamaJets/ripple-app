@@ -73,7 +73,7 @@
 // showing the picture can say what the picture is missing. Counting it and
 // drawing nothing, silently, is the failure `unmapped()` exists to prevent.
 import type { WorkoutEntry } from './mockData';
-import { exerciseSlug } from './exerciseId';
+import { exerciseSlug, synonymAliases } from './exerciseId';
 import { entryTonnage, type BodyweightHistory } from './bodyweightSets';
 import { isTimedSet } from './timedSets';
 import { unmapped, approximations, drawnIntensity, type DrawnMuscle } from './muscleMap';
@@ -95,6 +95,20 @@ export interface MuscledExercise {
   /** The catalogue's TRAINING vocabulary, space-separated: 'gluteus maximus'. */
   primaryMuscles: string[];
   secondaryMuscles: string[];
+  /**
+   * The other names this movement goes by — 'butt kicks' on heel-flicks.
+   *
+   * Optional, and absent is not an empty catalogue: a caller holding rows
+   * without the column simply gets the behaviour this file had before, which
+   * is the id match alone. `useExerciseCatalogue` has read it since
+   * supabase/parts/2601, so the live screens pass it without changing a line.
+   *
+   * What it buys is the difference between "Abdominal crunch" being a set of
+   * work this app could file and a set it could only apologise for. See
+   * `synonymAliases` for why it is an exact, normalised-name match and never a
+   * near one.
+   */
+  synonyms?: readonly string[] | null;
 }
 
 /**
@@ -363,6 +377,10 @@ export function muscleWorkBoard(
     for (const m of primary) vocab.add(m);
     for (const m of secondary) vocab.add(m);
   }
+  // The names a member or a coach actually types, pointing at the rows they
+  // mean. Built once for the whole board rather than per entry: the catalogue
+  // is six hundred rows and the log is thousands.
+  const aliases = synonymAliases(catalogue);
 
   const acc = new Map<string, Acc>();
   const unmatched = new Map<string, number>();
@@ -382,7 +400,11 @@ export function muscleWorkBoard(
     const setCount = e.sets.filter((s, i) => (s?.[0] ?? 0) > 0 || isTimedSet(e, i)).length;
     if (setCount <= 0) continue;
     const slug = exerciseSlug(e.exercise || '');
-    const row = slug ? bySlug.get(slug) : undefined;
+    // The row's own id first, and only then the names it is also known by. In
+    // that order because a row must never be redirected by somebody else's
+    // synonym — `synonymAliases` drops those, and asking in this order means
+    // the drop can never matter.
+    const row = slug ? (bySlug.get(slug) ?? bySlug.get(aliases.get(slug) ?? '')) : undefined;
     const name = (e.exercise || '').trim() || 'Unnamed';
     if (!row) {
       unmatched.set(name, (unmatched.get(name) ?? 0) + setCount);

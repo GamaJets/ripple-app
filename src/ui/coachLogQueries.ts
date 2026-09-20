@@ -31,7 +31,7 @@ import { capLimit, capped } from '../lib/rowCap';
 import { type LoadStatus } from './loadStatus';
 import {
   indexQueries, queryPatch, withdrawPatch,
-  type QueryRow, type WorkoutQuery,
+  type KnownCoach, type QueryRow, type WorkoutQuery,
 } from '../lib/coachLogReview';
 
 
@@ -177,4 +177,47 @@ export function useCoachLogQueries(userId: string | null): CoachLogQueries {
   const withdraw = useCallback((workoutId: string) => write(workoutId, withdrawPatch()), [write]);
 
   return { byId, status, query, withdraw, reload };
+}
+
+/**
+ * The one coach this member can PROVE, for naming the sessions in their log
+ * that they did not write themselves.
+ *
+ * Here beside the query read because it answers the other half of the same
+ * question — who wrote this row, and what may be said about it — and because
+ * it was written out longhand on app/(client)/workouts.tsx and needed a second
+ * caller the moment the Activity feed started attributing sessions. Two copies
+ * of a name lookup that decides whose name goes under somebody's training
+ * record is the drift src/lib/threadPeer.ts describes the cost of.
+ *
+ * `my_coach()` (supabase/parts/67, extended by 115) and deliberately NOT
+ * `clients.trainer_id`: this name goes under a record made ABOUT somebody, so
+ * it uses the function that demands BOTH halves of the coach↔client link and
+ * returns the id and the name in one row, with no second read to get out of
+ * step with the first.
+ *
+ * Null covers every way of not knowing, and `coachNameFor`
+ * (src/lib/coachLogReview.ts) turns all of them back into "your coach" — which
+ * is true of every coach-logged row whoever wrote it.
+ */
+export function useLoggingCoach(userId: string | null): KnownCoach | null {
+  const [coach, setCoach] = useState<KnownCoach | null>(null);
+  useEffect(() => {
+    if (!USE_SUPABASE || !userId) { setCoach(null); return; }
+    let live = true;
+    (async () => {
+      try {
+        // no-error-ok: null and refused are the same answer here — the caption
+        // says "your coach", which is true of every coach-logged row.
+        const { data } = await supabase.rpc('my_coach');
+        if (!live) return;
+        // RETURNS TABLE, so supabase-js hands back an array.
+        const row: any = Array.isArray(data) ? data[0] : data;
+        const id = typeof row?.coach_id === 'string' ? row.coach_id : null;
+        setCoach(id ? { id, name: typeof row?.coach_name === 'string' ? row.coach_name : null } : null);
+      } catch { /* the generic caption, which is never wrong */ }
+    })();
+    return () => { live = false; };
+  }, [userId]);
+  return coach;
 }

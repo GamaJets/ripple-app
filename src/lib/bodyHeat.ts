@@ -245,6 +245,55 @@ export function notOnThisSide(
   return out.sort();
 }
 
+/**
+ * Which view of the body has MORE of this window's work on it.
+ *
+ * ── the report this exists for ────────────────────────────────────────────
+ *
+ * The screen opened on the front, always. A member whose coach had just put
+ * them through leg curls, split squats, hip thrusts and hip abduction — four
+ * movements whose prime movers are hamstrings and glutes, and every one of them
+ * drawn on the BACK — opened Your Muscles, saw an unlit body, and concluded the
+ * app had lost the session. It had not: the work was there, the ranking below
+ * listed it, and the picture they were looking at was the one view that could
+ * not show it. A default that is right for a push day and blind to a pull day
+ * is not a default, it is a coin toss the screen makes on the member's behalf.
+ *
+ * ── the measure is INTENSITY, not the number of layers ────────────────────
+ *
+ * Counting lit layers would let four lightly-worked front muscles outvote two
+ * hard-worked posterior ones, which is the same "how often a word appears"
+ * mistake src/lib/muscleWork.ts refuses on `SECONDARY_SHARE`. The values here
+ * are already the scaled scores the shading is drawn from, so summing them
+ * answers the question the picture is about: where is the work.
+ *
+ * A muscle drawn on BOTH views counts for both, which is correct rather than
+ * convenient — `trapezius` genuinely is on both sheets of artwork, and it is
+ * visible whichever way the member is looking.
+ *
+ * ── a tie is the front ────────────────────────────────────────────────────
+ *
+ * Including the tie that matters: a window with no work at all, where both
+ * sums are zero. There is nothing to be shown either way, so the screen opens
+ * where it always did and nothing has changed for the member who trained
+ * nothing.
+ */
+export function busierSide(
+  intensity: Readonly<Record<string, number>>,
+  frontLayers: readonly string[],
+  backLayers: readonly string[],
+): 'front' | 'back' {
+  const sum = (names: readonly string[]): number => {
+    const has = new Set(names);
+    let total = 0;
+    for (const [layer, value] of Object.entries(intensity ?? {})) {
+      if (has.has(layer) && Number.isFinite(value) && value > 0) total += value;
+    }
+    return total;
+  };
+  return sum(backLayers) > sum(frontLayers) ? 'back' : 'front';
+}
+
 /* ── what it says ─────────────────────────────────────────────────────────── */
 
 /**

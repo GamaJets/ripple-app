@@ -32,7 +32,7 @@
 // where videoForExercise actually puts it". That is only true if somebody keeps
 // checking, so the last block here checks it: for every library shape below,
 // what clipSources SAYS is on screen is what videoForExercise RETURNS.
-import { videoForExercise, exerciseSlug, sameExercise, findExercise, type ExerciseRef, type VideoLike } from './exerciseId';
+import { videoForExercise, exerciseSlug, sameExercise, findExercise, synonymAliases, type ExerciseRef, type VideoLike } from './exerciseId';
 import { clipOwner } from './clipOwner';
 import { clipSources } from './clipSources';
 
@@ -239,6 +239,59 @@ const handset: Clip = { id: 'vxm4k7q2z1', exerciseId: 'back-squat', name: 'Back 
   const played = videoForExercise('Back Squat', [theirs, handset], ME);
   eq(played, handset, 'the player plays the same clip the preview described');
   ok(played != null && clipOwner(played, ME) !== 'platform', 'and does not file it under the Academy');
+}
+
+/* ── the names people actually type ─────────────────────────────────────────
+ *
+ * A coach typed "Abdominal crunch". The catalogue holds `ab-crunch`, the slug
+ * of what was typed is `abdominal-crunch`, and every screen that files a
+ * logged set against a movement found nothing — so a set of crunches lit no
+ * muscle and counted towards none.
+ */
+{
+  const cat = [
+    { id: 'ab-crunch', synonyms: ['Abdominal crunch', 'abdominal crunches'] },
+    { id: 'heel-flicks', synonyms: ['butt kicks', 'heel kicks'] },
+    { id: 'crunches', synonyms: [] as string[] },
+  ];
+  const a = synonymAliases(cat);
+  eq(a.get(exerciseSlug('Abdominal crunch')), 'ab-crunch',
+     'the name a coach typed reaches the row it means');
+  eq(a.get('butt-kicks'), 'heel-flicks', 'and so does the name a member types');
+  eq(a.get('ab-crunch'), undefined, 'a row is never an alias of itself');
+  eq(a.get('squat'), undefined, 'and nothing is invented for a name nobody listed');
+}
+
+// A synonym that IS another row's id must not redirect that row. `bench-press`
+// listed as somebody's alternative name cannot be allowed to move the row that
+// is bench press.
+{
+  const a = synonymAliases([
+    { id: 'bench-press', synonyms: [] as string[] },
+    { id: 'dumbbell-press', synonyms: ['Bench press'] },
+  ]);
+  eq(a.get('bench-press'), undefined, 'a real row outranks anybody else\u2019s synonym for it');
+}
+
+// Two rows claiming one name is a question the catalogue cannot answer, and
+// picking the first would be picking by array order — the exact failure this
+// file records having shipped once already.
+{
+  const a = synonymAliases([
+    { id: 'ab-crunch', synonyms: ['Crunch'] },
+    { id: 'cable-crunch', synonyms: ['Crunch'] },
+  ]);
+  eq(a.get('crunch'), undefined, 'an ambiguous name resolves to nothing rather than to a guess');
+}
+
+// A blank or absent column is the ordinary case and is never a crash.
+{
+  const a = synonymAliases([
+    { id: 'row' },
+    { id: 'pull-up', synonyms: null },
+    { id: 'dip', synonyms: ['', '   '] },
+  ]);
+  eq(a.size, 0, 'no synonyms is no aliases, and no exception');
 }
 
 if (errors.length) {

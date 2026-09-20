@@ -52,7 +52,7 @@ import { View, Text, ScrollView, TextInput, Alert, Modal, Pressable } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Flag, PartialRead, PageHead, SyncBadge, Ring, TonedChip, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Flag, PartialRead, PageHead, SyncBadge, Ring, TonedChip, fig, type Tone } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, elevation, fontScale, type as ty, numeric, font } from '../../src/theme/scale';
 import {
@@ -100,6 +100,22 @@ import {
 // could see that an hour had been delivered and nothing about what it was
 // worth. The pair is never split: the integer alone names no money.
 import { RATE_MEANING_NOTE, sessionRate } from '../../src/lib/sessionRate';
+// ── what was actually done in the hour ────────────────────────────────────
+//
+// This screen listed the HOUR — booked, delivered, approved, disputed, what it
+// was worth — and never once what happened inside it. A member reading "Session
+// Not Yet Marked · Tue, Sep 15" had no way from here to reach the five
+// exercises their coach had recorded against that day, which is half of the
+// report this section answers. `entriesInSession` is the one place the pairing
+// rule lives: the link when `workouts.session_id` names the session, and the
+// coach's rows on the same local day when nothing does — see its header for why
+// the hour cannot be used and the day can.
+import { entriesInSession, pairingNote } from '../../src/lib/loggedSession';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { setListLabel } from '../../src/lib/timedSets';
+import { liftIn } from '../../src/lib/units';
+import { useSettings } from '../../src/ui/settings';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { useMyCancellations } from '../../src/ui/cancellations';
 import { useAuth } from '../../src/ui/auth';
 import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
@@ -171,6 +187,20 @@ export default function PtSessions() {
   const { sessions, status: sessionStatus, approveSession, disputeSession, refresh: refreshSessions } = useSessions();
   const sessionsWhole = isWhole(sessionStatus);
   const c = useClientData();
+  /* ── the training that went with the hour ─────────────────────────────────
+   *
+   * The member's own log, which is where a coach's write-up of a session lands:
+   * `workouts` rows against the member with `logged_by` set (supabase/parts/53).
+   * Its status matters as much as its rows — an empty log under a failed read
+   * would put "Nothing was logged in this session" under an hour that was fully
+   * written up, which is the same collapse this whole screen is built to refuse.
+   */
+  const { log, status: logStatus } = useWorkoutLog();
+  const logWhole = isWhole(logStatus);
+  const wu = useSettings().weightUnit;
+  // The reader's own language for a movement. The stored name is the identity
+  // and is untouched; only the sentence moves.
+  const { textOf: movement } = useMovementName();
   // Read against the signed-in id rather than `useClientData().id`, which falls
   // back to the literal 'unknown' when Supabase has not answered — a string
   // that matches no row, so the read would come back empty and the screen would
@@ -753,6 +783,9 @@ export default function PtSessions() {
             // minor-unit factor belongs to the currency and is 1, 100 or 1000.
             // See src/lib/sessionRate.ts and supabase/parts/1010.
             const rate = sessionRate(s.rateCents, s.rateCurrency);
+            // The training filed under this hour, and how sure that filing is.
+            const paired = entriesInSession(log, { id: s.id, startsAt: s.startsAt, trainerId: s.trainerId });
+            const pairNote = pairingNote(paired.by);
             return (
               <View key={s.id}>
                 {i > 0 ? <Rule /> : null}
@@ -794,6 +827,52 @@ export default function PtSessions() {
                       <TonedChip label="You Approved This" tone="brand" icon="check" />
                     </View>
                   ) : null}
+                  {/* ── what was logged in it ──────────────────────────────
+                      The exercises, sets, reps and loads recorded against this
+                      hour — the thing this screen has never shown and the
+                      thing the member asked for. Drawn only under a WHOLE log
+                      read: a short log under this heading is an hour that
+                      looks emptier than it was, and "nothing was logged" is a
+                      claim about somebody's session that a prefix cannot
+                      support. Under anything less the line below says which it
+                      is instead of listing rows. */}
+                  {logWhole ? (
+                    paired.entries.length ? (
+                      <View style={{ marginTop: sp.md, gap: sp.xs }}>
+                        <Text style={{ ...ty.caption, ...font('600'), color: t.ink2 }}>
+                          {paired.by === 'link' ? 'Logged In This Session' : 'Logged On This Day'}
+                        </Text>
+                        {paired.entries.map((e, j) => (
+                          <View key={e.id ?? `${e.t}-${j}`}>
+                            <Text style={{ ...ty.label, color: t.ink }}>{movement(e.exercise)}</Text>
+                            {e.sets?.length ? (
+                              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+                                {setListLabel(e, (kg) => fig(liftIn(kg, wu)), wu)}
+                              </Text>
+                            ) : e.cardio ? (
+                              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+                                {[`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null].filter(Boolean).join(' · ')}
+                              </Text>
+                            ) : null}
+                          </View>
+                        ))}
+                        {/* Said where the list is read, not as a footnote. A
+                            day match is a likelihood and the member is looking
+                            at it under a heading that names an hour. */}
+                        {pairNote ? <Flag tone={t.ink3} style={{ marginTop: sp.xs }}>{pairNote}</Flag> : null}
+                      </View>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                        Nothing was logged against this session. Your coach records what you did from
+                        their own app, and not every session is written up.
+                      </Text>
+                    )
+                  ) : (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      Your training log could not be read in full, so what was logged in this session is
+                      not known here. It is missing from this screen rather than from your record.
+                    </Text>
+                  )}
                 </View>
               </View>
             );

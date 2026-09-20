@@ -31,6 +31,14 @@ import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { liftIn, weightLabel } from '../../src/lib/units';
 import { setChipLabel } from '../../src/lib/timedSets';
+// A session, put back together out of the rows that make it up. One row per
+// movement is how `workouts` stores an hour; this is what turns five of them
+// back into the hour the member and their coach both remember.
+import { loggedSessions, sessionFeedTitle, sessionSummary } from '../../src/lib/loggedSession';
+import { tonnage, tonnageNote } from '../../src/lib/bodyweightSets';
+import { attributionLine } from '../../src/lib/workoutAttribution';
+import { coachNameFor } from '../../src/lib/coachLogReview';
+import { useLoggingCoach } from '../../src/ui/coachLogQueries';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ZoneStrip } from '../../src/ui/ZoneBoard';
@@ -55,6 +63,18 @@ import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 // bookings, and the trainer side (which stores real user ids) never matched at all.
 
 interface Event { at: string; icon: string; title: string; sub: string; route?: string;
+  /** The word on the button that opens `route`. "View Details" unless the row
+   *  is going somewhere more specific than that. */
+  routeLabel?: string;
+  /** The movements of a SESSION, drawn when the row is opened. One line per
+   *  exercise with its sets as they were performed — which is the thing this
+   *  feed was reported for not showing. Absent on a row that is one movement,
+   *  where `sub` already is the sets. */
+  lines?: { title: string; sets: string; pr: boolean }[];
+  /** A sentence that qualifies a figure on the row — a tonnage missing its
+   *  unpriced bodyweight sets, or who wrote the session. Data, not prose: it
+   *  states why a number is short or whose account of an hour this is. */
+  note?: string | null;
   hr?: { title: string; startISO: string; durationMin: number };
   /** A whole session's time in heart-rate zones, drawn as a strip when the row
    *  is opened. One per SESSION — see src/lib/sessionZones.ts for why this
@@ -174,6 +194,10 @@ export default function Activity() {
   // screens: a short weight history under-prices the earlier sets and would
   // invent a record out of a failed read.
   const bwHistory = isWhole(cd.scansStatus) ? cd.weightSeries : [];
+  // Whose name may go under a session this member did not write. Null covers
+  // every way of not knowing and reads as "Your Coach", which is true of every
+  // coach-logged row whoever wrote it — see `coachNameFor`.
+  const loggingCoach = useLoggingCoach(cd.id && cd.id !== 'unknown' ? cd.id : null);
 
   const events: Event[] = [];
 
@@ -204,9 +228,84 @@ export default function Activity() {
   const setText = (e: WorkoutEntry, i: number): string =>
     setChipLabel(e, i, (kg) => fig(liftIn(kg, wu)), wu);
 
-  // Workouts + PR flags
-  for (const e of log) {
+  /* ── a session is one event, not one event per movement ─────────────────
+   *
+   * This loop used to walk `log` — one row per MOVEMENT — so the hour a coach
+   * spent with a member arrived here as five separate "Logged Hip Thrust"
+   * lines, each indistinguishable from five things the member had done alone
+   * on five different occasions, and not one of them saying a coach had
+   * written it. That is the whole of the report: "training sessions logged by
+   * the coach are not displaying what exercises and weights and reps were
+   * done". The exercises, the weights and the reps were all on this screen;
+   * the SESSION was not, so nothing joined them up and nothing was attributed.
+   *
+   * `loggedSessions` puts the rows back together on the two facts that
+   * identify a session — the instant they share and who wrote them. A group of
+   * one is left exactly as it was: a single movement is not a session, and
+   * folding it into one would cost the personal-record heading, the route to
+   * the records screen and the heart-rate window that hang off a single entry.
+   */
+  const trainedSessions = loggedSessions(log);
+  for (const s of trainedSessions.filter((g) => g.entries.length > 1)) {
+    // Every movement of it, with each set as it was performed. `setText` is
+    // the same renderer the single-entry rows use, so a set reads identically
+    // whether it arrived alone or inside a session.
+    const lines = s.entries.map((e) => ({
+      title: movement(e.exercise),
+      sets: e.sets
+        ? e.sets.map((_x, i) => setText(e, i)).join(' · ')
+        : e.cardio
+          ? [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null].filter(Boolean).join(' · ')
+          : '',
+      pr: prsKnown && isNewPR(log, e, bwHistory),
+    }));
+    // The load, through the same converter and the same caveat as every other
+    // tonnage in this app. `tonnageNote` is not decoration: a bodyweight set
+    // this member's weight history cannot price is missing from the figure,
+    // and a total that swallowed it would be a smaller session stated as a
+    // number. Withheld entirely under anything but a whole read, because a
+    // prefix of a session is not a session's load.
+    const ton = tonnage(s.entries, bwHistory);
+    const load = isWhole(feedStatus) && ton.kg > 0 ? `${fig(liftIn(ton.kg, wu))} ${wu}` : null;
+    // The session's own length, when somebody said what it was. Session-scoped,
+    // so every row carries the same number and the first that has one answers
+    // for all of them — see `WorkoutEntry.sessionMins`.
+    const mins = s.entries.reduce<number | null>((acc, e) => acc ?? (
+      typeof e.sessionMins === 'number' && Number.isFinite(e.sessionMins) && e.sessionMins > 0
+        ? Math.round(e.sessionMins) : null), null);
+    const title = sessionFeedTitle(s, coachNameFor({ loggedBy: s.loggedBy ?? undefined }, loggingCoach));
+    events.push({
+      at: s.at,
+      icon: s.loggedBy ? 'people' : 'dumbbell',
+      title,
+      sub: sessionSummary(s, load),
+      lines,
+      // Only where a figure was actually drawn, and only when it is short.
+      note: load ? tonnageNote(ton) : null,
+      // The member's own record of this hour is on Train, where each row of it
+      // carries the amend and the query their coach can read. That is the
+      // affordance src/lib/coachLogReview.ts exists for and this feed must not
+      // grow a second, weaker copy of.
+      //
+      // The bare path, NOT `trainIntent`. That helper mints a one-shot token
+      // from the clock to mean "somebody pressed Start Workout", and it is
+      // called at the tap on every other caller — minting one here, in the
+      // render body, once per session, would both claim an intent nobody had
+      // and give this row a different route on every redraw.
+      route: '/(client)/workouts',
+      routeLabel: s.loggedBy ? 'Review This Session' : 'View Details',
+      hr: mins == null ? undefined : { title, startISO: s.at, durationMin: mins },
+    });
+  }
+
+  // Workouts + PR flags — the movements that were logged on their own.
+  for (const e of trainedSessions.filter((g) => g.entries.length === 1).map((g) => g.entries[0])) {
     const pr = prsKnown && isNewPR(log, e, bwHistory);
+    // One movement a coach wrote is still a record made about somebody by
+    // somebody else, and it carried nothing saying so. `attributionLine` is the
+    // sentence both apps use for it, and `coachNameFor` decides whether this
+    // app is entitled to use the coach's name or has to say "your coach".
+    const by = attributionLine(e, coachNameFor(e, loggingCoach), true);
     if (e.sets) {
       // The heart-rate window is the member's OWN testimony about how long the
       // session ran, or there is no window and no chart.
@@ -224,9 +323,9 @@ export default function Activity() {
       // is what the app does everywhere else it has no figure.
       const mins = typeof e.sessionMins === 'number' && Number.isFinite(e.sessionMins) && e.sessionMins > 0
         ? Math.round(e.sessionMins) : null;
-      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${movement(e.exercise)}` : `Logged ${movement(e.exercise)}`, sub: e.sets.map((_s, i) => setText(e, i)).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: mins == null ? undefined : { title: movement(e.exercise), startISO: e.t, durationMin: mins } });
+      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${movement(e.exercise)}` : `Logged ${movement(e.exercise)}`, sub: e.sets.map((_s, i) => setText(e, i)).join(' · '), note: by, route: pr ? '/(client)/records' : '/(client)/trends', hr: mins == null ? undefined : { title: movement(e.exercise), startISO: e.t, durationMin: mins } });
     } else if (e.cardio) {
-      events.push({ at: e.t, icon: 'heart', title: `Logged ${movement(e.exercise)}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: e.cardio.mins > 0 ? { title: movement(e.exercise), startISO: e.t, durationMin: e.cardio.mins } : undefined });
+      events.push({ at: e.t, icon: 'heart', title: `Logged ${movement(e.exercise)}`, note: by, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: e.cardio.mins > 0 ? { title: movement(e.exercise), startISO: e.t, durationMin: e.cardio.mins } : undefined });
     }
   }
 
@@ -319,18 +418,25 @@ export default function Activity() {
    * training session writes one feed row per movement — src/lib/mockData.ts
    * says it on `WorkoutEntry.id`, "one session writes all its exercises with
    * the same timestamp" — so tallying rows would tell somebody who trained
-   * three times that they trained eleven. The timestamp is the session's
-   * identity, so the distinct timestamps are the sessions.
+   * three times that they trained eleven. The instant a session's rows share
+   * is its identity, so the sessions are what `loggedSessions` cuts out of the
+   * log rather than the rows themselves.
    *
    * Personal records are deliberately not fed in. `catchUp` folds them into
    * the trained count on the understanding that one row is one workout, which
    * is true of a per-session list and not of a per-movement one; a session
    * with three records would come back as three workouts. They are already on
    * the rows below under a trophy, which is where a record belongs.
+   *
+   * `loggedSessions` is what cuts them, and it is the same cut the rows above
+   * are drawn from, so the line and the list cannot come to disagree about how
+   * many times somebody trained. It was a Set of distinct timestamps, which is
+   * the same answer in every case but one: a coach writing an hour up at the
+   * instant the member logged their own accessory work folded into a single
+   * workout, because a bare timestamp cannot see who wrote the row.
    */
-  const trainedAt = new Set(log.map((e) => e.t).filter(Boolean));
   const tally = catchUp([
-    ...[...trainedAt].map((at) => ({ at, kind: 'workout' as FeedKind })),
+    ...trainedSessions.map((g) => ({ at: g.at, kind: 'workout' as FeedKind })),
     ...checkins.map((c) => ({ at: c.at, kind: 'checkin' as FeedKind })),
     ...pastSessions.map((r) => ({ at: r.session.startsAt, kind: 'session' as FeedKind })),
   ], nowMs, CATCH_UP_DAYS);
@@ -421,7 +527,7 @@ export default function Activity() {
             return (
               <View key={i}>
                 {i > 0 ? <Rule /> : null}
-                <Pressable onPress={() => setOpen(isOpen ? null : i)} accessibilityRole="button" accessibilityLabel={`${e.title}. ${e.sub}. ${isOpen ? 'Collapse' : 'Tap to expand'}`}
+                <Pressable onPress={() => setOpen(isOpen ? null : i)} accessibilityRole="button" accessibilityLabel={`${e.title}. ${e.sub}.${e.note ? ` ${e.note}` : ''} ${isOpen ? 'Collapse' : 'Tap to expand'}`}
                   style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
                   <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name={e.icon as any} size={17} color={t.brand} />
@@ -429,8 +535,41 @@ export default function Activity() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.title}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }} numberOfLines={isOpen ? undefined : 2}>{e.sub}</Text>
+                    {/* Who wrote it, or why a figure on it is short. One line,
+                        beside the thing it qualifies, and drawn shut as well as
+                        open: a record made about somebody by somebody else says
+                        so where they will read it, not one tap further on. */}
+                    {e.note ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.note}</Text>
+                    ) : null}
                     {isOpen ? (
                       <View style={{ marginTop: sp.md }}>
+                        {/* ── what was actually done in the hour ─────────────
+                            The exercises, with every set as reps by load in the
+                            member's own unit, bodyweight and holds honoured —
+                            `setChipLabel` renders them identically here and on
+                            Train. This is the answer to the report: the feed
+                            had the rows and never put them on screen as a
+                            session, so an hour with a coach showed a heading
+                            and nothing under it. */}
+                        {e.lines?.length ? (
+                          <View style={{ marginBottom: sp.md, gap: sp.sm }}>
+                            {e.lines.map((l, j) => (
+                              <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm }}>
+                                {/* A record inside a session keeps its trophy.
+                                    It is a fact about the set and it would
+                                    otherwise be lost to the grouping. */}
+                                <Icon name={l.pr ? 'trophy' : 'dumbbell'} size={13} color={l.pr ? t.brand : t.ink3} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ ...ty.label, color: t.ink }}>{l.title}</Text>
+                                  {l.sets ? (
+                                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 1 }}>{l.sets}</Text>
+                                  ) : null}
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        ) : null}
                         {/* The strip carries its own spoken sentence — "zone 3
                             Cardio, 12 minutes 30 seconds" — so it is not
                             re-labelled here. */}
@@ -438,7 +577,7 @@ export default function Activity() {
                         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.at, now)}</Text>
                         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                           {e.route ? (
-                            <Ghost label="View Details" onPress={() => router.push(e.route as any)} />
+                            <Ghost label={e.routeLabel ?? 'View Details'} onPress={() => router.push(e.route as any)} />
                           ) : null}
                           {e.hr ? (
                             <Ghost label="Heart Rate" icon="heart" onPress={() => setHrFor(e.hr!)} />

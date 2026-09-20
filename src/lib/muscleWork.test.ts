@@ -357,5 +357,35 @@ const win = (extra: Record<string, unknown> = {}) =>
   eq(EMPTY_WORK_BOARD.status, 'loading', 'and claims nothing has been read');
 }
 
+/* ── the name a coach actually typed ────────────────────────────────────────
+ *
+ * "Abdominal crunch" slugs to `abdominal-crunch`, the catalogue holds
+ * `ab-crunch`, and the join found nothing — so three sets of crunches lit no
+ * muscle on the diagram, reached no ranking, and appeared only in the line at
+ * the bottom that says what could not be filed. `exercises.synonyms` names the
+ * row and nothing that files a set had ever read it.
+ */
+{
+  const withSynonyms: MuscledExercise[] = [
+    {
+      id: 'ab-crunch', name: 'Ab Crunch',
+      primaryMuscles: ['abdominals'], secondaryMuscles: [],
+      synonyms: ['Abdominal crunch'],
+    },
+  ];
+  const log: WorkoutEntry[] = [
+    { t: at('2026-08-28'), exercise: 'Abdominal crunch', sets: [[12, 24.75], [12, 24.75], [15, 24.75]] },
+  ];
+  const board = muscleWorkBoard(log, withSynonyms, { sinceMs: NOW - WEEK, nowMs: NOW });
+  eq(board.setsCounted, 3, 'the sets are counted rather than apologised for');
+  eq(board.unmatchedSets, 0, 'and nothing is left unfiled');
+  eq(board.muscles[0]?.muscle, 'abdominals', 'they reach the muscle the catalogue names');
+
+  // And with the column absent — every row the catalogue held before part 2601
+  // — the answer is exactly what it was, which is what makes this safe to add.
+  const noSynonyms = muscleWorkBoard(log, [{ ...withSynonyms[0], synonyms: undefined }], { sinceMs: NOW - WEEK, nowMs: NOW });
+  eq(noSynonyms.unmatchedSets, 3, 'with no synonyms on the row the name still resolves to nothing');
+}
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('muscleWork.test.ts ok');

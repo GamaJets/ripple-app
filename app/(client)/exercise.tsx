@@ -330,7 +330,12 @@ export default function ExerciseScreen() {
     : plannedSets
       ? `${plannedSets} set${plannedSets === 1 ? '' : 's'}`
       : lastSets
-        ? `Last time · ${lastSets}`
+        // Who did the recording, where it was not the member. "Last time" is a
+        // claim about their own training, and an hour their coach wrote up is
+        // still their training — but a member reading it back is entitled to
+        // know whose account of it they are reading, which is the same rule
+        // the Train day sheet and the Activity feed now follow.
+        ? `Last time · ${lastSets}${lastEntry?.loggedBy ? ' · logged by your coach' : ''}`
         : [detail?.group, detail?.equipment].filter((x): x is string => !!x).map(cap).join(' · ') || null;
 
   /* ── the set tracker (board page 6) ──────────────────────────────────────

@@ -73,6 +73,63 @@ export function findExercise(name: string, catalogue: ExerciseRef[]): ExerciseRe
   return catalogue.find((e) => e.id === id) ?? null;
 }
 
+/**
+ * The names a catalogue row is ALSO known by, as slugs, pointing at its id.
+ *
+ * ── the report this exists for ────────────────────────────────────────────
+ *
+ * A coach typed "Abdominal crunch" into their client's log. `exerciseSlug`
+ * makes that `abdominal-crunch`, the catalogue holds `ab-crunch` and
+ * `crunches` and no row with that id, so the join found nothing — and a set of
+ * crunches lit no muscle on the body diagram, counted towards no muscle in the
+ * rankings, and appeared only in the "we could not file this" line at the
+ * bottom of the screen. The member saw an hour of work and an unlit stomach.
+ *
+ * `exercises.synonyms` is the column for exactly this — "the names a member
+ * actually types", supabase/parts/2601, 305 rows carry at least one — and it
+ * was read only by the library's SEARCH. Nothing that files a logged set
+ * against a movement had ever looked at it.
+ *
+ * ── this is a normalised-name match and nothing more ──────────────────────
+ *
+ * The slug of a synonym, compared for equality with the slug of what was
+ * typed. There is deliberately no fuzzy fallback here, for the same reason
+ * `videoForExercise` refuses one two functions down: a near-miss files
+ * somebody's sets against a movement they did not do, and the diagram, the
+ * rankings and the recovery map then all state it as fact. No match is an
+ * honest answer and the screens already have a sentence for it.
+ *
+ * Two rules keep the alias safe to apply blind:
+ *
+ *   · a synonym that slugs to a REAL row's id is dropped. `bench-press` as
+ *     somebody's synonym must never redirect the row that IS bench-press.
+ *   · a synonym two different rows claim is dropped, both times. The
+ *     catalogue cannot tell us which movement was meant, and picking the first
+ *     would be picking by array order — the exact failure `videoForExercise`
+ *     records having shipped once already.
+ */
+export function synonymAliases(
+  catalogue: readonly { id: string; synonyms?: readonly string[] | null }[],
+): Map<string, string> {
+  const ids = new Set<string>();
+  for (const row of catalogue) if (row && typeof row.id === 'string' && row.id) ids.add(row.id);
+  const out = new Map<string, string>();
+  const clashed = new Set<string>();
+  for (const row of catalogue) {
+    if (!row || typeof row.id !== 'string' || !row.id) continue;
+    if (!Array.isArray(row.synonyms)) continue;
+    for (const raw of row.synonyms) {
+      const slug = exerciseSlug(String(raw ?? ''));
+      // Not a name at all, or a name the catalogue already owns outright.
+      if (!slug || ids.has(slug) || clashed.has(slug)) continue;
+      const held = out.get(slug);
+      if (held && held !== row.id) { out.delete(slug); clashed.add(slug); continue; }
+      out.set(slug, row.id);
+    }
+  }
+  return out;
+}
+
 /** The minimum a video has to carry to be matched to an exercise.
  *
  *  `id` is REQUIRED, and that is the point of it. It is how the clip is TOLD

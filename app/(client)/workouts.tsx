@@ -189,10 +189,10 @@ import { STRETCH_ROUTINES, routineSummary, type StretchRoutine } from '../../src
 import { buildRoutine, BUILD_MINUTES, STRETCH_FOCUS } from '../../src/lib/stretchBuilder';
 import { useStretchCatalogue } from '../../src/ui/stretchCatalogue';
 import { StretchRunner } from '../../src/ui/StretchRunner';
-import { reviewFor, queryFor, type KnownCoach } from '../../src/lib/coachLogReview';
+import { reviewFor, queryFor } from '../../src/lib/coachLogReview';
 import { canPairHere, pairInvite, pairInviteAction } from '../../src/lib/sessionPairing';
 import { PairMonitorSheet, usePairRows } from '../../src/ui/PairMonitorSheet';
-import { useCoachLogQueries } from '../../src/ui/coachLogQueries';
+import { useCoachLogQueries, useLoggingCoach } from '../../src/ui/coachLogQueries';
 import { CoachLogReviewStrip } from '../../src/ui/CoachLogReview';
 import { dayKeyOf, instantForDay, readWorkoutEdit, type WorkoutDraftSet } from '../../src/lib/entryEdit';
 import { useSettings } from '../../src/ui/settings';
@@ -745,25 +745,13 @@ export default function Train() {
    * argues why that is the only safe direction: a header that fell back to
    * whichever name WAS readable showed a client their own name under the words
    * "Your coach".
+   *
+   * The lookup itself moved to `useLoggingCoach` in src/ui/coachLogQueries.ts
+   * when app/(client)/activity.tsx came to need the same name for the same
+   * reason. It is the same call, the same nulls and the same comments; what
+   * changed is that there is now one of it.
    */
-  const [loggingCoach, setLoggingCoach] = useState<KnownCoach | null>(null);
-  useEffect(() => {
-    if (!USE_SUPABASE || !cd.id || cd.id === 'unknown') return;
-    let live = true;
-    (async () => {
-      try {
-        // no-error-ok: null and refused are the same answer here — the caption
-        // says "your coach", which is true of every coach-logged row.
-        const { data } = await supabase.rpc('my_coach');
-        if (!live) return;
-        // RETURNS TABLE, so supabase-js hands back an array.
-        const row: any = Array.isArray(data) ? data[0] : data;
-        const id = typeof row?.coach_id === 'string' ? row.coach_id : null;
-        setLoggingCoach(id ? { id, name: typeof row?.coach_name === 'string' ? row.coach_name : null } : null);
-      } catch { /* the generic caption, which is never wrong */ }
-    })();
-    return () => { live = false; };
-  }, [cd.id]);
+  const loggingCoach = useLoggingCoach(cd.id && cd.id !== 'unknown' ? cd.id : null);
 
   /* Where each coach-logged row stands with the member: queried, or not, or not
    * known. Its own read rather than a field on `WorkoutEntry` — see the header

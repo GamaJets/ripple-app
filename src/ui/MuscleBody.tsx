@@ -91,7 +91,7 @@
 // beside it. The picture confirms; the list informs.
 import { useEffect, useMemo, useRef } from 'react';
 import {
-  Animated, Easing, Image, StyleSheet, Text, View,
+  Animated, Easing, Image, Pressable, StyleSheet, Text, View,
   type StyleProp, type ViewStyle,
 } from 'react-native';
 import { useTheme } from './components';
@@ -133,7 +133,7 @@ export type { BodySide };
  *            nothing, and none of those is this week.
  */
 export function MuscleBody({
-  side, intensity, status, ramp, height, surface, legend = true, captions = true, style,
+  side, intensity, status, ramp, height, surface, legend = true, captions = true, onFlip, style,
 }: {
   side: BodySide;
   /** Intensity 0..1 per DRAWN layer name — `drawnIntensity` in src/lib/muscleMap.ts. */
@@ -167,6 +167,21 @@ export function MuscleBody({
    * caution exists to prevent.
    */
   captions?: boolean;
+  /**
+   * Turn the body round, when the caller owns which side is showing.
+   *
+   * Given, the "n muscles you trained are drawn on the back" note becomes the
+   * control that takes the reader there. That sentence was the app admitting it
+   * had drawn the wrong half of somebody's week and then leaving them to find
+   * the segmented bar above the picture themselves — and the reader most likely
+   * to miss the bar is the one looking at an unlit body wondering whether the
+   * app lost their session. A sentence that names a thing you cannot reach from
+   * it is half an answer.
+   *
+   * Absent on the callers that draw one side and have no other to offer, where
+   * the note stays a plain statement of fact.
+   */
+  onFlip?: () => void;
   style?: StyleProp<ViewStyle>;
 }) {
   const t = useTheme();
@@ -274,11 +289,21 @@ export function MuscleBody({
         </Flag>
       ) : null}
 
-      {captions && missing.length ? (
-        <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-          {`${missing.length} muscle${missing.length === 1 ? '' : 's'} you trained ${missing.length === 1 ? 'is' : 'are'} drawn on the ${side === 'front' ? 'back' : 'front'} of the body: ${missing.map(sayLayer).join(', ')}.`}
-        </Flag>
-      ) : null}
+      {captions && missing.length ? (() => {
+        const other = side === 'front' ? 'back' : 'front';
+        const line = `${missing.length} muscle${missing.length === 1 ? '' : 's'} you trained ${missing.length === 1 ? 'is' : 'are'} drawn on the ${other} of the body: ${missing.map(sayLayer).join(', ')}.`;
+        const flag = <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>{line}</Flag>;
+        // A button only where there is somewhere to go. The role and the label
+        // are on the Pressable and the sentence inside it is decorative to a
+        // screen reader — one stop, one sentence, which is rule 3 of
+        // scripts/check-a11y.mjs and the same rule the diagram itself follows.
+        return onFlip ? (
+          <Pressable onPress={onFlip} accessibilityRole="button"
+            accessibilityLabel={`${line} Show the ${other} of the body.`}>
+            {flag}
+          </Pressable>
+        ) : flag;
+      })() : null}
 
       {/* No legend when nothing is graded. A key to four bands beside a body
           drawn in one of them is a key to a picture that is not there. */}

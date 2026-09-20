@@ -77,7 +77,11 @@ import { useSettings } from '../../src/ui/settings';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { isWhole } from '../../src/ui/loadStatus';
 import { MuscleBody } from '../../src/ui/MuscleBody';
-import type { BodySide } from '../../src/ui/muscleArt';
+import { layerNames, type BodySide } from '../../src/ui/muscleArt';
+// Which view of the body this window's work is actually on. See its header for
+// the session that produced the report: four posterior movements, and a screen
+// that opened on the front and drew an unlit body.
+import { busierSide } from '../../src/lib/bodyHeat';
 import { num, num1 } from '../../src/lib/format';
 import { volumeIn, convertedNote } from '../../src/lib/units';
 import {
@@ -137,7 +141,21 @@ export default function Muscles() {
   const unitNote = convertedNote(wu);
 
   const [days, setDays] = useState<WindowDays>(7);
-  const [side, setSide] = useState<BodySide>('front');
+  /* ── which way round the body opens ──────────────────────────────────────
+   *
+   * Null means "nobody has chosen", and the picture then follows the work —
+   * `busierSide` below. A member who taps Front or Back has chosen, and their
+   * choice stands for the rest of the visit including across a change of
+   * window, because it is an answer about what they want to look at and not
+   * about any one window's data.
+   *
+   * Two pieces of state and not one, deliberately. Seeding `useState` from the
+   * board would freeze the answer at whatever the reads held on the first
+   * render — which on a screen mounted before the log lands is an empty board,
+   * so the default would be computed from nothing and never revisited. That is
+   * the frozen-at-mount defect src/ui/today.ts exists for, one field over.
+   */
+  const [sidePick, setSidePick] = useState<BodySide | null>(null);
 
   /* `useNow()`, and it is IN the dependency list. A window whose start comes
    * from `Date.now()` inside a memo keyed on the reads is pinned to whenever
@@ -162,6 +180,11 @@ export default function Muscles() {
   );
 
   const shading = useMemo(() => diagramShading(board), [board]);
+  /* The side to draw: the member's own choice, or the one their window's work
+   * is actually on. `layerNames` is the artwork's manifest for each view, so
+   * this asks the same question the picture answers. */
+  const side: BodySide = sidePick
+    ?? busierSide(shading.byLayer, layerNames('front'), layerNames('back'));
   const rankings = useMemo(() => muscleRankings(board), [board]);
   const notes = useMemo(() => rankingNotes(board, rankings), [board, rankings]);
   const rests = useMemo(() => restMap(board), [board]);
@@ -281,7 +304,7 @@ export default function Muscles() {
     <Section>
       {/* The body is what this screen is for, so it is the first card and
           the front/back choice is the board's segmented bar over it. */}
-      <Segmented style={{ marginBottom: sp.lg }} value={side} onChange={setSide}
+      <Segmented style={{ marginBottom: sp.lg }} value={side} onChange={setSidePick}
         options={[
           { key: 'front', label: 'Front', a11yLabel: 'Front of the body' },
           { key: 'back', label: 'Back', a11yLabel: 'Back of the body' },
@@ -300,7 +323,13 @@ export default function Muscles() {
           would squash one of them. 330 points is the whole figure above the
           fold on a phone and grows nothing when the reader's text does, which
           is right: it is a drawing and not type. */}
-      <MuscleBody side={side} intensity={shading.byLayer} status={board.status} height={330} />
+      {/* `onFlip` turns the "n muscles you trained are drawn on the back" note
+          into the control that takes the reader there. Without it that
+          sentence tells somebody their work is on the other view and leaves
+          them to find the bar above the picture — and the reader most likely
+          to miss the bar is exactly the one staring at an unlit body. */}
+      <MuscleBody side={side} intensity={shading.byLayer} status={board.status} height={330}
+        onFlip={() => setSidePick(side === 'front' ? 'back' : 'front')} />
 
       {/* ── what the darkest colour is worth ──────────────────────────────
           Printed, and printed as a figure rather than implied, because the
