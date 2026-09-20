@@ -17,6 +17,14 @@
 // old order. Nothing was removed; the sections are the board's cards now, so
 // the rules that used to separate them are gone with the air they divided.
 //
+// Round five (the approved look): with a readable device the page now OPENS on
+// today's figure — a figure card, then heart rate, steps and HRV as toned tiles
+// — and the catalogue follows it. A row's state is a toned chip (Connected
+// green, Not Readable amber, Unavailable neutral), a connected row's own
+// figures are chips in each metric's hue, and the two paragraphs of "how this
+// works" are behind Expandables. Every sentence that states a sync state or a
+// withheld figure's reason is where it was.
+//
 // Also removed: the footnote claiming cloud devices "arrive with the backend
 // rollout". They connect today — `makeCloudProvider` runs the vendor OAuth and
 // reads the day through the edge function, and WHOOP already feeds the workout
@@ -40,7 +48,7 @@ import { importSources, withHr, useImportedIds, isLogged, readRecent, readNote, 
 import { isWhole } from '../../src/ui/loadStatus';
 import type { WriteOutcome } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
-import { Section, SectionHead, Hero, ListRow, Cta, Ghost, PageHead, Flag, Notice, fig } from '../../src/ui/kit';
+import { Section, SectionHead, KpiRow, TonedChip, Expandable, ListRow, Cta, Ghost, PageHead, Flag, Notice, fig } from '../../src/ui/kit';
 import { requestHealthAuth, writeAuthStatus, type WriteAuth } from '../../src/lib/wearables/appleHealth';
 import {
   planWrite, readLedger, writeSessions, summariseResult, writeUnavailableReason,
@@ -87,7 +95,7 @@ import { useSettings } from '../../src/ui/settings';
 // the field itself, and this screen was breaking it.
 import { useDeviceHrv } from '../../src/ui/deviceHrv';
 import { hrvBuildingLine, hrvTrendLine } from '../../src/lib/hrvTrend';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 
 type MetricKey = 'kcal' | 'hr' | 'hrv' | 'steps' | 'source';
 
@@ -863,6 +871,66 @@ export default function Devices() {
       centre line — the way board page 17 opens this screen. */}
   <PageHead title="Wearables" />
 
+  {/* ── the figure: today's live burn, when a device is feeding it ──────
+      FIRST now (round five): a pushed page opens on its figure, then the
+      evidence, then the rows. It sat under the catalogue, so a member with a
+      watch on opened this screen to six rows of logos before one number. With
+      nothing readable there is no figure to lead with and the catalogue is
+      the first thing on the page, as before. The retired `Hero` became the
+      figure card every other screen uses. */}
+  {showLive ? (<>
+   <Section>
+    <Pressable onPress={() => setDetail('kcal')} accessibilityRole="button"
+     accessibilityLabel={`${energy.kind === 'total' ? 'Energy today' : 'Active today'}, ${energy.kcal == null ? 'no figure yet' : `${num(energy.kcal)} kilocalories`}. Opens the detail.`}>
+     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm }}>
+      <Text style={{ ...ty.head, color: t.ink, flexShrink: 1 }}>{energy.kind === 'total' ? 'Energy Today' : 'Active Today'}</Text>
+      <TonedChip label={staleNote ? 'Not Current' : 'Live'} tone={staleNote ? 'amber' : 'brand'} />
+     </View>
+     <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', marginTop: sp.xs }}>
+      <Text style={{ ...ty.hero, color: t.data.orangeInk }}>{fig(energy.kcal == null ? null : num(energy.kcal))}</Text>
+      <Text style={{ ...ty.label, color: t.ink3, marginStart: sp.xs }}>kcal</Text>
+     </View>
+     {/* The staleness goes in the hero's own note as well as in the flag below,
+         because this is the figure the label calls "Active Today" — the one a
+         member reads and closes the screen on. A four-hour-old number under that
+         label, with the admission a section further down, is the admission in the
+         wrong place.
+         The FAILED read is asked about first, and it was asked about second —
+         which put it behind a null test it can never get past. `sync()` leaves
+         `metrics[id]` untouched when the first read throws, so a device that
+         could not be reached produces `energy.kcal == null` AND
+         `todayStatus === 'error'` together, and the chain answered "Wear your
+         watch": our own failed read, stated back to the member as something they
+         did not do. Two connected providers where one answers and the other does
+         not is enough to reach it — `showLive` is true, `todayStatus` is
+         `worstStatus(...)`, and the energy figure is still missing. */}
+     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+      {w.todayStatus === 'error'
+     ? (energy.kcal == null
+      ? `We couldn’t read today’s energy from your ${connected.length} connected ${devicesWord}, so there is no figure here yet. That is our read, not a day you did not move.`
+      : `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`)
+     : energy.kcal == null
+      ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
+      : energy.kind === 'total'
+       ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
+       : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
+     </Text>
+    </Pressable>
+   </Section>
+
+   {/* The three other live figures as tiles, each in the hue it has across
+       the app — heart rate pink, steps purple, HRV teal. A figure the device
+       has not sent is a dash, never a nought; WHY is on its row in Live Today
+       below, which is also where each figure names the device it came from.
+       `route` carries the detail sheet's key: the tile opens what its row
+       opens. HRV is tonight's reading and is a tile only when there is one. */}
+   <KpiRow tiles onPress={(k) => setDetail(k.route as MetricKey)} items={[
+    { label: 'Avg Heart Rate', value: fig(w.today.heartRateAvg == null ? null : num(w.today.heartRateAvg)), unit: w.today.heartRateAvg == null ? undefined : 'bpm', tone: 'pink', route: 'hr' },
+    { label: 'Steps', value: fig(w.today.steps == null ? null : num(w.today.steps)), tone: 'purple', route: 'steps' },
+    ...(hrv.tonight ? [{ label: 'HRV Tonight', value: fig(num(hrv.tonight.ms)), unit: 'ms', tone: 'teal' as const, route: 'hrv' }] : []),
+   ]} />
+  </>) : null}
+
   {/* ── connected apps ──────────────────────────────────────────────────
       First, as board page 17 draws it: one row per app in the catalogue,
       the app's brand mark on its plate, its name, and a chip at the end that
@@ -932,7 +1000,7 @@ export default function Devices() {
            and no status colour is spent on decoration. */}
        <ProviderMark id={p.meta.id} size={40} />
        <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.meta.name}</Text>
+        <Text style={{ ...ty.head, color: t.ink }}>{p.meta.name}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>
        </View>
        {busy ? (
@@ -953,22 +1021,25 @@ export default function Devices() {
         // status it is, in the same shape as the Connect chip beside its
         // neighbours, and the button that ends the connection is below,
         // labelled with what pressing it does.
-        <View accessible accessibilityLabel={`${p.meta.name} is connected`}
-         style={{ paddingVertical: 11, paddingHorizontal: sp.lg, borderRadius: radius.sm, backgroundColor: t.brand }}>
-         <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Connected</Text>
+        <View accessible accessibilityLabel={`${p.meta.name} is connected`}>
+         <TonedChip label="Connected" tone="brand" icon="check" />
         </View>
        ) : on ? (
-        // Remembered, and unreadable here. Grey, so a stored flag with
-        // nothing behind it never wears the live colour; the flag under the
-        // row says why, and Disconnect below is how the member clears it.
-        <View accessible accessibilityLabel={`${p.meta.name} cannot be read on this phone`}
-         style={{ paddingVertical: 11, paddingHorizontal: sp.lg, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-         <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Not Readable</Text>
+        // Remembered, and unreadable here. Amber — slipping, in the app's
+        // one colour language — so a stored flag with nothing behind it never
+        // wears the live green; the flag under the row says why, and
+        // Disconnect below is how the member clears it.
+        <View accessible accessibilityLabel={`${p.meta.name} cannot be read on this phone`}>
+         <TonedChip label="Not Readable" tone="amber" />
         </View>
        ) : blocked ? (
-        // Unchanged: an unavailable provider's button re-attempts the connect,
-        // which is the only thing there is to do about it.
-        <Ghost label="Unavailable" onPress={() => onConnect(p)} />
+        // A neutral chip, because it is a state; still pressable, because
+        // re-attempting the connect is the only thing there is to do about
+        // it and that is what this control has always done.
+        <Pressable onPress={() => onConnect(p)} accessibilityRole="button" hitSlop={12}
+         accessibilityLabel={`${p.meta.name} is unavailable. Try connecting it`}>
+         <TonedChip label="Unavailable" tone="neutral" />
+        </Pressable>
        ) : (
         // The board's grey "Connect" chip. It was the green primary; the one
         // green thing on this list is now the state that has been reached.
@@ -1049,13 +1120,13 @@ export default function Devices() {
           return <Text style={{ ...ty.caption, color: t.ink3 }}>Read, and {p.meta.name} has no figures for today yet.</Text>;
          }
          return (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg }}>
-           {m.activeKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.activeKcal)} active kcal</Text>
-            : m.totalKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.totalKcal)} kcal all day</Text> : null}
-           {m.heartRateAvg != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateAvg} bpm avg</Text> : null}
-           {m.heartRateResting != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateResting} resting</Text> : null}
-           {m.steps != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.steps.toLocaleString()} steps</Text> : null}
-           {m.workoutMins != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.workoutMins} min</Text> : null}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.xs }}>
+           {m.activeKcal != null ? <TonedChip tone="orange" label={`${num(m.activeKcal)} active kcal`} />
+            : m.totalKcal != null ? <TonedChip tone="orange" label={`${num(m.totalKcal)} kcal all day`} /> : null}
+           {m.heartRateAvg != null ? <TonedChip tone="pink" label={`${num(m.heartRateAvg)} bpm avg`} /> : null}
+           {m.heartRateResting != null ? <TonedChip tone="pink" label={`${num(m.heartRateResting)} resting`} /> : null}
+           {m.steps != null ? <TonedChip tone="purple" label={`${num(m.steps)} steps`} /> : null}
+           {m.workoutMins != null ? <TonedChip tone="brand" label={`${num(m.workoutMins)} min`} /> : null}
            {/* The three the catalogue above this row has always advertised.
                WHOOP's card sells "Strain, recovery, sleep & heart rate" and
                Oura's sells "Readiness, HRV & sleep", and until now a member who
@@ -1069,12 +1140,12 @@ export default function Devices() {
                Oura calls it readiness, both 0–100 and both meaning the same
                thing, and a member cross-checking against the vendor's own app
                needs to know which word they are looking for. */}
-           {m.recoveryPct != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{Math.round(m.recoveryPct)}% {m.recoverySource === 'oura' ? 'readiness' : 'recovery'}</Text> : null}
+           {m.recoveryPct != null ? <TonedChip tone="teal" label={`${num(Math.round(m.recoveryPct))}% ${m.recoverySource === 'oura' ? 'readiness' : 'recovery'}`} /> : null}
            {/* One decimal, because WHOOP's own app shows one and a rounded 14
                and a rounded 15 are a meaningfully different day on a 0–21
                logarithmic scale. */}
-           {m.strain != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num1(m.strain)} strain</Text> : null}
-           {m.hrv != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{Math.round(m.hrv)} ms HRV</Text> : null}
+           {m.strain != null ? <TonedChip tone="amber" label={`${num1(m.strain)} strain`} /> : null}
+           {m.hrv != null ? <TonedChip tone="blue" label={`${num(Math.round(m.hrv))} ms HRV`} /> : null}
           </View>
          );
         })()}
@@ -1108,44 +1179,18 @@ export default function Devices() {
        both render as Unavailable three rows above the sentence claiming they
        work. It now names only the two that do, and says what the other two
        need — which is the same thing their rows say, rather than the opposite. */}
-   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-    Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs — sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
-   </Text>
+   {/* Prose, so it is behind a control (round five) — the rows above say
+       each app's state on their own. */}
+   <View style={{ marginTop: sp.md }}>
+    <Expandable title="How Each App Connects">
+     <Text style={{ ...ty.caption, color: t.ink3, }}>
+      Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs — sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
+     </Text>
+    </Expandable>
+   </View>
   </Section>
 
-  {/* ── the hero: today's live burn, when a device is feeding it ─────── */}
   {showLive ? (<>
-   <Hero
-    label={energy.kind === 'total' ? 'Energy Today' : 'Active Today'}
-    figure={num(energy.kcal)}
-    unit="kcal"
-    // The staleness goes in the hero's own note as well as in the flag below,
-    // because this is the figure the label calls "Active Today" — the one a
-    // member reads and closes the screen on. A four-hour-old number under that
-    // label, with the admission a section further down, is the admission in the
-    // wrong place.
-    // The FAILED read is asked about first, and it was asked about second —
-    // which put it behind a null test it can never get past. `sync()` leaves
-    // `metrics[id]` untouched when the first read throws, so a device that
-    // could not be reached produces `energy.kcal == null` AND
-    // `todayStatus === 'error'` together, and the chain answered "Wear your
-    // watch": our own failed read, stated back to the member as something they
-    // did not do. Two connected providers where one answers and the other does
-    // not is enough to reach it — `showLive` is true, `todayStatus` is
-    // `worstStatus(...)`, and the energy figure is still missing.
-    note={w.todayStatus === 'error'
-     ? (energy.kcal == null
-      ? `We couldn’t read today’s energy from your ${connected.length} connected ${devicesWord}, so there is no figure here yet. That is our read, not a day you did not move.`
-      : `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`)
-     : energy.kcal == null
-      ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
-      : energy.kind === 'total'
-       ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
-       : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
-    onPress={() => setDetail('kcal')}
-   />
-
-
    <Section>
     <SectionHead title="Live Today" note={`${connected.length} ${devicesWord}`} onPress={() => setDetail('source')} />
     {/* Whether these figures are today's, or the last ones we had.
@@ -1156,7 +1201,7 @@ export default function Devices() {
         are just not current, and that is a different sentence from either
         "live" or "unknown". */}
     {staleNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote}</Flag> : null}
-    <ListRow icon="heart" title="Average Heart Rate"
+    <ListRow icon="heart" tone="pink" title="Average Heart Rate"
      note={w.today.heartRateAvg == null ? awaitingNote('heartRate', connectedMeta) : `${num(w.today.heartRateAvg)} bpm across today's samples, from ${named('heartRateAvg')}`}
      onPress={() => setDetail('hr')} />
     {/* HRV, as a trend against the member's own nights and never as a bare
@@ -1166,7 +1211,7 @@ export default function Devices() {
         nothing, so there was no history for it to be a trend against and could
         not have been. The nights are kept now (supabase/parts/720). */}
     {hrv.tonight ? (
-     <ListRow icon="heart" title="Heart Rate Variability"
+     <ListRow icon="heart" tone="teal" title="Heart Rate Variability"
       note={hrv.trend
        ? `${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · ${hrvTrendLine(hrv.trend)}`
        : hrv.status === 'error'
@@ -1177,15 +1222,15 @@ export default function Devices() {
         : `${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · ${hrvBuildingLine(hrv.nightsKept)}`}
       onPress={() => setDetail('hrv')} />
     ) : null}
-    <ListRow icon="trending" title="Steps"
+    <ListRow icon="trending" tone="purple" title="Steps"
      note={w.today.steps == null ? awaitingNote('steps', connectedMeta) : `${num(w.today.steps)} today, from ${named('steps')}`}
      onPress={() => setDetail('steps')} />
-    <ListRow icon="clock" title="Connected Sources"
+    <ListRow icon="clock" tone="neutral" title="Connected Sources"
      note={connected.map((p) => p.meta.name).join(' · ')}
      onPress={() => setDetail('source')} />
-    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-     {liveFootnote(connectedMeta)}
-    </Text>
+    <Expandable title="About These Figures">
+     <Text style={{ ...ty.caption, color: t.ink3 }}>{liveFootnote(connectedMeta)}</Text>
+    </Expandable>
    </Section>
   </>) : null}
 
@@ -1212,7 +1257,7 @@ export default function Devices() {
          paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill,
          backgroundColor: on ? t.brand : t.surface2,
         }}>
-        <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>
+        <Text style={{ ...ty.caption, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>
          {lookbackLabel(d)}
         </Text>
        </Pressable>
@@ -1262,7 +1307,7 @@ export default function Devices() {
          borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
         }}>
          <View style={{ flex: 1 }}>
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sm.activity}</Text>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{sm.activity}</Text>
           {/* The distance a watch recorded, in the unit the member measures
               distance in. It arrives from every provider in kilometres — that
               is what `WorkoutSample.distanceKm` means — and was printed with
@@ -1379,7 +1424,7 @@ export default function Devices() {
        const lastNight = r.readings.filter((rd) => rd.night === lastNightKey);
        return (
         <View key={r.provider} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{provider?.meta.name ?? r.provider}</Text>
+         <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{provider?.meta.name ?? r.provider}</Text>
          {r.status !== 'ready' ? (
           // 'error' is louder than 'unsupported' because one of them means we
           // do not know what happened last night and the other means we never
@@ -1483,7 +1528,7 @@ export default function Devices() {
        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Ready to write</Text>
        {hkPlan.writable.map((p, i) => (
         <View key={p.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.activityLabel}</Text>
+         <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{p.activityLabel}</Text>
          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
           {[sessionWhen(p.t), `${fig(Math.round(p.seconds / 60))} min`,
             // The plan carries metres, because that is what HealthKit takes.
@@ -1512,7 +1557,7 @@ export default function Devices() {
        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>No length recorded — not written</Text>
        {hkPlan.skipped.map((sk, i) => (
         <View key={sk.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sk.exercises[0] || 'Session'}{sk.exercises.length > 1 ? ` +${sk.exercises.length - 1}` : ''}</Text>
+         <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{sk.exercises[0] || 'Session'}{sk.exercises.length > 1 ? ` +${sk.exercises.length - 1}` : ''}</Text>
          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{sessionWhen(sk.t)} · {fig(null)} min</Text>
          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{sk.reason}</Text>
          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>

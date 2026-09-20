@@ -4,8 +4,10 @@
 // streak card.
 //
 // On the instrument-panel kit (`src/ui/kit`) and the scale (`src/theme/scale`).
-// Every threshold, computation and route is preserved — twelve bordered tiles
-// became one hero figure and a hairline-separated list. The badges' `icon` field
+// Every threshold, computation and route is preserved. Round five: the count is
+// a ring, the next badge is a meter under it, and the set is a grid of medals —
+// toned when earned, grey behind a lock when not, grey with a dash when the
+// read cannot say. The badges' `icon` field
 // held an empty string for every badge (its emoji had been stripped), so each
 // tile rendered a blank 28px circle; that dead field is gone.
 import { useEffect, useState, useCallback } from 'react';
@@ -13,16 +15,69 @@ import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, PageHead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Icon, type IconName } from '../../src/ui/Icon';
+import type { Theme } from '../../src/theme/tokens';
+import { Section, SectionHead, PageHead, Ring, Meter, TonedChip, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, fontScale } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn } from '../../src/lib/units';
-import { BADGES, badgeFigures, badgeState, type BadgeState } from '../../src/lib/badges';
+import { BADGES, badgeFigures, badgeState, type BadgeState, type BadgeKey, type BadgeFigures } from '../../src/lib/badges';
+
+// The medal each badge wears: a glyph and a hue by FAMILY — streaks orange (the
+// streak chip on Home), training days the accent, records amber and purple,
+// volume blue and teal. The hue says nothing the title does not. The same table
+// is in app/(client)/profile.tsx, because a lane may not add a module; it
+// belongs in src/lib/badges.ts beside BADGES.
+const BADGE_LOOK: Record<BadgeKey, { icon: IconName; tone: Tone }> = {
+  'first-rep': { icon: 'check', tone: 'amber' },
+  'on-a-roll': { icon: 'flame', tone: 'orange' },
+  'week-warrior': { icon: 'flame', tone: 'orange' },
+  'two-weeks': { icon: 'calendar', tone: 'orange' },
+  'unstoppable': { icon: 'sparkle', tone: 'orange' },
+  'ten-sessions': { icon: 'dumbbell', tone: 'brand' },
+  'fifty-club': { icon: 'dumbbell', tone: 'brand' },
+  'record-breaker': { icon: 'trophy', tone: 'amber' },
+  'pr-machine': { icon: 'trending', tone: 'purple' },
+  'cardio-kick': { icon: 'heart', tone: 'pink' },
+  'one-tonne': { icon: 'scale', tone: 'blue' },
+  'ten-tonnes': { icon: 'scale', tone: 'teal' },
+};
+/** A medal's plate and glyph colours — the kit's `toneOf` is not exported, and
+ *  its IconPlate is a rounded square where the mockup's medal is a circle. */
+const medalColours = (t: Theme, tone: Tone) => tone === 'brand' ? { soft: t.brandSoft, ink: t.brandText }
+  : tone === 'neutral' ? { soft: t.surface3, ink: t.ink3 }
+  : { soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+
+/**
+ * How far along one badge is: what they have, and what it takes.
+ *
+ * These are `badgeMet`'s thresholds read as a pair rather than as a verdict,
+ * and they must stay its thresholds — src/lib/badges.ts is where they are
+ * decided and this only draws them, so whether a badge is EARNED is never
+ * taken from here. Cardio Kick has no distance to cover (it is one session or
+ * none), so it has no meter. `say` writes the figure the way the badge's own
+ * description does: days, records, or volume in the reader's unit.
+ */
+function progressOf(key: BadgeKey, f: BadgeFigures): { have: number; need: number; kind: 'days' | 'records' | 'volume' } | null {
+  switch (key) {
+    case 'first-rep': return { have: f.trainingDays, need: 1, kind: 'days' };
+    case 'ten-sessions': return { have: f.trainingDays, need: 10, kind: 'days' };
+    case 'fifty-club': return { have: f.trainingDays, need: 50, kind: 'days' };
+    case 'on-a-roll': return { have: f.longestStreak, need: 3, kind: 'days' };
+    case 'week-warrior': return { have: f.longestStreak, need: 7, kind: 'days' };
+    case 'two-weeks': return { have: f.longestStreak, need: 14, kind: 'days' };
+    case 'unstoppable': return { have: f.longestStreak, need: 30, kind: 'days' };
+    case 'record-breaker': return { have: f.prCount, need: 1, kind: 'records' };
+    case 'pr-machine': return { have: f.prCount, need: 5, kind: 'records' };
+    case 'one-tonne': return { have: f.totalVolumeKg, need: 1000, kind: 'volume' };
+    case 'ten-tonnes': return { have: f.totalVolumeKg, need: 10000, kind: 'volume' };
+    case 'cardio-kick': return null;
+  }
+}
 import { useBadgeWatch } from '../../src/ui/badgeWatch';
 import { Confetti } from '../../src/ui/Confetti';
 
@@ -108,6 +163,20 @@ export default function Achievements() {
   // read to the left. The badges stay blank either way — that part was right —
   // and only the sentence under them changes.
   const bodyReading = bodyUnknown && cd.scansStatus === 'loading';
+  /** The count may be stated: a whole log, and no badge left unreadable. */
+  const counted = countable && !bodyUnknown;
+  const next = counted ? badges.find((b) => b.state === 'locked' && progressOf(b.key, figures)) ?? null : null;
+  const nextProgress = next ? progressOf(next.key, figures) : null;
+  // "7 of 10 days", "2 of 5 records", "640 of 1,000 kg" — the quantity on its
+  // own, because it is also what the meter says aloud. Volume converts the way
+  // the badge's description does; the threshold itself stays a fixed mass.
+  const say = (p: { have: number; need: number; kind: 'days' | 'records' | 'volume' }) => {
+    if (p.kind !== 'volume') return `${Math.min(p.have, p.need).toLocaleString()} of ${p.need.toLocaleString()} ${p.kind === 'days' ? 'days' : 'records'}`;
+    // `volumeIn` may decline to answer, and then only the target is stated:
+    // a volume nobody converted is not a volume of nought.
+    const have = volumeIn(Math.min(p.have, p.need), wu);
+    return have == null ? `Toward ${volumeLabel(p.need)}` : `${Math.floor(have).toLocaleString()} of ${volumeLabel(p.need)}`;
+  };
 
   // ── The celebration ────────────────────────────────────────────────────
   //
@@ -142,25 +211,41 @@ export default function Achievements() {
             screens reached from the same rows should open the same way. */}
         <PageHead title="Achievements" />
 
-        {/* ── the hero: how much of the set is unlocked ───────────────────── */}
-        <Hero
-          label="Unlocked"
-          // Withheld under `bodyUnknown` for the same reason it is withheld
-          // under a partial log: the count can only be an under-count while
-          // four of the twelve are unreadable, and a figure that is silently
-          // low is worse than a blank with a sentence under it.
-          figure={countable && !bodyUnknown ? fig(earnedCount) : fig(null)}
-          unit={`of ${badges.length}`}
-          arc={countable && !bodyUnknown ? earnedCount / badges.length : undefined}
-          arcLabel="of badges earned"
-          note={logStatus === 'loading' ? 'Reading your training log…'
-            : !logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
-            : !countable ? 'You have trained more times than this screen can read in one go, so the count is left blank. Anything marked Earned below really is.'
-            : bodyReading ? 'Reading your weight history — the badges priced from your bodyweight sets are blank until it lands.'
-            : bodyUnknown ? 'Your weight history could not be read, so the badges priced from your bodyweight sets are left blank rather than shown as locked.'
-            : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
-        />
-
+        {/* ── the figure: how much of the set is unlocked, as a ring ────────
+            Withheld under `bodyUnknown` for the same reason it is withheld
+            under a partial log: the count can only be an under-count while
+            four of the twelve are unreadable, and a figure that is silently
+            low is worse than a track with no arc and a sentence beside it. */}
+        <Section>
+          <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+            <Ring value={counted ? earnedCount / badges.length : null} figure={counted ? fig(earnedCount) : null} sub={`of ${badges.length}`}
+              size={112} tone="amber"
+              spoken={counted ? `${earnedCount} of ${badges.length} badges earned` : 'Badges earned, not counted'} />
+            <View style={{ flex: 1, minWidth: 0, gap: sp.sm, alignSelf: 'stretch', justifyContent: 'center' }}>
+              <Text style={{ ...ty.section, color: t.ink }}>Unlocked</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                {logStatus === 'loading' ? 'Reading your training log…'
+                  : !logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
+                  : !countable ? 'You have trained more times than this screen can read in one go, so the count is left blank. Anything marked Earned below really is.'
+                  : bodyReading ? 'Reading your weight history — the badges priced from your bodyweight sets are blank until it lands.'
+                  : bodyUnknown ? 'Your weight history could not be read, so the badges priced from your bodyweight sets are left blank rather than shown as locked.'
+                  : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
+              </Text>
+            </View>
+          </View>
+          {/* ── the next one, and how far off it is ──────────────────────────
+              The first LOCKED badge in the set's own order that has a distance
+              to cover. Only a badge known to be locked: 'unknown' is not a
+              shortfall, and a meter under it would draw our failed read as the
+              member's. Nothing under a count that is withheld, for the same
+              reason. */}
+          {next && nextProgress ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Meter label={`Next · ${next.title}`} val={nextProgress.have} target={nextProgress.need} tone={BADGE_LOOK[next.key].tone}
+                note={say(nextProgress)} />
+            </View>
+          ) : null}
+        </Section>
 
         <Section>
           <SectionHead title="Badges" />
@@ -171,31 +256,34 @@ export default function Achievements() {
                 : 'A pull-up or a dip is priced from your bodyweight on the day, and that history could not be read just now. The badges that depend on it are blank rather than locked. Nothing you have earned is gone.'}
             </Text>
           ) : null}
-          {badges.map((b, bi) => {
-            // 'earned' | 'locked' | 'unknown' from the module, which encodes
-            // what this screen used to work out from two separate booleans:
-            // "Locked" is a claim that the badge has NOT been earned, and with
-            // an unread or truncated log we do not know — while "Earned"
-            // survives both, because every threshold only ever under-counts.
-            // A failed read is 'unknown' too: `countable` is false there.
-            const earned = logKnown && b.state === 'earned';
-            return (
-            <View key={b.key}>
-              {bi > 0 ? <Rule /> : null}
-              <View accessibilityLabel={`${b.title}, ${!logKnown ? 'not known' : b.state === 'earned' ? 'unlocked' : b.state === 'locked' ? 'locked' : 'not known'}. ${b.desc}`}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={earned ? 'check' : 'trophy'} size={16} color={earned ? t.brand : t.ink3} />
+          {/* A grid of medals, three across and two once the reader's text is
+              large. 'earned' | 'locked' | 'unknown' from the module, which
+              encodes what this screen used to work out from two separate
+              booleans: "Locked" is a claim that the badge has NOT been earned,
+              and with an unread or truncated log we do not know — while
+              "Earned" survives both, because every threshold only ever
+              under-counts. A failed read is 'unknown' too: `countable` is
+              false there. An unknown medal is grey with a dash and NO lock. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: sp.lg }}>
+            {badges.map((b) => {
+              const earned = logKnown && b.state === 'earned';
+              const locked = logKnown && b.state === 'locked';
+              const c = medalColours(t, earned ? BADGE_LOOK[b.key].tone : 'neutral');
+              return (
+                <View key={b.key} accessible accessibilityLabel={`${b.title}, ${earned ? 'unlocked' : locked ? 'locked' : 'not known'}. ${b.desc}`}
+                  style={{ width: fontScale >= 1.35 ? '50%' : '33.33%', alignItems: 'center', paddingHorizontal: sp.xs, gap: sp.xs }}>
+                  <View style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: c.soft, alignItems: 'center', justifyContent: 'center' }}>
+                    {earned ? <Icon name={BADGE_LOOK[b.key].icon} size={30} color={c.ink} />
+                      : locked ? <Icon name="lock" size={24} color={c.ink} />
+                      : <Text style={{ ...ty.head, color: c.ink }}>{fig(null)}</Text>}
+                  </View>
+                  <Text style={{ ...ty.label, color: earned ? t.ink : t.ink2, textAlign: 'center', marginTop: sp.xs }}>{b.title}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>{b.desc}</Text>
+                  {earned ? <View style={{ alignSelf: 'center' }}><TonedChip label="Earned" tone={BADGE_LOOK[b.key].tone} icon="check" /></View> : null}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: earned ? t.ink : t.ink2 }}>{b.title}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{b.desc}</Text>
-                </View>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{!logKnown ? fig(null) : b.state === 'earned' ? 'Earned' : b.state === 'locked' ? 'Locked' : fig(null)}</Text>
-              </View>
-            </View>
-            );
-          })}
+              );
+            })}
+          </View>
         </Section>
       </ScrollView>
       {/* Over the list rather than inside it, so the burst is not clipped by

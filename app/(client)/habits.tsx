@@ -30,6 +30,13 @@
 // under the card, because the card's water row is a tick and a figure and not
 // a place to log a glass.
 //
+// ── Round five (the approved look) ─────────────────────────────────────────
+//
+// The screen opens on a hero card — "Today", the day's count as a chip, and the
+// counted three as rings — and the list is a card of its own under it: a toned
+// plate per row, and for water, steps and sleep a Meter in the ring's hue in
+// place of a bare "5/8". Every dash and every reason is exactly where it was.
+//
 // ── TF-31 ───────────────────────────────────────────────────────────────────
 //
 // The checklist is derived now (src/lib/checklist.ts), so it varies in length
@@ -50,8 +57,8 @@ import { Icon, type IconName } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, PageHead, Flag, Notice, Field, MiniRing, fig, type Tone } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, PageHead, Flag, Notice, Field, MiniRing, Meter, IconPlate, TonedChip, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { unsentNote } from '../../src/lib/offlineQueue';
@@ -116,6 +123,10 @@ interface RowFigure {
 /** The three counted habits, and the hue each takes in the rings over the
  *  list. A tick is not a quantity and gets no ring. */
 const RING_TONE: Record<string, Tone> = { water: 'teal', steps: 'purple', sleep: 'blue' };
+/** The plate behind a row's icon. The counted three keep their ring's hue, so
+ *  the ring in the hero and the row under it are visibly the same thing;
+ *  calories and protein take the hues they have on Meals and Home. */
+const PLATE_TONE: Record<string, Tone> = { ...RING_TONE, train: 'brand', kcal: 'orange', protein: 'blue' };
 
 export default function Habits() {
   const t = useTheme();
@@ -335,15 +346,37 @@ export default function Habits() {
 
         {/* ── the card: today's list, one row per habit ──────────────────── */}
         <Section>
+          {/* The hero: today's count as a chip beside the title, and the three
+              quantities that have a goal as rings under it. The state first,
+              then the list that explains it. */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md }}>
-            <Text style={{ ...ty.head, color: t.ink, flexShrink: 1 }}>Daily Habits</Text>
-            <View accessible accessibilityLabel={headSpoken}
-              style={{ minWidth: 28, height: 28, borderRadius: radius.pill, paddingHorizontal: allDone ? 0 : sp.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: allDone ? t.brand : t.surface2 }}>
-              {allDone
-                ? <Icon name="check" size={15} color={t.brandInk} />
-                : <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink2 }}>{headCount}</Text>}
+            <Text accessibilityRole="header" style={{ ...ty.section, color: t.ink, flexShrink: 1 }}>Today</Text>
+            <View accessible accessibilityLabel={headSpoken}>
+              <TonedChip label={allDone ? 'All Done' : headCount === fig(null) ? headCount : `${headCount} Done`} tone={allDone ? 'brand' : 'neutral'} icon={allDone ? 'check' : undefined} />
             </View>
           </View>
+            {/* ── the counted three, as rings ─────────────────────────────────
+                Water, steps and sleep are quantities against a goal, and the
+                mockups draw a quantity against a goal as a small coloured
+                ring. Each is `rowFigure`'s own answer for that row — the same
+                text, and a ratio that exists only where the text is a real
+                figure — so a watch that has not answered is a ring with no
+                arc and a dash, exactly as its row is a dash with the reason
+                under it. Only the habits actually on today's list get one. */}
+            {h.habits.some((hb) => RING_TONE[hb.id]) ? (
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
+                {h.habits.filter((hb) => RING_TONE[hb.id]).map((hb) => {
+                  const f = rowFigure(hb.id, hb.done);
+                  const counted = f.text !== fig(null);
+                  return (
+                    <MiniRing key={hb.id} tone={RING_TONE[hb.id]} label={hb.label}
+                      value={counted ? f.ratio ?? null : null}
+                      figure={counted ? f.text : null}
+                      spoken={`${hb.label}, ${counted ? f.text.replace('/', ' of ') : 'not counted'}`} />
+                  );
+                })}
+              </View>
+            ) : null}
 
           {/* Which copy of the plan named today's session, and how old it is.
               Non-null only while the cache is what is being served —
@@ -414,29 +447,13 @@ export default function Habits() {
             </Text>
           ) : null}
 
-          <View style={{ marginTop: sp.sm }}>
-            {/* ── the counted three, as rings ─────────────────────────────────
-                Water, steps and sleep are quantities against a goal, and the
-                mockups draw a quantity against a goal as a small coloured
-                ring. Each is `rowFigure`'s own answer for that row — the same
-                text, and a ratio that exists only where the text is a real
-                figure — so a watch that has not answered is a ring with no
-                arc and a dash, exactly as its row is a dash with the reason
-                under it. Only the habits actually on today's list get one. */}
-            {h.habits.some((hb) => RING_TONE[hb.id]) ? (
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-                {h.habits.filter((hb) => RING_TONE[hb.id]).map((hb) => {
-                  const f = rowFigure(hb.id, hb.done);
-                  const counted = f.text !== fig(null);
-                  return (
-                    <MiniRing key={hb.id} tone={RING_TONE[hb.id]} label={hb.label}
-                      value={counted ? f.ratio ?? null : null}
-                      figure={counted ? f.text : null}
-                      spoken={`${hb.label}, ${counted ? f.text.replace('/', ' of ') : 'not counted'}`} />
-                  );
-                })}
-              </View>
-            ) : null}
+        </Section>
+
+        {/* ── the list: one row per habit ─────────────────────────────────── */}
+        {h.habits.length + h.gaps.length > 0 ? (
+        <Section>
+          <SectionHead title="Your List" />
+          <View>
             {h.habits.map((hb, hi) => {
               // The run for THIS line, or null. Three different nulls meet here
               // and none of them is a zero:
@@ -500,15 +517,28 @@ export default function Habits() {
                       state page 10 draws on its Meditate row — so done and not
                       done differ in fill, in glyph and in the figure's ink, and
                       none of the three is colour alone. */}
-                  <View style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: hb.done ? t.brand : t.surface2 }}>
-                    {hb.done
-                      ? <Icon name="check" size={17} color={t.brandInk} />
-                      : icon
-                        ? <Icon name={icon} size={17} color={t.brand} />
-                        : <Text style={{ ...ty.body, color: t.ink2 }}>{hb.icon}</Text>}
-                  </View>
+                  {hb.done ? (
+                    <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: t.brand }}>
+                      <Icon name="check" size={20} color={t.brandInk} />
+                    </View>
+                  ) : icon ? <IconPlate icon={icon} tone={PLATE_TONE[hb.id] ?? 'neutral'} /> : (
+                    <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface3 }}>
+                      <Text style={{ ...ty.body, color: t.ink2 }}>{hb.icon}</Text>
+                    </View>
+                  )}
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: hb.done ? t.ink : t.ink2 }}>{hb.label}</Text>
+                    {/* A row that COUNTS toward a goal is a meter in its ring's
+                        hue: the name, the count over the goal, and the bar. Only
+                        where `rowFigure` printed a real figure — `ratio` is set
+                        on that branch and no other — so a watch that has not
+                        answered is a name and a reason, never an empty bar. */}
+                    {figure.ratio != null ? (
+                      <View style={{ marginTop: -sp.md }}>
+                        <Meter label={hb.label} note={figure.text.replace('/', ' / ')} val={figure.ratio} target={1} tone={RING_TONE[hb.id] ?? 'brand'} />
+                      </View>
+                    ) : (
+                      <Text style={{ ...ty.body, ...font('600'), color: hb.done ? t.ink : t.ink2 }}>{hb.label}</Text>
+                    )}
                     {/* Only the coach-set rows are attributed. "From your targets"
                         under a line that already reads "Hit 152 g protein" is
                         noise; "your coach asked for this" is not. */}
@@ -534,7 +564,9 @@ export default function Habits() {
                       accent once the row is ticked. Wraps rather than truncates
                       — "8,483/10,000" at the largest text size is two lines and
                       still a figure. */}
-                  <Text style={{ ...value(15), color: hb.done ? t.brand : t.ink, textAlign: END_ALIGN, flexShrink: 1 }}>{figure.text}</Text>
+                  {figure.ratio != null ? null : (
+                    <Text style={{ ...value(15), color: hb.done ? t.brandText : t.ink, textAlign: END_ALIGN, flexShrink: 1 }}>{figure.text}</Text>
+                  )}
                 </Pressable>
               </View>
               );
@@ -560,6 +592,7 @@ export default function Habits() {
             Built from your plan, your targets and anything your coach adds.
           </Text>
         </Section>
+        ) : null}
 
 
         {/* ── water ──────────────────────────────────────────────────────── */}
@@ -585,7 +618,7 @@ export default function Habits() {
           {waterCounted ? (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: h.waterGoal == null ? sp.md : sp.lg }}>
               {Array.from({ length: h.waterGoal ?? h.water }).map((_, i) => (
-                <View key={i} style={{ width: 24, height: 32, borderRadius: radius.sm, borderWidth: hairline, borderColor: i < h.water ? t.brand : t.ring, backgroundColor: i < h.water ? t.brand : 'transparent', opacity: i < h.water ? 0.9 : 1 }} />
+                <View key={i} style={{ width: 24, height: 32, borderRadius: radius.sm, borderWidth: hairline, backgroundColor: i < h.water ? t.data.teal : t.surface3 }} />
               ))}
             </View>
           ) : (
@@ -656,8 +689,8 @@ export default function Habits() {
             score built on it, all from a literal. */}
         <Section>
           <SectionHead title="Your Daily Targets" note="Optional" />
-          <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.md }}>
-            Set any of these and it joins your list. Leave one blank and nothing is assumed.
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+            Set one and it joins your list. Blank means nothing is assumed.
           </Text>
 
           {/* The unit for each of these three is what the whole box means, and

@@ -20,8 +20,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, Cta, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, type as ty, value } from '../../src/theme/scale';
+import { Section, Cta, fig, PageHead, Segmented, ListRow } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, value, font } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
@@ -34,7 +34,6 @@ import { useBrand } from '../../src/ui/brand';
 import { shownStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
 import { charsPerLine, wrapLines } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
-import { FORWARD_CHAR } from '../../src/ui/direction';
 
 /**
  * The card as an EXPORTABLE GRAPHIC, drawn in SVG so `toDataURL` can turn it
@@ -131,7 +130,7 @@ function ShareCard({ t, appName, kicker, big, unit, sub }: { t: Theme; appName: 
   return (
     <View style={{ backgroundColor: t.brand, borderRadius: radius.md, padding: sp.xl, minHeight: 200, justifyContent: 'space-between', ...elevation.e1 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>{appName}</Text>
+        <Text style={{ ...ty.body, ...font('600'), color: t.brandInk }}>{appName}</Text>
         <Text style={{ ...ty.micro, color: t.brandInk, opacity: 0.85 }}>{kicker}</Text>
       </View>
       <View>
@@ -139,7 +138,7 @@ function ShareCard({ t, appName, kicker, big, unit, sub }: { t: Theme; appName: 
           <Text style={{ ...value(56), color: t.brandInk }}>{big}</Text>
           {unit ? <Text style={{ ...ty.title, color: t.brandInk, marginStart: 6, letterSpacing: 0 }}>{unit}</Text> : null}
         </View>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.brandInk, opacity: 0.9, marginTop: sp.xs }}>{sub}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.brandInk, opacity: 0.9, marginTop: sp.xs }}>{sub}</Text>
       </View>
     </View>
   );
@@ -348,14 +347,10 @@ export default function Cards() {
         <PageHead title="Milestone Cards" subtitle="Screenshot & share your wins" />
 
         <Section>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: layout.section }}>
-            {cards.map((cd, i) => (
-              <Pressable key={cd.kicker} onPress={() => setIdx(i)} accessibilityRole="button" accessibilityLabel={cd.kicker}
-                style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: idx === i ? t.surface2 : 'transparent' }}>
-                <Text style={{ ...ty.label, fontWeight: idx === i ? '500' : '400', color: idx === i ? t.ink : t.ink3 }}>{cd.kicker}</Text>
-              </Pressable>
-            ))}
-          </View>
+          {/* The kit's segmented bar, as every other screen picks between
+              views; it was a hand-built row of three grey pills. */}
+          <Segmented style={{ marginBottom: layout.section }} value={String(idx)} onChange={(k) => setIdx(Number(k))}
+            options={cards.map((cd, i) => ({ key: String(i), label: cd.kicker }))} />
 
           <ShareCard t={t} appName={appName} kicker={card.kicker} big={card.big} unit={card.unit} sub={card.sub} />
 
@@ -399,11 +394,8 @@ export default function Cards() {
               mentions either network, and concluded the connection was broken
               or buried in a setting. What is actually there is the phone's own
               share sheet, which is what this now says. */}
-          <Pressable onPress={() => router.push('/(client)/social')} accessibilityRole="button" accessibilityLabel="Share your progress"
-            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, alignSelf: 'center' }}>
-            <Icon name="share" size={15} color={t.ink3} />
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Share Your Progress {FORWARD_CHAR}</Text>
-          </Pressable>
+          <ListRow icon="share" tone="blue" title="Share Your Progress" note="Your change since your first scan, from the share sheet"
+            onPress={() => router.push('/(client)/social')} />
         </Section>
       </ScrollView>
     </SafeAreaView>

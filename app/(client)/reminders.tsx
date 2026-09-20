@@ -33,8 +33,8 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, Field, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Field, PageHead, IconPlate, ListRow } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { pushAvailable } from '../../src/ui/pushNotifications';
 import { REMINDERS_KEY as KEY, rescheduleReminders } from '../../src/ui/reminderSync';
 import {
@@ -48,7 +48,6 @@ import { jsDayForIndex } from '../../src/lib/weekStart';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { movedNote } from '../../src/lib/notifyPrefs';
 import { useNotifyPrefs } from '../../src/ui/notifyPrefs';
-import { FORWARD_ICON } from '../../src/ui/direction';
 
 const two = (n: number) => String(n).padStart(2, '0');
 const fmt = (h: number, m: number) => `${two(((h + 11) % 12) + 1)}:${two(m)} ${h < 12 ? 'AM' : 'PM'}`;
@@ -187,7 +186,7 @@ export default function Reminders() {
             accessibilityLabel={`${label}, ${DAY_LABEL[d]}`}
             hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
             style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink3 }}>{DAY_LABEL[d].slice(0, 1)}</Text>
+            <Text style={{ ...ty.caption, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink3 }}>{DAY_LABEL[d].slice(0, 1)}</Text>
           </Pressable>
         );
       })}
@@ -268,7 +267,7 @@ export default function Reminders() {
     <Pressable onPress={() => set(val)}
       accessibilityRole="radio" accessibilityState={{ selected: cur === val }}
       style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: cur === val ? t.brand : t.surface2 }}>
-      <Text style={{ ...ty.label, fontWeight: cur === val ? '600' : '500', color: cur === val ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font(cur === val ? '600' : '500'), color: cur === val ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
   // What the hour and minute boxes will actually schedule, in the 12-hour form
@@ -307,8 +306,7 @@ export default function Reminders() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-        <PageHead title="Reminders" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg, textAlign: 'center' }}>Gentle daily nudges for hydration and supplements.</Text>
+        <PageHead title="Reminders" subtitle="Gentle daily nudges" />
 
         {!pushAvailable() ? (
           <Notice kicker="Not sending yet" title="Nothing can be scheduled on this build"
@@ -331,9 +329,10 @@ export default function Reminders() {
         {/* Hydration */}
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: hydration ? sp.lg : 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-              <Icon name="water" size={17} color={t.brand} />
-              <Text style={{ ...ty.head, color: t.ink }}>Hydration nudges</Text>
+            {/* Water is teal everywhere in the app; grey while it is off. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1, minWidth: 0 }}>
+              <IconPlate icon="water" tone={hydration ? 'teal' : 'neutral'} />
+              <Text style={{ ...ty.head, color: t.ink, flexShrink: 1 }}>Hydration Nudges</Text>
             </View>
             {/* A switch, announced as one. It was an unnamed button whose state
                 was a dot's position and a track colour — nothing a screen
@@ -411,8 +410,14 @@ export default function Reminders() {
             return (
               <View key={k} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  {/* A hue per kind while it is on — training the accent, the
+                      weigh-in blue, the photo purple — and grey while it is
+                      off, so the card shows at a glance which are live. The
+                      switch beside it is what says so aloud. */}
+                  <IconPlate icon={k === 'training' ? 'dumbbell' : k === 'weighin' ? 'scale' : 'camera'}
+                    tone={!f.on ? 'neutral' : k === 'training' ? 'brand' : k === 'weighin' ? 'blue' : 'purple'} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{label}</Text>
+                    <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{label}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {f.on ? `${fmt(f.hour, f.minute)} · ${daysLabel(f.days)}` : why}
                     </Text>
@@ -430,7 +435,7 @@ export default function Reminders() {
                       <Field label="Hour" hint="24h" style={{ flex: 0 }} a11y={`${label}, hour on a 24-hour clock`}>
                         <TextInput value={String(f.hour)} onChangeText={(x) => setFixedFor(k, { hour: Math.min(23, Math.max(0, parseInt(x, 10) || 0)) })} keyboardType="number-pad" style={num} />
                       </Field>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, paddingBottom: 13 }}>:</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink3, paddingBottom: 13 }}>:</Text>
                       <Field label="Min" style={{ flex: 0 }} a11y={`${label}, minutes past the hour`}>
                         <TextInput value={two(f.minute)} onChangeText={(x) => setFixedFor(k, { minute: Math.min(59, Math.max(0, parseInt(x, 10) || 0)) })} keyboardType="number-pad" style={num} />
                       </Field>
@@ -463,11 +468,12 @@ export default function Reminders() {
           {supps.map((s, i) => (
             <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, color: t.ink2 }}>{s.name}</Text>
+                <IconPlate icon="bell" tone="amber" />
+                <View style={{ flex: 1, marginStart: sp.md }}>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{s.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{daysLabel(s.days)}</Text>
                 </View>
-                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginEnd: sp.md }}>{fmt(s.hour, s.minute)}</Text>
+                <Text style={{ ...ty.label, ...numeric, ...font('600'), color: t.ink, marginEnd: sp.md }}>{fmt(s.hour, s.minute)}</Text>
                 {/* 16pt of glyph with `hitSlop={6}` is a 28pt target — the
                     smallest control on this screen, and the only destructive
                     one on it. The two switches above it are 48 × 28 and each
@@ -497,7 +503,7 @@ export default function Reminders() {
             <Field label="Hour" hint="24h" style={{ flex: 0 }} a11y="Hour on a 24-hour clock">
               <TextInput value={sh} onChangeText={setSh} keyboardType="number-pad" style={num} />
             </Field>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, paddingBottom: 13 }}>:</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink3, paddingBottom: 13 }}>:</Text>
             <Field label="Min" style={{ flex: 0 }} a11y="Minutes past the hour">
               <TextInput value={sm} onChangeText={setSm} keyboardType="number-pad" style={num} />
             </Field>
@@ -517,15 +523,8 @@ export default function Reminders() {
             the only route to that screen, so a member who wants a 3am nudge to
             stop has somewhere to go from the screen they set it on. */}
         <Section>
-          <Pressable onPress={() => router.push('/(client)/notification-prefs')}
-            accessibilityRole="button" accessibilityLabel="Notification settings and quiet hours"
-            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Notification Settings</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Which kinds of notification reach you, and the hours to hold them until.</Text>
-            </View>
-            <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
-          </Pressable>
+          <ListRow icon="bell" tone="amber" title="Notification Settings" note="Which kinds reach you, and your quiet hours"
+            onPress={() => router.push('/(client)/notification-prefs')} />
         </Section>
 
         <View style={{ marginTop: layout.section }}>

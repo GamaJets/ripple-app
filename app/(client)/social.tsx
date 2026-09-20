@@ -42,10 +42,10 @@ import { useSettings } from '../../src/ui/settings';
 // THOUSANDS separator.
 import { plain, weightDeltaIn } from '../../src/lib/units';
  import { deltaLabel, deltaSign, deltaMoved } from '../../src/lib/deltaLabel';
-import { Rule, Section, SectionHead, KpiRow, Cta, Notice, fig, PageHead } from '../../src/ui/kit';
+import { Section, KpiRow, Cta, Notice, fig, PageHead, HeroCard, Expandable } from '../../src/ui/kit';
 import { num } from '../../src/lib/format';
 import { isWhole } from '../../src/ui/loadStatus';
-import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, type as ty } from '../../src/theme/scale';
 
 export default function Social() {
  const t = useTheme();
@@ -127,19 +127,13 @@ export default function Social() {
  const figure = plain(Math.abs(wtMove), 1);
  const note = `Body fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}%` : 'unchanged'} across ${num(cd.scans.length)} scans`;
  return (
- /* The board's figure card in place of the retired Hero: the section's
- name, the figure at hero size with its unit beside it, the note under.
- Spoken as one sentence, as the Hero spoke it. */
- <Section>
- <SectionHead title={label} />
- <View accessible accessibilityLabel={`${label}, ${figure} ${wu}, ${note}`}>
- <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
- <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
- <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, flexShrink: 0 }}>{wu}</Text>
- </View>
- <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
- </View>
- </Section>
+ /* The night hero (round five): this screen has one state — how far the
+ member has come since their first scan — and one action, sharing it, so
+ the figure is the headline and Share is the bright button on the same
+ card. It was a figure card at the top and a button four sections down.
+ The words are spoken as one sentence by the card. */
+ <HeroCard eyebrow={label} title={`${figure} ${wu}`} meta={note}
+  cta={{ label: 'Share My Progress', onPress: share }} />
  );
  })()
  ) : (
@@ -152,46 +146,39 @@ export default function Social() {
     : 'You have more scans on record than can be read in one go, and "since your first scan" means the first one — which may not be among them. A figure that would go into a post has to be the right one, so none is offered.'} />
  </View>
  ) : (
- <View style={{ paddingTop: sp.xxl, paddingBottom: sp.xl }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>Your progress</Text>
- <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>
-  {cd.scansStatus === 'loading' ? 'Reading your scans…' : 'Nothing to show yet'}
- </Text>
- <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
- Log a second body scan and the change between your first and your latest appears here — and in anything you share.
- </Text>
- </View>
+ <HeroCard eyebrow="Your Progress"
+  title={cd.scansStatus === 'loading' ? 'Reading Your Scans…' : 'Nothing to Show Yet'}
+  meta="Log a second body scan and the change since your first appears here, and in anything you share."
+  cta={{ label: `Share ${BRAND.label}`, onPress: share }} />
  )
  )}
 
- <Rule />
+ {/* A withheld figure still leaves the app itself to share: the button the
+ hero would have carried, under the notice that says why there is no hero. */}
+ {!measured && !scansWhole && cd.scansStatus !== 'loading' ? (
+ <View style={{ marginTop: 14 }}><Cta label={`Share ${BRAND.label}`} wide onPress={share} /></View>
+ ) : null}
 
- {measured ? (<>
- <Section>
- <SectionHead title="Since Your First Scan" />
- <KpiRow items={[
- // The heading above names the baseline, so these two carry the figure alone —
- // and where it rounds to nothing they carry the word instead of a sign, with
- // the unit dropped so it cannot read "No change kg".
- { label: 'Weight', value: deltaMoved(wtMove) ? deltaLabel(wtMove, { since: null }) : 'No change', unit: deltaMoved(wtMove) ? wu : undefined },
- { label: 'Body Fat', value: deltaMoved(bfMove) ? deltaLabel(bfMove, { since: null }) : 'No change', unit: deltaMoved(bfMove) ? '%' : undefined },
- { label: 'Scans', value: fig(cd.scans.length) },
+ {/* The three figures behind the headline, as tiles on the ground. Blue,
+ purple and grey: they NAME the metric. Whether down is good depends on a
+ goal this screen does not read, so no tile wears green or red. */}
+ {measured ? (
+ <KpiRow tiles items={[
+ // The hero names the baseline, so these carry the figure alone — and where
+ // it rounds to nothing they carry the word instead of a sign, with the unit
+ // dropped so it cannot read "No change kg".
+ { label: 'Weight Since First Scan', value: deltaMoved(wtMove) ? deltaLabel(wtMove, { since: null }) : 'No change', unit: deltaMoved(wtMove) ? wu : undefined, tone: 'blue' },
+ { label: 'Body Fat Since First Scan', value: deltaMoved(bfMove) ? deltaLabel(bfMove, { since: null }) : 'No change', unit: deltaMoved(bfMove) ? '%' : undefined, tone: 'purple' },
+ { label: 'Scans', value: fig(num(cd.scans.length)), tone: 'neutral' },
  ]} />
- </Section>
- <Rule />
- </>) : null}
+ ) : null}
 
  <Section>
- <SectionHead title="How Sharing Works" />
- <Text style={{ ...ty.body, color: t.ink2 }}>
+ <Expandable title="How Sharing Works">
+ <Text style={{ ...ty.caption, color: t.ink3 }}>
  Sharing opens your phone's own share sheet, so it goes wherever you send it — a story, a post, a message to one person. {BRAND.label} has no posting access to any account: nothing is ever posted automatically, and you approve every share.
  </Text>
- </Section>
-
- <Rule />
-
- <Section>
- <Cta label={measured ? 'Share My Progress' : `Share ${BRAND.label}`} wide onPress={share} />
+ </Expandable>
  </Section>
 
  </ScrollView>

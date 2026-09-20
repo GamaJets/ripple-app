@@ -72,8 +72,8 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Field, Cta, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Field, Cta, Flag, PageHead, IconPlate, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useNotifyPrefs, type PrefWrite } from '../../src/ui/notifyPrefs';
 import {
   CATEGORIES, allows,
@@ -495,8 +495,9 @@ export default function NotificationPrefs() {
             const on = allows(c.key, prefs);
             return (
               <View key={c.key} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <IconPlate icon="bell" tone={on ? 'amber' : 'neutral'} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{c.title}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.note}</Text>
                 </View>
                 {/* A switch, announced as one, and 48 x 28 with hit slop to
@@ -557,7 +558,7 @@ export default function NotificationPrefs() {
           ) : (<>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Quiet Hours</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Quiet Hours</Text>
                 {/* What is IN FORCE, from `quietView` — never the boxes below,
                     which are a draft until somebody saves them. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -694,8 +695,11 @@ export default function NotificationPrefs() {
             const state = channelState(c.key, channels.muted, channels.status);
             return (
               <View key={c.key} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                {/* Grey unless the switch is known to be ON: an unread position
+                    must not wear the colour of an answer. */}
+                <IconPlate icon="message" tone={state === 'on' ? 'blue' : 'neutral'} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{c.title}</Text>
                   {/* The unknown label goes in front of the note rather than
                       replacing it: what the switch governs is true whether or
                       not the position has been read, and dropping the note
@@ -720,18 +724,24 @@ export default function NotificationPrefs() {
               the one kind no switch here covers. None of them reports that a
               notification was or was not suppressed, because no row in that
               table has ever existed to suppress one. */}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{MEMBER_CHANNELS_REACH}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_STILL_RECORDED}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_ACCOUNT}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_NOT_COVERED}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_MASTER}</Text>
+          {/* Behind a control (round five): they are the small print of the
+              switches above, all still here, one tap away. */}
+          <Expandable title="How These Switches Work">
+            <Text style={{ ...ty.caption, color: t.ink3, }}>{MEMBER_CHANNELS_REACH}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_STILL_RECORDED}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_ACCOUNT}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_NOT_COVERED}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_MASTER}</Text>
+          </Expandable>
         </Section>
 
 
         <Section>
+          <Expandable title="Where These Are Kept">
           <Text style={{ ...ty.caption, color: t.ink3 }}>
             The switches under What This App Sends are kept on this phone, and only this phone. If you use the app on a second phone, that one has its own answers — and signing out clears them, so the next person to sign in here starts from the defaults rather than yours. The switches under Sent To You are the other way round: they are stored on your account, so they are the same wherever you sign in. Quiet hours are both — the account holds the window that stops what is sent to you, and this phone holds the one that delays the reminders it sets itself.
           </Text>
+          </Expandable>
         </Section>
 
       </ScrollView>

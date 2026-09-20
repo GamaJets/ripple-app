@@ -45,8 +45,8 @@ import { View, Text, TextInput, ScrollView, Alert, Pressable } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Flag, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Flag, fig, PageHead, IconPlate, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -54,7 +54,6 @@ import { reportError } from '../../src/lib/reportError';
 import {
   MIN_PASSWORD, changeEmail, changePassword, emailProblem, endOtherSessions, passwordProblem, pendingEmail,
 } from '../../src/lib/accountSecurity';
-import { END_ALIGN } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
 /** Have we read the account's own state, and what did it say. `'failed'` is
@@ -235,24 +234,27 @@ export default function Account() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <PageHead title="Account & Sign-in" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
-          The password you sign in with, and the address a reset would go to
-        </Text>
+        <PageHead title="Account & Sign-in" subtitle="Your password, and where a reset would go" />
 
 
         {/* ── email ──────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Email Address" />
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingBottom: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-            <Text style={{ ...ty.label, color: t.ink3 }}>On your account</Text>
-            <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={1}>
+          {/* The address as the card's figure: a plate, the label over it, the
+              address in ink. It was a grey label and a right-aligned value cut
+              to one line — on the screen whose whole subject is this address. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingBottom: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+            <IconPlate icon="message" tone="blue" />
+            <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>On Your Account</Text>
+            <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>
               {/* `|| null` and not the empty string `email` already is: `fig('')` is the
                   empty string, so an unread address left this slot blank under its
                   label — indistinguishable from an account with no email at all.
                   The dash is how the rest of the app says "not read". */}
               {auth.loading ? 'Checking…' : fig(email || null)}
             </Text>
+            </View>
           </View>
 
           {/* The four states of "is there a change outstanding", kept apart.
@@ -269,7 +271,7 @@ export default function Account() {
               <Pressable onPress={() => { void loadPending(); }} hitSlop={8} accessibilityRole="button"
                 accessibilityLabel="Check again for an outstanding email change"
                 style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
+                <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
           ) : pending.email ? (
@@ -284,9 +286,13 @@ export default function Account() {
             autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress"
             accessibilityLabel="New email address" style={inp} />
           {emNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{emNote}</Flag> : null}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Your gym sees the name on your profile, not this. This is the address you sign in with and the only place a password reset can be sent — so keep it one you can open.
-          </Text>
+          <View style={{ marginTop: sp.md }}>
+            <Expandable title="Who Sees This Address">
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                Your gym sees the name on your profile, not this. This is the address you sign in with and the only place a password reset can be sent — so keep it one you can open.
+              </Text>
+            </Expandable>
+          </View>
           <View style={{ height: sp.md }} />
           <Cta label={emBusy ? 'Sending…' : 'Change Email Address'} wide disabled={emBusy} onPress={() => { void submitEmail(); }} />
         </Section>
@@ -315,9 +321,13 @@ export default function Account() {
 
           {pwNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{pwNote}</Flag> : null}
 
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            We ask for your current password so that a phone left unlocked on a bench can’t be used to lock you out of your own account.
-          </Text>
+          <View style={{ marginTop: sp.md }}>
+            <Expandable title="Why We Ask for Your Current Password">
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                So that a phone left unlocked on a bench can’t be used to lock you out of your own account.
+              </Text>
+            </Expandable>
+          </View>
           <View style={{ height: sp.md }} />
           <Cta label={pwBusy ? 'Changing…' : 'Change Password'} wide disabled={pwBusy} onPress={() => { void submitPassword(); }} />
         </Section>

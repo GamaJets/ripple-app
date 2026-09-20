@@ -55,7 +55,7 @@ import { BuildInfo } from '../../src/ui/BuildInfo';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, ListRow, Ghost, PageHead, fig } from '../../src/ui/kit';
 import { RepdbAttribution } from '../../src/ui/Attribution';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
@@ -135,7 +135,7 @@ function Row({ t, label, sub, right, first }: { t: Theme; label: string; sub?: s
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       <View style={{ flex: 1, paddingEnd: sp.md }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{label}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{label}</Text>
         {sub ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sub}</Text> : null}
       </View>
       {right}
@@ -161,7 +161,7 @@ function Units<T extends string>({ options, value, onPick, t }: { options: reado
           <Pressable key={u} onPress={() => onPick(u)} accessibilityRole="radio" accessibilityState={{ selected: on }}
             hitSlop={hitSlopFor(32)}
             style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{u}</Text>
+            <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{u}</Text>
           </Pressable>
         );
       })}
@@ -495,22 +495,18 @@ export default function Settings() {
             to the Me tab, which is where the photo and the body details are
             edited; there is no second editor to open from here.
 
-            A plain list on the ground rather than a <Section>, on purpose:
-            the brief for this page is "hairline separated, no section boxes",
-            and every card under it is a group of controls, not a route. */}
-        <View style={{ marginTop: sp.sm }}>
-          <ListRow icon="me" title="Profile" note="Your photo, name and body details" onPress={() => router.push('/(client)/profile')} />
-          <Rule />
-          <ListRow icon="target" title="Goals" note="What you are working toward, and by when" onPress={() => router.push('/(client)/goal')} />
-          <Rule />
-          <ListRow icon="bell" title="Notifications" note="Choose what you are sent, and when" onPress={() => router.push('/(client)/notification-prefs')} />
-          <Rule />
-          <ListRow icon="lock" title="Privacy" note="Your account, your data and who can see it" onPress={() => router.push('/(client)/account')} />
-          <Rule />
-          <ListRow icon="heart" title="Connected Apps" note="Your watch and the apps that feed your day" onPress={() => router.push('/(client)/devices')} />
-          <Rule />
-          <ListRow icon="message" title="Help & Support" note="Tell us what to improve, or ask for help" onPress={() => router.push('/(client)/feedback')} />
-        </View>
+            Round five: the list is a card like every other on the grey ground,
+            and each row wears the toned plate it wears on Me, so the same six
+            destinations look the same in both places. The hue is decoration;
+            the row says what it is. */}
+        <Section>
+          <ListRow icon="me" tone="brand" title="Profile" note="Your photo, name and body details" onPress={() => router.push('/(client)/profile')} />
+          <ListRow icon="target" tone="purple" title="Goals" note="What you are working toward, and by when" onPress={() => router.push('/(client)/goal')} />
+          <ListRow icon="bell" tone="amber" title="Notifications" note="Choose what you are sent, and when" onPress={() => router.push('/(client)/notification-prefs')} />
+          <ListRow icon="lock" tone="blue" title="Privacy" note="Your account, your data and who can see it" onPress={() => router.push('/(client)/account')} />
+          <ListRow icon="heart" tone="pink" title="Connected Apps" note="Your watch and the apps that feed your day" onPress={() => router.push('/(client)/devices')} />
+          <ListRow icon="message" tone="teal" title="Help & Support" note="Tell us what to improve, or ask for help" onPress={() => router.push('/(client)/feedback')} />
+        </Section>
 
 
         {/* ── the order from here down ─────────────────────────────────────
@@ -533,7 +529,7 @@ export default function Settings() {
               had not forgotten, and there was nothing at all they could do
               about an email address they no longer had access to. Which is the
               address every route back into the account goes to. */}
-          <ListRow icon="settings" title="Password & Email" note="Change your password or the address you sign in with"
+          <ListRow icon="lock" tone="blue" title="Password & Email" note="Change your password or the address you sign in with"
             onPress={() => router.push('/(client)/account')} />
         </Section>
 
@@ -572,7 +568,7 @@ export default function Settings() {
 
         <Section>
           <SectionHead title="Appearance" />
-          <ListRow icon="palette" title="Theme & Accent Colour" note="10 palettes, applied live"
+          <ListRow icon="palette" tone="purple" title="Theme & Accent Colour" note="10 palettes, applied live"
             onPress={() => router.push('/(client)/appearance')} />
         </Section>
 
@@ -684,7 +680,7 @@ export default function Settings() {
               <Row t={t} label="Deletion Status Unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer — it does not mean you have none." right={
                 <Pressable onPress={() => { void loadDeletion(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Check your deletion status again"
                   style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
                 </Pressable>
               } />
               <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
@@ -770,7 +766,7 @@ export default function Settings() {
             <Pressable onPress={() => setFilesOpen(false)} accessibilityRole="button"
               accessibilityLabel="Close your files"
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Done</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Done</Text>
             </Pressable>
           </ScrollView>
         </View>

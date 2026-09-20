@@ -8,13 +8,19 @@
 // seven stacked bordered boxes, and `<ListRow>` for the hub instead of a
 // hand-rolled row for the 3,815th time.
 //
+// Round five: the approved mockup (mock/project/ClientMe.dc.html). The identity
+// sits on the ground under a centred head with Settings at its trailing edge,
+// the three figures are tiles in their own hues over eight real weeks, the
+// badges are a row of medals, and the daily target is the macro mix as a donut.
+// Flow: who you are → what you have done → what you hold → rows.
+//
 // TF-37: the edit sheet had its own kg/lb and cm/in toggles, local to the
 // modal and gone the moment it closed, converting through a bare `round1` in
 // both directions — type 180 lb, get 81.6 kg stored, come back to 179.9 lb. The
 // stats line under the name ignored all of it and printed "cm" and "kg"
 // regardless. Both now go through src/lib/units.ts, and the unit itself is the
 // account's (src/ui/settings.tsx), the same one the Settings screen sets.
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -23,8 +29,8 @@ import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Card, Field, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, KpiRow, ListRow, PageHead, Ghost, Donut, Legend, Field, Flag, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { CLIENT_FEATURES } from '../../src/lib/features';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
@@ -46,13 +52,45 @@ import { uploadMyAvatar } from '../../src/ui/avatarUpload';
 import { avatarSource, isDeviceAvatar, DEVICE_AVATAR_NOTE, AVATAR_UPLOAD_FAILED_NOTE } from '../../src/lib/avatarImage';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
-import { monthNamesShort, fmtFullDay } from '../../src/lib/format';
+import { monthNamesShort, fmtFullDay, fmtPointMonth, num } from '../../src/lib/format';
 import { localDate } from '../../src/lib/localDate';
 import { FORWARD_ICON, turn } from '../../src/ui/direction';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { activeDays, longestStreak } from '../../src/lib/streaks';
-import { badgeFigures, earnedKeys, BADGE_COUNT } from '../../src/lib/badges';
+import { BADGES, badgeFigures, badgeState, earnedKeys, BADGE_COUNT, type BadgeKey } from '../../src/lib/badges';
+import { startOfWeek } from '../../src/lib/weekStart';
+import { useNow } from '../../src/ui/today';
+import { supabase } from '../../src/lib/supabase';
+
+// What each badge's medal looks like: a glyph and a hue by FAMILY, so the row
+// of medals reads as four kinds of achievement rather than twelve colours —
+// streaks are the orange the streak chip on Home already is, training days the
+// accent the Workouts tile is, records amber, volume blue. The hue carries
+// nothing the badge's title does not say; it is how an eye finds the one that
+// is new. app/(client)/achievements.tsx holds the same table, because a lane
+// may not add a module: it belongs in src/lib/badges.ts beside BADGES.
+const BADGE_LOOK: Record<BadgeKey, { icon: IconName; tone: Tone }> = {
+  'first-rep': { icon: 'check', tone: 'amber' },
+  'on-a-roll': { icon: 'flame', tone: 'orange' },
+  'week-warrior': { icon: 'flame', tone: 'orange' },
+  'two-weeks': { icon: 'calendar', tone: 'orange' },
+  'unstoppable': { icon: 'sparkle', tone: 'orange' },
+  'ten-sessions': { icon: 'dumbbell', tone: 'brand' },
+  'fifty-club': { icon: 'dumbbell', tone: 'brand' },
+  'record-breaker': { icon: 'trophy', tone: 'amber' },
+  'pr-machine': { icon: 'trending', tone: 'purple' },
+  'cardio-kick': { icon: 'heart', tone: 'pink' },
+  'one-tonne': { icon: 'scale', tone: 'blue' },
+  'ten-tonnes': { icon: 'scale', tone: 'teal' },
+};
+/** A medal's plate and glyph colours. The kit's `toneOf` is not exported and
+ *  its IconPlate is a rounded square; the mockup's medal is a circle. */
+const medalColours = (t: Theme, tone: Tone) => tone === 'brand' ? { soft: t.brandSoft, ink: t.brandText }
+  : tone === 'neutral' ? { soft: t.surface3, ink: t.ink3 }
+  : { soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+/** How many weeks the three tiles' trends look back over. */
+const TREND_WEEKS = 8;
 
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat Loss' },
@@ -175,9 +213,9 @@ function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => vo
           accessibilityRole="button" accessibilityLabel="Close" />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: sp.lg, borderTopWidth: hairline, borderColor: t.ring, ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
-          <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>
+          <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, ...font('500'), color: t.ink3 }}>Cancel</Text></Pressable>
           <Text style={{ ...ty.head, color: t.ink }}>Date of birth</Text>
-          <Pressable onPress={save} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Done</Text></Pressable>
+          <Pressable onPress={save} hitSlop={8}><Text style={{ ...ty.body, ...font('600'), color: t.brand }}>Done</Text></Pressable>
         </View>
         <View style={{ position: 'relative' }}>
           <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }} />
@@ -211,7 +249,7 @@ function Seg({ options, value: val, onChange, t }: { options: string[]; value: s
           accessibilityLabel={val === o ? `Shown in ${SEG_SPOKEN[o] ?? o}` : `Show in ${SEG_SPOKEN[o] ?? o} instead`}
           hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
           style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: val === o ? t.brand : 'transparent' }}>
-          <Text style={{ ...ty.label, fontWeight: '600', color: val === o ? t.brandInk : t.ink3 }}>{o.toUpperCase()}</Text>
+          <Text style={{ ...ty.label, ...font('600'), color: val === o ? t.brandInk : t.ink3 }}>{o.toUpperCase()}</Text>
         </Pressable>
       ))}
     </View>
@@ -252,16 +290,16 @@ const HUB_ICON: Record<string, IconName> = {
 // which is right by construction. HUB_ICON above is now only an override.
 const FEATURE_ICON: Record<string, IconName> = Object.fromEntries(CLIENT_FEATURES.map((f) => [f.route, f.icon]));
 const hubIcon = (route: string): IconName => HUB_ICON[route] ?? FEATURE_ICON[route] ?? 'grid';
-const HUB_GROUPS: { title: string; items: { label: string; note: string; route: string }[] }[] = [
+const HUB_GROUPS: { title: string; tone: Tone; items: { label: string; note: string; route: string }[] }[] = [
   // First, deliberately. Pairing a watch is not an occasional settings errand —
   // it is the thing a member opens Me to do in their first week and again every
   // time a strap stops syncing, and it was the fifth group down, under roughly
   // twenty-eight rows. A group's position is the only ranking this screen has.
-  { title: 'Devices & Media', items: [
+  { title: 'Devices & Media', tone: 'pink', items: [
     { label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
     { label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
   ] },
-  { title: 'Progress & Insights', items: [
+  { title: 'Progress & Insights', tone: 'blue', items: [
     { label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
     { label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency' },
     { label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records' },
@@ -272,7 +310,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards' },
     { label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity' },
   ] },
-  { title: 'Training', items: [
+  { title: 'Training', tone: 'brand', items: [
     { label: 'This Week', note: 'Your week of training at a glance', route: '/(client)/week' },
     { label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
     { label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
@@ -284,13 +322,13 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     // needs to know about your body, owned by you and written only by you.
     { label: 'Your Intake', note: 'What your coach should know before they train you', route: '/(client)/intake' },
   ] },
-  { title: 'Daily', items: [
+  { title: 'Daily', tone: 'orange', items: [
     { label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
     { label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
     { label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
     { label: 'Reminders', note: 'Hydration & supplement nudges', route: '/(client)/reminders' },
   ] },
-  { title: 'Connect', items: [
+  { title: 'Connect', tone: 'teal', items: [
     // The coach you HAVE, above the directory of coaches you do not. There was
     // no screen for the former until part 130 made one possible.
     { label: 'Your Coach', note: 'Who is coaching you, and what they can see', route: '/(client)/my-coach' },
@@ -341,7 +379,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
   // Above Account, because these are things a member DOES — at the turnstile,
   // at renewal, when a session needs approving — and Account is where they go
   // to change a setting.
-  { title: 'Your Gym', items: [
+  { title: 'Your Gym', tone: 'purple', items: [
     // First, because it is the one opened while standing at a door.
     { label: 'Entry Barcode', note: 'The code you scan to get in', route: '/(client)/access' },
     { label: 'Membership', note: 'Your plan, passes and what they include', route: '/(client)/membership' },
@@ -354,7 +392,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Offers', note: 'Redeem a code your gym has given you', route: '/(client)/offers' },
     { label: 'Invite a Friend', note: 'Your referral link', route: '/(client)/referral' },
   ] },
-  { title: 'Account', items: [
+  { title: 'Account', tone: 'neutral', items: [
     { label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
     { label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings' },
     { label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback' },
@@ -601,6 +639,73 @@ export default function Profile() {
   // rows: under 'error' and 'partial' the rows are not the member's history.
   const { log, status: logStatus } = useWorkoutLog();
   const logWhole = isWhole(logStatus);
+  // The weight history prices every bodyweight set, so four badges depend on
+  // it as well as on the log. Offered only when it was read whole, exactly as
+  // app/(client)/achievements.tsx does, so the two screens cannot disagree
+  // about how many badges somebody holds.
+  const scansWhole = isWhole(cd.scansStatus);
+  const badgeFigs = useMemo(() => badgeFigures(log, scansWhole ? cd.weightSeries : []), [log, scansWhole, cd.weightSeries]);
+  const medals = BADGES.map((b) => ({ ...b, state: badgeState(b.key, badgeFigs, logWhole, scansWhole) }));
+  // A count over the set, so it is withheld while any badge is unreadable: it
+  // could only be an under-count, and a figure that is silently low is worse
+  // than a dash with its reason beside it.
+  const badgesCountable = logWhole && !medals.some((m) => m.state === 'unknown');
+  const earnedCount = medals.filter((m) => m.state === 'earned').length;
+  // The row on this screen is five medals — the width of the card at the
+  // mockup's 54pt — earned first, so what is drawn is what they HAVE and the
+  // grey ones are what comes next. All twelve are on Achievements.
+  const medalRow = [...medals.filter((m) => m.state === 'earned'), ...medals.filter((m) => m.state !== 'earned')].slice(0, 5);
+
+  // ── the three tiles' trends ──────────────────────────────────────────────
+  //
+  // Each is the figure above it AS IT STOOD at the end of each of the last
+  // eight weeks, recounted from the same log by the same function — not a
+  // drawing. Workouts is the exception the brief names: training days IN each
+  // week, because an all-time count can only rise and a line that can only rise
+  // says nothing about how the last two months went. A week before the first
+  // entry in the log is a gap and not a zero: nobody measured it. Nothing is
+  // drawn under a read that is not whole, for the reason the tiles are dashes.
+  // `useNow`, not `Date.now()`: this tab stays mounted across midnight.
+  const now = useNow();
+  const trends = useMemo(() => {
+    if (!logWhole || log.length === 0) return null;
+    const first = Math.min(...log.map((e) => new Date(e.t).getTime()));
+    const thisWeek = startOfWeek(now);
+    const weeks = Array.from({ length: TREND_WEEKS }, (_, i) => {
+      const from = new Date(thisWeek); from.setDate(from.getDate() - 7 * (TREND_WEEKS - 1 - i));
+      const to = new Date(from); to.setDate(to.getDate() + 7);
+      return { from: from.getTime(), to: to.getTime() };
+    });
+    const upTo = (ms: number) => log.filter((e) => new Date(e.t).getTime() < ms);
+    const lived = (w: { to: number }) => w.to > first;
+    return {
+      workouts: weeks.map((w) => lived(w) ? activeDays(log.filter((e) => { const ms = new Date(e.t).getTime(); return ms >= w.from && ms < w.to; })).length : null),
+      badges: weeks.map((w) => lived(w) ? earnedKeys(badgeFigures(upTo(w.to), scansWhole ? cd.weightSeries : [])).length : null),
+      streak: weeks.map((w) => lived(w) ? longestStreak(upTo(w.to)) : null),
+    };
+  }, [log, logWhole, now, scansWhole, cd.weightSeries]);
+
+  // ── "Member since" ───────────────────────────────────────────────────────
+  //
+  // The day the ACCOUNT was made, which is `created_at` on the auth user and is
+  // held in the stored session, so this asks storage rather than the network.
+  // `clients` carries no such column on the rows this screen reads. `error` is
+  // read: a session that could not be read draws no line at all, which is the
+  // only honest rendering of a date nobody has — never today's, never a guess.
+  const [memberSince, setMemberSince] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!live || error) return;
+        const at = data.session?.user?.created_at;
+        const d = at ? new Date(at) : null;
+        if (d && Number.isFinite(d.getTime())) setMemberSince(fmtPointMonth(d.getFullYear(), d.getMonth()));
+      } catch { /* the line is simply not drawn */ }
+    })();
+    return () => { live = false; };
+  }, [cd.id]);
   const statsLine = [age != null ? age + ' yrs' : null, heightLabel(cd.heightCm, lu), weightLabel(cd.weightKg, wu)]
     .filter(Boolean).join(' · ') || 'Add your height and weight';
   const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
@@ -652,98 +757,125 @@ export default function Profile() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* ── header: who you are. No hero — a profile has no live metric ───
-            The board's Me opens on a card: the photo, the name, the stats
-            line, and three figures under a rule. The pencil that sat beside
-            the name is a row now, so the way to edit is a sentence rather
-            than a glyph. */}
-        <Card style={{ marginTop: sp.md, marginBottom: sp.lg }}>
-          <View style={{ alignItems: 'center', gap: sp.md }}>
-            <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityState={{ disabled: photoBusy }} accessibilityRole="button"
-              accessibilityLabel={photoBusy ? 'Uploading your profile photo' : 'Change your profile photo'}>
-              {/* `avatarSource`, not `cd.photo`. A row still holding a device path
-                  from before the upload existed would otherwise draw here — and
-                  only here, on the one device that can open it, which is exactly
-                  how nobody noticed the coach could not. */}
-              {avatarSource(cd.photo) ? (
-                <Image source={{ uri: avatarSource(cd.photo)! }} style={{ width: 72, height: 72, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
-              ) : (
-                <View style={{ width: 72, height: 72, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                  {cd.init ? (
-                    <Text style={{ ...value(20), color: t.brandInk }}>{cd.init}</Text>
-                  ) : (
-                    <Icon name="me" size={24} color={t.brandInk} />
-                  )}
-                </View>
-              )}
-              <View style={{ position: 'absolute', bottom: -2, end: -2, width: 22, height: 22, borderRadius: radius.pill, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="camera" size={12} color={t.ink2} />
-              </View>
-            </Pressable>
-            <Pressable onPress={openEdit} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ alignItems: 'center' }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Me</Text>
-              {/* An empty name used to render as an empty line under "ME". Say
-                  what to do about it instead of showing nothing. */}
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize', textAlign: 'center' }} numberOfLines={1}>
-                {cd.name || 'Add your name'}
-              </Text>
-              <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3, textAlign: 'center' }}>{statsLine}</Text>
-            </Pressable>
-            {/* ── who you are WITH, under who you are ──────────────────────
-                The data-layout review's first item for Me is identity and the
-                coach or membership context, and the head said nothing about
-                either: whether anybody is coaching this member was a radio
-                group four sections down that records what they ASKED for, not
-                what is true. `coachLinked` is the fact — `clients.trainer_id`
-                — and it is three-valued: null is a read that has not landed,
-                and under it this line is not drawn at all rather than telling
-                a coached member they are on their own. It opens Your Coach,
-                which says the right thing in either case. No name: a client
-                cannot read their coach's row from here (see the header of
-                app/(client)/my-coach.tsx), and that screen is where it is. */}
-            {cd.coachLinked != null ? (
-              <Pressable onPress={() => router.push('/(client)/my-coach')} accessibilityRole="button" hitSlop={10}
-                accessibilityLabel={cd.coachLinked ? 'You are working with a coach. Opens Your Coach' : 'You are training on your own. Opens Your Coach'}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs }}>
-                <Icon name="people" size={13} color={t.ink3} />
-                <Text style={{ ...ty.caption, color: t.ink2 }}>{cd.coachLinked ? 'Working With a Coach' : 'Training on Your Own'}</Text>
-                <Icon name={FORWARD_ICON} size={12} color={t.ink3} />
-              </Pressable>
-            ) : null}
-          </View>
-          {/* Three figures the rest of this screen is built from. A dash
-              where nothing has been measured — never a placeholder body. */}
-          <View style={{ marginTop: sp.lg, paddingTop: sp.lg, borderTopWidth: hairline, borderTopColor: t.ring }}>
-            {/* The board's three: workouts, badges, best streak — all counted
-                off the training log, and only under a WHOLE read of it. A log
-                read at the row cap is a prefix of somebody's history, and a
-                count over a prefix stated as a total is the invented figure
-                this app refuses everywhere else; every tile is a dash until
-                the read is whole. Weight and body fat are on Progress. */}
-            <KpiRow items={[
-              { label: 'Workouts', value: logWhole ? fig(activeDays(log).length) : fig(null), unit: logWhole ? 'days' : undefined },
-              { label: 'Badges', value: logWhole ? fig(earnedKeys(badgeFigures(log, cd.weightSeries)).length) : fig(null), unit: logWhole ? `of ${BADGE_COUNT}` : undefined },
-              { label: 'Best Streak', value: logWhole ? fig(longestStreak(log)) : fig(null), unit: logWhole ? 'days' : undefined },
-            ]} />
-            {/* What period and what source — a figure without either is a
-                number (rule 2). All three are counted over the whole training
-                log, so they are all-time, and under a read that is not whole
-                the line says why the tiles are dashes instead. */}
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
-              {logWhole ? 'All time, from your training log' : 'Your training log has not been read in full, so these are not counted'}
-            </Text>
-          </View>
-        </Card>
+        {/* ── head: the mockup's Me opens on a centred title with one control,
+            Settings, at the trailing edge. A tab root, so nothing to go back to:
+            the leading slot is the blank of the same width. */}
+        <PageHead title="Profile" leading={null}
+          trailing={<Ghost icon="settings" a11yLabel="Settings" onPress={() => router.push('/(client)/settings')} />} />
 
-        <Section style={{ paddingTop: 0 }}>
+        {/* ── who you are, on the ground rather than in a card ─────────────── */}
+        <View style={{ alignItems: 'center', gap: sp.xs, marginTop: sp.lg }}>
+          <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityState={{ disabled: photoBusy }} accessibilityRole="button"
+            accessibilityLabel={photoBusy ? 'Uploading your profile photo' : 'Change your profile photo'}>
+            {/* `avatarSource`, not `cd.photo`. A row still holding a device path
+                from before the upload existed would otherwise draw here — and
+                only here, on the one device that can open it, which is exactly
+                how nobody noticed the coach could not. */}
+            {avatarSource(cd.photo) ? (
+              <Image source={{ uri: avatarSource(cd.photo)! }} style={{ width: 84, height: 84, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
+            ) : (
+              <View style={{ width: 84, height: 84, borderRadius: radius.pill, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center' }}>
+                {cd.init ? (
+                  <Text style={{ ...value(30), color: t.brandText }}>{cd.init}</Text>
+                ) : (
+                  <Icon name="me" size={32} color={t.brandText} />
+                )}
+              </View>
+            )}
+            <View style={{ position: 'absolute', bottom: -2, end: -2, width: 26, height: 26, borderRadius: radius.pill, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
+              <Icon name="camera" size={14} color={t.ink2} />
+            </View>
+          </Pressable>
+          <Pressable onPress={openEdit} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ alignItems: 'center', marginTop: sp.xs }}>
+            {/* An empty name used to render as an empty line. Say what to do
+                about it instead of showing nothing. */}
+            <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', textAlign: 'center' }} numberOfLines={2}>
+              {cd.name || 'Add your name'}
+            </Text>
+            {/* Drawn only when the account's own date was read — see
+                `memberSince` above. */}
+            {memberSince ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 2, textAlign: 'center' }}>Member since {memberSince}</Text> : null}
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2, textAlign: 'center' }}>{statsLine}</Text>
+          </Pressable>
+          {/* ── who you are WITH, under who you are ──────────────────────
+              The data-layout review's first item for Me is identity and the
+              coach or membership context, and the head said nothing about
+              either: whether anybody is coaching this member was a radio
+              group four sections down that records what they ASKED for, not
+              what is true. `coachLinked` is the fact — `clients.trainer_id`
+              — and it is three-valued: null is a read that has not landed,
+              and under it this line is not drawn at all rather than telling
+              a coached member they are on their own. It opens Your Coach,
+              which says the right thing in either case. No name: a client
+              cannot read their coach's row from here (see the header of
+              app/(client)/my-coach.tsx), and that screen is where it is. */}
+          {cd.coachLinked != null ? (
+            <Pressable onPress={() => router.push('/(client)/my-coach')} accessibilityRole="button" hitSlop={10}
+              accessibilityLabel={cd.coachLinked ? 'You are working with a coach. Opens Your Coach' : 'You are training on your own. Opens Your Coach'}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs, marginTop: sp.xs }}>
+              <Icon name="people" size={14} color={t.ink3} />
+              <Text style={{ ...ty.caption, color: t.ink2 }}>{cd.coachLinked ? 'Working With a Coach' : 'Training on Your Own'}</Text>
+              <Icon name={FORWARD_ICON} size={12} color={t.ink3} />
+            </Pressable>
+          ) : null}
+        </View>
+
+        {/* The mockup's three: workouts, badges, best streak — each a tile of
+            its own on the ground, in its own hue, over its own eight weeks. All
+            counted off the training log, and only under a WHOLE read of it. A
+            log read at the row cap is a prefix of somebody's history, and a
+            count over a prefix stated as a total is the invented figure this
+            app refuses everywhere else; every tile is a dash, with no line
+            under it, until the read is whole. Weight and body fat are on
+            Progress. */}
+        <KpiRow tiles onPress={(k) => router.push(k.route as any)} items={[
+          { label: 'Workouts', value: logWhole ? fig(activeDays(log).length) : fig(null), unit: logWhole ? 'days' : undefined, tone: 'brand', trend: trends?.workouts, route: '/(client)/consistency' },
+          { label: 'Badges', value: badgesCountable ? fig(earnedCount) : fig(null), unit: badgesCountable ? `of ${BADGE_COUNT}` : undefined, tone: 'amber', trend: trends?.badges, route: '/(client)/achievements' },
+          { label: 'Best Streak', value: logWhole ? fig(longestStreak(log)) : fig(null), unit: logWhole ? 'days' : undefined, tone: 'orange', trend: trends?.streak, route: '/(client)/consistency' },
+        ]} />
+        {/* What period and what source — a figure without either is a number
+            (rule 2). One line, because under a read that is not whole it is the
+            reason the tiles are dashes, and that is data rather than prose. */}
+        <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
+          {logWhole ? 'All time, from your training log · lines are the last 8 weeks' : 'Your training log has not been read in full, so these are not counted'}
+        </Text>
+
+        {/* ── badges: what they hold, as medals ─────────────────────────────
+            Earned ones in their hue, the rest grey behind a lock — and a badge
+            whose state is not KNOWN (a read that failed, or stopped short) is
+            grey with no lock on it, because a lock is a claim that it has not
+            been earned. "n of 12" is the head's link and opens the full set. */}
+        <Section>
+          <SectionHead title="Badges" note={badgesCountable ? `${earnedCount} of ${BADGE_COUNT}` : 'See All'} onPress={() => router.push('/(client)/achievements')} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: sp.sm }}>
+            {medalRow.map((m) => {
+              const earned = m.state === 'earned';
+              const c = medalColours(t, earned ? BADGE_LOOK[m.key].tone : 'neutral');
+              return (
+                <View key={m.key} accessible accessibilityRole="image"
+                  accessibilityLabel={`${m.title}, ${earned ? 'earned' : m.state === 'locked' ? 'locked' : 'not known'}`}
+                  style={{ width: 54, height: 54, borderRadius: radius.pill, backgroundColor: c.soft, alignItems: 'center', justifyContent: 'center' }}>
+                  {earned ? <Icon name={BADGE_LOOK[m.key].icon} size={26} color={c.ink} />
+                    : m.state === 'locked' ? <Icon name="lock" size={22} color={c.ink} />
+                    : <Text style={{ ...ty.head, color: c.ink }}>{fig(null)}</Text>}
+                </View>
+              );
+            })}
+          </View>
+          {!badgesCountable && logStatus !== 'loading' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Not every badge could be read, so they are not counted. Anything shown as earned really is.</Text>
+          ) : null}
+        </Section>
+
+        <Section>
           {/* A named tone each — the mockups' coloured icon plates — so the hub
               stops being a column of seven identical grey circles. The hue is
               decoration and carries nothing: every row says what it is. */}
           <ListRow icon="pencil" tone="brand" title="Edit Profile" note="Photo, name and body details" onPress={openEdit} />
+          <ListRow icon="heart" tone="pink" title="Connected Apps" note="Your watch and the apps that feed your day" onPress={() => router.push('/(client)/devices')} />
           <ListRow icon="target" tone="purple" title="Goals" note="What you are working toward, and by when" onPress={() => router.push('/(client)/goal')} />
           <ListRow icon="bell" tone="amber" title="Notifications" note="Choose what you are sent, and when" onPress={() => router.push('/(client)/notification-prefs')} />
           <ListRow icon="lock" tone="blue" title="Privacy" note="Your account, your data and who can see it" onPress={() => router.push('/(client)/account')} />
-          <ListRow icon="heart" tone="pink" title="Connected Apps" note="Your watch and the apps that feed your day" onPress={() => router.push('/(client)/devices')} />
           <ListRow icon="message" tone="teal" title="Help & Support" note="Tell us what to improve, or ask for help" onPress={() => router.push('/(client)/feedback')} />
           {/* Sign Out stays on Settings, where its confirmation and the
               sentence about what a failed sign-out means already live. */}
@@ -784,7 +916,7 @@ export default function Profile() {
                   accessibilityHint="Your goal sets your daily calorie and macro targets"
                   style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.lg,
                     paddingVertical: sp.md, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{g.label}</Text>
+                  <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{g.label}</Text>
                 </Pressable>
               );
             })}
@@ -801,7 +933,7 @@ export default function Profile() {
               <Pressable key={mm} onPress={() => cd.setCoachingMode(mm)} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={`${COACHING_MODE_LABEL[mm]}. ${COACHING_MODE_NOTE[mm]}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 20, height: 20, borderRadius: radius.pill, borderWidth: 2, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>{on ? <View style={{ width: 10, height: 10, borderRadius: radius.pill, backgroundColor: t.brand }} /> : null}</View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{COACHING_MODE_LABEL[mm]}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{COACHING_MODE_LABEL[mm]}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHING_MODE_NOTE[mm]}</Text>
                 </View>
               </Pressable>
@@ -821,13 +953,27 @@ export default function Profile() {
               Your last profile change has not reached the server, so what is on this screen may not be what your coach sees. It keeps retrying — open Edit and save again if it does not clear.
             </Flag>
           ) : null}
-          <SectionHead title="Daily Target" note={macros ? `${macros.kcal.toLocaleString()} kcal` : undefined} onPress={() => router.push('/(client)/nutrition')} />
+          <SectionHead title="Daily Target" note={macros ? 'Meals' : undefined} onPress={() => router.push('/(client)/nutrition')} />
           {macros ? (
-            <KpiRow items={[
-              { label: 'Protein', value: fig(macros.protein), unit: 'g' },
-              { label: 'Carbs', value: fig(macros.carbs), unit: 'g' },
-              { label: 'Fat', value: fig(macros.fat), unit: 'g' },
-            ]} />
+            // The day's target as the mix it is: calories by macro, each in the
+            // hue it has on Meals (protein blue, carbs orange, fat purple), with
+            // the grams the plan actually sets beside each. 4, 4 and 9 kcal a
+            // gram are what `macrosFor` built the grams from, so the ring is
+            // that arithmetic read backwards and not a second opinion.
+            (() => {
+              const slices = [
+                { label: 'Protein', value: macros.protein * 4, tone: 'blue' as const, shown: `${num(macros.protein)} g` },
+                { label: 'Carbs', value: macros.carbs * 4, tone: 'orange' as const, shown: `${num(macros.carbs)} g` },
+                { label: 'Fat', value: macros.fat * 9, tone: 'purple' as const, shown: `${num(macros.fat)} g` },
+              ];
+              return (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+                  <Donut slices={slices} centre={macros.kcal.toLocaleString()} sub="kcal"
+                    spoken={`Daily target, ${macros.kcal.toLocaleString()} kilocalories. ${slices.map((x) => `${x.label} ${x.shown}`).join(', ')}.`} />
+                  <Legend items={slices} />
+                </View>
+              );
+            })()
           ) : (
             // "Add your weight and body fat" is an instruction that only makes
             // sense if we know they have not. `macros` is null equally when the
@@ -851,30 +997,29 @@ export default function Profile() {
               is finished or not: the HOME row leaves when there is nothing left
               in it, and a screen nothing links to fails check:reachable and,
               more to the point, cannot be gone back to. */}
-          <ListRow icon="sparkle" title="Getting Started" note="What is set up, and what is still worth doing"
+          <ListRow icon="sparkle" tone="amber" title="Getting Started" note="What is set up, and what is still worth doing"
             onPress={() => router.push('/(client)/getting-started')} />
-          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
+          <ListRow icon="search" tone="blue" title="User Guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
-          <ListRow icon="search" title="Explore All Features" note="Search anything in the app"
+          <ListRow icon="search" tone="purple" title="Explore All Features" note="Search anything in the app"
             onPress={() => router.push('/(client)/explore')} />
         </Section>
 
         {/* ── the hub: grouped, collapsible, deliberately quiet ───────────── */}
         {hubGroups.map((g) => { const gc = collapsed[g.title] ?? false; return (
-          <View key={g.title}>
-            <Rule />
-            <Section>
-              <Pressable onPress={() => setCollapsed((p) => ({ ...p, [g.title]: !gc }))} accessibilityRole="button" accessibilityLabel={(gc ? 'Expand ' : 'Collapse ') + g.title}
-                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: gc ? 0 : sp.sm }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{g.title}</Text>
-                <View style={{ transform: [{ rotate: turn(gc ? 0 : 90) }] }}><Icon name={FORWARD_ICON} size={13} color={t.ink3} /></View>
-              </Pressable>
-              {!gc ? g.items.map((h) => (
-                <ListRow key={h.route} icon={hubIcon(h.route)} title={h.label} note={h.note}
-                  onPress={() => router.push(h.route as any)} />
-              )) : null}
-            </Section>
-          </View>
+          <Section key={g.title}>
+            {/* The group's name is a heading now, not a 13pt grey label: it is
+                what names the card, and it was the quietest text in it. */}
+            <Pressable onPress={() => setCollapsed((p) => ({ ...p, [g.title]: !gc }))} accessibilityRole="button" accessibilityLabel={(gc ? 'Expand ' : 'Collapse ') + g.title}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, marginBottom: gc ? 0 : sp.xs }}>
+              <Text style={{ ...ty.head, color: t.ink, flex: 1, minWidth: 0 }}>{g.title}</Text>
+              <View style={{ transform: [{ rotate: turn(gc ? 0 : 90) }] }}><Icon name={FORWARD_ICON} size={16} color={t.ink3} /></View>
+            </Pressable>
+            {!gc ? g.items.map((h) => (
+              <ListRow key={h.route} icon={hubIcon(h.route)} tone={g.tone} title={h.label} note={h.note}
+                onPress={() => router.push(h.route as any)} />
+            )) : null}
+          </Section>
         ); })}
       </ScrollView>
 
@@ -887,7 +1032,7 @@ export default function Profile() {
           <ScrollView contentContainerStyle={{ padding: G }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
               <Text style={{ ...ty.title, color: t.ink }}>Edit Profile</Text>
-              <Pressable onPress={() => setShowEdit(false)} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Close</Text></Pressable>
+              <Pressable onPress={() => setShowEdit(false)} hitSlop={8}><Text style={{ ...ty.body, ...font('600'), color: t.brand }}>Close</Text></Pressable>
             </View>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Name</Text>
@@ -895,7 +1040,7 @@ export default function Profile() {
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Date of birth</Text>
             <Pressable onPress={() => setShowDob(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{dobLabel}</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{dobLabel}</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{age != null ? `${age} yrs  ▾` : '▾'}</Text>
             </Pressable>
 
@@ -954,18 +1099,18 @@ export default function Profile() {
                   accessibilityHint="Your diet sets how your daily target is split between protein, carbs and fat"
                   style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: sp.lg, paddingVertical: sp.sm,
                     borderRadius: radius.pill, backgroundColor: cd.diet === d.id ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: cd.diet === d.id ? '600' : '500', color: cd.diet === d.id ? t.brandInk : t.ink2 }}>{d.label}</Text>
+                  <Text style={{ ...ty.label, ...font(cd.diet === d.id ? '600' : '500'), color: cd.diet === d.id ? t.brandInk : t.ink2 }}>{d.label}</Text>
                 </Pressable>
               ))}
             </View>
 
             <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, marginBottom: sp.lg }}>
-              <Text style={{ ...ty.caption, color: t.ink3 }}>{previewMacros ? <>New target · <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink }}>{previewMacros.kcal.toLocaleString()} kcal</Text> · P{previewMacros.protein} / C{previewMacros.carbs} / F{previewMacros.fat}</> : 'Enter a weight and body fat to see your target.'}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{previewMacros ? <>New target · <Text style={{ ...ty.caption, ...numeric, ...font('600'), color: t.ink }}>{previewMacros.kcal.toLocaleString()} kcal</Text> · P{previewMacros.protein} / C{previewMacros.carbs} / F{previewMacros.fat}</> : 'Enter a weight and body fat to see your target.'}</Text>
             </View>
 
             <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm }} onPress={save}>
               {saved ? <Icon name="check" size={16} color={t.ink} /> : null}
-              <Text style={{ ...ty.body, fontWeight: '600', color: saved ? t.ink : t.brandInk }}>{saved ? 'Sending…' : 'Save'}</Text>
+              <Text style={{ ...ty.body, ...font('600'), color: saved ? t.ink : t.brandInk }}>{saved ? 'Sending…' : 'Save'}</Text>
             </Pressable>
           </ScrollView>
         </View>

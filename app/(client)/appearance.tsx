@@ -29,8 +29,8 @@ import { View, Text, Pressable, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, fontScale } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, IconPlate, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, fontScale, font } from '../../src/theme/scale';
 import { metaByKey, paletteForScheme, type Theme } from '../../src/theme/tokens';
 import { fontScaleNote } from '../../src/lib/typeScale';
 import { switchLabel } from '../../src/lib/a11y';
@@ -75,7 +75,7 @@ function SettingRow({
   const body = (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{title}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{title}</Text>
         {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text> : null}
       </View>
       {right}
@@ -117,8 +117,9 @@ export default function Appearance() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <PageHead title="Appearance" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>How this app looks, and how much of it your phone decides. Everything here applies instantly.</Text>
+        {/* One quiet line under the title, not a paragraph: the screen is three
+            cards of controls and each already says what it does. */}
+        <PageHead title="Appearance" subtitle="Everything here applies instantly" />
 
 
         {/* ── Light / Dark / System (board page 20) ─────────────────────
@@ -130,9 +131,9 @@ export default function Appearance() {
         <Section>
           <SectionHead title="Appearance" />
           {([
-            { key: 'light', label: 'Light', icon: 'sun' },
-            { key: 'dark', label: 'Dark', icon: 'moon' },
-            { key: 'system', label: 'System', icon: 'settings' },
+            { key: 'light', label: 'Light', icon: 'sun', tone: 'amber' },
+            { key: 'dark', label: 'Dark', icon: 'moon', tone: 'purple' },
+            { key: 'system', label: 'System', icon: 'settings', tone: 'blue' },
           ] as const).map((row, i) => {
             const on = appearance === row.key;
             return (
@@ -140,10 +141,11 @@ export default function Appearance() {
                 accessibilityRole="radio" accessibilityState={{ selected: on }}
                 accessibilityLabel={`${row.label} appearance`}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={row.icon} size={17} color={on ? t.brand : t.ink3} />
-                </View>
-                <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: t.ink, flex: 1 }}>{row.label}</Text>
+                {/* The chosen row's plate takes its hue and the other two are
+                    grey, so the choice shows in the plate, the weight and the
+                    tick — and is said, in `accessibilityState`. */}
+                <IconPlate icon={row.icon} tone={on ? row.tone : 'neutral'} />
+                <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: t.ink, flex: 1 }}>{row.label}</Text>
                 {on ? <Icon name="check" size={19} color={t.brand} /> : null}
               </Pressable>
             );
@@ -182,9 +184,11 @@ export default function Appearance() {
           />
           {/* The one place the app cannot follow all the way, said here rather
               than found as a row of ellipses along the bottom of the screen. */}
-          <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-            The five tab names along the bottom share the width of the phone, so at the largest text sizes they shorten. Their icons do not change, and neither does what each one says out loud.
-          </Flag>
+          <Expandable title="At the Largest Text Sizes">
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              The five tab names along the bottom share the width of the phone, so at the largest text sizes they shorten. Their icons do not change, and neither does what each one says out loud.
+            </Text>
+          </Expandable>
         </Section>
 
 
@@ -207,7 +211,7 @@ export default function Appearance() {
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <Swatch th={th} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: t.ink }}>{p.name}</Text>
+                  <Text style={{ ...ty.body, ...font(on ? '600' : '500'), color: t.ink }}>{p.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>
                     {p.light ? 'Light theme' : 'Dark theme'}
                     {follow && on && p.key !== shownPalette ? ` · showing ${metaByKey(shownPalette).name}` : ''}

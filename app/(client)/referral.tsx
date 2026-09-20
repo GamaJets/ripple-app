@@ -50,8 +50,9 @@ import {
 } from '../../src/lib/referralCredit';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useReadDeadline } from '../../src/ui/readDeadline';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, PageHead } from '../../src/ui/kit';
-import { sp, layout, hairline, radius, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, Ghost, PageHead, HeroCard, KpiRow, TonedChip, Expandable, fig } from '../../src/ui/kit';
+import { num } from '../../src/lib/format';
+import { sp, layout, hairline, radius, type as ty, numeric, font } from '../../src/theme/scale';
 
 export default function Referral() {
   const t = useTheme();
@@ -209,64 +210,43 @@ export default function Referral() {
 
         <PageHead title="Invite Friends" subtitle="Training is easier with company" />
 
-        {/* ── the one card: the thing you act on ─────────────────────────── */}
-        <Section>
-          <Card>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your code</Text>
+        {/* ── the hero: the code, and the one thing to do with it ───────────
+            The night card every tab root opens on, here on a pushed page
+            because this screen HAS one state and one action: the code is the
+            headline, what has come of it is the line under it, Share is the
+            bright button. With no code the headline says so and the button is
+            Try Again — a failed read is never a blank card. */}
+        <HeroCard eyebrow="Your Code"
+          title={code ?? (status === 'loading' ? 'Reading…' : 'Not Available')}
+          meta={code || status === 'loading' ? summaryLine(status, joined, converted)
+            : 'We couldn’t reach your code just now. Nothing has been changed or cancelled.'}
+          cta={code ? { label: 'Share My Invite', onPress: invite } : { label: 'Try Again', onPress: load, disabled: status === 'loading' }}>
+          {/* The link, shown as well as sent. A member pasting their invite
+              into an Instagram bio or a WhatsApp group needs the URL itself,
+              and a share sheet cannot put it there. */}
+          {code ? (
+            <Text style={{ ...ty.caption, ...numeric, color: t.nightInk2, marginTop: sp.md }} numberOfLines={2}>{link}</Text>
+          ) : null}
+        </HeroCard>
+        {code ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.md, marginTop: 14 }}>
+            <Ghost label="Copy Link" icon="share" onPress={() => copy('link')} />
+            <Ghost label="Copy Code" onPress={() => copy('code')} />
+            {/* Ink, not a coloured flash. `copied` is a fact about what
+                just happened rather than a state worth a status colour, and
+                t.crit/t.warn are marks in this app and not text anyway. */}
+            {copied ? <Text style={{ ...ty.caption, color: t.ink2 }}>{copied}</Text> : null}
+          </View>
+        ) : null}
 
-            {code ? (
-              <Text style={{ ...value(30), color: t.ink, letterSpacing: 1.5, marginTop: 6 }}>{code}</Text>
-            ) : status === 'loading' ? (
-              <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}><ActivityIndicator color={t.ink3} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your referral code…" /></View>
-            ) : (
-              // No invented fallback. A code this screen made up is a code the
-              // server has not registered, so anything a friend did with it
-              // would be credited to nobody — and the reader would never know.
-              // "It hasn't changed" asserted a code the reader may never have
-              // seen: `setCode(c)` runs before this branch, so this is what a
-              // FIRST load failure shows too, and with no referral code issued
-              // yet a first load is the common case. The sentence now claims
-              // only what is true either way.
-              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-                We couldn’t reach your code just now. Nothing has been changed or cancelled — try again in
-                a moment.
-              </Text>
-            )}
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
-              <View accessibilityElementsHidden importantForAccessibility="no"
-                style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: status === 'ready' && (joined || 0) > 0 ? t.brand : t.ink3 }} />
-              <Text style={{ ...ty.label, ...numeric, color: t.ink2 }} numberOfLines={2}>
-                {summaryLine(status, joined, converted)}
-              </Text>
-            </View>
-
-            {/* The link, shown as well as sent. A member pasting their invite
-                into an Instagram bio or a WhatsApp group needs the URL itself,
-                and a share sheet cannot put it there. */}
-            {code ? (
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.md }} numberOfLines={2}>{link}</Text>
-            ) : null}
-
-            <View style={{ marginTop: sp.lg }}>
-              {code ? (
-                <Cta label="Share My Invite" wide onPress={invite} />
-              ) : (
-                <Ghost label="Try Again" onPress={load} />
-              )}
-            </View>
-            {code ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
-                <Ghost label="Copy Link" icon="share" onPress={() => copy('link')} />
-                <Ghost label="Copy Code" onPress={() => copy('code')} />
-                {/* Ink, not a coloured flash. `copied` is a fact about what
-                    just happened rather than a state worth a status colour, and
-                    t.crit/t.warn are marks in this app and not text anyway. */}
-                {copied ? <Text style={{ ...ty.caption, color: t.ink2 }}>{copied}</Text> : null}
-              </View>
-            ) : null}
-          </Card>
-        </Section>
+        {/* The two counts as tiles. Both come from the server's own totals and
+            are stated only under a 'ready' read — under anything else they are
+            dashes, and the hero's line above says which kind of not-knowing it
+            is. They are exact even where the list below is cut at its cap. */}
+        <KpiRow tiles items={[
+          { label: 'Joined on Your Code', value: status === 'ready' && joined != null ? fig(num(joined)) : fig(null), tone: 'blue' },
+          { label: 'Started Training', value: status === 'ready' && converted != null ? fig(num(converted)) : fig(null), tone: 'brand' },
+        ]} />
 
 
         {/* ── who actually came ───────────────────────────────────────────── */}
@@ -296,13 +276,15 @@ export default function Referral() {
 
           {status === 'ready' ? rows.map((r, i) => (
             <View key={r.joinedAt + r.name + i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <View style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: r.converted ? t.brand : t.ink3 }}>{r.name.slice(0, 1).toUpperCase()}</Text>
+              <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: r.converted ? t.brandSoft : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.label, ...font('700'), color: r.converted ? t.brandText : t.ink2 }}>{r.name.slice(0, 1).toUpperCase()}</Text>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{r.name}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{friendLine(r)}</Text>
               </View>
+              {/* The state as words on a plate; `friendLine` has the date. */}
+              <TonedChip label={r.converted ? 'Training' : 'Joined'} tone={r.converted ? 'brand' : 'neutral'} />
             </View>
           )) : null}
 
@@ -320,27 +302,27 @@ export default function Referral() {
         </Section>
 
 
+        {/* How it works, and what is and is not being promised — prose, so it
+            is behind a control (round five). Every sentence is still here:
+            the conversion rule, the reward note and the privacy note are the
+            terms of the invite, and one tap is where terms belong. */}
         <Section>
-          <SectionHead title="How It Works" />
+          <Expandable title="How It Works" note="The steps, the rule and what your friend’s gym sees">
           {steps.map((s, i) => (
-            <View key={s.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink2 }}>{s.n}</Text>
+              <View key={s.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 32, height: 32, borderRadius: radius.pill, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ ...ty.label, ...numeric, ...font('700'), color: t.brandText }}>{s.n}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{s.label}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.label}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
-              </View>
-            </View>
-          ))}
-        </Section>
-
-
-        {/* ── what is and is not being promised ───────────────────────────── */}
-        <Section>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>{CONVERSION_RULE}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{rewardNote(appName)}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFERRAL_PRIVACY_NOTE}</Text>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{CONVERSION_RULE}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{rewardNote(appName)}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFERRAL_PRIVACY_NOTE}</Text>
+          </Expandable>
         </Section>
 
       </ScrollView>
