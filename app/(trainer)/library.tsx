@@ -60,8 +60,9 @@ import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, Notice, Ghost, PageHead, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, KpiRow, Notice, Ghost, PageHead, PartialRead, Expandable, TonedChip, type Tone } from '../../src/ui/kit';
+import { groupTone, tonePlate } from '../../src/ui/coach/ProgramBuilderFlow';
+import { sp, layout, radius, elevation, type as ty, font } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
@@ -132,8 +133,15 @@ const inGroup = (field: string | null, chip: string) =>
  *  different things about it. */
 const kitLabel = (r: CatalogueRow) => (r.equipment ? cap(r.equipment) : 'Equipment not recorded');
 
-function Chips({ options, value, onChange, a11y }: {
+function Chips({ options, value, onChange, a11y, toneFor }: {
   options: string[]; value: string; onChange: (v: string) => void;
+  /** The muscle-group row passes this and the equipment row does not. With it
+   *  every chip carries its group's colour — a dot while it is off, the soft
+   *  plate and its ink while it is on — the same colour the group's chip has
+   *  on each row below and its bar has in the builder's Weekly Volume. The
+   *  word is always there; the colour is how an eye finds Legs in a row of
+   *  eleven. Equipment has no colour of its own and keeps the underline. */
+  toneFor?: (v: string) => Tone;
   /** What a screen reader says the chip will DO. Passed in because this row is
    *  now drawn twice over two different columns, and "Show Cable only" read
    *  out as a muscle group is worse than no label — the two rows look the same
@@ -150,12 +158,24 @@ function Chips({ options, value, onChange, a11y }: {
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.xs }}>
       {options.map((o) => {
         const on = value.toLowerCase() === o.toLowerCase();
+        if (toneFor) {
+          const c = tonePlate(t, toneFor(o));
+          return (
+            <Pressable key={o} onPress={() => onChange(o)} accessibilityRole="button"
+              accessibilityLabel={a11y(o)}
+              accessibilityState={{ selected: on }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: sp.md, borderRadius: radius.pill, backgroundColor: on ? c.soft : t.surface }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.mark }} />
+              <Text style={{ ...ty.label, ...font(on ? '700' : '500'), color: on ? c.ink : t.ink2 }}>{o}</Text>
+            </Pressable>
+          );
+        }
         return (
           <Pressable key={o} onPress={() => onChange(o)} accessibilityRole="button"
             accessibilityLabel={a11y(o)}
             accessibilityState={{ selected: on }}
             style={{ paddingHorizontal: sp.md, paddingTop: sp.sm, paddingBottom: on ? 0 : sp.sm, borderRadius: radius.pill, backgroundColor: on ? 'transparent' : t.surface2, alignItems: 'center' }}>
-            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.ink : t.ink2 }}>{o}</Text>
+            <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.ink : t.ink2 }}>{o}</Text>
             {on ? <View style={{ alignSelf: 'stretch', height: 2, borderRadius: 1, backgroundColor: t.brand, marginTop: 4, marginBottom: sp.sm - 2 }} /> : null}
           </Pressable>
         );
@@ -441,13 +461,47 @@ export default function TrainerLibrary() {
         {/* ── the head, the board's way (coach page 6) ─────────────────────
             Back at the leading edge and the title centred. The eyebrow that
             sat over the title, and the catalogue figure that sat under it,
-            are on the card at the foot of the screen now: the board opens on
-            the search and the rows, not on a sentence about them. */}
+            became the three tiles directly under this head; the sentence
+            about them is folded away at the foot. */}
         <PageHead title="Exercise Library" onBack={goBack} />
+
+        {/* ── what you have filmed, as three tiles on the ground ───────────
+            The page opens on its figures now, the way every pushed page in
+            the approved look does, and the search is still in the first
+            viewport under them. Each is a count over BOTH reads and is a dash
+            until both are whole — a catalogue prefix undercounts the
+            movements and a clip-library prefix undercounts the matches. The
+            reason a dash is a dash is the one line under the tiles; what the
+            three figures mean is behind What These Count at the foot. */}
+        <KpiRow tiles items={[
+          { label: 'Your Clips', value: clipCountable ? num(filmed) : '—', tone: 'brand' },
+          { label: 'Academy Clips', value: clipCountable ? num(academyFilmed) : '—', tone: 'blue' },
+          { label: 'Not Filmed', value: clipCountable ? num(rows.length - covered) : '—', tone: 'amber' },
+        ]} />
+        {!clipCountable ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {status === 'loading' ? 'Reading the catalogue…'
+              : status === 'error' ? 'The catalogue could not be read — the figures are unknown, not zero.'
+                : status === 'partial' ? 'More movements than fit in one read — a subtotal is not shown.'
+                  : 'Blank until the catalogue and your clip library are both read in full.'}
+          </Text>
+        ) : strandedOnPhone > 0 ? (
+          // The correction, and only when there is something to correct. A
+          // clip that never reached the server counts in none of the three
+          // figures, and calling the movement Not Filmed is the screen
+          // agreeing with a coach who believes they have already done it.
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {strandedOnPhone === 1
+              ? '1 Not Filmed movement has a clip on this phone only — no client can watch it. Add it again from Videos.'
+              : `${num(strandedOnPhone)} Not Filmed movements have clips on this phone only — no client can watch them. Add them again from Videos.`}
+          </Text>
+        ) : null}
 
         {/* ── finding one ────────────────────────────────────────────────── */}
         {/* The board's search row, the pill Meals draws over its catalogue. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, marginTop: sp.lg, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, marginTop: sp.lg, paddingHorizontal: sp.lg, borderRadius: radius.pill,
+                       // White and lifted: on the grey ground a surface2 pill was grey on grey.
+                       backgroundColor: t.surface, ...elevation.card }}>
           <Icon name="search" size={17} color={t.ink3} />
           <TextInput value={q} onChangeText={setQ} placeholder="Search exercises…" placeholderTextColor={t.ink3}
             accessibilityLabel="Search exercises" returnKeyType="search" autoCorrect={false}
@@ -468,6 +522,7 @@ export default function TrainerLibrary() {
             header), so it is the row that comes first. */}
         <View style={{ marginTop: sp.md }}>
           <Chips options={groups} value={group} onChange={setGroup}
+            toneFor={(g) => (g === ALL ? 'brand' : groupTone(g))}
             a11y={(g) => (g === ALL ? 'Show every muscle group' : `Show ${g} only`)} />
         </View>
 
@@ -493,7 +548,7 @@ export default function TrainerLibrary() {
               borderRadius: radius.pill, backgroundColor: mineOnly ? t.brand : t.surface2,
             }}>
             <Icon name={mineOnly ? 'check' : 'grid'} size={13} color={mineOnly ? t.brandInk : t.ink3} />
-            <Text style={{ ...ty.label, fontWeight: mineOnly ? '600' : '500', color: mineOnly ? t.brandInk : t.ink2 }}>
+            <Text style={{ ...ty.label, ...font(mineOnly ? '600' : '500'), color: mineOnly ? t.brandInk : t.ink2 }}>
               {countable ? `In your programmes · ${num(programmedHere)}` : 'In your programmes'}
             </Text>
           </Pressable>
@@ -506,8 +561,7 @@ export default function TrainerLibrary() {
             explanation they can act on. */}
         {mineOnly ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            Every movement you have written into one of your saved programmes. Built from your own programmes,
-            not from a list you keep up to date — the three starters Repple ships with are not counted.
+            From your saved programmes — the three starters are not counted.
           </Text>
         ) : null}
 
@@ -628,7 +682,7 @@ export default function TrainerLibrary() {
                             {/* `r.name` stays the identity — it is what this
                                 row navigates by and what a programme stores.
                                 Only the label moves. */}
-                            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.display.text}</Text>
+                            <Text style={{ ...ty.head, color: t.ink }}>{r.display.text}</Text>
                             {/* The kit sits AFTER the muscle group, not before
                                 it. The owner's library leads with equipment
                                 because "does this assume kit we do not own" is
@@ -640,9 +694,16 @@ export default function TrainerLibrary() {
                                 saying WHY these rows and not the others, and a
                                 row that says nothing is indistinguishable from
                                 one the catalogue never labelled. */}
-                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                              {[r.group ? cap(r.group) : 'Muscle group not recorded', kitLabel(r), fallbackTag(r.display)].filter(Boolean).join(' · ')}
-                            </Text>
+                            {/* The group is a chip in its own colour now — the
+                                colour its filter chip has above — and an
+                                unrecorded one is a grey chip that SAYS so
+                                rather than a missing one. */}
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: sp.sm, rowGap: 2, marginTop: 4 }}>
+                              <TonedChip tone={groupTone(r.group)} label={r.group ? cap(r.group) : 'Group Not Recorded'} />
+                              <Text style={{ ...ty.caption, color: t.ink3, flexShrink: 1 }}>
+                                {[kitLabel(r), fallbackTag(r.display)].filter(Boolean).join(' · ')}
+                              </Text>
+                            </View>
                             {/* Its own line, and only when the title cannot
                                 explain itself: a search for "butt kicks" that
                                 answers with Heel Flicks has to say which of the
@@ -701,51 +762,19 @@ export default function TrainerLibrary() {
 
 
 
-        {/* ── what you have filmed, under the list ─────────────────────────
-            These were the first viewport — a hero figure and three KPIs above
-            the search. Board page 6 opens on the search and the rows, so the
-            figures sit under them now. Nothing about what they count, or when
-            they decline to, has changed. The catalogue's own size is the head's
-            note, and only under a whole read: under 'partial' those rows are a
-            prefix of the catalogue, so a count would be a subtotal printed as
-            a total. */}
-        <Section>
-          <SectionHead title="What You Have Filmed" note={countable ? `${num(rows.length)} movements` : undefined} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-            {status === 'loading' ? 'Reading the catalogue…'
-              : status === 'error' ? 'The catalogue could not be read, so how many movements there are is unknown — not zero.'
-                : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
-                  : rows.length === 0 ? 'The catalogue came back empty.'
-                    : 'Every one of them can go into a programme, and your clients see the same list.'}
+        {/* What the three figures at the top count, behind a fold: it is an
+            explanation and not a reading, so it comes off the page. "Nothing
+            to Show" was the old name for Not Filmed and it was wrong, not just
+            blunt — nearly every movement carries a demonstration the client
+            can already watch. */}
+        <Expandable title="What These Count" note={countable ? `${num(rows.length)} movements in the catalogue` : undefined}>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            Your Clips, Academy Clips and Not Filmed count movements a coaching clip reaches, not whether a movement
+            can be demonstrated — nearly every exercise here already shows your client how it is done. Not Filmed
+            means nothing your clients can watch has been recorded for it; record yours on the Videos screen and
+            yours is what they see. Every movement can go into a programme, and your clients see the same list.
           </Text>
-          {/* "Nothing to Show" was wrong, not just blunt. It counted movements
-              with no coach clip — and nearly every one of them carries a demonstration
-              animation the client can already watch, so there is something to
-              show for nearly all of them. Renamed to what it actually counts. */}
-          <KpiRow items={[
-            { label: 'Your Clips', value: clipCountable ? num(filmed) : '—' },
-            { label: 'Academy Clips', value: clipCountable ? num(academyFilmed) : '—' },
-            { label: 'Not Filmed', value: clipCountable ? num(rows.length - covered) : '—' },
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {clipCountable
-              ? 'These count movements a coaching clip reaches, not whether a movement can be demonstrated — nearly every exercise here already shows your client how it is done. Not Filmed means nothing your clients can watch has been recorded for it; record yours on the Videos screen and yours is what they see.'
-              : 'These stay blank until both the catalogue and your clip library have been read in full, rather than reporting a figure computed from part of them.'}
-          </Text>
-          {/* The correction to the line above, and only when there is something
-              to correct. A clip that never reached the server counts in none of
-              the three figures — it is not yours as far as a client is
-              concerned, it is certainly not the Academy's, and calling the
-              movement Not Filmed is the screen agreeing with a coach who
-              believes they have already done it. */}
-          {clipCountable && strandedOnPhone > 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              {strandedOnPhone === 1
-                ? '1 of those counted as Not Filmed does have a clip of yours — saved on this phone only, because it never reached the server, so no client can watch it. Add it again from Videos.'
-                : `${num(strandedOnPhone)} of those counted as Not Filmed do have clips of yours — saved on this phone only, because they never reached the server, so no client can watch them. Add them again from Videos.`}
-            </Text>
-          ) : null}
-        </Section>
+        </Expandable>
       </ScrollView>
     </SafeAreaView>
   );

@@ -50,8 +50,8 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, ListRow, PageHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ListRow, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Meter, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, font, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -135,7 +135,7 @@ import {
 import { useAuth } from '../../src/ui/auth';
 import { notifySuccess } from '../../src/ui/haptics';
 import { WEEK_DAYS, WEEK_DAY_NAMES } from '../../src/lib/weekStart';
-import { ProgramBuilderFlow, ProgramWorkflowFooter } from '../../src/ui/coach/ProgramBuilderFlow';
+import { ProgramBuilderFlow, ProgramWorkflowFooter, DAY_TYPE_TONE, dayTypeOf, groupTone, toneFill, toneOnFill, type DayType } from '../../src/ui/coach/ProgramBuilderFlow';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { useBackTo } from '../../src/ui/backTo';
 import { backDestination } from '../../src/lib/backTo';
@@ -1930,6 +1930,25 @@ export default function Builder() {
     return m;
   }, [cat.rows]);
   const rowFor = (name: string) => catByName.get(exerciseSlug(name)) ?? null;
+  // Sets per muscle group over the week being edited — the Weekly Volume card.
+  // See the card for why this is a plain sum and not `muscleBoard`.
+  const weekVolume = useMemo(() => {
+    const by = new Map<string, number>();
+    let ungrouped = 0;
+    for (const d of days) for (const e of d.exercises) {
+      const n = setCount(e);
+      if (n <= 0) continue;
+      const g = (e.group || catByName.get(exerciseSlug(e.name))?.group || '').trim();
+      if (g) by.set(g, (by.get(g) ?? 0) + n); else ungrouped += n;
+    }
+    const groups = [...by].map(([group, sets]) => ({ group, sets }))
+      .sort((x, y) => y.sets - x.sets || x.group.localeCompare(y.group));
+    return { groups, ungrouped };
+  }, [days, catByName]);
+  // A day type's colour as a FILL, and what is written on it. See Workout Days.
+  const typeFill = (tone: Tone) => toneFill(t, tone);
+  const typeOn = (tone: Tone) => toneOnFill(t, tone);
+  const typesPresent = (Object.keys(DAY_TYPE_TONE) as DayType[]).filter((k) => days.some((d) => dayTypeOf(d) === k));
   const thumbRows = useMemo(() => {
     const inDays = days.flatMap((d) => d.exercises.map((e) => rowFor(e.name))).filter(Boolean);
     const inPicker = catShownList.slice(0, catShown);
@@ -2498,6 +2517,115 @@ export default function Builder() {
           leading={cameFrom ? undefined : null} onBack={goBack}
           trailing={<Ghost icon="grid" onPress={() => router.push('/(trainer)/templates')} a11yLabel="Templates" />} />
 
+        {/* The programme's name, first — it is the template's name and the
+            name every client sees over their week. */}
+        <Section>
+        <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Program Name</Text>
+        <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
+          accessibilityLabel="Program name" style={inp} />
+
+        {/* ── the week as seven circles, the board's way ───────────────────
+            Always the whole week, in the order src/lib/weekStart.ts draws one,
+            so an empty programme still reads as a week with nothing ticked
+            rather than as a blank. A day that is in the week is filled (in the
+            colour of its type, below); a tap on it opens the editor there (`openDay`), and a tap on
+            an empty one adds a session on that day (`addDayOn`). The plus that
+            used to sit beside the circles is gone: every day it could add is
+            now a circle, and the one thing it could do that a circle cannot —
+            a second session on a weekday already in use — is the editor's Add
+            Training Day plus its Change Day control, which is where a two-a-day
+            belongs.
+
+            `findIndex`, so a weekday with two sessions answers with its first:
+            the circle is a way in, not a count, and the spoken label says how
+            many sessions there are so the second is not a surprise.
+
+            A day in the week is filled in the colour of its TYPE — upper,
+            lower, full body, conditioning — read off the day's focus and its
+            exercises' groups by `dayTypeOf`, because a programme stores no
+            type. The week reads as a split at a glance: two blues, two
+            purples and an orange is an upper/lower with a full-body day. The
+            colour never stands alone: the legend under the circles names
+            every type that is present, and the spoken label says it.
+
+            Why the fill is the hue's ink step and not its mark is written
+            over `toneFill` in src/ui/coach/ProgramBuilderFlow.tsx. */}
+        <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginTop: sp.lg, marginBottom: sp.sm }}>Workout Days</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: sp.sm }}>
+          {DAYS.map((abbr, i) => {
+            const di = days.findIndex((d) => d.day === abbr);
+            const selected = di >= 0;
+            const sessions = days.filter((d) => d.day === abbr);
+            const exercises = sessions.reduce((a, d) => a + d.exercises.length, 0);
+            const open = selected && editorOpen && !!openDays[di];
+            const kind = selected ? dayTypeOf(days[di]) : null;
+            const spoken = selected
+              ? `${WEEK_DAY_NAMES[i]}, ${kind}, in the week${sessions.length > 1 ? `, ${num(sessions.length)} sessions` : ''}, ${exercises === 1 ? '1 exercise' : `${num(exercises)} exercises`}`
+              : `${WEEK_DAY_NAMES[i]}, not in the week`;
+            return (
+              <Pressable key={abbr}
+                onPress={() => (selected ? openDay(di) : addDayOn(abbr))}
+                accessibilityRole="button"
+                accessibilityState={{ selected, expanded: selected ? open : undefined }}
+                accessibilityLabel={spoken}
+                accessibilityHint={selected ? (open ? 'Folds this day in the editor' : 'Opens this day in the editor') : 'Adds a training day'}
+                style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center',
+                         backgroundColor: kind ? typeFill(DAY_TYPE_TONE[kind]) : t.surface2 }}>
+                <Text style={{ ...ty.label, ...font('700'), color: kind ? typeOn(DAY_TYPE_TONE[kind]) : t.ink2 }}>{abbr.slice(0, 1)}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {/* The legend: only the types this week actually has, in one fixed
+            order so the line does not reshuffle as a coach edits. */}
+        {typesPresent.length ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: sp.md, rowGap: 2, marginTop: sp.md }}>
+            {typesPresent.map((k) => (
+              <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: typeFill(DAY_TYPE_TONE[k]) }} />
+                <Text style={{ ...ty.micro, ...font('500'), color: t.ink2 }}>{k}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        </Section>
+
+        {/* ── Weekly Volume: sets per muscle group, as bars ────────────────
+            The evidence under the week. Every figure is a sum over the
+            builder's own state — `setCount`, the number `composeDays` sends —
+            so nothing here is read and nothing can be unknown. The group is
+            the one the exercise carries, and the catalogue's when it carries
+            none.
+
+            Not `muscleBoard` from src/lib/muscleVolume.ts, though this is its
+            picture: that is a join over a DATED LOG of performed sets, and
+            feeding it a prescription would mean inventing a timestamp and a
+            rep count for every set to get past its filters.
+
+            The bars are each group against the week's largest, so the longest
+            bar is the group this week trains most and the rest read as a
+            share of it. A movement with no group is work this cannot file, and
+            is said as one line rather than left out of a card that would then
+            look complete. */}
+        <Section>
+          <SectionHead title="Weekly Volume"
+            note={totalExercises ? `${num(totalExercises)} exercise${s(totalExercises)}` : undefined} />
+          {weekVolume.groups.length === 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {totalExercises ? 'No sets on a named muscle group yet' : 'Add exercises to see sets per muscle group'}
+            </Text>
+          ) : weekVolume.groups.map((g) => (
+            <Meter key={g.group} label={g.group} val={g.sets} target={weekVolume.groups[0].sets}
+              tone={groupTone(g.group)} note={`${num(g.sets)} set${s(g.sets)}`} />
+          ))}
+          {weekVolume.ungrouped ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {`${num(weekVolume.ungrouped)} set${s(weekVolume.ungrouped)} not counted — no muscle group on the movement`}
+            </Text>
+          ) : null}
+        </Section>
+
+
         {/* ── the coach's named programmes, one tap each ───────────────────
             Reported from a coach's phone: "Is there a way again to create
             shortcuts to named programmes you have created so you don't have
@@ -2509,7 +2637,13 @@ export default function Builder() {
             Nothing is drawn for a coach who has saved nothing, so a first
             session still opens the way the board draws it. Capped, with the
             whole library as the last chip, because this is a shortcut row and
-            a row of forty is the scroll it was asked to replace. */}
+            a row of forty is the scroll it was asked to replace.
+
+            Under the week and its volume now, which is where the approved
+            mockup's flow puts a tool: the name and the week are the state, the
+            volume is the evidence, and this row is a way to replace both. It
+            is still above the fold on an empty builder, where it matters —
+            an empty Weekly Volume card is two lines tall. */}
         {shortcuts.length ? (
           <View style={{ marginTop: sp.lg }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.sm, marginBottom: sp.sm }}>
@@ -2517,7 +2651,9 @@ export default function Builder() {
               <Text style={{ ...ty.caption, color: t.ink3 }}>{usage.withheld ? 'Newest first' : 'Most used first'}</Text>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg }}>
+              // Room under the chips for the card shadow, which a horizontal
+              // ScrollView otherwise clips at its own bottom edge.
+              contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg, paddingBottom: sp.sm, paddingHorizontal: 2 }}>
               {shortcuts.slice(0, SHORTCUT_CAP).map((tpl) => {
                 const dc = tpl.program.days.length;
                 const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
@@ -2530,8 +2666,8 @@ export default function Builder() {
                     accessibilityLabel={`Load ${tpl.name} into the builder. ${shape}${on ? `. ${num(on)} training it now` : ''}.`}
                     style={{ minHeight: MIN_TARGET, maxWidth: 220, justifyContent: 'center',
                              paddingHorizontal: sp.lg, paddingVertical: sp.sm,
-                             borderRadius: radius.md, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring }}>
-                    <Text numberOfLines={2} style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{tpl.name}</Text>
+                             borderRadius: radius.md, backgroundColor: t.surface, ...elevation.card }}>
+                    <Text numberOfLines={2} style={{ ...ty.label, ...font('600'), color: t.ink }}>{tpl.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {shape}{on ? ` · ${num(on)} training it` : ''}
                     </Text>
@@ -2543,68 +2679,21 @@ export default function Builder() {
                   accessibilityRole="button" accessibilityLabel={`All ${num(shortcuts.length)} of your programmes, in the template library`}
                   style={{ minHeight: MIN_TARGET, justifyContent: 'center', paddingHorizontal: sp.lg, paddingVertical: sp.sm,
                            borderRadius: radius.md, backgroundColor: t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{`All ${num(shortcuts.length)}`}</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{`All ${num(shortcuts.length)}`}</Text>
                 </Pressable>
               ) : null}
             </ScrollView>
           </View>
         ) : null}
 
-        {/* The programme's name, first — it is the template's name and the
-            name every client sees over their week. */}
-        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xl, marginBottom: 6 }}>Program Name</Text>
-        <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
-          accessibilityLabel="Program name" style={inp} />
-
-        {/* ── the week as seven circles, the board's way ───────────────────
-            Always the whole week, in the order src/lib/weekStart.ts draws one,
-            so an empty programme still reads as a week with nothing ticked
-            rather than as a blank. A day that is in the week is filled in the
-            brand; a tap on it opens the editor there (`openDay`), and a tap on
-            an empty one adds a session on that day (`addDayOn`). The plus that
-            used to sit beside the circles is gone: every day it could add is
-            now a circle, and the one thing it could do that a circle cannot —
-            a second session on a weekday already in use — is the editor's Add
-            Training Day plus its Change Day control, which is where a two-a-day
-            belongs.
-
-            `findIndex`, so a weekday with two sessions answers with its first:
-            the circle is a way in, not a count, and the spoken label says how
-            many sessions there are so the second is not a surprise. */}
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Workout Days</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: sp.sm }}>
-          {DAYS.map((abbr, i) => {
-            const di = days.findIndex((d) => d.day === abbr);
-            const selected = di >= 0;
-            const sessions = days.filter((d) => d.day === abbr);
-            const exercises = sessions.reduce((a, d) => a + d.exercises.length, 0);
-            const open = selected && editorOpen && !!openDays[di];
-            const spoken = selected
-              ? `${WEEK_DAY_NAMES[i]}, in the week${sessions.length > 1 ? `, ${num(sessions.length)} sessions` : ''}, ${exercises === 1 ? '1 exercise' : `${num(exercises)} exercises`}`
-              : `${WEEK_DAY_NAMES[i]}, not in the week`;
-            return (
-              <Pressable key={abbr}
-                onPress={() => (selected ? openDay(di) : addDayOn(abbr))}
-                accessibilityRole="button"
-                accessibilityState={{ selected, expanded: selected ? open : undefined }}
-                accessibilityLabel={spoken}
-                accessibilityHint={selected ? (open ? 'Folds this day in the editor' : 'Opens this day in the editor') : 'Adds a training day'}
-                style={{ width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center',
-                         backgroundColor: selected ? t.brand : t.surface2 }}>
-                <Text style={{ ...ty.label, fontWeight: '700', color: selected ? t.brandInk : t.ink2 }}>{abbr.slice(0, 1)}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
         {/* Three rows with truthful counts, and the editor behind the first.
             Supersets are counted the way the editor badges them — a set-group
             of two or more, see src/lib/setGroups.ts. */}
         <Section>
-          <ListRow icon="dumbbell" title="Exercises"
+          <ListRow icon="dumbbell" tone="brand" title="Exercises"
             note={blockExercises === 0 ? 'None yet — open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'the week is open below, a row a day' : 'tap to show the week, a row a day'}`}
             onPress={() => setEditorOpen((o) => !o)} />
-          <ListRow icon="swap" title="Supersets"
+          <ListRow icon="swap" tone="blue" title="Supersets"
             note={(() => { const n = days.reduce((acc, d) => acc + d.exercises.filter((_, i) => isGrouped(d.exercises, i)).length, 0); return n === 0 ? 'None in this week' : `${num(n)} grouped ${n === 1 ? 'exercise' : 'exercises'} this week`; })()}
             onPress={() => setEditorOpen(true)} />
           {/* A START SOURCE, which is what the review asks a template to be on
@@ -2612,7 +2701,7 @@ export default function Builder() {
               builder. It used to push the library — a second screen with its
               own assign flow, which is a parallel editor by another name. The
               library is still one tap away, from the head and from the sheet. */}
-          <ListRow icon="grid" title="Templates"
+          <ListRow icon="grid" tone="amber" title="Templates"
             note={tplStatus === 'ready' && savedCount ? `Start from one of your ${num(savedCount)}, or a starter` : 'Start from one you saved, or a starter'}
             onPress={() => setTplPick(true)} />
         </Section>
@@ -2682,7 +2771,7 @@ export default function Builder() {
                   <Pressable key={c.id} onPress={() => setClientId(on ? '' : c.id)}
                     accessibilityRole="button" accessibilityLabel={on ? `Stop building for ${c.name}` : `Build for ${c.name}`}
                     style={{ paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
                   </Pressable>
                 );
               })}
@@ -3220,19 +3309,23 @@ export default function Builder() {
                 const counts = `${num(d.exercises.length)} exercise${s(d.exercises.length)} · ${num(daySets)} set${s(daySets)}`;
                 const focus = d.focus.trim();
                 const cardio = (d.cardio ?? '').trim();
+                const kind = dayTypeOf(d);
                 return (
                   <Pressable onPress={() => toggleDay(di)} accessibilityRole="button"
                     accessibilityState={{ expanded: open }}
-                    accessibilityLabel={`${dayName}${focus ? `, ${focus}` : ''}. ${counts}${cardio ? ', and conditioning' : ''}.`}
+                    accessibilityLabel={`${dayName}, ${kind}${focus ? `, ${focus}` : ''}. ${counts}${cardio ? ', and conditioning' : ''}.`}
                     accessibilityHint={open ? 'Shuts this day' : 'Opens this day to read and edit its exercises'}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: MIN_TARGET + sp.sm }}>
-                    <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{d.day}</Text>
-                    </View>
+                    {/* The day's type as a bar down the row's leading edge, in
+                        the colour its circle has at the top of the page, so a
+                        week of shut rows reads as the same split the circles
+                        drew. The type is also the first word of the line under
+                        the name — the bar is never the only place it is said. */}
+                    <View style={{ width: 5, alignSelf: 'stretch', minHeight: 40, borderRadius: 3, backgroundColor: typeFill(DAY_TYPE_TONE[kind]) }} />
                     <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{dayName}</Text>
+                      <Text style={{ ...ty.head, color: t.ink }}>{dayName}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                        {[focus || null, counts, cardio ? 'conditioning' : null].filter(Boolean).join(' · ')}
+                        {[focus && focus.toLowerCase() !== kind.toLowerCase() ? `${kind} · ${focus}` : kind, counts, cardio ? 'conditioning' : null].filter(Boolean).join(' · ')}
                       </Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -3272,7 +3365,7 @@ export default function Builder() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                 <Pressable onPress={() => cycleDay(di)} accessibilityRole="button" accessibilityLabel={`Change day, currently ${d.day}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{d.day}</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{d.day}</Text>
                   <Icon name="swap" size={13} color={t.ink3} />
                 </Pressable>
                 <TextInput value={d.focus} onChangeText={(v) => setDayFocus(di, v)} placeholder="Focus (e.g. Push)" placeholderTextColor={t.ink3}
@@ -3403,7 +3496,7 @@ export default function Builder() {
                       accessibilityHint={isOpen ? 'Shuts its sets, weight and notes' : 'Opens its sets, weight and notes'}
                       style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: sp.sm, minHeight: MIN_TARGET }}>
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(e.name)}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{movement(e.name)}</Text>
                         {/* The muscle group, and — separately — the set group.
                             Two different meanings of the word "group" that
                             happened to collide in this file, kept apart on
@@ -3413,7 +3506,7 @@ export default function Builder() {
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs, flexWrap: 'wrap', marginTop: 2 }}>
                           {e.group ? <Text style={{ ...ty.caption, color: t.ink3 }}>{e.group}</Text> : null}
                           {gb ? (
-                            <Text style={{ ...ty.caption, color: t.brand, fontWeight: '600' }}>
+                            <Text style={{ ...ty.caption, color: t.brand, ...font('600') }}>
                               {e.group ? '· ' : ''}{gb.label} · {gb.position} of {gb.size}
                             </Text>
                           ) : null}
@@ -3565,7 +3658,7 @@ export default function Builder() {
                             <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: ri })} accessibilityRole="button"
                               accessibilityLabel={`How set ${row.n} of ${movement(e.name)} is performed — currently ${rm.label}`}
                               style={{ minWidth: 34, alignItems: 'center', paddingHorizontal: sp.sm, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                              <Text style={{ ...ty.caption, fontWeight: '600', color: badgeFor(row.method) ? t.ink : t.ink3 }}>{rm.short}</Text>
+                              <Text style={{ ...ty.caption, ...font('600'), color: badgeFor(row.method) ? t.ink : t.ink3 }}>{rm.short}</Text>
                             </Pressable>
                             {/* Hidden on the last row rather than disabled: an
                                 exercise of no sets is not a lighter exercise,
@@ -3594,7 +3687,7 @@ export default function Builder() {
                           accessibilityLabel={`Weight unit: ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'pounds' : 'kilograms'}`}
                           onPress={() => patchEx(di, e.key, { loadUnit: (e.loadUnit ?? defaultUnit) === 'kg' ? 'lb' : 'kg' })}
                           style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                          <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
+                          <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
                         </Pressable>
                       </View>
                     </View>
@@ -3656,7 +3749,7 @@ export default function Builder() {
                       accessibilityLabel={`Weight unit: ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'pounds' : 'kilograms'}`}
                       onPress={() => patchEx(di, e.key, { loadUnit: (e.loadUnit ?? defaultUnit) === 'kg' ? 'lb' : 'kg' })}
                       style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
                     </Pressable>
                   </View>
 
@@ -4303,7 +4396,7 @@ export default function Builder() {
                   {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{c.name}</Text>
                   {/* The warning is a DOT, not the ink: warn as caption text
                       measures under AA on the three light palettes, so the one
                       sentence the coach most needs was the hardest to read.
@@ -4436,7 +4529,7 @@ export default function Builder() {
                 <View style={{ marginTop: sp.md, gap: sp.sm }}>
                   {injuryGate.outstanding.map((inj, i) => (
                     <View key={i}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {areaLabel(inj.area)} · {inj.severity}
                       </Text>
                       {inj.note ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{inj.note}</Text> : null}
@@ -4689,7 +4782,7 @@ export default function Builder() {
                       own invention has no artwork and is not lent any. */}
                   <ExerciseThumb uri={thumbFor(rowFor(x.name) ?? { thumbPath: null })} t={t} size={44} />
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{x.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{x.name}</Text>
                     {x.group ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{x.group}</Text> : null}
                   </View>
                   {(() => {
@@ -4788,7 +4881,7 @@ export default function Builder() {
                             loading". */}
                         <ExerciseThumb uri={thumbFor(e)} t={t} size={44} />
                         <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.display.text}</Text>
+                          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{e.display.text}</Text>
                           {/* Only what the row actually carries. A movement with
                               no muscle group shows no muscle group — never
                               "Uncategorised", which is a label we invented, and
@@ -4880,10 +4973,10 @@ export default function Builder() {
                       <Icon name="grid" size={17} color={t.brand} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.name}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{num(dc)} day{s(dc)} · {num(ec)} exercise{s(ec)}{isStarter(tpl.id) ? ' · starter' : ''}</Text>
                     </View>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Use</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: t.brand }}>Use</Text>
                   </Pressable>
                   {/* Not offered on a starter. Those three are compiled into
                       the bundle, so "deleting" one hides it until the next
@@ -4968,10 +5061,10 @@ export default function Builder() {
                                borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                       <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
                                      backgroundColor: on ? t.brand : t.surface2 }}>
-                        <Text style={{ ...ty.caption, fontWeight: '700', color: on ? t.brandInk : t.ink3 }}>{m.short}</Text>
+                        <Text style={{ ...ty.caption, ...font('700'), color: on ? t.brandInk : t.ink3 }}>{m.short}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, color: t.ink, fontWeight: on ? '600' : '400' }}>{m.label}</Text>
+                        <Text style={{ ...ty.body, color: t.ink, ...font(on ? '600' : '400') }}>{m.label}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{m.blurb}</Text>
                         {!m.countsToVolume ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Not counted as training volume.</Text>

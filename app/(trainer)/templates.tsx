@@ -66,8 +66,10 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { DateSheet } from '../../src/ui/DateSheet';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
-import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Flag, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Flag, Notice, PartialRead, IconPlate, TonedChip } from '../../src/ui/kit';
+import { DayPips } from '../../src/ui/coach/ProgramBuilderFlow';
+import { WEEK_DAYS } from '../../src/lib/weekStart';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -396,10 +398,11 @@ export default function Templates() {
         {/* The board's page head (coach page 15 lists this one as Program
             Templates). The eyebrow went; the line under the title says what
             the screen is for. */}
-        <PageHead title="Program Templates" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
-          Build once, assign to many. Save any program from the builder.
-        </Text>
+        {/* The sentence that sat under the head is the head's own subtitle
+            now, cut to the half that is not an instruction: prose comes off
+            the page, and "save any program from the builder" is said by the
+            empty state below to the one coach it is news to. */}
+        <PageHead title="Program Templates" subtitle="Build once, assign to many" />
 
         {/* ── the coach's named programmes, one tap each ───────────────────
             Reported from a coach's phone: "Is there a way again to create
@@ -418,7 +421,9 @@ export default function Templates() {
               <Text style={{ ...ty.micro, color: t.ink3 }}>Your Programmes</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{usage.withheld ? 'Newest first' : 'Most used first'}</Text>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg }}>
+            {/* Room under the chips for the card shadow, which a horizontal
+                ScrollView otherwise clips at its own bottom edge. */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg, paddingBottom: sp.sm, paddingHorizontal: 2 }}>
               {shortcuts.map((tpl) => {
                 const on = usage.withheld ? 0 : (usage.byId[tpl.id]?.on.length ?? 0);
                 const weeks = isBlock(tpl.program) ? weekCount(tpl.program) : 1;
@@ -429,9 +434,10 @@ export default function Templates() {
                     accessibilityLabel={`Open ${tpl.name} in the builder. ${shape}${on ? `. ${num(on)} training it now` : ''}.`}
                     style={{ minHeight: MIN_TARGET, maxWidth: 220, justifyContent: 'center',
                              paddingHorizontal: sp.lg, paddingVertical: sp.sm,
-                             borderRadius: radius.md, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring }}>
-                    <Text numberOfLines={2} style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{tpl.name}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                             borderRadius: radius.md, backgroundColor: t.surface, ...elevation.card }}>
+                    <Text numberOfLines={2} style={{ ...ty.label, ...font('600'), color: t.ink }}>{tpl.name}</Text>
+                    <View style={{ marginTop: 6 }}><DayPips days={tpl.program.days} weekDays={WEEK_DAYS} /></View>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                       {shape}{on ? ` · ${num(on)} training it` : ''}
                     </Text>
                   </Pressable>
@@ -479,19 +485,38 @@ export default function Templates() {
           {templates.map((tpl, i) => (
             <View key={tpl.id} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                <View style={{ width: 38, height: 38, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="grid" size={18} color={t.brand} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{isStarter(tpl.id) ? ' · starter' : ''}</Text>
+                {/* A starter is the platform's and a saved one is the coach's;
+                    the plate says which before the caption does. */}
+                <IconPlate icon="grid" tone={isStarter(tpl.id) ? 'amber' : 'brand'} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{tpl.name}</Text>
+                  {/* The week as pips, each day in its type's colour — the
+                      shape of the programme without opening it. Drawn off the
+                      template's own days, so there is nothing to withhold. */}
+                  <View style={{ marginTop: 6 }}><DayPips days={tpl.program.days} weekDays={WEEK_DAYS} /></View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{isStarter(tpl.id) ? ' · starter' : ''}</Text>
                   {/* Present tense, and only ever about who is ON something.
                       Nothing behind this line reads a session or an adherence
                       figure, so it must never be read as saying a programme
                       worked — and a template nobody is on says nothing at all
                       rather than reporting its own absence twenty times over. */}
+                  {/* As chips now: the count is the thing an eye looks for down
+                      a list, and the two counts are two different facts — on
+                      it as saved, and on a copy a coach has since edited.
+                      `byId` is EMPTY under a withheld read (see
+                      src/lib/templateUsage.ts), so no chip can be drawn from a
+                      count nobody made. */}
                   {usage.byId[tpl.id]?.line ? (
-                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{usage.byId[tpl.id].line}</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                      {usage.byId[tpl.id].on.length ? (
+                        <TonedChip icon="people" tone="brand"
+                          label={`${num(usage.byId[tpl.id].on.length)} Training It`} />
+                      ) : null}
+                      {usage.byId[tpl.id].from.length ? (
+                        <TonedChip icon="pencil" tone="blue"
+                          label={`${num(usage.byId[tpl.id].from.length)} on an Edited Copy`} />
+                      ) : null}
+                    </View>
                   ) : null}
                 </View>
               </View>
@@ -756,10 +781,10 @@ export default function Templates() {
                         {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
                       </View>
                       <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                        <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
                         {/* The warning is a DOT, not the ink. warn as caption text
                             measures 3.87–4.08:1 on the three light palettes —
                             under AA — so "replaces the program they are on" was
@@ -917,9 +942,11 @@ function PlatformProgrammes() {
         title="Platform Programmes"
         note={isWhole(status) && !signedOut && templates.length ? String(templates.length) : undefined}
       />
-      <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-        Ready-made plans that ship with the app. They are not yours and they are not in your library — you
-        cannot edit, delete or assign one. They are here to read and to build from.
+      {/* One line where there were three. What it still has to say is the
+          part that is a fact about the controls — no Edit, Delete or Assign
+          here — so a coach does not go looking for them. */}
+      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+        Ships with the app, to read and build from. Not editable, deletable or assignable.
       </Text>
 
       {/* Loading, failed, not-allowed-to-look and genuinely empty are four
@@ -971,12 +998,22 @@ function PlatformProgrammes() {
                   ].filter(Boolean).join('. ')}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg, minHeight: MIN_TARGET }}
                 >
-                  <View style={{ width: 38, height: 38, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name="grid" size={18} color={t.ink2} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name?.text ?? x.id}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{meta}</Text>
+                  <IconPlate icon="grid" tone="purple" />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.head, color: t.ink }}>{name?.text ?? x.id}</Text>
+                    {/* Sessions a week as filled pips out of seven. A COUNT,
+                        not a calendar — the catalogue says how often and not
+                        on which days — so they fill from the leading edge and
+                        `meta` beside them says the number in words. Nothing is
+                        drawn for a row that carries no frequency. */}
+                    {typeof x.frequencyPerWeek === 'number' && x.frequencyPerWeek > 0 ? (
+                      <View style={{ flexDirection: 'row', gap: 5, marginTop: 6 }}>
+                        {Array.from({ length: 7 }, (_, k) => (
+                          <View key={k} style={{ width: 14, height: 8, borderRadius: 4, backgroundColor: k < Math.min(7, x.frequencyPerWeek as number) ? t.data.purple : t.surface3 }} />
+                        ))}
+                      </View>
+                    ) : null}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{meta}</Text>
                     {description ? (
                       <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }} numberOfLines={isOpen ? undefined : 2}>{description.text}</Text>
                     ) : null}

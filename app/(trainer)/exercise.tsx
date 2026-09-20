@@ -38,8 +38,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Ghost, PageHead, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, Notice, Ghost, PageHead, Flag, TonedChip, Donut, Legend, type Tone } from '../../src/ui/kit';
+import { groupTone } from '../../src/ui/coach/ProgramBuilderFlow';
+import { sp, layout, radius, elevation, type as ty, font } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
@@ -83,6 +84,16 @@ import {
 import { liftIn } from '../../src/lib/units';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 
+
+/** A band's colour, for its slice of the ring and the chip over its list. The
+ *  three verdicts take the app's three state colours — going up is fine,
+ *  not moving is slipping, going backwards needs the coach — and the three
+ *  that are NOT verdicts take hues that say nothing: nobody is doing badly by
+ *  being too new to judge. */
+const LEVEL_TONE: Record<StalledLevel, Tone> = {
+  climbing: 'brand', holding: 'amber', dropping: 'red',
+  new: 'blue', 'no-load': 'purple', unseen: 'neutral',
+};
 
 export default function TrainerExercise() {
   const t = useTheme();
@@ -203,6 +214,12 @@ export default function TrainerExercise() {
     .filter((x): x is string => !!x)
     .map(cap);
 
+  // The demonstration as the page's hero: the large radius and the hero
+  // shadow. Two views because a shadow and a clip cannot share one — the
+  // `overflow: 'hidden'` that rounds the picture also cuts the shadow off.
+  const hero = { borderRadius: radius.xl, backgroundColor: t.surface, ...elevation.hero };
+  const heroClip = { borderRadius: radius.xl, overflow: 'hidden' as const };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
@@ -222,11 +239,14 @@ export default function TrainerExercise() {
               reads the translated one. `display.note` says when the
               catalogue has no translation, so an English name is never
               passed off as a German one. The identity is still `name`. */}
-          <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
+          {/* The group in its own colour — the one its chip has in the
+              library and its bar has in the builder — and the kit beside it. */}
           {detail && (detail.group || detail.equipment) ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-              {[detail.group ? cap(detail.group) : null, detail.equipment ? cap(detail.equipment) : null].filter(Boolean).join(' · ')}
-            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: sp.sm, rowGap: 2, marginTop: 6 }}>
+              {detail.group ? <TonedChip tone={groupTone(detail.group)} label={cap(detail.group)} /> : null}
+              {detail.equipment ? <Text style={{ ...ty.caption, color: t.ink3 }}>{cap(detail.equipment)}</Text> : null}
+            </View>
           ) : null}
           {display?.note ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{display.note}</Text>
@@ -243,14 +263,16 @@ export default function TrainerExercise() {
           <Notice tone={t.warn} kicker="Exercise" title="This could not be read"
             note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
         ) : clip ? (
-          <ExerciseVideo video={clip} exerciseName={detail?.name || name} />
+          <View style={hero}><View style={heroClip}><ExerciseVideo video={clip} exerciseName={detail?.name || name} /></View></View>
         ) : animUrl ? (
           <>
+            <View style={hero}><View style={heroClip}>
             <DemoAnimation uri={animUrl} label={detail?.name || name}
               // The stills, so the box is never empty while 1.6 MB of clip is on
               // its way, and so a clip that never arrives lands on the picture we
               // already had rather than on a hole.
               stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
+            </View></View>
             {detail?.demoLicence !== 'commercial' ? (
               <View style={{ marginTop: sp.sm }}>
                 <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
@@ -259,7 +281,7 @@ export default function TrainerExercise() {
           </>
         ) : frames.length ? (
           <>
-            <FrameLoop urls={frames} label={detail?.name || name} />
+            <View style={hero}><View style={heroClip}><FrameLoop urls={frames} label={detail?.name || name} /></View></View>
             {caption ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{caption}</Text> : null}
             {/* Beside the artwork, not two screens away. The licence asks for
                 one visible credit and the Credits card on Profile is it; this
@@ -346,20 +368,23 @@ export default function TrainerExercise() {
                 that has none. */}
             {detail.instructions.length ? (
               <>
-                <Rule />
                 <Section>
                   <SectionHead title="Instructions" note={`${detail.instructions.length} steps`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-                      <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
-                      <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
+                      {/* The mockups' numbered plate: a Sora numeral on the
+                          accent's soft plate. A grey "1" at label size beside
+                          a paragraph was a list with its numbers missing. */}
+                      <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ ...ty.label, ...font('700', 'display'), color: t.brandText }}>{n + 1}</Text>
+                      </View>
+                      <Text style={{ ...ty.body, color: t.ink2, flex: 1, paddingTop: 3 }}>{step}</Text>
                     </View>
                   ))}
                 </Section>
               </>
             ) : status === 'ready' ? (
               <>
-                <Rule />
                 <Section>
                   <SectionHead title="Instructions" />
                   {/* Some rows carry no instructions because nobody has
@@ -384,26 +409,16 @@ export default function TrainerExercise() {
                 description is an invented fact about somebody's training. */}
             {detail.description ? (
               <>
-                <Rule />
                 <Section>
                   <Text style={{ ...ty.body, color: t.ink }}>{detail.description}</Text>
                 </Section>
               </>
             ) : null}
 
-            <Rule />
             <Section>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                {detail.group ? (
-                  <View style={{ backgroundColor: t.brand, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{detail.group}</Text>
-                  </View>
-                ) : null}
-                {chips.map((c) => (
-                  <View key={c} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{c}</Text>
-                  </View>
-                ))}
+                {detail.group ? <TonedChip tone={groupTone(detail.group)} label={detail.group} /> : null}
+                {chips.map((c) => <TonedChip key={c} tone="neutral" label={c} />)}
               </View>
               {/* A coach programming for somebody training at home needs to know
                   what the lift is performed on. An absent equipment column is a
@@ -427,7 +442,6 @@ export default function TrainerExercise() {
                 nothing. */}
             {detail.primaryMuscles.length || detail.secondaryMuscles.length ? (
               <>
-                <Rule />
                 <Section>
                   <SectionHead title="Muscles Worked" />
                   <ExerciseMuscles primary={detail.primaryMuscles} secondary={detail.secondaryMuscles} status={status} />
@@ -447,12 +461,11 @@ export default function TrainerExercise() {
             visible to everybody except the person doing the coaching. */}
         {detail && detail.tips.length ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Tips" note={`${detail.tips.length}`} />
               {detail.tips.map((tip, n) => (
                 <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.body, color: t.brand }}>·</Text>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand, marginTop: 9 }} />
                   <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{tip}</Text>
                 </View>
               ))}
@@ -465,7 +478,6 @@ export default function TrainerExercise() {
             belongs in somebody's week. */}
         {detail && (detail.goals.length || detail.tags.length) ? (
           <>
-            <Rule />
             <Section>
               {detail.goals.length ? (
                 <>
@@ -504,12 +516,8 @@ export default function TrainerExercise() {
             is not required, only that the screen has stopped loading. */}
         {status !== 'loading' ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Across Your Roster" />
-              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                Every client on your book against this movement — who is progressing, who has stalled, and who has never logged it.
-              </Text>
               <View style={{ flexDirection: 'row' }}>
                 <Ghost
                   label={askedRoster ? 'Hide Your Roster' : 'Show Your Roster'}
@@ -529,10 +537,26 @@ export default function TrainerExercise() {
                       means one thing — logged in both halves of the window and
                       no heavier in the second — and a coach who disagrees can
                       point at the row rather than at a verdict. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                    Compared over {ROSTER_WINDOW_DAYS} days, split in half: the heaviest set logged
-                    in the recent half against the heaviest in the earlier one. It is a claim about the
-                    record and nothing else — reps added at the same weight are progress and do not show here.
+                  {/* ── the book against this movement, as one ring ──────────
+                      Only when BOTH reads are whole — the aggregate and the
+                      book it is judged against. Under anything less the
+                      sentence above says why and there is no ring: a share of
+                      a book that did not load is a share of nothing anybody
+                      can name. The legend carries every count in words, and
+                      green, amber and red mean here what they mean on every
+                      other screen: fine, slipping, needs you. */}
+                  {isWhole(rosterAsk) && isWhole(rosterStatus) && rosterJudged.length ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg, marginTop: sp.lg }}>
+                      <Donut centre={num(rosterJudged.length)} sub={rosterJudged.length === 1 ? 'client' : 'clients'}
+                        slices={rosterBands.map((b) => ({ label: LEVEL_TITLE[b.level], value: b.rows.length, tone: LEVEL_TONE[b.level], shown: num(b.rows.length) }))}
+                        spoken={`${num(rosterJudged.length)} on your book. ${rosterBands.map((b) => `${LEVEL_TITLE[b.level]}, ${num(b.rows.length)}`).join('. ')}.`} />
+                      <Legend items={rosterBands.map((b) => ({ label: LEVEL_TITLE[b.level], value: b.rows.length, tone: LEVEL_TONE[b.level], shown: num(b.rows.length) }))} />
+                    </View>
+                  ) : null}
+                  {/* The judgement is defined in one line where it was three:
+                      what is compared, and the one thing it cannot see. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {`Heaviest set, recent half of ${ROSTER_WINDOW_DAYS} days against the earlier half. Reps added at the same weight do not show.`}
                   </Text>
                   {rosterAsk === 'error' ? (
                     <View style={{ marginTop: sp.md }}>
@@ -544,7 +568,7 @@ export default function TrainerExercise() {
                   ) : null}
                   {rosterAsk === 'ready' ? rosterBands.map((band) => (
                     <View key={band.level} style={{ marginTop: sp.md }}>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>{LEVEL_TITLE[band.level]}</Text>
+                      <TonedChip tone={LEVEL_TONE[band.level]} label={LEVEL_TITLE[band.level]} />
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                         {`${band.rows.length === 1 ? 'This client ' : 'These clients '}${LEVEL_NOTE[band.level]}.`}
                       </Text>
@@ -579,8 +603,7 @@ export default function TrainerExercise() {
                   )) : null}
                   {rosterAsk === 'ready' && rosterJudged.some((c) => c.e1rmKg != null) ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                      Any one-rep max behind these figures is an ESTIMATE off logged sets. Nobody in this app
-                      has tested one, and the same arithmetic is what a client's own progression screen uses.
+                      Any one-rep max behind these is an estimate off logged sets — nobody has tested one.
                     </Text>
                   ) : null}
                 </View>
