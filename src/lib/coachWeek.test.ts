@@ -21,7 +21,7 @@
 import {
   DAYS_AHEAD, DAYS_BEHIND, daysBetweenIso, shiftIso, planWindow, sideOf,
   coachWeek, dayHeading, whenLabel, coachPlanLine, coachConflictLine,
-  programmeCaveat, planNote, type ScheduledFocus,
+  programCaveat, planNote, type ScheduledFocus,
 } from './coachWeek';
 import { PLANNED_DAY_TYPES, type PlannedDay, type PlanOutcome } from './dayPlan';
 import { scheduledFocus } from './checklist';
@@ -166,8 +166,8 @@ ok(plain.conflicts.length === 0,
 for (const d of [...plain.ahead, ...plain.gone]) {
   ok(d.conflict === null, `${d.plan.dateISO} claims nothing while the program is unknown`);
 }
-ok(programmeCaveat(true, 'Sam') === null, 'a known program needs no caveat');
-ok((programmeCaveat(false, 'Sam') ?? '').includes('Sam'),
+ok(programCaveat(true, 'Sam') === null, 'a known program needs no caveat');
+ok((programCaveat(false, 'Sam') ?? '').includes('Sam'),
   'and an unknown one is said out loud, because no conflicts looks the same as never having checked');
 
 // ── labels: the right DAY, written the reader's way ──

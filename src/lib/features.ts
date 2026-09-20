@@ -88,7 +88,7 @@ export const CLIENT_FEATURES: Feature[] = [
   //
   // Not `soloHide`. A member training themselves is the person these are FOR;
   // the note is what keeps them from reading as a coach's work.
-  { key: 'programs', label: 'Programs', note: 'Ready-made plans to follow — not written by your coach', route: '/(client)/programmes', icon: 'grid', area: 'train', keywords: 'program programs program plan plans routine routines workout plan template templates split ppl push pull legs upper lower full body 5x5 stronglifts beginner strength hypertrophy bodyweight home dumbbell kettlebell hiit mobility core ready made follow' },
+  { key: 'programs', label: 'Programs', note: 'Ready-made plans to follow — not written by your coach', route: '/(client)/programs', icon: 'grid', area: 'train', keywords: 'program programs program plan plans routine routines workout plan template templates split ppl push pull legs upper lower full body 5x5 stronglifts beginner strength hypertrophy bodyweight home dumbbell kettlebell hiit mobility core ready made follow' },
   { key: 'tools', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools', icon: 'settings', area: 'train', keywords: 'calculator 1rm plates macros' },
   { key: 'recovery', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery', icon: 'water', area: 'train', keywords: 'sleep hydration mobility rest' },
   { key: 'habits', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits', icon: 'check', area: 'train', keywords: 'water streak daily' },

@@ -45,7 +45,7 @@ import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/t
 import { useClientData } from '../../src/ui/clientData';
 import { INJURY_AREAS, areaLabel, newInjuryId, type Injury, type InjurySeverity } from '../../src/lib/injuries';
 import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle, injuryStanding } from '../../src/lib/injuryEdit';
-import { ackState, programmeChoiceState } from '../../src/lib/injuryGate';
+import { ackState, programChoiceState } from '../../src/lib/injuryGate';
 import { worstStatus } from '../../src/ui/loadStatus';
 import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -125,7 +125,7 @@ export default function Injuries() {
   // able to disagree — so the client side passes the same thing.
   const coachRead = ackState(worstStatus(mine.readStatus, c.profileStatus), active, mine.read?.keys ?? null);
   // The second fact, with its own status and its own failure sentence.
-  const choices = programmeChoiceState(mine.choicesStatus, mine.choices.length);
+  const choices = programChoiceState(mine.choicesStatus, mine.choices.length);
 
   const closeSheet = () => { setNote(''); setSev('moderate'); setArea('knee'); setEditing(null); setOpen(false); };
 

@@ -448,7 +448,7 @@ export default function MyTraining() {
    *
    * It used to be `mintAll(names)`, called from Log by Text as well, and it
    * passed NO muscle group — which is how rows reached a 615-row catalogue
-   * with `muscle_group` null, and from there a programme and two templates
+   * with `muscle_group` null, and from there a program and two templates
    * with a blank `group` that `groupsOf` then dropped. A group is now required
    * (src/ui/customExercise.ts), and a free-text sentence cannot be asked for
    * one per lift without becoming a form. So Log by Text mints nothing and

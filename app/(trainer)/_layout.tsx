@@ -97,7 +97,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
         <Tabs.Screen name="client-intake" options={{ href: null, title: 'Their Intake' }} />
         <Tabs.Screen name="client-nutrition" options={{ href: null, title: 'Their Nutrition' }} />
-        <Tabs.Screen name="group" options={{ href: null, title: 'Group Programme' }} />
+        <Tabs.Screen name="group" options={{ href: null, title: 'Group Program' }} />
         <Tabs.Screen name="share-kit" options={{ href: null, title: 'Share Kit' }} />
         <Tabs.Screen name="documents" options={{ href: null, title: 'Documents' }} />
         <Tabs.Screen name="invoices" options={{ href: null, title: 'Invoices' }} />

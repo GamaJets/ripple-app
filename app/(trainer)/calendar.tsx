@@ -70,7 +70,7 @@ import { slotLabel, slotWhoName, unnamedSlotNote } from '../../src/lib/slotName'
 // what they are due to train in it. Both were reachable only by LEAVING the
 // day — the client's record was behind Check In, which marks them present on
 // the way through, and their session for the day was three taps further on
-// behind the programme tab. See the header of src/lib/daySession.ts; every
+// behind the program tab. See the header of src/lib/daySession.ts; every
 // sentence and every refusal below comes out of it, and none of them is
 // decided here.
 import {
@@ -80,7 +80,7 @@ import {
 import { canFinish } from '../../src/lib/sessionFinish';
 import {
 } from '../../src/lib/daySession';
-// Which programme each client is on, and the day the coach said their block
+// Which program each client is on, and the day the coach said their block
 // begins. The same provider app/(trainer)/client-week.tsx resolves a week
 // from, read the same way — there is one answer to "which week" in this app.
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -436,13 +436,13 @@ export default function TrainerSchedule() {
    * The day sheet listed a time, a duration and a status, and a coach standing
    * in front of the day they were about to work could not find out from it what
    * the 8am was supposed to be. It was on the client screen, behind the
-   * programme tab, three taps on.
+   * program tab, three taps on.
    *
-   * This provider already holds it — the programme and the coach's own start
+   * This provider already holds it — the program and the coach's own start
    * date for every client on the book — and `trainingOnDay` resolves the day
    * out of it through `blockPosition`, `clientWeek` and `scheduledDay`, which
    * is the machinery app/(trainer)/client-week.tsx already uses. Its own
-   * status is carried into every answer: a null programme under a failed read
+   * status is carried into every answer: a null program under a failed read
    * is UNKNOWN, and drawing it as a rest day is the one thing this must not do.
    */
   const ap = useAssignedPrograms();
@@ -879,7 +879,7 @@ export default function TrainerSchedule() {
     Promise.resolve(reloadPolicy()),
     // The plan on each booked row is resolved from these. A pull that moved
     // the diary and left the assignments would redraw the day against the
-    // programmes this phone was already holding — which under a failed read is
+    // programs this phone was already holding — which under a failed read is
     // exactly the state the row's own caveat is about, and a coach who pulls
     // to clear it should actually be clearing it.
     Promise.resolve(ap.reload()),

@@ -211,7 +211,7 @@ export function listLine(
  * separates the first two; the third is why the "none" branch does not claim
  * the client is training to nothing.
  */
-export function programmeLine(
+export function programLine(
   status: LoadStatus,
   title: string | null,
   days: number | null,

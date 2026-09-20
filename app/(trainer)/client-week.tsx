@@ -103,7 +103,7 @@ import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import {
   coachWeek, planWindow, dayHeading, whenLabel, coachPlanLine, coachConflictLine,
-  programmeCaveat, planNote, DAYS_AHEAD, DAYS_BEHIND,
+  programCaveat, planNote, DAYS_AHEAD, DAYS_BEHIND,
   type CoachPlanDay, type ScheduledFocus,
 } from '../../src/lib/coachWeek';
 
@@ -130,7 +130,7 @@ const TYPE_BAR: Record<PlannedDayType, number> = { training: 1, deload: 0.55, re
 
 export default function ClientWeek() {
   const t = useTheme();
-  // Movement names here come out of the client's LOG and out of the programme
+  // Movement names here come out of the client's LOG and out of the program
   // JSON, both of which store the English identity. A German coach reads the
   // library in German and would otherwise read this section in English.
   const { textOf: movement } = useMovementName();
@@ -253,7 +253,7 @@ export default function ClientWeek() {
    * A client typed into the book by hand has a `coach_clients` row and no user
    * account, so `workouts` holds nothing for them — and the read would come
    * back with zero rows and NO error, which this screen would otherwise draw as
-   * a person who has trained none of their programme. The roster is the only
+   * a person who has trained none of their program. The roster is the only
    * thing that knows which table the row came from; see
    * src/lib/clientRecord.ts. `handAdded` undefined is "the roster has not
    * said", which goes on asking — only an explicit true withholds.
@@ -340,7 +340,7 @@ export default function ClientWeek() {
   }, [picked, askable, today, loadLog]);
 
   // Four reads: the client's planned days, the roster the picker and the
-  // header come off, the programme assignments — which decide which week of a
+  // header come off, the program assignments — which decide which week of a
   // block is on screen, so a refresh that moved the days and left the
   // assignment would lay this week's plan out against last week's block — and
   // the training log the last section compares that same week against.
@@ -349,17 +349,17 @@ export default function ClientWeek() {
     ...(picked ? [load(picked, askable), loadLog(picked, askable)] : []),
   ]), [r, ap, picked, load, loadLog, askable]));
 
-  // The programme this coach has assigned them, or null. Null covers three
-  // different situations — none assigned, the read failed, and a programme
+  // The program this coach has assigned them, or null. Null covers three
+  // different situations — none assigned, the read failed, and a program
   // assigned by a different coach, which `assigned_programs_coach_rw` will not
-  // show this one — and none of the three is "their programme schedules
-  // nothing". So a null programme feeds `undefined` into planConflict, which
+  // show this one — and none of the three is "their program schedules
+  // nothing". So a null program feeds `undefined` into planConflict, which
   // claims no conflict on an unknown, and the caveat below says so in words.
-  const programme = picked ? ap.getProgram(picked) : null;
+  const program = picked ? ap.getProgram(picked) : null;
   /**
    * The week of the block this client's own phone is showing them.
    *
-   * This screen compared the days they had marked against `programme.days` —
+   * This screen compared the days they had marked against `program.days` —
    * week one, by construction (see `ProgramWeek` in src/lib/programs.ts) —
    * whichever week the client was actually standing in. On a twelve-week block
    * that made every conflict after week one a comparison against a session
@@ -378,13 +378,13 @@ export default function ClientWeek() {
    */
   const startsOn = picked ? (ap.startsOn[picked] ?? null) : null;
   const shownWeek = useMemo(() => {
-    if (!programme) return null;
-    const weeks = programWeeks(programme);
+    if (!program) return null;
+    const weeks = programWeeks(program);
     if (!weeks.length) return null;
-    const pos = blockPosition(startsOn, todayISO, weekCount(programme));
+    const pos = blockPosition(startsOn, todayISO, weekCount(program));
     const w = clientWeek(pos, weeks.length);
     return { days: (weeks[w.index] ?? weeks[0]).days, at: w, label: weekLabel(weeks[w.index] ?? weeks[0], w.index + 1) };
-  }, [programme, startsOn, todayISO]);
+  }, [program, startsOn, todayISO]);
   const focusOn = useCallback<ScheduledFocus>(
     (weekday) => (shownWeek ? scheduledFocus(shownWeek.days, weekday) : undefined),
     [shownWeek],
@@ -436,7 +436,7 @@ export default function ClientWeek() {
   }), [shownWeek, ap.status, logStatus, log, todayISO, oldestLogged]);
   const loads = useMemo(() => loadLine(loadTally(pva.movements), who), [pva, who]);
 
-  const caveat = ap.status === 'loading' ? null : programmeCaveat(!!programme, who);
+  const caveat = ap.status === 'loading' ? null : programCaveat(!!program, who);
 
   // The span actually asked for, so the empty-week sentence can name its own
   // edges rather than describe a fortnight in the abstract.
@@ -606,7 +606,7 @@ export default function ClientWeek() {
                 ) : (
                   <>
                     {/* Conflicts first, and only the ones still ahead. A day
-                        their programme and their own mark disagree about is
+                        their program and their own mark disagree about is
                         worth a message while it can still be settled; the same
                         disagreement on a day already gone is an argument about
                         the past, so it stays on its row and out of here. */}
@@ -621,7 +621,7 @@ export default function ClientWeek() {
                         <SectionHead title="Worth Raising"
                           note={isWhole(status) ? `${board.conflicts.length}` : undefined} />
                         <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
-                          Days where {who}&rsquo;s mark and the programme you assigned them say
+                          Days where {who}&rsquo;s mark and the program you assigned them say
                           different things. Neither has been changed by the other, and nothing on
                           this screen will change either.
                         </Text>
@@ -667,7 +667,7 @@ export default function ClientWeek() {
                       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                         Today and the next {DAYS_AHEAD - 1} days. Far enough out to hold the whole of
                         next week, which is where a deload or a week away needs catching — after it
-                        starts is too late to reprogramme it.
+                        starts is too late to reprogram it.
                       </Text>
                       </Expandable>
                       {board.ahead.length ? board.ahead.map(dayRow) : (
@@ -761,13 +761,13 @@ export default function ClientWeek() {
                     ) : null}
 
                     {/* The other half of the conversation: work they logged that
-                        this programme does not name. Spelled as they typed it. */}
+                        this program does not name. Spelled as they typed it. */}
                     {pva.offPlan.length ? (
                       <View style={{ marginTop: sp.lg }}>
                         <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but Not Prescribed</Text>
                         <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{pva.offPlan.map(movement).join(' \u00b7 ')}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                          Work outside the programme is not a fault; it is the part of {who}&rsquo;s training the
+                          Work outside the program is not a fault; it is the part of {who}&rsquo;s training the
                           plan does not describe.
                         </Text>
                       </View>
@@ -785,14 +785,14 @@ export default function ClientWeek() {
                   </Section>
                 )}
 
-                {/* ── whose copy of the programme every clash above was drawn
+                {/* ── whose copy of the program every clash above was drawn
                     against ──────────────────────────────────────────────────
                     `getProgram` consults this device's cache when no read has
                     landed, and serves it under 'error' — deliberately, and the
                     header of src/ui/assignedPrograms.tsx argues why. What it
                     does NOT do is make anything 'ready'. So on a failed read
-                    `programme` is non-null, `programmeCaveat` returns null
-                    because a programme IS known, and every clash on this screen
+                    `program` is non-null, `programCaveat` returns null
+                    because a program IS known, and every clash on this screen
                     was computed against whatever was on the phone. The horizon
                     on that cache is thirty days: a coach who rewrote the block
                     a fortnight ago reads last month's Thursday against this
@@ -803,7 +803,7 @@ export default function ClientWeek() {
                     being served — `mayServeCached` decides that — so it needs
                     no gate of its own and disappears the moment a live read
                     lands. app/(client)/week.tsx :194 renders it in the same
-                    position over the same programme; this screen is the coach's
+                    position over the same program; this screen is the coach's
                     view of that week and had nothing. */}
                 {ap.cachedNote ? (
                   <Section><Flag tone={t.warn}>{ap.cachedNote}</Flag></Section>
@@ -817,7 +817,7 @@ export default function ClientWeek() {
                     Only on a block, and only because a conflict reported
                     against a week the client is not doing is worse than no
                     conflict at all — it sends the coach to change a session
-                    nobody has. Null on a one-week programme, where a week
+                    nobody has. Null on a one-week program, where a week
                     number would be counting something that does not exist. */}
                 {shownWeek && shownWeek.at.count > 1 && board.state !== 'unreadable' ? (
                   <Section>

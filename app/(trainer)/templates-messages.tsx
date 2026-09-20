@@ -1,7 +1,7 @@
 // Trainer · Saved Messages — the library behind the picker in a chat thread.
 //
 // Named `templates-messages` and not `templates`, because `templates` is
-// already the PROGRAMME template library and expo-router has one flat namespace
+// already the PROGRAM template library and expo-router has one flat namespace
 // per group. Two screens called Templates in one coach app would be a coin toss
 // every time somebody navigated, and the route is the part a person cannot
 // disambiguate from the label.

@@ -100,7 +100,7 @@ export function ackState(
  */
 export type ChoiceState = 'unknown' | 'none' | 'some' | 'partial';
 
-export function programmeChoiceState(status: LoadStatus, count: number): ChoiceState {
+export function programChoiceState(status: LoadStatus, count: number): ChoiceState {
   // whole-ok: 'partial' is a value of this function's own return type and it is
   // produced on the very next line — the type comment above lists all four
   // answers precisely so 'partial' would not have to hide inside one of the

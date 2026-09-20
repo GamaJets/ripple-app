@@ -420,7 +420,7 @@ export default function TrainerVideos() {
   // this and already told own clips from the rest; the row list was not.
   const myId = auth.user?.id ?? null;
   const { templates, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
-  // ── Whose programmes this section is about ─────────────────────────────
+  // ── Whose programs this section is about ─────────────────────────────
   //
   // The heading says "What Your Programs Need", and the list under it has to
   // be the coach's own work or the sentence is false. Two things stood between
@@ -430,11 +430,11 @@ export default function TrainerVideos() {
   //    Legs, Fat-loss Circuit, Tone & Sculpt — so the list is NEVER empty. A
   //    coach who has saved nothing (which, against phgfwzpkkwdysftlgkoq today,
   //    is every coach: `program_templates` holds zero rows) was shown the
-  //    movements of three demonstration programmes, counted, and told how many
+  //    movements of three demonstration programs, counted, and told how many
   //    of them they had still to film. Nobody had written any of it.
   //  · the status was never read. Under 'error' the starters are all that is
   //    left standing where the coach's real library should be, so the coverage
-  //    would have been computed over somebody else's programmes and presented
+  //    would have been computed over somebody else's programs and presented
   //    as a fact about theirs — the same failure the provider's own header
   //    describes for the picker.
   //
@@ -448,7 +448,7 @@ export default function TrainerVideos() {
   // (src/lib/templateLibrary.ts:153) reads `.limit(capLimit())` and answers
   // 'partial' when the page came back at the ceiling, so under it
   // `savedTemplates` is a PREFIX of the coach's library — and the section this
-  // feeds counts across it. A prefix of the programmes produces a SHORTER list
+  // feeds counts across it. A prefix of the programs produces a SHORTER list
   // of movements to film, so the coach is told there is less to do than there
   // is, which is the one direction this section must never be wrong in.
   // `check:whole` matches the `!== 'error'` spelling and cannot see this one.
@@ -549,7 +549,7 @@ export default function TrainerVideos() {
   const openIsHosted = !!openId && openId.startsWith('db');
   const clients = useGrantableClients(openIsHosted);
   // Three reads: the clips themselves, the movement catalogue they are matched
-  // against, and the programme templates the coverage figure is counted over.
+  // against, and the program templates the coverage figure is counted over.
   // Coverage is a ratio across all three, so refreshing one of them would print
   // a fraction whose halves came from different reads.
   //
@@ -801,12 +801,12 @@ export default function TrainerVideos() {
                   : 'Record a clip or paste a link, then choose who gets to watch it.'}>
           {/* ── coverage, as meters ─────────────────────────────────────────
               Filmed OF PROGRAMMED: every bar is a share of the distinct
-              movements in this coach's own saved programmes, which is the
+              movements in this coach's own saved programs, which is the
               denominator `coverageFor` reports. `coverage` is null unless the
               library, the templates AND the ownership of each clip were read
               whole, and a null draws one bar with no fill and the words "Not
               counted", never an empty bar that reads as "nothing filmed". A
-              coach with no saved programmes has nothing to be a share of, and
+              coach with no saved programs has nothing to be a share of, and
               gets no bars at all.
 
               Green is the coach's own clip, blue the Academy's, purple the
@@ -833,7 +833,7 @@ export default function TrainerVideos() {
         </FigureCard>
 
 
-        {/* ── what you programme but nobody has filmed ────────────────────
+        {/* ── what you program but nobody has filmed ────────────────────
             The library answers "what have I recorded". This answers the more
             useful question: what am I asking people to do that they have never
             seen done. Scoped to the movements in this coach's own templates,
@@ -842,7 +842,7 @@ export default function TrainerVideos() {
         {coverage && coverageLine(coverage) ? (
           <>
             <Section>
-              {/* "Programs", not "Programmes". The tab bar under this heading
+              {/* "Programs", not "Programs". The tab bar under this heading
                   says Programs, the Programs tab itself says Programs, and the
                   User Guide quotes this heading — so on one screen, at the
                   default text size, a coach read the British spelling in a
@@ -953,9 +953,9 @@ export default function TrainerVideos() {
         <Section>
           {/* The way into the catalogue, from the one screen where a coach is
               already thinking about movements. Until this row existed the 600
-              exercises a coach can programme were reachable only from inside
+              exercises a coach can program were reachable only from inside
               the builder's "Add Exercise" sheet — so looking one up, or seeing
-              which of them nobody has filmed, meant opening a programme you
+              which of them nobody has filmed, meant opening a program you
               did not want to write. */}
           <ListRow icon="grid" tone="blue" title="Browse the Exercise Library" note="Every movement, and whether you have filmed it"
             onPress={() => router.push('/(trainer)/library')} />

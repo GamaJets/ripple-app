@@ -312,7 +312,7 @@ export function coachConflictLine(
  * they are. Said out loud because a screen showing no conflicts looks identical
  * whether it checked and found none or never checked at all.
  */
-export function programmeCaveat(known: boolean, who: string): string | null {
+export function programCaveat(known: boolean, who: string): string | null {
   return known
     ? null
     : `No program of yours is assigned to ${who} that this app can read, so nothing below has been checked against one. That is not the same as their week agreeing with it.`;

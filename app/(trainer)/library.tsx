@@ -1,10 +1,10 @@
-// Coach · Exercise Library — what you can programme, and whether you have filmed it.
+// Coach · Exercise Library — what you can program, and whether you have filmed it.
 //
 // The catalogue was reachable from exactly one place in the coach app: the
 // "Add Exercise" sheet inside the Program Builder. So a coach could only look
-// a movement up while mid-build, from a modal, with a half-written programme
+// a movement up while mid-build, from a modal, with a half-written program
 // underneath it. Wanting to check what a cable pullover looks like, or what
-// the client will actually see when they tap a row, meant starting a programme
+// the client will actually see when they tap a row, meant starting a program
 // you did not want in order to open a picker you did not want to use.
 //
 // ── Why this is not the owner's library with a different header ────────────
@@ -13,7 +13,7 @@
 // equipment leads their row and is their filter. A client reads it to answer
 // "how do I do this". Neither is the coach's question, which is:
 //
-//     what can I put in a programme, and have I filmed it?
+//     what can I put in a program, and have I filmed it?
 //
 // Both halves matter and only the first one existed anywhere. A coach's clip
 // is the thing their client sees under load; the catalogue's own artwork is
@@ -87,7 +87,7 @@ import { catalogueValue as cap, num } from '../../src/lib/format';
 // barbell and nothing else, was choosing from six hundred movements with no way
 // to exclude the ones that assume a cable stack. The column has been on the row
 // all along — the owner's library has filtered on it since it shipped — and the
-// coach, who is the person actually writing the programme, could not.
+// coach, who is the person actually writing the program, could not.
 //
 // The rule lives in src/lib/equipmentFacet.ts rather than here because it is
 // the SAME rule that screen uses, and a second hand-written case-insensitive
@@ -126,7 +126,7 @@ const inGroup = (field: string | null, chip: string) =>
  *
  *  Says so even when the answer is "we do not know", and always, rather than
  *  leaving the slot blank on the 190 rows that hold no equipment. A blank there
- *  reads as "needs nothing", which is how a cable fly ends up in a programme
+ *  reads as "needs nothing", which is how a cable fly ends up in a program
  *  written for somebody with a pair of dumbbells and a doorway. The same
  *  sentence app/(owner)/library.tsx puts on its rows, word for word, because a
  *  coach and an owner looking at the same movement must not be told two
@@ -296,11 +296,11 @@ export default function TrainerLibrary() {
    * rows for its coverage figure.
    *
    * NULL under anything but a whole read, for the reason that screen states at
-   * length: the provider seeds three built-in starter programmes, so the list is
+   * length: the provider seeds three built-in starter programs, so the list is
    * never empty and a coach who has saved nothing would be shown the movements
    * of three demonstrations as their own work — and `readLibrary` answers
    * 'partial' at the row ceiling, under which this set is a PREFIX and the
-   * filter would hide movements the coach does programme. Null means the control
+   * filter would hide movements the coach does program. Null means the control
    * is not offered at all.
    */
   const { templates, status: tplStatus } = useProgramTemplates();
@@ -319,7 +319,7 @@ export default function TrainerLibrary() {
     return s;
   }, [tplStatus, templates]);
   const [mineOnly, setMineOnly] = useState(false);
-  /** How many rows of the catalogue the coach's own programmes name. Only a
+  /** How many rows of the catalogue the coach's own programs name. Only a
    *  count under a whole catalogue read, like every other figure here. */
   const programmedHere = useMemo(
     () => (programmed == null ? 0 : rows.filter((r) => programmed.has(exerciseSlug(r.name))).length),
@@ -328,7 +328,7 @@ export default function TrainerLibrary() {
   const canScopeToMine = programmed != null && programmedHere > 0;
   // The control can vanish underneath the selection — a refresh whose template
   // read comes back short, or a coach who has just deleted their last
-  // programme. Left alone the filter would keep excluding rows with nothing on
+  // program. Left alone the filter would keep excluding rows with nothing on
   // screen saying it was on, which is the shorter-list-as-a-complete-one shape
   // the kit gap note exists for.
   useEffect(() => { if (!canScopeToMine && mineOnly) setMineOnly(false); }, [canScopeToMine, mineOnly]);
@@ -447,7 +447,7 @@ export default function TrainerLibrary() {
     // Named as the state it is, not as the chip's label: "No movement matches
     // Chest · Not recorded" reads as a kit called Not Recorded.
     if (kit !== ALL_KIT) bits.push(kit === UNRECORDED_KIT ? 'no recorded equipment' : kit);
-    // Named as the cut it is. "No movement matches Chest · In your programmes"
+    // Named as the cut it is. "No movement matches Chest · In your programs"
     // would read as a muscle group somebody had invented.
     if (mineOnly) bits.push('movements you have programmed');
     return `No movement matches ${bits.join(' · ')}.`;
@@ -530,7 +530,7 @@ export default function TrainerLibrary() {
             Above the two facets because it is the coarsest cut and the one a
             coach reaches for first: thirty or forty movements they actually
             write, out of six hundred. Offered only when there are some — an
-            unread template library, or a coach who has saved no programmes,
+            unread template library, or a coach who has saved no programs,
             gets no control rather than one that selects nothing.
 
             The count is on the control, and it is only a count because both
@@ -549,7 +549,7 @@ export default function TrainerLibrary() {
             }}>
             <Icon name={mineOnly ? 'check' : 'grid'} size={13} color={mineOnly ? t.brandInk : t.ink3} />
             <Text style={{ ...ty.label, ...font(mineOnly ? '600' : '500'), color: mineOnly ? t.brandInk : t.ink2 }}>
-              {countable ? `In Your Programmes · ${num(programmedHere)}` : 'In Your Programmes'}
+              {countable ? `In Your Programs · ${num(programmedHere)}` : 'In Your Programs'}
             </Text>
           </Pressable>
         ) : null}
@@ -561,7 +561,7 @@ export default function TrainerLibrary() {
             explanation they can act on. */}
         {mineOnly ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            From your saved programmes — the three starters are not counted.
+            From your saved programs — the three starters are not counted.
           </Text>
         ) : null}
 
@@ -626,9 +626,9 @@ export default function TrainerLibrary() {
           ) : status === 'error' ? (
             // Not "no exercises". The catalogue is there and we could not read
             // it, and a coach shown an empty list would conclude there is
-            // nothing to programme.
+            // nothing to program.
             <Notice tone={t.warn} kicker="Catalogue" title="The Exercise List Could Not Be Read"
-              note="This is our end, not yours — the movements are still there. Nothing below this line is a statement about what you can programme.">
+              note="This is our end, not yours — the movements are still there. Nothing below this line is a statement about what you can program.">
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Try Again" onPress={() => { reload(); }} />
               </View>
@@ -680,7 +680,7 @@ export default function TrainerLibrary() {
                           </View>
                           <View style={{ flex: 1 }}>
                             {/* `r.name` stays the identity — it is what this
-                                row navigates by and what a programme stores.
+                                row navigates by and what a program stores.
                                 Only the label moves. */}
                             <Text style={{ ...ty.head, color: t.ink }}>{r.display.text}</Text>
                             {/* The kit sits AFTER the muscle group, not before
@@ -772,7 +772,7 @@ export default function TrainerLibrary() {
             Your Clips, Academy Clips and Not Filmed count movements a coaching clip reaches, not whether a movement
             can be demonstrated — nearly every exercise here already shows your client how it is done. Not Filmed
             means nothing your clients can watch has been recorded for it; record yours on the Videos screen and
-            yours is what they see. Every movement can go into a programme, and your clients see the same list.
+            yours is what they see. Every movement can go into a program, and your clients see the same list.
           </Text>
         </Expandable>
       </ScrollView>

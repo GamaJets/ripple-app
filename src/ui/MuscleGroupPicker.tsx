@@ -4,7 +4,7 @@
 //
 // Four rows in a 615-row catalogue had no muscle group, because
 // `ensureCatalogueRow` accepted a call with none and two screens made one.
-// Those four reached an assigned programme and two templates, and a programme
+// Those four reached an assigned program and two templates, and a program
 // row with a blank `group` is dropped by `groupsOf` on purpose — a guess made
 // from a movement's name is not a fact. So the owner's Upper day printed
 // "Chest · Arms · Back" over a day containing an overhead press, and Muscle

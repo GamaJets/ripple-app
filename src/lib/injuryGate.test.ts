@@ -5,7 +5,7 @@
 // program is built." These assertions pin the two ways that goes wrong — a
 // gate that never opens, and a gate that opens once and stays open past the
 // next disclosure.
-import { ackState, guardInjuries, injuryKey, programmeChoiceState } from './injuryGate';
+import { ackState, guardInjuries, injuryKey, programChoiceState } from './injuryGate';
 import type { Injury } from './injuries';
 
 const errors: string[] = [];
@@ -134,19 +134,19 @@ ok(injuryKey(knee) === injuryKey(inj('knee', 'mild', 'a different note')), 'the 
 
 // The bug: one folded status meant a failed program read was reported as a
 // failed acknowledgement read, and the block that failed drew as nothing.
-eq(programmeChoiceState('error', 0), 'unknown', 'a failed program read is not "none assigned"');
-eq(programmeChoiceState('error', 3), 'unknown', 'nor is a failed one with stale rows still in hand');
-eq(programmeChoiceState('loading', 0), 'unknown', 'nor is one still in flight');
-eq(programmeChoiceState('ready', 0), 'none', 'a finished read with no rows is genuinely none');
-eq(programmeChoiceState('ready', 2), 'some', 'and with rows is all of them');
-eq(programmeChoiceState('partial', 900), 'partial', 'a truncated read is shown but never called all of them');
-eq(programmeChoiceState('partial', 0), 'unknown', 'a truncation that returned nothing tells us nothing');
+eq(programChoiceState('error', 0), 'unknown', 'a failed program read is not "none assigned"');
+eq(programChoiceState('error', 3), 'unknown', 'nor is a failed one with stale rows still in hand');
+eq(programChoiceState('loading', 0), 'unknown', 'nor is one still in flight');
+eq(programChoiceState('ready', 0), 'none', 'a finished read with no rows is genuinely none');
+eq(programChoiceState('ready', 2), 'some', 'and with rows is all of them');
+eq(programChoiceState('partial', 900), 'partial', 'a truncated read is shown but never called all of them');
+eq(programChoiceState('partial', 0), 'unknown', 'a truncation that returned nothing tells us nothing');
 
 // The two states are independent: every combination is reachable, and the one
 // that mattered is a good acknowledgement read beside a failed program read.
 eq(ackState('ready', [knee], [injuryKey(knee)]), 'covered',
   'the acknowledgement read stands on its own when the program read failed');
-eq(programmeChoiceState('error', 0), 'unknown',
+eq(programChoiceState('error', 0), 'unknown',
   'and the program read says so on its own when the acknowledgement read worked');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

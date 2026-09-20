@@ -3436,7 +3436,7 @@ export default function Train() {
             // them, so a row here labelled "Programs" would read as that, and
             // the fifteen behind it are written for nobody. The screen itself
             // says so again at the top.
-            ['grid', 'Ready-Made Programs', '/(client)/programmes'],
+            ['grid', 'Ready-Made Programs', '/(client)/programs'],
             ['calendar', 'This Week', '/(client)/week'],
             ['trending', 'Targets', '/(client)/progression'],
             // Sits with the training tools rather than three levels down inside

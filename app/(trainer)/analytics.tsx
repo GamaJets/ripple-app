@@ -1121,11 +1121,11 @@ export default function TrainerAnalytics() {
           )}
         </WindowFigure>
 
-        {/* ── programme completions over the window ────────────────────────
+        {/* ── program completions over the window ────────────────────────
             The mockup's second block, as its blue area chart. One completion
-            is one session a client logged — a programme day done — and the
+            is one session a client logged — a program day done — and the
             unit says "sessions", because "completions" under a bare count
-            would otherwise be read as programmes finished, which nothing in
+            would otherwise be read as programs finished, which nothing in
             the record marks. The longer account is in How These Are Counted. */}
         <WindowFigure
           title="Program Completions"
@@ -1205,7 +1205,7 @@ export default function TrainerAnalytics() {
             {prevFigures?.adherenceByBucket.some((v) => v != null) ? ` The fainter bar beside each is the same ${rangeDef.bucketDays === 1 ? 'day' : 'week'} of ${beforeNote}.` : ''}
           </Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            Completions are workout sessions your clients logged from {winSpan}, by the day they trained. A session logged is a programme day done, not a whole programme finished. Nothing in the record marks that.
+            Completions are workout sessions your clients logged from {winSpan}, by the day they trained. A session logged is a program day done, not a whole program finished. Nothing in the record marks that.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             In the roster strip, Adherence is the average of each client’s own check-in rating{avgAdh == null ? '' : `, over the ${_adhKnown.length} who have one`}; At Risk is anyone under 70% on it.

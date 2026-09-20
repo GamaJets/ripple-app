@@ -10,13 +10,13 @@
 //
 // ── The bulk assign is now withheld, not warned about ──────────────────────
 //
-// One tap in the sheet below replaces the training programme of every client
+// One tap in the sheet below replaces the training program of every client
 // the coach ticked. `getProgram` returns null both for a client who is on
 // nothing and for a client whose row did not come back, so against an unread
 // `assigned_programs` that tap silently overwrote however many of them were on
 // something bespoke — and the confirmation said "Assigned". The control waits
 // for a whole read now, and when it has one it marks the clients whose
-// programme it is about to replace. See src/lib/overwriteGuard.ts.
+// program it is about to replace. See src/lib/overwriteGuard.ts.
 //
 // The library itself had the quieter half of the same problem: three built-in
 // starters are always present, so a failed read of the coach's own templates
@@ -29,7 +29,7 @@
 // been read — src/lib/injuryGate.ts, which refuses when the disclosures could
 // not be READ and not merely when they are empty. This sheet, which assigns to
 // twelve people at once, asked nothing. So the single fastest way to put a
-// programme in front of somebody's shoulder without ever seeing it was to tick
+// program in front of somebody's shoulder without ever seeing it was to tick
 // their name here instead of opening them in the builder, and the coach would
 // have been told "Assigned".
 //
@@ -49,7 +49,7 @@
 // purpose because undefined is "nobody has ever asked this person" and `[]` is
 // "they were asked and said none"; and `(c?.injuries ?? [])` turned the first
 // into the second. `guardInjuries` returns ALLOWED on an empty list. So the
-// person on the book with the LEAST known about them opened the programme gate
+// person on the book with the LEAST known about them opened the program gate
 // most easily, and the screen's silence read as an all-clear.
 //
 // The three states are now told apart in src/lib/disclosureFact.ts and each has
@@ -91,7 +91,7 @@ import { assignCtaLabel } from '../../src/lib/assignPicker';
 import { disclosureFact, neverAskedBrief, type DisclosureFact } from '../../src/lib/disclosureFact';
 import { FORWARD_CHAR } from '../../src/ui/direction';
 import { isWhole } from '../../src/ui/loadStatus';
-import { useProgrammeLibrary } from '../../src/ui/workoutTemplates';
+import { useProgramLibrary } from '../../src/ui/workoutTemplates';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import {
   goalLabel, difficultyLabel, frequencyLabel, restLabel, setsLabel,
@@ -105,9 +105,9 @@ export default function Templates() {
   //
   // The library is seeded with three built-in starters, so a failed read of
   // `program_templates` produces a page that looks entirely healthy and is
-  // missing every programme the coach ever built — and "No templates yet" is
+  // missing every program the coach ever built — and "No templates yet" is
   // printed under the same condition. The bulk assign below is worse: it
-  // replaces the programme of every client the coach ticks, and `getProgram`
+  // replaces the program of every client the coach ticks, and `getProgram`
   // returns null both for a client who has none and for a client whose row did
   // not come back. Ticking twelve names against an unread `assigned_programs`
   // silently overwrites however many of them were on something bespoke.
@@ -139,7 +139,7 @@ export default function Templates() {
    * was written to end, arriving through the other door.
    *
    * Same semantics as the builder's, deliberately: blank means "assign it now",
-   * it never holds the programme back, and `CLIENT_STARTS_NOW` says so under
+   * it never holds the program back, and `CLIENT_STARTS_NOW` says so under
    * the field.
    */
   const [startsOn, setStartsOn] = useState('');
@@ -163,11 +163,11 @@ export default function Templates() {
    */
   const [delFailed, setDelFailed] = useState<{ id: string; why: string } | null>(null);
 
-  // One assign here is many overwrites, so it is held until the programmes it
+  // One assign here is many overwrites, so it is held until the programs it
   // would replace have actually been read. See src/lib/overwriteGuard.ts.
   // Kept alongside the plan below because it is what licenses the "replaces the
   // program they are on" marker on each row, which is a claim about a read.
-  const assignGuard = guardOverwrite(programStatus, 'the programmes these clients are currently on');
+  const assignGuard = guardOverwrite(programStatus, 'the programs these clients are currently on');
 
   const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setStartsOn(''); setAssignTpl(tpl); };
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
@@ -186,7 +186,7 @@ export default function Templates() {
   // because undefined is "nobody has ever asked this person" and `[]` is "they
   // were asked and said none" — and `?? []` turned the first into the second.
   // `guardInjuries` returns ALLOWED on an empty list, so a person with no
-  // account who has never been asked anything opened the programme gate as
+  // account who has never been asked anything opened the program gate as
   // though they had disclosed none, and a coach assigned a template on it.
   //
   // src/lib/disclosureFact.ts holds the three apart and hands this screen both
@@ -320,7 +320,7 @@ export default function Templates() {
 
     const parts = [report.body];
     // Named, never silently dropped. A coach who believes twelve people got a
-    // programme when eleven did is worse off than one who was refused.
+    // program when eleven did is worse off than one who was refused.
     if (plan.blocked.length) {
       parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all — they have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Open them in the builder and read what they disclosed.`);
     }
@@ -349,21 +349,21 @@ export default function Templates() {
   );
 
   /**
-   * The coach's named programmes, in the order the shortcut row draws them —
+   * The coach's named programs, in the order the shortcut row draws them —
    * the same rule, and the same sentence over the row, as the builder's.
    *
    * MOST USED first when `usage` could be counted, which is only under a whole
    * read of who is training what. When it is withheld the order is the
    * library's own, newest first, and the row says so: an order with no stated
    * rule reads as random. The coach's OWN only — the starters are in the list
-   * below, and a shortcut row that led with programmes the coach never wrote
+   * below, and a shortcut row that led with programs the coach never wrote
    * would be the app's library and not theirs.
    */
   const shortcuts = useMemo(() => {
     const own = templates.filter((tpl) => !isStarter(tpl.id));
     if (usage.withheld) return own;
     const used = (id: string) => (usage.byId[id]?.on.length ?? 0) + (usage.byId[id]?.from.length ?? 0);
-    // Stable: equally used programmes keep the library's newest-first order.
+    // Stable: equally used programs keep the library's newest-first order.
     return own.map((tpl, i) => ({ tpl, i })).sort((a, b) => used(b.tpl.id) - used(a.tpl.id) || a.i - b.i).map((x) => x.tpl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templates, usage]);
@@ -374,8 +374,8 @@ export default function Templates() {
    *
    *  `at` makes each tap its own request. The builder is a tab and stays
    *  mounted, and it loads a `templateId` once per value — so without this a
-   *  coach who opened a programme, worked on somebody else's, and came back to
-   *  open the same programme again was pushed to a builder that did nothing. */
+   *  coach who opened a program, worked on somebody else's, and came back to
+   *  open the same program again was pushed to a builder that did nothing. */
   const openInBuilder = (tpl: ProgramTemplate) =>
     router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id, from: 'trainerTemplates', at: String(Date.now()) } });
 
@@ -404,9 +404,9 @@ export default function Templates() {
             empty state below to the one coach it is news to. */}
         <PageHead title="Program Templates" subtitle="Build once, assign to many" />
 
-        {/* ── the coach's named programmes, one tap each ───────────────────
+        {/* ── the coach's named programs, one tap each ───────────────────
             Reported from a coach's phone: "Is there a way again to create
-            shortcuts to named programmes you have created so you don't have
+            shortcuts to named programs you have created so you don't have
             to scroll through." The list below is every template with its
             controls, which is the right shape for managing a library and the
             wrong one for the thing a coach does daily — open the block they
@@ -418,7 +418,7 @@ export default function Templates() {
         {shortcuts.length ? (
           <View style={{ marginTop: sp.lg }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.sm, marginBottom: sp.sm }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Your Programmes</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Your Programs</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{usage.withheld ? 'Newest first' : 'Most used first'}</Text>
             </View>
             {/* Room under the chips for the card shadow, which a horizontal
@@ -451,7 +451,7 @@ export default function Templates() {
           <Cta label="Build a New Program" wide onPress={() => router.push({ pathname: '/(trainer)/builder', params: { from: 'trainerTemplates' } })} />
           {/* A tick-list is remembered by nobody. A group is the same fan-out
               with the list kept, so tomorrow the coach can still answer "who is
-              on the bootcamp programme". */}
+              on the bootcamp program". */}
           <View style={{ marginTop: sp.sm }}>
             <Ghost label="Program Groups" onPress={() => router.push('/(trainer)/group')} />
           </View>
@@ -464,12 +464,12 @@ export default function Templates() {
           <SectionHead title="Templates" note={tplStatus === 'ready' && templates.length ? String(templates.length) : undefined} />
 
           {/* The starters are the problem, not the consolation. Three of them
-              are always present, so a coach whose dozen saved programmes did
+              are always present, so a coach whose dozen saved programs did
               not come back sees a working library with somebody else's
-              programmes in it and concludes their work is gone. */}
+              programs in it and concludes their work is gone. */}
           {tplStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Library" title="Your Saved Templates Could Not Be Read"
-              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing — your own programmes are on the server and did not come back. Reopen this screen once you have signal." />
+              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing — your own programs are on the server and did not come back. Reopen this screen once you have signal." />
           ) : tplStatus === 'partial' ? (
             <PartialRead what="templates in your library" shown={templates.length} />
           ) : null}
@@ -491,13 +491,13 @@ export default function Templates() {
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={{ ...ty.head, color: t.ink }}>{tpl.name}</Text>
                   {/* The week as pips, each day in its type's colour — the
-                      shape of the programme without opening it. Drawn off the
+                      shape of the program without opening it. Drawn off the
                       template's own days, so there is nothing to withhold. */}
                   <View style={{ marginTop: 6 }}><DayPips days={tpl.program.days} weekDays={WEEK_DAYS} /></View>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{isStarter(tpl.id) ? ' · starter' : ''}</Text>
                   {/* Present tense, and only ever about who is ON something.
                       Nothing behind this line reads a session or an adherence
-                      figure, so it must never be read as saying a programme
+                      figure, so it must never be read as saying a program
                       worked — and a template nobody is on says nothing at all
                       rather than reporting its own absence twenty times over. */}
                   {/* As chips now: the count is the thing an eye looks for down
@@ -539,14 +539,14 @@ export default function Templates() {
                     launch with no explanation. See `removeTemplateFrom`.
 
                     The confirmation NAMES the template and says what a delete
-                    does not touch: a client training a programme assigned from
-                    it keeps that programme, because an assignment is a jsonb
+                    does not touch: a client training a program assigned from
+                    it keeps that program, because an assignment is a jsonb
                     copy and no foreign key in the database points at
                     `program_templates` at all. */}
                 {!isStarter(tpl.id) ? (
                   <Pressable onPress={() => Alert.alert(
                     'Delete This Template?',
-                    `“${tpl.name}” is removed from your library for good — there is no undo. Anybody already training it keeps their programme, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
+                    `“${tpl.name}” is removed from your library for good — there is no undo. Anybody already training it keeps their program, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
                     [{ text: 'Keep', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => {
                       const gone = await removeTemplateFrom(tpl.id);
                       if (gone.ok) { setDelFailed((p) => (p && p.id === tpl.id ? null : p)); return; }
@@ -572,7 +572,7 @@ export default function Templates() {
           ))}
         </Section>
 
-        <PlatformProgrammes />
+        <PlatformPrograms />
 
       </ScrollView>
 
@@ -610,7 +610,7 @@ export default function Templates() {
                     but 'ready' it cannot, and the button at the bottom is
                     withheld rather than annotated. */}
                 {!assignGuard.allowed ? (
-                  <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programmes'}
+                  <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programs'}
                     title={programStatus === 'loading' ? 'Reading What These Clients Are On' : 'What These Clients Are On Could Not Be Read'}
                     note={assignGuard.reason ?? undefined} />
                 ) : null}
@@ -657,11 +657,11 @@ export default function Templates() {
                     on it — and on a phone is met only after every decision it
                     belongs to. */}
                 {/* ── the day the block begins ──────────────────────────────
-                    Only on a block, because on a one-week programme there is no
+                    Only on a block, because on a one-week program there is no
                     week for a date to count to and the field would be a control
                     that changes nothing a coach can see.
 
-                    It does NOT hold the programme back. `CLIENT_STARTS_NOW` is
+                    It does NOT hold the program back. `CLIENT_STARTS_NOW` is
                     printed under it saying so, for the reason the builder gives
                     at length: a coach who believes the date is enforced, and
                     assigns a block "starting Monday" on a Thursday, has replaced
@@ -716,7 +716,7 @@ export default function Templates() {
                     {startsOn && !isStartDate(startsOn) ? (
                       <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
                         Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
-                        programme goes out with no start date rather than one nothing can read back.
+                        program goes out with no start date rather than one nothing can read back.
                       </Flag>
                     ) : (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
@@ -730,7 +730,7 @@ export default function Templates() {
                 {roster.map((c, i) => {
                   const on = !!picked[c.id];
                   // Only sayable off a whole read. Under any other status the
-                  // absence of a programme means nothing was found out, and
+                  // absence of a program means nothing was found out, and
                   // marking somebody "no program yet" on that basis is how a
                   // coach comes to overwrite one without realising.
                   const replaces = assignGuard.allowed && !!getProgram(c.id);
@@ -843,7 +843,7 @@ export default function Templates() {
                   </View>
                   <View style={{ flex: 1 }}>
                     {/* Withheld, not warned about. One tap here writes over as
-                        many training programmes as there are ticks, with no undo
+                        many training programs as there are ticks, with no undo
                         and nothing told to the clients — so it waits until the
                         screen knows what it would be replacing. */}
                     {/* `planFanOut` is shared with the Groups screen, and with
@@ -857,7 +857,7 @@ export default function Templates() {
                         case could never run, because `plan.label` is null only
                         once at least one client is ticked. Asked before the
                         shared guard, so the guard keeps answering for every other
-                        refusal (the overwrite check, a missing programme) where
+                        refusal (the overwrite check, a missing program) where
                         its wording is right. */}
                     {/* The same label the builder puts on the same gesture, from
                         src/lib/assignPicker.ts — the two were the same expression
@@ -893,7 +893,7 @@ export default function Templates() {
 
 /* ── the fifteen that belong to nobody ──────────────────────────────────────
  *
- * `public.workout_templates` — the platform's own programme catalogue,
+ * `public.workout_templates` — the platform's own program catalogue,
  * imported from RepDB, readable by every signed-in account and writable through
  * the API by no one. It is a SECOND table on purpose:
  * `program_templates.coach_id` is NOT NULL, so filing these there would have
@@ -923,10 +923,10 @@ export default function Templates() {
  * client doing thirty repetitions of a thirty-second plank. A button that
  * cannot be honest is not offered, and the section says so instead.
  */
-function PlatformProgrammes() {
+function PlatformPrograms() {
   const t = useTheme();
   const router = useRouter();
-  const { templates, status, signedOut, unreadableRows, locale, movements, reload } = useProgrammeLibrary();
+  const { templates, status, signedOut, unreadableRows, locale, movements, reload } = useProgramLibrary();
   // The English catalogue name is what /(trainer)/exercise must be opened with;
   // this is the coach's own language for the line. See src/lib/catalogueLocale.ts.
   const { nameOf } = useMovementName();
@@ -939,7 +939,7 @@ function PlatformProgrammes() {
           count over a signed-out read measures a permissions refusal. isWhole,
           not `!== 'error'`. */}
       <SectionHead
-        title="Platform Programmes"
+        title="Platform Programs"
         note={isWhole(status) && !signedOut && templates.length ? String(templates.length) : undefined}
       />
       {/* One line where there were three. What it still has to say is the
@@ -954,27 +954,27 @@ function PlatformProgrammes() {
           `to authenticated`, so a session that has not been restored yet is
           handed zero rows and no error at all. */}
       {status === 'loading' ? (
-        <Text style={{ ...ty.label, color: t.ink3 }}>Reading the platform programmes…</Text>
+        <Text style={{ ...ty.label, color: t.ink3 }}>Reading the platform programs…</Text>
       ) : status === 'error' ? (
-        <Notice tone={t.warn} kicker="Platform" title="The Platform Programmes Could Not Be Read"
+        <Notice tone={t.warn} kicker="Platform" title="The Platform Programs Could Not Be Read"
           note="This is our end. Nothing has been removed and none of your own templates above are affected — pull down to try again." />
       ) : signedOut ? (
-        <Notice tone={t.warn} kicker="Platform" title="Sign In to See the Platform Programmes"
+        <Notice tone={t.warn} kicker="Platform" title="Sign In to See the Platform Programs"
           note="These are only readable once you are signed in, so this section was not allowed to look them up." />
       ) : (
         <>
-          {status === 'partial' ? <PartialRead what="platform programmes" shown={templates.length} onPress={reload} /> : null}
+          {status === 'partial' ? <PartialRead what="platform programs" shown={templates.length} onPress={reload} /> : null}
           {unreadableRows > 0 ? (
             <Flag tone={t.warn}>
               {unreadableRows === 1
-                ? 'One platform programme came back in a shape this app could not read and is not listed below.'
-                : `${unreadableRows} platform programmes came back in a shape this app could not read and are not listed below.`}
+                ? 'One platform program came back in a shape this app could not read and is not listed below.'
+                : `${unreadableRows} platform programs came back in a shape this app could not read and are not listed below.`}
             </Flag>
           ) : null}
 
           {templates.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              There are no platform programmes yet. They appear here as they are added.
+              There are no platform programs yet. They appear here as they are added.
             </Text>
           ) : templates.map((x, i) => {
             const name = localisedText(x.name, locale);
@@ -1028,13 +1028,13 @@ function PlatformProgrammes() {
                     {movements.status === 'error' ? (
                       <Flag tone={t.warn}>
                         The catalogue names for these movements could not be read, so each line is listed by its
-                        catalogue id. The sets, reps and rests below are the programme's own and are complete.
+                        catalogue id. The sets, reps and rests below are the program's own and are complete.
                       </Flag>
                     ) : null}
 
                     {x.days.length === 0 ? (
                       <Text style={{ ...ty.label, color: t.ink3 }}>
-                        This programme lists no days. That is a gap in the programme, not a read that failed.
+                        This program lists no days. That is a gap in the program, not a read that failed.
                       </Text>
                     ) : x.days.map((d, di) => {
                       const dayName = localisedText(d.name, locale);
@@ -1081,10 +1081,10 @@ function PlatformProgrammes() {
                       );
                     })}
 
-                    {/* Whose programmes these are, on the page they are read
+                    {/* Whose programs these are, on the page they are read
                         from rather than two screens away on a credits card. */}
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                      Programme by RepDB · repdb.co
+                      Program by RepDB · repdb.co
                     </Text>
                   </View>
                 ) : null}

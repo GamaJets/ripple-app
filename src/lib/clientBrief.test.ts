@@ -16,7 +16,7 @@
 //    list assembled out of three reads that never landed. `blind` has to name
 //    what was missed whenever anything was.
 import {
-  lastSeenLine, goalsLine, weekLine, photosLine, listLine, programmeLine,
+  lastSeenLine, goalsLine, weekLine, photosLine, listLine, programLine,
   attention, noAccountNote, unaskedNote, WEEK_SPAN_DAYS,
 } from './clientBrief';
 import { goalBoard } from './clientGoals';
@@ -166,11 +166,11 @@ ok(/Nothing ticked at all/.test(listLine('ready', 3, { seenDays: 0, windowDays: 
 
 /* ── the program ───────────────────────────────────────────────────────── */
 
-ok(/could not be read/.test(programmeLine('error', null, null, WHO)),
+ok(/could not be read/.test(programLine('error', null, null, WHO)),
   'a failed program read is not "no program assigned"');
-ok(/that this app can read/.test(programmeLine('ready', null, null, WHO)),
+ok(/that this app can read/.test(programLine('ready', null, null, WHO)),
   'no program is hedged, because another coach\'s program looks identical from here');
-ok(programmeLine('ready', 'Push Pull Legs', 3, WHO) === 'Push Pull Legs · 3 days a week.',
+ok(programLine('ready', 'Push Pull Legs', 3, WHO) === 'Push Pull Legs · 3 days a week.',
   'an assigned program is named with its own shape');
 
 /* ── what is outstanding, and what was not checked ───────────────────────── */

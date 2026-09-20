@@ -23,7 +23,7 @@
 //   · when was this person last seen at all — the hero, from `assessDrift`,
 //     the same verdict and the same words the roster orders itself by;
 //   · what is outstanding — unread messages, goals past their target date,
-//     days they have marked that disagree with the programme;
+//     days they have marked that disagree with the program;
 //   · and only then, the five screens plus the thread and the builder, each
 //     with a line underneath saying whether there is anything in there.
 //
@@ -163,7 +163,7 @@ import {
   COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode,
 } from '../../src/lib/types';
 import {
-  lastSeenLine, goalsLine, weekLine, photosLine, listLine, programmeLine,
+  lastSeenLine, goalsLine, weekLine, photosLine, listLine, programLine,
   attention, noAccountNote, unaskedNote,
 } from '../../src/lib/clientBrief';
 import { sessionsOf, trainingBoard, trainingLine } from '../../src/lib/clientTraining';
@@ -653,14 +653,14 @@ export default function ClientScreen() {
     return () => { live = false; };
   }, [canRead, id, today, readNonce]);
 
-  // The programme is the coach's own row and null covers three situations —
+  // The program is the coach's own row and null covers three situations —
   // none assigned, the read failed, and one assigned by a different coach,
   // which `assigned_programs_coach_rw` will not show this one. `undefined`
   // through `planConflict` claims no conflict on an unknown.
-  const programme = id ? ap.getProgram(id) : null;
+  const program = id ? ap.getProgram(id) : null;
   const focusOn = useCallback<ScheduledFocus>(
-    (weekday) => (programme ? scheduledFocus(programme.days, weekday) : undefined),
-    [programme],
+    (weekday) => (program ? scheduledFocus(program.days, weekday) : undefined),
+    [program],
   );
   const week = useMemo(
     () => coachWeek(weekStatus === 'error' ? null : days, todayISO, focusOn),
@@ -1542,7 +1542,7 @@ export default function ClientScreen() {
    * person on their own phone: a check-in, a scan, a photo, a payment, a
    * training day. None of it arrives here by itself.
    *
-   * `readNonce` carries the thirteen effect reads; the roster, the programme
+   * `readNonce` carries the thirteen effect reads; the roster, the program
    * assignments, the gym, the glucose series, the intake and the attendance
    * record come from providers and are asked for beside them. All of them together, because
    * the briefing at the top of this screen is composed ACROSS them — a
@@ -1858,7 +1858,7 @@ export default function ClientScreen() {
           {!unasked && attn.items.length === 0 && !attn.blind ? (
             <Text style={{ ...ty.body, color: t.ink2 }}>
               Nothing outstanding that this screen can see: no unread messages, no goal past its
-              target date, and nothing marked ahead that argues with your programme.
+              target date, and nothing marked ahead that argues with your program.
             </Text>
           ) : null}
           {/* `attention()` returns its items in the order a coach should act
@@ -2009,8 +2009,8 @@ export default function ClientScreen() {
                 this screen it does not arrive with a way back to this record.
                 It is the only destination here handed an origin; the rest are
                 their own screens and carry their own Back. */}
-            <ListRow icon="grid" title={programme ? 'Their Program' : `Build ${who} a Program`}
-              note={programmeLine(ap.status, programme?.title ?? null, programme?.days.length ?? null, who)
+            <ListRow icon="grid" title={program ? 'Their Program' : `Build ${who} a Program`}
+              note={programLine(ap.status, program?.title ?? null, program?.days.length ?? null, who)
                 + (client?.injuries && client.injuries.length
                   ? ` ${client.injuries.length === 1 ? 'One injury is' : `${client.injuries.length} injuries are`} disclosed — they are the next card down; read ${client.injuries.length === 1 ? 'it' : 'them'} before you change this.`
                   : '')}
@@ -2026,7 +2026,7 @@ export default function ClientScreen() {
         {/* ── what they cannot do ─────────────────────────────────────────────
             The coach's side of this screen never read injuries at all. A client
             disclosing a knee reached their coach as a flag on the roster row and
-            a gate on the programme builder, and nowhere on the page about them —
+            a gate on the program builder, and nowhere on the page about them —
             so the one place a coach looks up a person before deciding what to
             put them through was the one place it was missing.
 
@@ -2103,7 +2103,7 @@ export default function ClientScreen() {
                   </View>
                 ))}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  Their own words. Their programme cannot be assigned until you have read these, and
+                  Their own words. Their program cannot be assigned until you have read these, and
                   their app already flags or swaps movements that load them. Only {who} can add,
                   change or remove one — you cannot, deliberately, because a gate the coach can edit
                   their way out of is not a gate.
@@ -2145,10 +2145,10 @@ export default function ClientScreen() {
 
         {/* ── when they are next in, and the button that books it ──────────
             This card held two things a coach comes here to DO — book them and
-            open their programme — because neither could be found: booking was
+            open their program — because neither could be found: booking was
             only ever reachable from the calendar, which asks who it is for
-            after the coach has already said, and the programme was the sixth
-            row of a list off the bottom of the screen. The programme is in
+            after the coach has already said, and the program was the sixth
+            row of a list off the bottom of the screen. The program is in
             Current Plan and Goal and on the action row now; this card keeps
             the booking, and the page's one full-width green button. */}
         {id ? (
@@ -2240,7 +2240,7 @@ export default function ClientScreen() {
           {/* Directly under the body composition and above the plan, because
               this is the only row on the screen about what has already
               happened. Everything else here is an intention — a goal, a marked
-              day, a list, a programme — and a coach standing in front of
+              day, a list, a program — and a coach standing in front of
               somebody wants the record before the plan. */}
           <ListRow icon="dumbbell" title="Training"
             note={unasked ?? trainingLine(trainedStatus, trainingBoardValue, who)}
@@ -3201,7 +3201,7 @@ export default function ClientScreen() {
             <Text style={{ ...ty.head, color: t.ink }}>Ask {who} to Record One</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
               You cannot add this for them — an injury has to come from the person who has it, or the
-              programme gate it closes would mean nothing. This messages them and points them at the
+              program gate it closes would mean nothing. This messages them and points them at the
               right screen.
             </Text>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">

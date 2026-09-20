@@ -124,7 +124,7 @@ export default function WeeklyReport() {
   // that row. This is not a count, a sum or an average over a prefix — the
   // three things src/ui/loadStatus.ts forbids under 'partial' — it is a single
   // row a truncated read is fully able to supply, and the same argument
-  // `programmeChoiceState` makes in src/lib/injuryGate.ts: a truncated read
+  // `programChoiceState` makes in src/lib/injuryGate.ts: a truncated read
   // did land.
   //
   // What neither admits is 'error' and 'loading', where the object on screen

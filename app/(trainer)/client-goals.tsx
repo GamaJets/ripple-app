@@ -8,7 +8,7 @@
 // `goal_targets` was that somebody else could see them. The console got a
 // "Working toward" column on the roster; the coach app got nothing. So the one
 // thing a coach most needs to know about a client, the thing that decides what
-// their programme should even be for, was visible on a laptop and invisible on
+// their program should even be for, was visible on a laptop and invisible on
 // the phone they actually coach from.
 //
 // ── It reads and it does not write ─────────────────────────────────────────

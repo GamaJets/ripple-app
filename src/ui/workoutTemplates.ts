@@ -272,7 +272,7 @@ export function useMovementNames(ids: readonly string[]): MovementNames {
  * fresh array every render — is a request loop rather than a bug you can see.
  * The ids are memoised on the templates that produced them.
  */
-export function useProgrammeLibrary(): WorkoutTemplatesRead & { movements: MovementNames } {
+export function useProgramLibrary(): WorkoutTemplatesRead & { movements: MovementNames } {
   const read = useWorkoutTemplates();
   const ids = useMemo(() => exerciseIdsIn(read.templates), [read.templates]);
   const movements = useMovementNames(ids);

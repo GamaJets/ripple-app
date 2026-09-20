@@ -1,4 +1,4 @@
-// Trainer · Program Groups. A coach running a bootcamp writes the programme
+// Trainer · Program Groups. A coach running a bootcamp writes the program
 // once, names the people it is for, and sends it to all of them — then sees, at
 // a glance, which of them is actually on it.
 //
@@ -6,11 +6,11 @@
 //
 // A group owns the LIST. It does not own the PLAN.
 //
-// Assigning to a group is a FAN-OUT: the group's programme is written into each
+// Assigning to a group is a FAN-OUT: the group's program is written into each
 // member's own `assigned_programs` row, exactly as if the coach had opened the
-// builder eight times. The alternative — a group row that owns the programme,
+// builder eight times. The alternative — a group row that owns the program,
 // with clients pointing at it — is tidier on paper and worse everywhere the
-// data is read. Everything downstream of a programme is already per client
+// data is read. Everything downstream of a program is already per client
 // (the client's Train tab, their logged sets, adherence, the injury
 // acknowledgement of a specific movement for a specific person), so a
 // group-owned plan would have to be reconciled against per-client progress on
@@ -20,10 +20,10 @@
 // group-owned plan that is an override table — a second source of truth for the
 // same question — and under this one it is simply their row, edited in the
 // builder, touching nobody else. The full argument, including what this costs,
-// is in supabase/parts/134-a-programme-written-once.sql.
+// is in supabase/parts/134-a-program-written-once.sql.
 //
 // The cost, stated plainly on this screen rather than hidden: editing the
-// group's programme does NOT rewrite what anybody is already training. It
+// group's program does NOT rewrite what anybody is already training. It
 // changes what the next assign sends, and the members then read as "on
 // something different" — which is true, and is the coach's decision to make.
 //
@@ -33,7 +33,7 @@
 // not be READ, not merely when they are empty. A fan-out that asked once
 // because asking eleven times was awkward would be the worst version of this
 // feature, so the plan is computed per member and the list is SPLIT: the ones
-// who are clear get the programme now, the ones who are not are named on this
+// who are clear get the program now, the ones who are not are named on this
 // screen with their own reason, and the button says "Assign to 7 of 8" rather
 // than "Assigned". Nobody is silently skipped. See src/lib/groupProgram.ts.
 //
@@ -112,9 +112,9 @@ import { FORWARD_ICON } from '../../src/ui/direction';
 /** What a member's chip says. Never "not assigned yet" off an unread
  *  `assigned_programs` — that is the sentence a coach acts on by assigning. */
 const STATE_LABEL: Record<MemberState, string> = {
-  on: 'On This Programme',
-  diverged: 'On a Different Programme',
-  none: 'No Programme Assigned',
+  on: 'On This Program',
+  diverged: 'On a Different Program',
+  none: 'No Program Assigned',
   unknown: 'Could Not Be Read',
 };
 
@@ -165,9 +165,9 @@ export default function Groups() {
   const pull = usePullToRefresh(reloadEverything);
   // And on the way back in. This screen is registered `href: null` inside
   // <Tabs>, so it mounts once and its five reads ran once — a coach who sent a
-  // programme to a group, opened somebody's copy in the builder to check it,
+  // program to a group, opened somebody's copy in the builder to check it,
   // and came back was shown the versions as they stood before they sent it.
-  // "on version 2 of this programme" about a person who is now on version 3 is
+  // "on version 2 of this program" about a person who is now on version 3 is
   // the sentence that gets acted on. See src/ui/refreshOnFocus.ts.
   useRefreshOnFocus(reloadEverything);
 
@@ -196,7 +196,7 @@ export default function Groups() {
    *
    * A group is the place this matters most and the only place it was missing.
    * Eight people doing one block start it on ONE day — that is what makes it a
-   * bootcamp rather than eight programmes — and it is one date to choose rather
+   * bootcamp rather than eight programs — and it is one date to choose rather
    * than eight, which is why it belongs on the fan-out and not on each of them.
    *
    * Blank is the ordinary case and stays the default: "assign it now" is what
@@ -229,7 +229,7 @@ export default function Groups() {
   // none"; and `(c?.injuries ?? [])` turned the first into the second.
   // `guardInjuries` returns ALLOWED on an empty list, so the member with the
   // LEAST known about them opened the gate most easily — and this is the
-  // fan-out, so one press put a programme in front of eight people on the
+  // fan-out, so one press put a program in front of eight people on the
   // strength of a silence.
   //
   // src/lib/disclosureFact.ts holds the three apart and hands this screen both
@@ -272,20 +272,20 @@ export default function Groups() {
   );
   const cover = groupCoverage(states, groupStatus, programStatus);
 
-  /* ── which VERSION of the group's programme each of them is on ───────────
+  /* ── which VERSION of the group's program each of them is on ───────────
      `memberState` answers 'diverged' for two people who need opposite things:
-     one is still on last month's version of this programme and needs one tap,
+     one is still on last month's version of this program and needs one tap,
      and the other had their Thursday rewritten around a shoulder and must not
-     be written to at all. The group's past programmes make the difference
+     be written to at all. The group's past programs make the difference
      sayable — and it is DERIVED, every render, from what each of them is
      actually training, rather than stamped on them when the fan-out ran and
      left to go stale the moment somebody edits one client's copy in the
      builder. See supabase/parts/177 and src/lib/groupProgram.ts. */
   const currentVersion = useMemo(() => {
     const vs = open?.versions ?? [];
-    // The version whose fingerprint matches the group's programme AS IT STANDS,
+    // The version whose fingerprint matches the group's program AS IT STANDS,
     // and not simply the highest number. A group whose plan was changed while
-    // the version write was refused has a live programme that is not its newest
+    // the version write was refused has a live program that is not its newest
     // version, and calling that newest one "current" would report every member
     // as behind something nobody has.
     const match = vs.filter((v) => v.signature != null && v.signature === groupSig);
@@ -306,7 +306,7 @@ export default function Groups() {
    * When each member was last seen at all — the half of a group this screen
    * could not answer.
    *
-   * A group screen said which PROGRAMME each of eight people was on and nothing
+   * A group screen said which PROGRAM each of eight people was on and nothing
    * whatever about whether any of them was doing it, which is the question a
    * coach opens a bootcamp for. Trainerize and Everfit both lead their group
    * view with it.
@@ -355,7 +355,7 @@ export default function Groups() {
     [groupStatus, programStatus, members, open],
   );
 
-  // Which movements in the group's programme load what a member has disclosed.
+  // Which movements in the group's program load what a member has disclosed.
   // Only asked of the members this assign would actually reach — the held ones
   // are not being written to, so there is nothing to warn about for them.
   const loadsFor = (m: FanOutMember): { exercise: string; area: string; severity: string }[] => {
@@ -368,8 +368,8 @@ export default function Groups() {
   };
 
   // The coach's decision to load a disclosed injury on purpose, recorded before
-  // the programme goes out and per client. Same table and same rule as the
-  // builder: a programme that went out while the record of the decision did not
+  // the program goes out and per client. Same table and same rule as the
+  // builder: a program that went out while the record of the decision did not
   // is the one outcome worse than having no record at all, because afterwards
   // it looks exactly like a coach who never knew.
   const recordChoice = async (clientId: string, movements: { exercise: string; area: string; severity: string }[]): Promise<boolean> => {
@@ -377,7 +377,7 @@ export default function Groups() {
       // Both fates return false, and that is the answer rather than a
       // fallback — the same one `recordInjuryChoice` in app/(trainer)/builder
       // .tsx takes, for the same reason stated above this function: this
-      // client's programme is then abandoned rather than sent with no record
+      // client's program is then abandoned rather than sent with no record
       // of the coach's decision behind it. Refusing on an outage is the
       // correct refusal, and nothing is written under a missing trainer id.
       //
@@ -418,7 +418,7 @@ export default function Groups() {
       const sending = members.filter((m) => plan.send.includes(m.clientId));
 
       // Knowing about a disclosure is not the same as deciding to load it
-      // anyway. Asked once for the whole group, because it is one programme —
+      // anyway. Asked once for the whole group, because it is one program —
       // but itemised by person, so the coach sees whose shoulder it is.
       const loaded = sending.map((m) => ({ m, movements: loadsFor(m) })).filter((x) => x.movements.length > 0);
       // The third fact, said at the moment of decision and not only on a row
@@ -434,7 +434,7 @@ export default function Groups() {
         const more = loaded.length - lines.length;
         const loadedBody = loaded.length
           ? `${lines.join('\n')}${more > 0 ? `\n· and ${more} more` : ''}\n\n`
-            + 'You can absolutely programme these on purpose. Confirming records that you chose to, with the date, for each of them — and they can see that record too.'
+            + 'You can absolutely program these on purpose. Confirming records that you chose to, with the date, for each of them — and they can see that record too.'
           : null;
         // Two different confirmations, because they are two different
         // decisions. Loading a disclosed injury on purpose is destructive and
@@ -443,10 +443,10 @@ export default function Groups() {
         // is a red button nobody reads.
         const go = await new Promise<boolean>((resolve) => {
           Alert.alert(
-            loaded.length ? 'This Programme Loads What They Disclosed' : 'Never Asked About Injuries',
+            loaded.length ? 'This Program Loads What They Disclosed' : 'Never Asked About Injuries',
             [loadedBody, askedNote].filter(Boolean).join('\n\n'),
             [
-              { text: loaded.length ? 'Change the Programme' : 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: loaded.length ? 'Change the Program' : 'Cancel', style: 'cancel', onPress: () => resolve(false) },
               { text: loaded.length ? 'I Know — Assign' : 'Assign', style: loaded.length ? 'destructive' : 'default', onPress: () => resolve(true) },
             ],
             { cancelable: true, onDismiss: () => resolve(false) },
@@ -465,7 +465,7 @@ export default function Groups() {
         const movements = loadsFor(m);
         if (movements.length) {
           const recorded = await recordChoice(m.clientId, movements);
-          // Their programme is abandoned, not sent-and-unrecorded. The others
+          // Their program is abandoned, not sent-and-unrecorded. The others
           // are unaffected: this is one client's record, not the group's.
           if (!recorded) { norecord.push(m.name); continue; }
         }
@@ -527,7 +527,7 @@ export default function Groups() {
       const names = res.failed.map((id) => roster.find((c) => c.id === id)?.name ?? 'One client');
       Alert.alert(
         res.added.length ? 'Some Were Not Added' : 'Nobody Was Added',
-        `${listNames(names)} ${res.failed.length === 1 ? 'is' : 'are'} not in the group — the server did not accept ${res.failed.length === 1 ? 'them' : 'them'}. Clients you added by hand have no account yet, so there is nothing to assign a programme to until they join.`,
+        `${listNames(names)} ${res.failed.length === 1 ? 'is' : 'are'} not in the group — the server did not accept ${res.failed.length === 1 ? 'them' : 'them'}. Clients you added by hand have no account yet, so there is nothing to assign a program to until they join.`,
       );
     }
   };
@@ -560,9 +560,9 @@ export default function Groups() {
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <PageHead title="Program Groups" subtitle="Write it once" />
         {/* What a group is, behind a fold; it was the paragraph above the list. */}
-        <Expandable title="How Groups Work" note="One programme, everybody in the group">
+        <Expandable title="How Groups Work" note="One program, everybody in the group">
           <Text style={{ ...ty.label, color: t.ink2 }}>
-            A bootcamp, a 6am class, a beginners' block. One programme goes to everybody in the group, and any one of them can be changed afterwards without touching the rest.
+            A bootcamp, a 6am class, a beginners' block. One program goes to everybody in the group, and any one of them can be changed afterwards without touching the rest.
           </Text>
         </Expandable>
 
@@ -591,7 +591,7 @@ export default function Groups() {
                 // Including whether the membership was READ. "3 clients" and
                 // "membership not read" are different answers and the label was
                 // saying neither.
-                accessibilityLabel={`${g.name}. ${groupStatus === 'ready' ? `${g.memberIds.length} ${g.memberIds.length === 1 ? 'client' : 'clients'}` : 'membership not read'}${g.program ? `, ${g.program.title}` : ', no programme yet'}`}
+                accessibilityLabel={`${g.name}. ${groupStatus === 'ready' ? `${g.memberIds.length} ${g.memberIds.length === 1 ? 'client' : 'clients'}` : 'membership not read'}${g.program ? `, ${g.program.title}` : ', no program yet'}`}
                 style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                   {/* A circle, as the board draws every row's icon. */}
@@ -603,7 +603,7 @@ export default function Groups() {
                       {/* The member count is a figure like any other: only
                           sayable off a whole read of the membership. */}
                       {groupStatus === 'ready' ? `${g.memberIds.length} ${g.memberIds.length === 1 ? 'client' : 'clients'}` : 'membership not read'}
-                      {g.program ? ` · ${g.program.title}` : ' · no programme yet'}
+                      {g.program ? ` · ${g.program.title}` : ' · no program yet'}
                     </Text>
                   </View>
                   <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
@@ -631,26 +631,26 @@ export default function Groups() {
             <Section>
               <SectionHead title={open.name} note={cover.countable ? `${num(cover.on)}/${num(cover.total)}` : undefined} />
 
-              {/* ── the programme ─────────────────────────────────────────── */}
-              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>Programme</Text>
+              {/* ── the program ─────────────────────────────────────────── */}
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>Program</Text>
               <Text style={{ ...ty.body, color: open.program ? t.ink : t.ink3, marginTop: 4 }}>
                 {open.program
                   ? `${open.program.title} · ${open.program.days.length} days · ${open.program.days.reduce((a, d) => a + d.exercises.length, 0)} exercises`
                   : 'None chosen yet — pick one from your library.'}
               </Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                <Ghost label={open.program ? 'Change Programme' : 'Choose from Library'} onPress={() => setPickTpl(true)} />
+                <Ghost label={open.program ? 'Change Program' : 'Choose from Library'} onPress={() => setPickTpl(true)} />
                 <Ghost label="Add Clients" onPress={() => { setPicked({}); setAddOpen(true); }} />
               </View>
               {open.program ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                  Changing the programme here does not change what anybody is already training. It changes what the next assign sends — the people below will then read as being on something different, which is the truth about their week until you send it.
+                  Changing the program here does not change what anybody is already training. It changes what the next assign sends — the people below will then read as being on something different, which is the truth about their week until you send it.
                 </Text>
               ) : null}
 
               {/* ── which version each of them is on ────────────────────────
                   The group still does not own the plan; what it now keeps is
-                  the programmes it used to have, so "on an older version of
+                  the programs it used to have, so "on an older version of
                   this" can be told apart from "on something else entirely".
                   Those two need opposite actions and they are two separate
                   sentences for exactly that reason — the second half of a
@@ -662,7 +662,7 @@ export default function Groups() {
                   <Text style={{ ...ty.micro, color: t.ink3 }}>Versions</Text>
                   <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>
                     {currentVersion == null
-                      ? 'This programme has not been recorded as a version yet, so nobody can be placed against it. Changing the programme records one.'
+                      ? 'This program has not been recorded as a version yet, so nobody can be placed against it. Changing the program records one.'
                       : `${num(spread.onCurrent)} on version ${num(currentVersion)} · ${num(spread.behind)} on an earlier one · ${num(spread.bespoke)} on something else`}
                   </Text>
                   {behind ? (
@@ -688,15 +688,15 @@ export default function Groups() {
                 {/* The same sentence as a bar. `cover.countable` is the guard
                     the sentence and the heading's fraction already use: without
                     it the bar has no fill and says "Not counted", never an empty
-                    bar that reads as nobody being on the programme. */}
-                <Meter label="On This Programme" tone="purple" target={cover.total}
+                    bar that reads as nobody being on the program. */}
+                <Meter label="On This Program" tone="purple" target={cover.total}
                   val={cover.countable ? cover.on : null}
                   note={cover.countable ? `${num(cover.on)} of ${num(cover.total)}` : 'Not counted'} />
                 {!cover.countable ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                     {groupStatus !== 'ready'
                       ? 'Who is in this group has not been read, so nothing here is a count of anybody.'
-                      : 'What these clients are currently on has not been read, so an absent programme below means "we did not find out" rather than "none".'}
+                      : 'What these clients are currently on has not been read, so an absent program below means "we did not find out" rather than "none".'}
                   </Text>
                 ) : null}
               </View>
@@ -708,7 +708,7 @@ export default function Groups() {
               {open.memberIds.map((id, i) => {
                 const m = asMember(id);
                 const st = states[i] ?? 'unknown';
-                // Which version this one is on, where their programme is one of
+                // Which version this one is on, where their program is one of
                 // the group's. Null for a client on a bespoke plan and for one
                 // whose assignment could not be read, and `st` is what tells
                 // those two apart — a version number over an unread row would
@@ -758,11 +758,11 @@ export default function Groups() {
                         {/* Named only where the record supports it. A version
                             number beside somebody whose assignment could not be
                             read would be a fact invented out of a failure, and
-                            "on a different programme" is not "on version 2" —
+                            "on a different program" is not "on version 2" —
                             it is the client whose copy was edited for them. */}
                         {/* Whether they are actually training it, from the
                             roster row this screen already holds. Directly under
-                            the programme state because the two together are the
+                            the program state because the two together are the
                             whole question: somebody on the current version who
                             has not been seen in three weeks is the person this
                             group exists to catch, and neither line alone says
@@ -772,11 +772,11 @@ export default function Groups() {
                         ) : null}
                         {mv?.behind && mv.version != null ? (
                           <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
-                            on version {num(mv.version)} of this programme — send it again to move them onto the current one
+                            on version {num(mv.version)} of this program — send it again to move them onto the current one
                           </Text>
                         ) : st === 'diverged' && mv && mv.version == null ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                            not any version of this programme — somebody edited their copy
+                            not any version of this program — somebody edited their copy
                           </Text>
                         ) : null}
                       </View>
@@ -784,7 +784,7 @@ export default function Groups() {
                           else's — which is the whole reason the group owns the
                           list and not the plan. */}
                       <Ghost label="Just Theirs" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { clientId: id, from: 'trainerGroup' } })} />
-                      <Pressable onPress={() => Alert.alert('Remove from Group?', `Take ${m.name} out of “${open.name}”? This does not change the programme they are on.`, [
+                      <Pressable onPress={() => Alert.alert('Remove from Group?', `Take ${m.name} out of “${open.name}”? This does not change the program they are on.`, [
                         { text: 'Keep', style: 'cancel' },
                         { text: 'Remove', style: 'destructive', onPress: async () => {
                           const gone = await removeMember(open.id, id);
@@ -855,7 +855,7 @@ export default function Groups() {
                       before the press rather than after it. */}
                   {startsOn && !isStartDate(startsOn) ? (
                     <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
-                      {`“${startsOn}” is not a date this app will store, so it will not be sent. The programme would still go out, dated nothing.`}
+                      {`“${startsOn}” is not a date this app will store, so it will not be sent. The program would still go out, dated nothing.`}
                     </Flag>
                   ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -873,7 +873,7 @@ export default function Groups() {
               </View>
 
               <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
-                <Ghost label="Delete Group" onPress={() => Alert.alert('Delete Group?', `Remove “${open.name}”? The clients keep the programmes they are on — this only deletes the list.`, [
+                <Ghost label="Delete Group" onPress={() => Alert.alert('Delete Group?', `Remove “${open.name}”? The clients keep the programs they are on — this only deletes the list.`, [
                   { text: 'Keep', style: 'cancel' },
                   { text: 'Delete', style: 'destructive', onPress: async () => {
                     const gone = await deleteGroup(open.id);
@@ -900,19 +900,19 @@ export default function Groups() {
         onPick={(iso) => { setStartsOn(iso); setStartPick(false); }}
       />
 
-      {/* ── pick the group's programme ──────────────────────────────────── */}
+      {/* ── pick the group's program ──────────────────────────────────── */}
       <Modal visible={pickTpl} transparent animationType="slide" onRequestClose={() => setPickTpl(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPickTpl(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '80%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
-            <Text style={{ ...ty.title, color: t.ink }}>Choose a Programme</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Choose a Program</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
               A copy is taken now, so editing the template later will not quietly redefine what this group is understood to be doing.
             </Text>
             {/* Three starters are always present, so a failed read of the
                 coach's own library looks like a healthy library with somebody
-                else's programmes in it. */}
+                else's programs in it. */}
             {tplStatus === 'error' ? (
               <Notice tone={t.warn} kicker="Library" title="Your Saved Templates Could Not Be Read"
                 note="Only the built-in starters are listed. That is not a statement that you have saved nothing." />
@@ -924,7 +924,7 @@ export default function Groups() {
                 if (!open) return;
                 setPickTpl(false);
                 const saved = await setGroupProgram(open.id, tpl.program);
-                if (!saved) Alert.alert('Not Saved', `“${tpl.name}” is showing as this group's programme on this screen but did not reach the server, so it will be gone when you reopen the app. Try again once you have signal.`);
+                if (!saved) Alert.alert('Not Saved', `“${tpl.name}” is showing as this group's program on this screen but did not reach the server, so it will be gone when you reopen the app. Try again once you have signal.`);
               }} accessibilityRole="button"
                 accessibilityLabel={`${tpl.name}. ${tpl.program.days.length} days, ${tpl.program.days.reduce((a, d) => a + d.exercises.length, 0)} exercises`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>

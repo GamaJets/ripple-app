@@ -26,7 +26,7 @@
 // ── Why a failure is not raised at the caller ────────────────────────────
 //
 // This runs alongside a write the coach actually asked for — logging a set,
-// adding an exercise to a programme. That write is the thing that must
+// adding an exercise to a program. That write is the thing that must
 // succeed. If the catalogue insert is refused (offline, a policy, a race with
 // another coach minting the same name) the log still stands and the movement
 // is still a string, which is exactly where it was before. So this reports and
@@ -50,7 +50,7 @@ export const COACH_SOURCE = 'coach';
  * It was `opts: { group?: string | null } = {}`, so the two live callers
  * omitted it and four rows went into a 615-row catalogue with `muscle_group`
  * null and no muscle data either. Those four then flowed into an assigned
- * programme and two templates as exercises with a blank `group` — and
+ * program and two templates as exercises with a blank `group` — and
  * `groupsOf` (src/ui/groupTone.ts) drops a blank on purpose, because a guess
  * made from a movement's NAME is exactly the kind of fact this app does not
  * invent. So the owner's Upper day read "Chest · Arms · Back" with no
@@ -63,7 +63,7 @@ export const COACH_SOURCE = 'coach';
  * the worst shape a missing fact can take.
  *
  * Required at the type level so the next caller does not compile rather than
- * discovering this in somebody's programme; and refused at RUNTIME too,
+ * discovering this in somebody's program; and refused at RUNTIME too,
  * because a screen can still hand this an empty string from a picker nobody
  * touched. The refusal reports and resolves rather than throwing, for the
  * reason in this file's header: it runs alongside a write the coach actually

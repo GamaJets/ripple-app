@@ -46,7 +46,7 @@ import { useBackFromHub } from '../../src/ui/backTo';
 import { Rule, Section, SectionHead, PageHead, Notice, PartialRead, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { useProgrammeLibrary } from '../../src/ui/workoutTemplates';
+import { useProgramLibrary } from '../../src/ui/workoutTemplates';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { isWhole } from '../../src/ui/loadStatus';
 import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
@@ -115,7 +115,7 @@ export default function Programs() {
   // otherwise Back from this screen walks FORWARD into the movement the member
   // just finished reading. See src/lib/backTo.ts.
   const goBack = useBackFromHub('(client)');
-  const lib = useProgrammeLibrary();
+  const lib = useProgramLibrary();
   const { templates, status, signedOut, unreadableRows, locale, movements } = lib;
   // The movement names come back as the English identity — that is what the
   // exercise screen must be opened with. This is the reader's own language for
@@ -279,7 +279,7 @@ export default function Programs() {
                   return (
                     <Pressable
                       key={`${x.id}-${di}-${ei}-${e.exerciseId}`}
-                      onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: target, from: 'clientProgrammes' } })}
+                      onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: target, from: 'clientPrograms' } })}
                       accessibilityRole="button"
                       // A label REPLACES the lines beneath it, so the sets, the
                       // reps and the rest have to be IN it or a screen-reader

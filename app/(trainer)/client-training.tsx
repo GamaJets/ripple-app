@@ -87,7 +87,7 @@ import { clipNoteLine } from '../../src/lib/formCheck';
 // P1 and P2. `muscleVolume.ts` answers "have I trained legs this week" and its
 // only importer was the CLIENT's own history screen — so the person paid to
 // notice a missing posterior chain was the one person the app did not show it
-// to, while the client, who cannot rewrite the programme, could. `longView.ts`
+// to, while the client, who cannot rewrite the program, could. `longView.ts`
 // draws twelve months of tonnage and its only importer was the same screen, so
 // the renewal conversation — which is won with an arc, not a fortnight — had
 // nothing behind it.
@@ -115,7 +115,7 @@ import {
 // ── the four things this screen could not say before ───────────────────────
 //
 // It had the RECORD and nothing to compare it against. The assignment was on a
-// different screen, the programme checks ran once in the builder and never
+// different screen, the program checks ran once in the builder and never
 // again, the block's start date did not exist, and what somebody had been on
 // before was destroyed by the next assign. All four of those are readable from
 // here, and every one of them is a claim about a person, so each arrives with
@@ -138,7 +138,7 @@ import {
   WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
   loadCheck, loadTally, loadLine, LOAD_TOLERANCE,
 } from '../../src/lib/planVsActual';
-// ── the programme the client rewrote ──────────────────────────────────────
+// ── the program the client rewrote ──────────────────────────────────────
 //
 // The coach half of `client_plan_edits`. The READER is the member's own —
 // src/ui/planEditsShared.ts, which goes through the one shape parser in
@@ -206,7 +206,7 @@ const CHIP_SHORT: Record<Attribution, string> = {
 export default function ClientTraining() {
   const t = useTheme();
   // Movement names on this screen come out of the client's LOG and out of the
-  // programme JSON, both of which store the English identity. A German coach
+  // program JSON, both of which store the English identity. A German coach
   // reads the library in German and read this screen in English.
   const { textOf: movement } = useMovementName();
   const router = useRouter();
@@ -498,7 +498,7 @@ export default function ClientTraining() {
    * P1. Balance is the COACH's job. `muscleVolume.ts` was reachable only from
    * the client's own history screen, so the member could see that they had
    * trained quads four times and hamstrings never, and the person who wrote the
-   * programme could not.
+   * program could not.
    *
    * The catalogue read is separate and fails on its own. "They have not trained
    * their back" over a catalogue that did not come back is an accusation about
@@ -582,10 +582,10 @@ export default function ClientTraining() {
     oldestDay,
   }), [compareWeek, assigned.status, status, log, oldestDay, today]);
 
-  /* ── the programme checks, re-run against what they are ACTUALLY on ─────
+  /* ── the program checks, re-run against what they are ACTUALLY on ─────
      `reviewProgram` ran once, in the builder, against a draft. Its seven rules
      include `volume-jump`, which reads THIS CLIENT'S OWN training history — and
-     that history keeps moving after the programme is assigned. A block that was
+     that history keeps moving after the program is assigned. A block that was
      safe in July against a client training four times a week is a different
      proposition in September against one who has trained twice this month.
 
@@ -602,7 +602,7 @@ export default function ClientTraining() {
    *
    * `client?.injuries ?? []` is an empty list under a failed roster exactly as
    * it is under a client with nothing wrong with them. The same discipline
-   * app/(trainer)/builder.tsx applies before it lets a programme be assigned;
+   * app/(trainer)/builder.tsx applies before it lets a program be assigned;
    * here the consequence is milder — a finding withheld rather than a write
    * permitted — but a check that silently did not run reads exactly like a
    * check that passed.
@@ -621,8 +621,8 @@ export default function ClientTraining() {
     logStatus: status,
     goal: goalToEnum(client?.goal),
   }), [program, picked, clientInjuries, disclosureStatus, log, status, client]);
-  // Only worth drawing when there is a programme to check. A client on nothing
-  // has no findings, and an empty "Programme Checks" heading over them reads as
+  // Only worth drawing when there is a program to check. A client on nothing
+  // has no findings, and an empty "Program Checks" heading over them reads as
   // seven rules that ran and passed.
   const showChecks = !!program && assigned.status !== 'loading';
 
@@ -635,7 +635,7 @@ export default function ClientTraining() {
    * `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so it passed, the
    * read ran, `assigned_program_history` answered with zero rows and no error
    * (its policy resolves `is_my_client()`, an EXISTS over `clients`), and
-   * `historyLine` printed the 'none' branch: "No earlier programme on record."
+   * `historyLine` printed the 'none' branch: "No earlier program on record."
    *
    * Said about somebody who has never had an account, on a page whose every
    * other section had already been withheld from them. Passing null instead
@@ -647,7 +647,7 @@ export default function ClientTraining() {
   /* ── and what they made of what they were given ────────────────────────
    *
    * `client_plan_edits` holds every swap, removal, addition and corrected set
-   * the member made to the programme above. Until today it was written by one
+   * the member made to the program above. Until today it was written by one
    * screen (src/ui/planEdits.tsx) and read by nothing at all; the member can now
    * see their own copy, and this is the coach's — which is the copy that was
    * the point of storing it.
@@ -659,7 +659,7 @@ export default function ClientTraining() {
    * exists and none is added here — see the section below on why.
    *
    * Its own state, because it fails on its own: a refused read of these must
-   * never be drawn as a client who has followed the programme as written, which
+   * never be drawn as a client who has followed the program as written, which
    * is the one thing a coach would act on immediately.
    */
   const [planEdits, setPlanEdits] = useState<SharedPlanEdits | null>(null);
@@ -667,7 +667,7 @@ export default function ClientTraining() {
   /** The client this answer is allowed to land under. The same guard `wanted`
    *  gives the log read, and for the same reason: tapping through a book starts
    *  a read per tap and they do not return in order, so without it one client's
-   *  rewritten programme is drawn under another client's name. */
+   *  rewritten program is drawn under another client's name. */
   const wantedEdits = useRef<string | null>(null);
   const loadPlanEdits = useCallback(async (id: string | null, ask: boolean) => {
     wantedEdits.current = id;
@@ -690,9 +690,9 @@ export default function ClientTraining() {
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
    * Seven reads: what this client actually trained (`load`, which is already the
-   * focus read), the book, the programme assigned to them, what they were on
+   * focus read), the book, the program assigned to them, what they were on
    * before, the movement catalogue, the injury acknowledgements, and the
-   * changes the client has made to the programme.
+   * changes the client has made to the program.
    *
    * The plan-versus-actual comparison on this screen is drawn ACROSS the
    * assignment and the logged sessions, so refreshing the sessions without the
@@ -719,7 +719,7 @@ export default function ClientTraining() {
    * sections on this screen cannot be talking about different Mondays.
    *
    * Null days under anything but a settled assignment, so the diff answers
-   * 'unmatched' and says the programme could not be read rather than listing
+   * 'unmatched' and says the program could not be read rather than listing
    * changes with no movement names and letting that read as changes to nothing.
    */
   const editDiff = useMemo(() => planEditsDiff({
@@ -1051,11 +1051,11 @@ export default function ClientTraining() {
                     plan is the shorter half. Every read behind it is separate
                     and each says so for itself. */}
                 {assigned.status === 'loading' ? (
-                  <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading the programme they are on&hellip;</Text></Section>
+                  <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading the program they are on&hellip;</Text></Section>
                 ) : assigned.status === 'error' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="What they are on could not be read"
-                      note={`Nothing below compares their training against a plan, because the plan did not come back. That is not the same as ${who} being on no programme.`} />
+                      note={`Nothing below compares their training against a plan, because the plan did not come back. That is not the same as ${who} being on no program.`} />
                   </Section>
                 ) : !program && assigned.status === 'partial' ? (
                   /* The third way `getProgram` returns null, and the one this
@@ -1064,7 +1064,7 @@ export default function ClientTraining() {
                      `client_id`, so at a gym past the row cap the clients whose
                      ids sort last simply are not in the map — and the null they
                      produce is indistinguishable from the null of a client on
-                     nothing. "The read came back and they are on no programme"
+                     nothing. "The read came back and they are on no program"
                      was the sentence a coach then got about a client they had
                      written a block for, with "Writing one in the Program
                      Builder" underneath it as the suggested fix.
@@ -1075,15 +1075,15 @@ export default function ClientTraining() {
                      end of what one request returns, which is a different thing
                      to do about it. */
                   <Section>
-                    <SectionHead title="Their Programme" note="not in this read" />
+                    <SectionHead title="Their Program" note="not in this read" />
                     <Notice tone={t.warn} kicker="Row Limit" title="We could not tell what they are on"
-                      note={`Your clients' programmes came back at the row limit and ${who} was past the end of it, so whether ${who} is on a programme is unknown rather than no. Nothing below compares their training against a plan. Pull down to read again.`} />
+                      note={`Your clients' programs came back at the row limit and ${who} was past the end of it, so whether ${who} is on a program is unknown rather than no. Nothing below compares their training against a plan. Pull down to read again.`} />
                   </Section>
                 ) : !program ? (
                   <Section>
-                    <SectionHead title="Their Programme" note="none assigned" />
+                    <SectionHead title="Their Program" note="none assigned" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
-                      The read came back and {who} is on no coach-assigned programme, so there is nothing
+                      The read came back and {who} is on no coach-assigned program, so there is nothing
                       to compare the sessions below against. Writing one in the Program Builder puts it on
                       their Train tab.
                     </Text>
@@ -1091,12 +1091,12 @@ export default function ClientTraining() {
                 ) : (
                   <Section>
                     <SectionHead
-                      title="Programme Versus Record"
+                      title="Program Versus Record"
                       note={pva.state === 'ready' && position.phase === 'during' && position.week
                         ? `week ${position.week} of ${position.weeks}`
                         : undefined}
                     />
-                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{program.title || 'An untitled programme'}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{program.title || 'An untitled program'}</Text>
 
                     {/* The block, and the honesty about what a start date does.
                         A coach who believes the date is enforced and assigns a
@@ -1147,7 +1147,7 @@ export default function ClientTraining() {
                             since it was built and nothing joined them: the
                             screen compared whether a movement APPEARED, never
                             what went on the bar. The sentence that changes next
-                            week's programme is the second one.
+                            week's program is the second one.
 
                             Rendered only where the plan named a load.
                             "Prescribed 0 kg" is not a prescription, and
@@ -1195,7 +1195,7 @@ export default function ClientTraining() {
                           {loadLine(loadTally(pva.movements), who)}
                         </Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                          The heaviest WORKING set the programme names, against the heaviest {who} logged in
+                          The heaviest WORKING set the program names, against the heaviest {who} logged in
                           the window: a ramp's top set, never its warm-up. Within {LOAD_TOLERANCE * 100}% counts as
                           hitting it, because the finest adjustment anybody can make to a barbell is one pair
                           of the smallest plates on the rack.
@@ -1212,7 +1212,7 @@ export default function ClientTraining() {
                         <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but Not Prescribed</Text>
                         <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{pva.offPlan.join(' · ')}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                          Spelled as {who} typed {pva.offPlan.length === 1 ? 'it' : 'them'}. Work outside the programme is
+                          Spelled as {who} typed {pva.offPlan.length === 1 ? 'it' : 'them'}. Work outside the program is
                           not a fault; it is the part of their training the plan does not describe.
                         </Text>
                       </View>
@@ -1229,9 +1229,9 @@ export default function ClientTraining() {
                     running" was the sentence the header of part 204 said was
                     being typed into a React state and thrown away.
 
-                    Drawn OUTSIDE the programme chain above on purpose. A member
+                    Drawn OUTSIDE the program chain above on purpose. A member
                     keeps their corrections when a coach unassigns a block, and
-                    a coach who has just taken somebody off a programme is
+                    a coach who has just taken somebody off a program is
                     exactly the coach who wants to see what that person had been
                     quietly fixing about it. `planEditsDiff` answers 'unmatched'
                     when there is no assignment to resolve names against and the
@@ -1291,7 +1291,7 @@ export default function ClientTraining() {
                               {planEditDiffLine(row, who, editLoad)}
                             </Text>
                             {/* The member's own set-by-set table, as a count.
-                                There is no per-set figure in the programme to
+                                There is no per-set figure in the program to
                                 put beside it — `ProgramExercise` carries one
                                 `sets` for the whole movement — so a column of
                                 rows against a column of dashes would be a
@@ -1304,7 +1304,7 @@ export default function ClientTraining() {
                             ) : null}
                             {!row.resolved ? (
                               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                                This programme no longer names that movement, so the change is about the
+                                This program no longer names that movement, so the change is about the
                                 block they were on when they made it.
                               </Text>
                             ) : null}
@@ -1317,12 +1317,12 @@ export default function ClientTraining() {
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                         These are {who}&apos;s own corrections to their copy of the plan and nothing here changes
                         what you assigned. A change is stored against a day and not against a week, so the only
-                        safe place to take one of these into the programme is the builder, where you can see
+                        safe place to take one of these into the program is the builder, where you can see
                         which week you are editing.
                       </Text>
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
                         <Ghost
-                          label="Edit the Programme"
+                          label="Edit the Program"
                           onPress={() => router.push({ pathname: '/(trainer)/builder', params: picked ? { clientId: picked, from: 'trainerClientTraining' } : { from: 'trainerClientTraining' } })}
                         />
                         {picked && fullName ? (
@@ -1344,11 +1344,11 @@ export default function ClientTraining() {
                     has. */}
                 {showChecks ? (
                   <Section>
-                    <SectionHead title="Programme Checks" note={review.findings.length ? `${review.findings.length}` : undefined} />
+                    <SectionHead title="Program Checks" note={review.findings.length ? `${review.findings.length}` : undefined} />
                     <Text style={{ ...ty.caption, color: t.ink3 }}>{checksLine()}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                       Run again here against what {who} is on now and what they have logged since — the same seven
-                      rules the builder runs before a programme is assigned, over a history that has moved since.
+                      rules the builder runs before a program is assigned, over a history that has moved since.
                     </Text>
                     {review.findings.length === 0 ? (
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
@@ -1501,7 +1501,7 @@ export default function ClientTraining() {
                     {/* ── which muscles the work landed on ────────────────
                         P1. Balance is the coach's job, and until now the app
                         showed it only to the client — who cannot rewrite the
-                        programme. Bars compare the groups with each other and
+                        program. Bars compare the groups with each other and
                         never with a target: there is no right number of sets
                         for a back and this screen does not pretend to know one. */}
                     <Section>
@@ -1811,12 +1811,12 @@ export default function ClientTraining() {
                     drawn for them anyway, and `useProgramHistory(null)` returns
                     `{ rows: null, status: 'ready' }`: `historyBoard` reads the
                     null and answers 'unreadable', so the line printed was
-                    "The earlier programmes could not be read. That is not the
+                    "The earlier programs could not be read. That is not the
                     same as Amy never having been on one."
 
                     Two answers where there are three. It is the safe half of
                     the pair — it does not accuse anybody of never having been
-                    on a programme — but it tells a coach their read failed when
+                    on a program — but it tells a coach their read failed when
                     no read was issued, directly underneath a notice saying this
                     person has no account, and the only thing it suggests doing
                     is pulling to refresh, for ever.
@@ -1828,7 +1828,7 @@ export default function ClientTraining() {
                 {askable ? (<>
                 <Rule />
                 <Section>
-                  <SectionHead title="Programme History" note={hist.earlierCount == null ? undefined : `${hist.earlierCount}`} />
+                  <SectionHead title="Program History" note={hist.earlierCount == null ? undefined : `${hist.earlierCount}`} />
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{historyLine(history.status, hist, who)}</Text>
                   {hist.entries.map((e, i) => (
                     <View key={e.key} style={{ marginTop: sp.md, paddingTop: i ? sp.md : 0, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
@@ -1845,7 +1845,7 @@ export default function ClientTraining() {
                   ))}
                   {history.status === 'partial' ? (
                     <View style={{ marginTop: sp.md }}>
-                      <PartialRead what="earlier programmes" shown={hist.entries.filter((e) => !e.current).length}
+                      <PartialRead what="earlier programs" shown={hist.entries.filter((e) => !e.current).length}
                         onPress={history.reload} />
                     </View>
                   ) : null}

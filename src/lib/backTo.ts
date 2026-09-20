@@ -33,7 +33,7 @@ export const BACK_TO = {
   // and scroll position are on the screen behind it — which is exactly the path
   // the tab history reorders away, because a member reads three movements out
   // of one workout in a row.
-  clientProgrammes: '/(client)/programmes',
+  clientPrograms: '/(client)/programs',
   clientWorkouts: '/(client)/workouts',
   ownerLibrary: '/(owner)/library',
   trainerBuilder: '/(trainer)/builder',

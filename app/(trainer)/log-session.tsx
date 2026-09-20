@@ -19,7 +19,7 @@
 //     energy, and the client's own screens render an absent burn as a dash.
 //     Guessing here would put a fabricated number into somebody else's history.
 //   · turn a PRESCRIPTION into a performed figure. Since the sheet can be
-//     filled from the client's own programme (below), every rep target the
+//     filled from the client's own program (below), every rep target the
 //     coach wrote passes through this screen — and `parseInt('30s')` is 30,
 //     which is a thirty-second plank hold written into somebody's permanent
 //     record as thirty repetitions. Nothing here parses a target. A row loaded
@@ -56,7 +56,7 @@
 // had spent twenty minutes writing somebody a push day retyped it standing next
 // to them.
 //
-// So the sheet can now be FILLED from the programme this coach assigned this
+// So the sheet can now be FILLED from the program this coach assigned this
 // client, for the day being logged. The picker offers the whole week rather
 // than only the day the date falls on, because a coach writing up an hour
 // afterwards is routinely writing up the Friday session they ran on a
@@ -178,7 +178,7 @@ import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { rateCentsToSnapshot } from '../../src/lib/rateSnapshot';
 import { fetchMyCurrency } from '../../src/lib/myCurrency';
 import type { MyCurrency } from '../../src/lib/currencySource';
-// The programme this coach assigned this client, and the rules for putting it
+// The program this coach assigned this client, and the rules for putting it
 // on the sheet. The provider is the one every other coach screen reads, so the
 // block shown here is the block shown on their record; the module beside it
 // owns the one thing that must not be got wrong, which is that a target is not
@@ -261,13 +261,13 @@ const PICKER_SHOWN = 12;
  * One movement on the sheet.
  *
  * `target` is the coach's OWN prescription for that set — '6-8', 'AMRAP',
- * '30s' — carried across when the row was loaded from the client's programme,
+ * '30s' — carried across when the row was loaded from the client's program,
  * and absent on a row the coach added by hand. It is a caption and nothing
  * else: it is never parsed, never written, and `entriesToWrite` does not know
  * it exists. What goes into the client's record is `reps` and `kg`, which are
  * what the coach typed or confirmed.
  *
- * `restSec` is the rest the coach's own programme states for the movement, in
+ * `restSec` is the rest the coach's own program states for the movement, in
  * seconds, and null where it states none or the row was added by hand. It
  * feeds the rest countdown and nothing else; like `target` it is never written.
  *
@@ -502,7 +502,7 @@ export default function LogSession() {
 
   const [rows, setRows] = useState<Row[]>([]);
   /**
-   * Which days of the client's programme have already been put on this sheet.
+   * Which days of the client's program have already been put on this sheet.
    *
    * A coach who taps Load twice gets the same six movements twice, and the
    * second copy is indistinguishable from a genuine second time through the
@@ -517,7 +517,7 @@ export default function LogSession() {
    */
   const [loadedDays, setLoadedDays] = useState<string[]>([]);
   /**
-   * The day of the programme the coach has chosen, or null to follow the one
+   * The day of the program the coach has chosen, or null to follow the one
    * the date being logged actually schedules.
    *
    * Null rather than seeded, so that changing the day at the top of the screen
@@ -573,8 +573,8 @@ export default function LogSession() {
    *     coach's way out of a chime after every tick.
    *   · THE REST COUNTDOWN starts when a set becomes done: the tick tapped, or
    *     — while the clock is running — a rep count typed into an empty box and
-   *     left. It counts the programme's own rest for that movement where the
-   *     programme states one and `DEFAULT_REST_SEC` where it does not, and says
+   *     left. It counts the program's own rest for that movement where the
+   *     program states one and `DEFAULT_REST_SEC` where it does not, and says
    *     which. The end cue is the member runner's, through the same two calls.
    *
    * Both are offered ONLY for a session filed under today. A session being
@@ -749,7 +749,7 @@ export default function LogSession() {
    * Monday, and on a multi-week block the week is counted to the day on screen.
    *
    * Nobody chosen means nothing to ask about: `getProgram` takes a client id and
-   * there is no such thing as "the programme" without one.
+   * there is no such thing as "the program" without one.
    *
    * No clock is read here. `logDay` is a chosen day, and the whole resolution —
    * which week of the block, which day of that week — is arithmetic on it.
@@ -779,7 +779,7 @@ export default function LogSession() {
   };
 
   /**
-   * Put a day of the programme on the sheet.
+   * Put a day of the program on the sheet.
    *
    * APPENDED, never substituted. Whatever the coach has already typed is
    * theirs and this screen is the only thing holding it — the same rule
@@ -793,11 +793,11 @@ export default function LogSession() {
    */
   const loadPlanDay = (opt: NonNullable<typeof chosenPlanDay>) => {
     const p = prefillDay(opt.day);
-    // The programme's own rest for each movement, looked up by the name
+    // The program's own rest for each movement, looked up by the name
     // `prefillDay` kept — it drops nameless rows, so positions do not line up
     // and an index would hand one movement another's rest. Only a usable
     // positive figure is carried: `restSecondsFor` treats everything else as
-    // "nobody set one", and the bar must not say "from your programme" over the
+    // "nobody set one", and the bar must not say "from your program" over the
     // app's default.
     const restByName = new Map<string, number>();
     for (const ex of Array.isArray(opt.day?.exercises) ? opt.day.exercises : []) {
@@ -836,14 +836,14 @@ export default function LogSession() {
    *      week so the picker always has something selected, and auto-loading
    *      THAT would put a session on the sheet the client was never due — on a
    *      rest day, silently, ready to save. An automatic action may only take
-   *      the answer the programme actually gives.
+   *      the answer the program actually gives.
    *   2. ONLY ONTO AN EMPTY SHEET. `loadPlanDay` appends, deliberately, and an
    *      effect that appends is an effect that can double. Whatever the coach
    *      has typed is theirs and this screen is the only thing holding it.
    *   3. ONCE. `loadedDays` already records what has been put on; the same key
    *      is never loaded twice, so a re-render, a refetch, or the coach
    *      switching the date away and back cannot stack two copies of a day.
-   *   4. NOT FROM A READ THAT DID NOT LAND. `offer.caveat` marks a programme
+   *   4. NOT FROM A READ THAT DID NOT LAND. `offer.caveat` marks a program
    *      resolved from the phone's last copy rather than a confirmed one. Shown
    *      with its caveat and loaded on a tap, that is a coach choosing to work
    *      from what is in hand. Loaded automatically it is a possibly-stale
@@ -851,7 +851,7 @@ export default function LogSession() {
    *      quiet wrongness this codebase refuses.
    *
    * The coach remains able to change any of it: pick another day, edit any
-   * figure, remove a row, add a movement. None of that touches the programme —
+   * figure, remove a row, add a movement. None of that touches the program —
    * this screen records what happened, and what the client is due next week is
    * still what the coach wrote in the builder.
    */
@@ -1825,7 +1825,7 @@ export default function LogSession() {
                 return (
                   <Pressable key={d.day} onPress={() => {
                     setChosenDay(d.day);
-                    // And the programme day goes back to following the date. A
+                    // And the program day goes back to following the date. A
                     // coach who switches from Tuesday to Monday is asking about
                     // Monday's session; a chip that stayed selected would be
                     // answering the question they have just changed. What has
@@ -1892,12 +1892,12 @@ export default function LogSession() {
               under Monday offers Monday's plan.
 
               Four states, four sentences, and they are not interchangeable —
-              a coach told "they have no programme" when the truth is "the read
+              a coach told "they have no program" when the truth is "the read
               did not land" will write the session from memory and stop
               trusting the screen. `planOffer` owns which one is said. */}
           {picked && offer ? (
             <Section>
-              <SectionHead title="From Their Programme" note={offer.weekLabel ?? undefined} />
+              <SectionHead title="From Their Program" note={offer.weekLabel ?? undefined} />
               {offer.state === 'unreadable' ? (
                 <Flag tone={t.warn}>{offer.line}</Flag>
               ) : (
@@ -1905,7 +1905,7 @@ export default function LogSession() {
               )}
 
               {/* A plan resolved from a read that did not land is offered WITH
-                  the caveat rather than withheld: the programme is real, it is
+                  the caveat rather than withheld: the program is real, it is
                   simply not known to be the newest one. */}
               {offer.caveat ? (
                 <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{offer.caveat}</Text>
@@ -2403,7 +2403,7 @@ export default function LogSession() {
         {rest && isLive ? (
           <RestBar key={rest.gen} t={t} endsAt={rest.endsAt}
             title={`${movement(rest.name)} · Set ${rest.setIdx + 1}`}
-            note={rest.fromPlan ? 'Rest from your programme' : `App default of ${DEFAULT_REST_SEC} seconds`}
+            note={rest.fromPlan ? 'Rest from your program' : `App default of ${DEFAULT_REST_SEC} seconds`}
             onAdd={() => setRest((cur) => (cur && cur.gen === rest.gen ? { ...cur, endsAt: cur.endsAt + 15000 } : cur))}
             onSkip={() => setRest((cur) => (cur && cur.gen === rest.gen ? null : cur))}
             onDone={() => setRest((cur) => (cur && cur.gen === rest.gen ? null : cur))} />

@@ -62,6 +62,6 @@ export function foldsAfterRemoval(folds: FoldedDays, removed: number): FoldedDay
  * Written as a named function rather than a bare `{}` at four call sites so
  * that the reason is stated once and a fifth caller has something to reach for.
  */
-export function foldsForNewProgramme(): FoldedDays {
+export function foldsForNewProgram(): FoldedDays {
   return {};
 }

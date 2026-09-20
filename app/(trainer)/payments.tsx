@@ -841,7 +841,7 @@ export default function TrainerPayments() {
   const withdrawPromo = (p: PromoCode) => {
     Alert.alert(
       `Withdraw ${p.code}?`,
-      // WHICH PACKAGE. A coach running "NEWYEAR 50% off" on a £300 programme
+      // WHICH PACKAGE. A coach running "NEWYEAR 50% off" on a £300 program
       // and "SUMMER 10% off" on a £60 pack was shown a code, a percentage and
       // nothing else — here and in the list — so withdrawing the wrong one
       // leaves the expensive offer live and stops the cheap one, and nothing

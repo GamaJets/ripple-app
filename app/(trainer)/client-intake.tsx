@@ -322,7 +322,7 @@ export default function ClientIntakeScreen() {
               {intake.tried.wont.trim() ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                   Worth taking literally. Somebody who says this and then finds it in week one of
-                  their programme is somebody who stops turning up in week three.
+                  their program is somebody who stops turning up in week three.
                 </Text>
               ) : null}
             </Section>
