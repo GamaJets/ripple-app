@@ -47,9 +47,13 @@ import { LEGACY_MEAL_SWAPS_KEY, mealSwapsKey, readMealSwaps, writeMealSwaps } fr
 // `mealOverride` map — those are catalogue-index machinery.
 import {
   RECIPE_ATTRIBUTION, RECIPE_DISCLAIMER, isRecipeMeal, portionRecipe, recipeAllergens,
-  type RecipeMeal, type PlannedRecipe, type RecipeDetailResult, type RecipeContext,
+  type RecipeMeal, type PlannedRecipe, type RecipeRef, type RecipeDetailResult, type RecipeContext,
 } from '../../src/lib/recipes';
-import { recipePlanKey, readRecipePlan, writeRecipePlan, withRecipeAt, withoutRecipeAt, type RecipePlan } from '../../src/lib/recipePlan';
+import { recipePlanKey, readRecipePlan, writeRecipePlan, recipePlanAt, withRecipeAt, withoutRecipeAt, type RecipePlan } from '../../src/lib/recipePlan';
+// The coach's own pinned recipes, read at the same two numbers the member's
+// are. The column and its four-key CHECK are src/lib/coachRecipeRefs.ts's job;
+// this screen only asks it what is pinned where.
+import { coachRecipeRefAt } from '../../src/lib/coachRecipeRefs';
 import { useRecipeSearch, useRecipeDetail } from '../../src/ui/useRecipeSearch';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { reportError } from '../../src/lib/reportError';
@@ -249,6 +253,17 @@ const dishKey = (m: PlannedMeal): string => (isRecipeMeal(m) ? `r${m.sourceId}` 
  *  not open is reported rather than alerted: nothing the member was doing
  *  depends on it, and the words it sits under are the credit either way. */
 const openLink = (where: string, url: string) => { Linking.openURL(url).catch((e) => reportError(where, e)); };
+
+/** Said once, on screen and on both shared documents, so the sheet somebody
+ *  shops from and the file they send cannot disagree about it. A planned
+ *  recipe's ingredients and figures are not stored — they are read from the
+ *  library — and a read that has not landed leaves the plan's own meal standing
+ *  in, which is a meal they are not going to cook. */
+const UNREAD_SHOPPING_WARNING =
+  'One or more of your planned recipes could not be read, so your plan’s own meal is standing in for it — its ingredients are not on this list and its figures are not in these totals.';
+/** The heading unmeasured ingredients go under. They are shopping and belong
+ *  on the list; they have no quantity, and inventing one is worse than none. */
+const UNMEASURED_HEAD = 'To Taste & As Needed';
 
 /** One planned recipe's read, as the screen holds it. `loading` rides along so
  *  "Try Again" can say it is trying — the hook keeps the old failure in
@@ -862,35 +877,70 @@ export default function Nutrition() {
   const planHasSnacks = plan.some((m) => m.slot === 'Snack');
   const planSlots = useMemo(() => Array.from(new Set(plan.map((m) => m.slot))), [plan]);
   const slotSel: Slot | null = slotPick && planSlots.includes(slotPick) ? slotPick : planSlots[0] ?? null;
-  // ── today's plan, with the member's planned recipes in it ──────────────
+  // ── the plan, with the planned recipes in it ───────────────────────────
   //
-  // `plan` stays what `buildPlan` composed — the week, the grocery list and the
-  // shared document are all built from it and from `input`, and none of them
-  // knows what a recipe is. `todayPlan` is what TODAY'S LIST draws: the same
-  // rows, with a planned recipe standing in at its position once its dish is in
-  // hand, portioned to the calories the generated row there carries
-  // (`portionRecipe` is `buildPlan`'s own arithmetic, so the slot's share of
-  // the day does not move by more than the dish).
+  // `plan` stays what `buildPlan` composed: catalogue indices, portioned. What
+  // a recipe does to it is applied ONCE, by `withRecipes`, and every artefact on
+  // this screen is built through that one composition — today's list, This
+  // Week, the grocery list and the shared document. It used to be applied to
+  // today's list alone, so a member who planned three real recipes went on
+  // shopping for three generated meals they were not going to eat.
+  //
+  // A planned recipe stands in at its position, portioned to the calories the
+  // generated row there carries (`portionRecipe` is `buildPlan`'s own
+  // arithmetic, so the slot's share of the day does not move by more than the
+  // dish). Its `ing` is PER SERVING and so is its `k/p/c/f` — the two are the
+  // same divisor (src/lib/recipes.ts, `toRecipeMeal`), which is what lets
+  // `groceryFromWeek` multiply the ingredients by `servings` and the day total
+  // add `K` without either being a figure for a plate nobody is serving.
   //
   // "Once its dish is in hand" is the rule that matters. A ref with no read
-  // behind it has no figures, and a failed read is not an empty slot: until the
-  // read is WHOLE the generated row stays exactly where it was, and the list
-  // says underneath which recipe it is waiting for or could not read.
+  // behind it has no figures and no ingredients, and a failed read is not an
+  // empty slot: until the read is WHOLE the generated row stays exactly where
+  // it was, the list says which recipe it is waiting for, and the day it is on
+  // prints no total and carries a warning on the shopping list — see
+  // `waitingIn`. That is the line the coach's board takes for the same reason
+  // (a day holding a pinned recipe draws its targets but not its rings).
   const recipeDish = (sourceId: number): RecipeMeal | null => {
     const held = recipeLive[sourceId];
     if (held) return held;
     const read = recipeReads[sourceId]?.result;
     return read && read.status === 'ready' ? read.meal : null;
   };
-  const todayPlan = useMemo((): PlannedMeal[] => plan.map((m) => {
-    const ref = recipePlan[m.pos];
+  // Which day of the week the member is standing in, and therefore which day a
+  // recipe planned here is planned FOR. `planDayIndex` returns null only for a
+  // date that is not one, and `todayKeyNow` is always the reader's own
+  // YYYY-MM-DD; the fallback is the week's first day rather than "no day", so a
+  // choice is never silently dropped on the floor.
+  const todayIdx = coachDay ?? 0;
+  // The coach's pinned recipes, keyed by the same two numbers the member's own
+  // are. Only while the coach's written week is the CURRENT one: a stale plan's
+  // day indices name meals this member is no longer served, and `coachOverride`
+  // has already fallen off it. A coach read that FAILED is `coachAdjust ===
+  // null` above — no refs, which is not the same as none pinned, and is why
+  // `adjustUnknown` still stops the board drawing.
+  const coachRefs = (coachPlanCurrent ? coachAdjust?.recipeRefs : null) ?? {};
+  /** The recipe planned for a day and slot: the member's own first, the coach's
+   *  pin behind it — exactly as `override` sits over `coachOverride`. */
+  const refAt = (day: number, pos: number): RecipeRef | null =>
+    recipePlanAt(recipePlan, day, pos) ?? coachRecipeRefAt(coachRefs, day, pos);
+  /** A built day with its planned recipes standing in. */
+  const withRecipes = (day: readonly PlannedMeal[], d: number): PlannedMeal[] => day.map((m) => {
+    const ref = refAt(d, m.pos);
     const dish = ref ? recipeDish(ref.sourceId) : null;
     // The slot is the PLAN's, not the one the recipe was searched under: a
     // change of meals-per-day moves which slot a position is, and a row filed
     // under a segment the plan no longer has would be a row nobody can find.
     return dish ? portionRecipe({ ...dish, slot: m.slot }, m.K, m.pos) : m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [plan, recipePlan, recipeLive, recipeReads]);
+  });
+  /** The rows of a built day whose planned recipe is NOT in hand — still being
+   *  read, or the read failed. The generated meal is standing in for each. */
+  const waitingIn = (day: readonly PlannedMeal[], d: number) =>
+    day.filter((m) => { const ref = refAt(d, m.pos); return !!ref && !recipeDish(ref.sourceId); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const todayPlan = useMemo(() => withRecipes(plan, todayIdx), [plan, todayIdx, recipePlan, coachRefs, recipeLive, recipeReads]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const todayWaiting = useMemo(() => waitingIn(plan, todayIdx), [plan, todayIdx, recipePlan, coachRefs, recipeLive, recipeReads]);
   const slotMeals = todayPlan.filter((m) => m.slot === slotSel);
   // The slot's rows as the ENGINE composed them. Everything that does catalogue
   // arithmetic below — the stride, `mealAt`, the "not the lead again" filter —
@@ -908,16 +958,23 @@ export default function Nutrition() {
     if (!Number.isInteger(idx) || idx < 0) return;
     setOverride({ ...override, [pos]: idx });
   };
-  /** Plan a real recipe at its slot. The REF is what is kept (`withRecipeAt`
-   *  goes through `recipeRef`); the dish is held in state so the row can be
-   *  drawn now without paying for a second read of something already in hand. */
+  /** Plan a real recipe at its slot, FOR TODAY. The REF is what is kept
+   *  (`withRecipeAt` goes through `recipeRef`); the dish is held in state so
+   *  the row can be drawn now without paying for a second read of something
+   *  already in hand.
+   *
+   *  The day is the reason this signature changed. Without one, choosing a
+   *  chicken tikka for breakfast made it breakfast every day for ever — see
+   *  the header of src/lib/recipePlan.ts. */
   const planRecipe = (m: PlannedRecipe) => {
     if (m.pos < 0) return;
     setRecipeLive((prev) => ({ ...prev, [m.sourceId]: m }));
-    setRecipePlan((prev) => withRecipeAt(prev, m.pos, m));
+    setRecipePlan((prev) => withRecipeAt(prev, todayIdx, m.pos, m));
   };
-  /** Hand a slot back to the plan's own meal. */
-  const unplanRecipe = (pos: number) => setRecipePlan((prev) => withoutRecipeAt(prev, pos));
+  /** Hand today's slot back to the plan's own meal. It takes out the MEMBER's
+   *  own choice; a recipe their coach pinned is the coach's pick and stays,
+   *  the way a coach's meal override does. */
+  const unplanRecipe = (pos: number) => setRecipePlan((prev) => withoutRecipeAt(prev, todayIdx, pos));
   // The rest of the slot's catalogue, portioned like the planned meal so the
   // calories on the rows are the calories the plan would carry. The planned
   // meal leads and is not repeated. Real search over real rows; an empty
@@ -995,12 +1052,14 @@ export default function Nutrition() {
       .map((m) => portionRecipe(m, recipeLead.K, recipeLead.pos))
     : [];
   // Planned recipes in this slot whose dish is NOT in hand: still reading, or
-  // the read failed. The generated row is standing in for each of them.
-  const recipesWaiting = genSlotMeals
-    .map((m) => ({ pos: m.pos, ref: recipePlan[m.pos] }))
-    .filter((x): x is { pos: number; ref: NonNullable<typeof x.ref> } => !!x.ref && !recipeDish(x.ref.sourceId));
+  // the read failed. The generated row is standing in for each of them. `mine`
+  // decides whether "Back to Plan's Meal" is offered — it takes out the
+  // member's own choice, and a recipe the COACH pinned is not one.
+  const recipesWaiting = waitingIn(genSlotMeals, todayIdx)
+    .map((m) => ({ pos: m.pos, ref: refAt(todayIdx, m.pos)!, mine: !!recipePlanAt(recipePlan, todayIdx, m.pos) }));
   // Whether any recipe stands in today's list. It decides the one caption that
-  // says how far a planned recipe reaches.
+  // says how far a planned recipe reaches, and the attribution that must go
+  // wherever one is shown.
   const recipeInPlan = todayPlan.some((m) => isRecipeMeal(m));
   // The seven days the member is actually shown, decided ONCE and used by both
   // the week view below and the grocery list. `coachWeekDay` is the coach's
@@ -1011,7 +1070,26 @@ export default function Nutrition() {
   const coachWeekDay = (d: number): Record<number, number> | null =>
     (coachPlanCurrent ? planDayOverride(coachPlan!, d) : null);
   const week = useMemo(() => planWeek(input, coachWeekDay), [input, coachPlanCurrent, coachPlan]);
-  const groc = useMemo(() => groceryFromWeek(week), [week]);
+  // The same seven days with the planned recipes standing in — ONE composition,
+  // so This Week, the shopping list and today's list cannot describe three
+  // different dinners. `groceryFromWeek` needs nothing new to shop a recipe: a
+  // `PlannedRecipe` IS a `PlannedMeal`, its `ing` carries metric amounts and a
+  // Repple department already (`deptForAisle`), and its `unmeasured` — "salt,
+  // to taste" — comes back on its own heading rather than as a quantity.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const weekPlan = useMemo(() => week.map(withRecipes), [week, recipePlan, coachRefs, recipeLive, recipeReads]);
+  // How many rows of each day are standing in for a recipe that could not be
+  // read. A day with any is a day whose total and whose shopping are INCOMPLETE
+  // — the recipe's figures and ingredients are not stored, so there is nothing
+  // honest to print — and both places say so rather than quietly totalling the
+  // generated stand-in as though it were the meal.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const weekWaiting = useMemo(() => week.map((day, d) => waitingIn(day, d).length), [week, recipePlan, coachRefs, recipeLive, recipeReads]);
+  const weekUnread = weekWaiting.reduce((a, n) => a + n, 0);
+  // Whether a real recipe is anywhere in the week. The shopping list is drawn
+  // from those ingredients, so it owes the credit and the backlink too.
+  const recipeWeek = weekPlan.some((day) => day.some(isRecipeMeal));
+  const groc = useMemo(() => groceryFromWeek(weekPlan), [weekPlan]);
   // ── the exclusions that could not be honoured, computed once ────────────
   //
   // It used to be computed inside the Today arm and rendered only there, so
@@ -1026,11 +1104,17 @@ export default function Nutrition() {
   // Which of the excluded things are actually in the week the list is built
   // from. `gapNote` says the filter could not be honoured; this says what ended
   // up in the shopping. Both go on the sheet.
+  // Read off the week AS SHOPPED, so a recipe's ingredients are marked the way
+  // the row and the sheet mark them — and through `recipeAllergens` for a
+  // recipe, which reads the unmeasured ingredients too ("butter, for greasing"
+  // is exactly as much dairy as 50 g of it).
   const weekAllergens = useMemo(() => {
     const found = new Set<Allergen>();
-    for (const day of week) for (const m of day) for (const a of mealAllergens(m, c.avoid)) found.add(a);
+    for (const day of weekPlan) {
+      for (const m of day) for (const a of (isRecipeMeal(m) ? recipeAllergens(m, c.avoid) : mealAllergens(m, c.avoid))) found.add(a);
+    }
     return [...found];
-  }, [week, c.avoid]);
+  }, [weekPlan, c.avoid]);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
   const grocKeys = DEPTS.flatMap((d) => (groc.byDept[d] || []).map((it) => d + '|' + it.item));
   const grocChecked = grocKeys.filter((k) => checked[k]).length;
@@ -1050,6 +1134,9 @@ export default function Nutrition() {
       weekAllergens.length
         ? `Meals in this week contain ${weekAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid. Check each item before you buy.`
         : null,
+      // A list that is short of a planned recipe's ingredients is a list
+      // somebody shops from and comes home missing a dinner.
+      weekUnread ? UNREAD_SHOPPING_WARNING : null,
     ].filter(Boolean) as string[];
     const lines: string[] = ['Grocery List', ...(warn.length ? ['', ...warn] : []), ''];
     let html = '<h2>Grocery List</h2>' + warn.map((w) => `<p><strong>${w}</strong></p>`).join('');
@@ -1059,6 +1146,15 @@ export default function Nutrition() {
       groc.byDept[d]!.forEach((it) => { const q = it.qty + (it.unit ? ' ' + it.unit : ''); lines.push('- ' + it.item + ' — ' + q); html += '<li>' + it.item + ' — ' + q + '</li>'; });
       html += '</ul>'; lines.push('');
     });
+    // Named, never quantified: a recipe asked for salt to taste, and "0 g salt"
+    // on a shopping list is a figure nobody wrote.
+    if (groc.unmeasured.length) {
+      lines.push(UNMEASURED_HEAD.toUpperCase());
+      html += '<h3>' + UNMEASURED_HEAD + '</h3><ul>';
+      groc.unmeasured.forEach((it) => { lines.push('- ' + it); html += '<li>' + it + '</li>'; });
+      html += '</ul>'; lines.push('');
+    }
+    if (recipeWeek) { lines.push(RECIPE_DISCLAIMER, `${RECIPE_ATTRIBUTION.text} — ${RECIPE_ATTRIBUTION.url}`); html += `<p>${RECIPE_DISCLAIMER}</p><p><a href="${RECIPE_ATTRIBUTION.url}">${RECIPE_ATTRIBUTION.text}</a></p>`; }
     await shareDoc(html, lines.join('\n'), 'Grocery List');
   };
   // The labels for the seven rows below are the plan's OWN day order, not a
@@ -1067,16 +1163,30 @@ export default function Nutrition() {
   // week wrongly. See PLAN_WEEKDAYS, which src/lib/weekStart.ts decides.
   const WEEKD = PLAN_WEEKDAYS;
   const sharePlan = async () => {
-    const rows = plan.map((m) => ({ slot: m.slot, name: m.n, K: m.K, P: m.P, C: m.C, F: m.F }));
+    // `todayPlan`, not `plan`. This mapped the composed catalogue day, so a
+    // member who sent their plan to somebody sent the meals they had replaced.
+    const rows = todayPlan.map((m) => ({ slot: m.slot, name: m.n, K: m.K, P: m.P, C: m.C, F: m.F }));
     const labels = c.avoid.map((a) => (ALLERGENS.find((x) => x.id === a)?.label ?? a));
-    const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels, appName, t.brand);
+    // Attribution and the backlink go WITH the document — it is read where none
+    // of this screen's links exist — and so does the sentence that says a
+    // planned recipe could not be read and the plan's own meal is in the table
+    // in its place.
+    const note = [
+      recipeInPlan ? `${RECIPE_DISCLAIMER} ${RECIPE_ATTRIBUTION.text} — ${RECIPE_ATTRIBUTION.url}` : null,
+      todayWaiting.length ? UNREAD_SHOPPING_WARNING : null,
+    ].filter(Boolean).join(' ');
+    const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels, appName, t.brand, note || undefined);
     await shareDoc(html, text, 'Meal Plan');
   };
   // `idx + d` was a synthetic week — the same meal shifted along the catalogue
   // one place per day, which is a pattern rather than a plan. Where the coach
   // has written a real week, show theirs.
+  //
+  // A day standing in for a recipe it could not read has NO total: the figures
+  // belong to the recipe and are not stored, and the generated stand-in's `K`
+  // summed under the recipe's name is a number for a plate nobody is serving.
   const weekPlans = view === 'week'
-    ? week.map((p) => ({ plan: p, tot: { K: p.reduce((a, m) => a + m.K, 0) } }))
+    ? weekPlan.map((p, d) => ({ plan: p, waiting: weekWaiting[d], tot: { K: weekWaiting[d] ? null : p.reduce((a, m) => a + m.K, 0) } }))
     : [];
 
   const G = layout.gutter;
@@ -1311,13 +1421,27 @@ export default function Nutrition() {
   // WHICH of the two "Use This Meal" paths a tap takes — hangs off this.
   const sheetRecipe = recipe && isRecipeMeal(recipe) ? recipe : null;
   const sheetAllergens = !recipe ? [] : sheetRecipe ? recipeAllergens(sheetRecipe, c.avoid) : mealAllergens(recipe, c.avoid);
-  // One reader per planned recipe whose dish is not already in hand — by
-  // `sourceId`, so the same recipe in two slots is one read, not two.
-  const recipesToRead = plan.reduce<{ sourceId: number; slot: Slot }[]>((acc, m) => {
-    const ref = recipePlan[m.pos];
-    if (ref && !recipeLive[ref.sourceId] && !acc.some((x) => x.sourceId === ref.sourceId)) acc.push({ sourceId: ref.sourceId, slot: m.slot });
-    return acc;
-  }, []);
+  // One reader per DISTINCT planned recipe whose dish is not already in hand —
+  // by `sourceId`, so the same recipe in two slots, or on three days, is one
+  // read and not six.
+  //
+  // The whole week, not just today, because the week is what the grocery list
+  // is built from and a ref has no ingredients. The cost is bounded by what the
+  // member (or their coach) deliberately PLANNED, never by how many rows a list
+  // happens to draw — which is the rule that matters now that an overrun is
+  // billed rather than refused: a detail is 1.1 points against 0.11 inside a
+  // search, and nothing here fetches one per search result.
+  // ponytail: one read per planned recipe, no cross-screen cache. If a member
+  // planning seven recipes a week turns out to be common, cache the replies by
+  // sourceId in src/ui/useRecipeSearch.ts, where the gate already lives.
+  const recipesToRead = [{ d: todayIdx, meals: plan }, ...week.map((day, d) => ({ d, meals: day }))]
+    .reduce<{ sourceId: number; slot: Slot }[]>((acc, { d, meals }) => {
+      for (const m of meals) {
+        const ref = refAt(d, m.pos);
+        if (ref && !recipeLive[ref.sourceId] && !acc.some((x) => x.sourceId === ref.sourceId)) acc.push({ sourceId: ref.sourceId, slot: m.slot });
+      }
+      return acc;
+    }, []);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -1535,14 +1659,25 @@ export default function Nutrition() {
               <View key={d} style={{ marginBottom: sp.xl }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.sm }}>
                   <Text accessibilityRole="header" style={{ ...ty.caption, ...font('700'), color: t.ink }}>{WEEKD[d]}</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{wp.tot.K.toLocaleString()} kcal</Text>
+                  {/* A dash, not a sum, on a day standing in for a recipe it
+                      could not read. See `weekPlans`. */}
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}
+                    accessibilityLabel={wp.tot.K == null ? 'Day total not known yet' : `${wp.tot.K.toLocaleString()} kcal`}>
+                    {wp.tot.K == null ? '—' : wp.tot.K.toLocaleString()} kcal
+                  </Text>
                 </View>
+                {wp.waiting ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                    {wp.waiting === 1 ? 'A recipe' : `${num(wp.waiting)} recipes`} planned for this day could not be read yet, so your plan’s meal is shown instead and the day has no total.
+                  </Text>
+                ) : null}
                 {wp.plan.map((m) => {
                   // The same per-row mark the Today list carries. This arm drew
                   // slot, name and kcal and nothing else, so a dish containing
                   // the thing the member excluded was unmarked on the tab they
-                  // plan and shop from.
-                  const inIt = mealAllergens(m, c.avoid);
+                  // plan and shop from. For a recipe it is Repple's own reading
+                  // of the ingredient list, unmeasured ones included.
+                  const inIt = isRecipeMeal(m) ? recipeAllergens(m, c.avoid) : mealAllergens(m, c.avoid);
                   return (
                   <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button"
                     // The mark this arm was given is on the row and in the
@@ -1628,7 +1763,7 @@ export default function Nutrition() {
                   below is standing in for it — a failed read is not an empty
                   slot, and a ref has no figures to draw — and this says which
                   recipe, and whether it is still being read or could not be. */}
-              {recipesWaiting.map(({ pos, ref }) => {
+              {recipesWaiting.map(({ pos, ref, mine }) => {
                 const read = recipeReads[ref.sourceId];
                 const failed = read && !read.loading && read.result && read.result.status !== 'ready' ? read.result : null;
                 return (
@@ -1636,7 +1771,7 @@ export default function Nutrition() {
                     {failed ? (
                       <>
                         <Flag tone={t.warn}>
-                          Your recipe “{ref.title}” could not be read, so your plan’s meal is shown in its place. {failed.message}
+                          {mine ? 'Your recipe' : 'Your coach’s recipe'} “{ref.title}” could not be read, so your plan’s meal is shown in its place. {failed.message}
                         </Flag>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
                           {/* Not for a recipe the library no longer has, nor for
@@ -1645,12 +1780,17 @@ export default function Nutrition() {
                           {failed.status === 'limited' || failed.status === 'error' ? (
                             <Ghost label="Try Again" a11yLabel={`Try reading ${ref.title} again`} onPress={read!.refresh} />
                           ) : null}
-                          <Ghost label="Back to Plan’s Meal" a11yLabel={`Take ${ref.title} out of your plan`} onPress={() => unplanRecipe(pos)} />
+                          {/* Only for the member's own choice. A recipe their
+                              COACH pinned is the coach's pick and is not taken
+                              out from here, the same as a coach's meal. */}
+                          {mine ? (
+                            <Ghost label="Back to Plan’s Meal" a11yLabel={`Take ${ref.title} out of today’s plan`} onPress={() => unplanRecipe(pos)} />
+                          ) : null}
                         </View>
                       </>
                     ) : (
                       <Text accessibilityLiveRegion="polite" style={{ ...ty.caption, color: t.ink3 }}>
-                        Reading your recipe “{ref.title}”… Your plan’s meal stands in until it is read.
+                        Reading {mine ? 'your recipe' : 'your coach’s recipe'} “{ref.title}”… Your plan’s meal stands in until it is read.
                       </Text>
                     )}
                   </View>
@@ -1702,15 +1842,16 @@ export default function Nutrition() {
                 </View>
               ) : null}
               {/* How far a planned recipe reaches, said once and where it is
-                  true. The week, the grocery list and the shared plan document
-                  are composed by `planWeek`/`buildPlan` from catalogue indices,
-                  and a recipe is not one; drawing it there as well means
-                  portioning, shopping and allergen-marking seven days around a
-                  dish whose figures may not be stored. Until that is built the
-                  honest thing is to say where it stops. */}
+                  true. It used to say "today's meal only", and it was accurate:
+                  the week, the grocery list and the shared plan were composed
+                  from catalogue indices that knew nothing about a recipe, so a
+                  member who planned three of them shopped for three meals they
+                  were not going to eat. All four are now one composition
+                  (`withRecipes`), and a recipe is planned for a DAY — so what
+                  this says is which day, and that the shopping followed it. */}
               {recipeInPlan ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  Your recipe replaces today’s meal only — This Week, the Grocery List and the shared plan keep your plan’s meals.
+                  Planned for {WEEKD[todayIdx] ?? 'today'} — This Week, the Grocery List and the shared plan are built from it. Another day keeps your plan’s own meal until you choose one there.
                 </Text>
               ) : null}
               {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
@@ -2158,10 +2299,10 @@ export default function Nutrition() {
                     a DIFFERENT dish from the one the plan composed, so a
                     coach's pick handed back stays the coach's pick. */}
                 {sheetRecipe ? (
-                  recipePlan[recipe.pos]?.sourceId === sheetRecipe.sourceId
+                  recipePlanAt(recipePlan, todayIdx, recipe.pos)?.sourceId === sheetRecipe.sourceId
                     ? <Ghost label="Back to Plan’s Meal" icon="swap" onPress={() => { unplanRecipe(recipe.pos); setRecipe(null); }} />
                     : <Ghost label="Use This Meal" icon="check" onPress={() => { planRecipe(sheetRecipe); setRecipe(null); }} />
-                ) : recipePlan[recipe.pos] ? (
+                ) : recipePlanAt(recipePlan, todayIdx, recipe.pos) ? (
                   <Ghost label="Use This Meal" icon="check" onPress={() => {
                     unplanRecipe(recipe.pos);
                     if (plan[recipe.pos]?.idx !== recipe.idx) choose(recipe.pos, recipe.idx);
@@ -2282,6 +2423,11 @@ export default function Nutrition() {
                 Meals in this week contain {weekAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid — so this list has ingredients for them in it. Check each item before you buy.
               </Flag>
             ) : null}
+            {/* A list short of a planned recipe's ingredients is a list
+                somebody shops from and comes home missing a dinner. */}
+            {weekUnread ? (
+              <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{UNREAD_SHOPPING_WARNING}</Flag>
+            ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xl }}>
               <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden' }}>
                 <View style={{ width: `${(grocCount ? Math.round((grocChecked / grocCount) * 100) : 0)}%`, height: 3, borderRadius: 2, backgroundColor: t.brand }} />
@@ -2306,6 +2452,32 @@ export default function Nutrition() {
                 ); })}
               </View>
             ))}
+            {/* What a recipe asks for without an amount — "salt, to taste",
+                "butter, for greasing". It is shopping and belongs on the list;
+                it has no quantity, and `src/lib/recipes.ts` keeps it out of the
+                measured rows rather than printing 0 g of it. No tick box: there
+                is nothing to count it against, and the progress bar above
+                counts things somebody can put in a trolley. */}
+            {groc.unmeasured.length ? (
+              <View style={{ marginBottom: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>🧂 {UNMEASURED_HEAD}</Text>
+                {groc.unmeasured.map((it) => (
+                  <Text key={it} style={{ ...ty.body, color: t.ink2, paddingVertical: sp.xs }}>{it}</Text>
+                ))}
+              </View>
+            ) : null}
+            {/* Wherever a recipe is shown: the disclaimer and the backlink. The
+                ingredients above are a recipe's on any week that holds one. */}
+            {recipeWeek ? (
+              <View style={{ marginBottom: sp.lg }}>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>{RECIPE_DISCLAIMER}</Text>
+                <Pressable onPress={() => openLink('meals.groceryAttribution', RECIPE_ATTRIBUTION.url)} accessibilityRole="link"
+                  accessibilityLabel={`${RECIPE_ATTRIBUTION.text}. Opens spoonacular.com`} hitSlop={hitSlopFor(20)}
+                  style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                  <Text style={{ ...ty.caption, ...font('600'), color: t.brand }}>{RECIPE_ATTRIBUTION.text}</Text>
+                </Pressable>
+              </View>
+            ) : null}
             <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
               <View style={{ flex: 1 }}><Cta label="Share List" wide onPress={shareGrocery} /></View>
               <View style={{ flex: 1 }}><Ghost label="Close" onPress={() => setShowGrocery(false)} /></View>

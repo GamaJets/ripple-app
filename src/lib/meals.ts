@@ -851,12 +851,28 @@ export function planWeek(
 }
 
 export interface GroceryItem { item: string; qty: number; unit: string; }
-export interface GroceryData { byDept: Partial<Record<Dept, GroceryItem[]>>; mealCount: number; }
+export interface GroceryData {
+  byDept: Partial<Record<Dept, GroceryItem[]>>;
+  mealCount: number;
+  /** Things a real recipe names without an amount — "salt, to taste", "butter,
+   *  for greasing". They belong on the list, because they are shopping; they do
+   *  not belong in `byDept`, because a department row prints a quantity and
+   *  there is no honest one. `src/lib/recipes.ts` keeps them out of `ing` for
+   *  exactly that reason; this is where they come back. Never for a generated
+   *  dish, every one of whose ingredients is measured. */
+  unmeasured: string[];
+}
+
+/** What the list is aggregated FROM. `unmeasured` is optional because only a
+ *  recipe has one — a `PlannedRecipe` satisfies this and so does a plain
+ *  `PlannedMeal`, which is how a week may hold both. */
+type GroceryRow = PlannedMeal & { unmeasured?: readonly string[] };
 
 /** Aggregate an already-built week into a department-grouped shopping list. */
-export function groceryFromWeek(week: readonly (readonly PlannedMeal[])[]): GroceryData {
+export function groceryFromWeek(week: readonly (readonly GroceryRow[])[]): GroceryData {
   const agg: Record<string, number> = {};
   const meals = new Set<string>();
+  const loose = new Set<string>();
   for (const day of week) {
     for (const meal of day) {
       meals.add(meal.n);
@@ -864,6 +880,7 @@ export function groceryFromWeek(week: readonly (readonly PlannedMeal[])[]): Groc
         const key = `${dept}||${item}||${unit}`;
         agg[key] = (agg[key] || 0) + qty * meal.servings;
       });
+      for (const u of meal.unmeasured ?? []) { const s = u.trim(); if (s) loose.add(s); }
     }
   }
   const byDept: Partial<Record<Dept, GroceryItem[]>> = {};
@@ -876,7 +893,7 @@ export function groceryFromWeek(week: readonly (readonly PlannedMeal[])[]): Groc
     (byDept[dept] = byDept[dept] || []).push({ item, qty, unit });
   });
   (Object.values(byDept) as GroceryItem[][]).forEach((list) => list.sort((a, b) => a.item.localeCompare(b.item)));
-  return { byDept, mealCount: meals.size };
+  return { byDept, mealCount: meals.size, unmeasured: [...loose].sort((a, b) => a.localeCompare(b)) };
 }
 
 /** The shopping list for the week this client is shown. */

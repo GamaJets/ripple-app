@@ -1,5 +1,5 @@
-// The real recipes a member put in their own plan — whose they are, and how
-// little of each is kept.
+// The real recipes a member put in their own plan — which DAY each one is for,
+// whose they are, and how little of each is kept.
 //
 // ── Why this is not a second column in src/lib/mealSwaps.ts ────────────────
 //
@@ -11,6 +11,31 @@
 // two readers that each refuse the other's values: `readMealSwaps` drops
 // anything that is not a non-negative integer, and `readRecipePlan` drops
 // anything that is not a `RecipeRef`.
+//
+// ── The day, and the migration that gave it one ────────────────────────────
+//
+// This was `{ pos → RecipeRef }` and the header argued for it: "a recipe chosen
+// for breakfast is a standing choice, the way a swap is." It is not. A swap
+// picks a dish out of a catalogue that composes a fresh day every day; a recipe
+// is a meal somebody intends to cook, with a shopping list behind it. Under the
+// old shape, tapping "Use This Meal" on a chicken tikka at breakfast made it
+// breakfast EVERY DAY, indefinitely, until the member went back and undid it —
+// which is not what anyone means by planning a meal, and made the week and the
+// grocery list impossible to compose honestly.
+//
+// So the map is `{ day → pos → RecipeRef }`, keyed exactly as
+// src/lib/coachRecipeRefs.ts keys the coach's pins, so the member's own choice
+// and their coach's read the same way at the same two numbers. `day` is an
+// index into the week AS DRAWN (src/lib/mealPlan.ts `planDayIndex`), which is
+// the index `planWeek` and the week strip already use.
+//
+// What was already stored is MIGRATED rather than dropped, and migrated as what
+// it meant: the old flat map really was every day, so it comes back as every
+// day. A member who had planned a breakfast finds it on all seven and can take
+// it off six of them — nobody loses a choice to a change of shape. The two
+// shapes cannot be confused, because a value under a day key is a map of refs
+// and a value under the old position key IS a ref; `readRecipeRef` tells them
+// apart with no version number to get wrong.
 //
 // ── What is kept, and the clause that decides it ───────────────────────────
 //
@@ -37,16 +62,15 @@
 // the same reason: a key with no account in it is a key the next member on a
 // shared handset inherits, and an account-scoped key is unreadable to them by
 // construction — which is why this needs no entry in src/lib/signOutState.ts.
-// Not the week as well: a recipe chosen for breakfast is a standing choice, the
-// way a swap is.
+import { PLAN_WEEK_DAYS } from './meals';
 import { readRecipeRef, recipeRef, type RecipeMeal, type RecipeRef } from './recipes';
 
 /** Every planned-recipe key starts with this. Nothing reads it at runtime; it
  *  is here so the shape can be asserted and recognised. */
 export const RECIPE_PLAN_PREFIX = 'repple.recipePlan:';
 
-/** Slot position → the recipe planned there. */
-export type RecipePlan = Record<number, RecipeRef>;
+/** Day of the week as drawn, then slot position → the recipe planned there. */
+export type RecipePlan = Record<number, Record<number, RecipeRef>>;
 
 /**
  * Where this member's planned recipes live.
@@ -66,12 +90,13 @@ export const isRecipePlanKey = (k: string): boolean =>
   typeof k === 'string' && k.startsWith(RECIPE_PLAN_PREFIX);
 
 const isPos = (pos: number) => Number.isInteger(pos) && pos >= 0;
+/** A day the week actually has. A stored 9 is not a day and never was one. */
+const isDay = (d: number) => Number.isInteger(d) && d >= 0 && d < PLAN_WEEK_DAYS;
 
-/** A map of anything, reduced to the positions that hold a real ref. Shared by
- *  the reader and the writer so the two cannot drift. */
-function refsOf(v: unknown): RecipePlan {
+/** One day's refs, rebuilt from whatever was handed in. */
+function dayRefsOf(v: unknown): Record<number, RecipeRef> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
-  const out: RecipePlan = {};
+  const out: Record<number, RecipeRef> = {};
   for (const [k, stored] of Object.entries(v as Record<string, unknown>)) {
     const pos = Number(k);
     if (!isPos(pos)) continue;
@@ -79,6 +104,35 @@ function refsOf(v: unknown): RecipePlan {
     // not come back with it.
     const ref = readRecipeRef(stored);
     if (ref) out[pos] = ref;
+  }
+  return out;
+}
+
+/** The one day's worth of choices the old shape held, put on every day —
+ *  because on every day is what it did. */
+function everyDay(day: Record<number, RecipeRef>): RecipePlan {
+  if (!Object.keys(day).length) return {};
+  const out: RecipePlan = {};
+  for (let d = 0; d < PLAN_WEEK_DAYS; d++) out[d] = { ...day };
+  return out;
+}
+
+/** A map of anything, reduced to the days and positions that hold a real ref.
+ *  Shared by the reader and the writer so the two cannot drift. */
+function refsOf(v: unknown): RecipePlan {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  const entries = Object.entries(v as Record<string, unknown>);
+  // The old shape, told apart by its VALUES rather than by a version field: a
+  // day holds a map of refs, and a map of refs is not itself one.
+  if (entries.some(([, stored]) => readRecipeRef(stored))) return everyDay(dayRefsOf(v));
+  const out: RecipePlan = {};
+  for (const [k, day] of entries) {
+    const d = Number(k);
+    if (!isDay(d)) continue;
+    const refs = dayRefsOf(day);
+    // Days holding nothing readable are dropped rather than left as empty
+    // objects, so "is anything planned" is the plain test it looks like.
+    if (Object.keys(refs).length) out[d] = refs;
   }
   return out;
 }
@@ -109,22 +163,34 @@ export function writeRecipePlan(plan: RecipePlan): string {
   return JSON.stringify(refsOf(plan ?? {}));
 }
 
-/**
- * The plan with this recipe at `pos`. Takes the DISH and keeps the ref —
- * through `recipeRef`, so the caller never builds the stored shape by hand.
- * A position that is not one (a snack idea's -1, a NaN) changes nothing.
- */
-export function withRecipeAt(plan: RecipePlan, pos: number, meal: RecipeMeal): RecipePlan {
-  if (!isPos(pos)) return plan;
-  return { ...plan, [pos]: recipeRef(meal) };
+/** The recipe planned for this day at this slot, or null for the plan's own
+ *  meal. Null for a day or a position that is not one, rather than a throw. */
+export function recipePlanAt(plan: RecipePlan, day: number, pos: number): RecipeRef | null {
+  if (!isDay(day) || !isPos(pos)) return null;
+  return plan[day]?.[pos] ?? null;
 }
 
-/** The plan with nothing chosen at `pos` — the slot goes back to the plan's own
- *  meal. The same object when there was nothing there, so a state setter fed
- *  this does not re-render (or re-write the store) for a no-op. */
-export function withoutRecipeAt(plan: RecipePlan, pos: number): RecipePlan {
-  if (!(pos in plan)) return plan;
+/**
+ * The plan with this recipe at `day`/`pos`. Takes the DISH and keeps the ref —
+ * through `recipeRef`, so the caller never builds the stored shape by hand.
+ * A day the week does not have, or a position that is not one (a snack idea's
+ * -1, a NaN), changes nothing.
+ */
+export function withRecipeAt(plan: RecipePlan, day: number, pos: number, meal: RecipeMeal): RecipePlan {
+  if (!isDay(day) || !isPos(pos)) return plan;
+  return { ...plan, [day]: { ...(plan[day] ?? {}), [pos]: recipeRef(meal) } };
+}
+
+/** The plan with nothing chosen at `day`/`pos` — the slot goes back to the
+ *  plan's own meal, on that day only. The same object when there was nothing
+ *  there, so a state setter fed this does not re-render (or re-write the
+ *  store) for a no-op. */
+export function withoutRecipeAt(plan: RecipePlan, day: number, pos: number): RecipePlan {
+  const held = plan[day];
+  if (!held || !(pos in held)) return plan;
+  const rest = { ...held };
+  delete rest[pos];
   const next = { ...plan };
-  delete next[pos];
+  if (Object.keys(rest).length) next[day] = rest; else delete next[day];
   return next;
 }

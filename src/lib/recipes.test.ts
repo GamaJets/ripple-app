@@ -203,6 +203,14 @@ eq(portionRecipe(meal, 5000, 0).servings, 8.5, 'and upward without a cap, as bui
 same([portionRecipe(meal, null, 0).servings, portionRecipe(meal, 0, 0).servings], [1, 1], 'no target is one serving as written, not a division by nothing');
 const bought = groceryFromWeek([[portionRecipe(meal, meal.k * 2, 0)]]);
 same(bought.byDept['Grains & Bread'], [{ item: 'Pasta', qty: 170, unit: 'g' }], 'a portioned recipe is a PlannedMeal to the grocery list: two servings, 170 g');
+// The per-serving trap, shopped: `ing` is per serving and so is `k`, from the
+// same divisor, which is the only reason multiplying one by `servings` and
+// adding the other to a day total describe the same plate.
+ok(!JSON.stringify(bought.byDept).includes('Salt'), '"salt, to taste" is not bought as 0 g of salt');
+same(bought.unmeasured, ['Salt'], 'it is named on its own heading instead, where there is no quantity to be wrong about');
+same(groceryFromWeek([[portionRecipe(meal, null, 0)]]).unmeasured, ['Salt'], 'however the recipe is portioned — an amount nobody gave does not scale');
+const generatedOnly = groceryFromWeek([buildPlan({ id: 'c1', weightKg: 70, bodyFatPct: 20, activity: 1.4, goal: 'tone', diet: 'meat', mealsPerDay: 3 }).plan]);
+same(generatedOnly.unmeasured, [], 'and a week of generated dishes has none: every one of their ingredients is measured');
 
 /* ── what may be stored ──────────────────────────────────────────────────── */
 

@@ -333,21 +333,33 @@ const page = (title: string, body: string, brand = 'Repple', accent?: string) =>
 
 export interface PlanMealRow { slot: string; name: string; K: number; P: number; C: number; F: number }
 
-export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow[], avoid: string[] = [], brand = 'Repple', accent?: string): { html: string; text: string } {
+/**
+ * A plan a member sends to somebody.
+ *
+ * `note` is the footnote the document is REQUIRED to carry when a row in it is
+ * somebody else's recipe: Spoonacular's terms ask for the credit and the
+ * backlink wherever a recipe is shown, and a plan shared to a notes app or
+ * printed is shown somewhere none of the app's own attribution exists. It also
+ * carries the other sentence a shared plan may owe — that a planned recipe
+ * could not be read, so the plan's own meal is in the table in its place.
+ */
+export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow[], avoid: string[] = [], brand = 'Repple', accent?: string, note?: string): { html: string; text: string } {
   const first = (name || '').split(' ')[0] || 'Your';
   const rows = meals.map((m) => `<tr><td><b>${esc(m.slot)}</b><br><span style="color:#64748b">${esc(m.name)}</span></td><td class="r">${m.K}</td><td class="r">${m.P}g</td><td class="r">${m.C}g</td><td class="r">${m.F}g</td></tr>`).join('');
   const totK = meals.reduce((a, m) => a + m.K, 0), totP = meals.reduce((a, m) => a + m.P, 0), totC = meals.reduce((a, m) => a + m.C, 0), totF = meals.reduce((a, m) => a + m.F, 0);
   const avoidLine = avoid.length ? `<p style="color:#64748b;font-size:13px;margin-top:10px">Excludes: ${esc(avoid.join(', '))}</p>` : '';
   const body = `<h2 style="margin-top:20px">${esc(first)}'s meal plan</h2><p style="color:#64748b;margin:0">Daily target ~${num(targetKcal)} kcal</p>${avoidLine}
     <table><tr><th>Meal</th><th class="r">Kcal</th><th class="r">P</th><th class="r">C</th><th class="r">F</th></tr>
-    ${rows}<tr class="tot"><td>Total</td><td class="r">${totK}</td><td class="r">${totP}g</td><td class="r">${totC}g</td><td class="r">${totF}g</td></tr></table>`;
+    ${rows}<tr class="tot"><td>Total</td><td class="r">${totK}</td><td class="r">${totP}g</td><td class="r">${totC}g</td><td class="r">${totF}g</td></tr></table>` +
+    (note ? `<p style="color:#64748b;font-size:12px;margin-top:14px">${esc(note)}</p>` : '');
   // The HTML above and this line are the same figure in two formats, and they
   // were spelled two different ways: `toLocaleString` in the document and raw
   // in the text. A 2,400 kcal target read "2,400 kcal" in the PDF a member
   // opened and "2400 kcal" in the message body it was attached to.
   const text = `${first}'s meal plan (${brand}) — target ~${num(targetKcal)} kcal\n` +
     meals.map((m) => `• ${m.slot}: ${m.name} — ${m.K} kcal (P${m.P}/C${m.C}/F${m.F})`).join('\n') +
-    `\nTotal: ${totK} kcal · P${totP} C${totC} F${totF}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '');
+    `\nTotal: ${totK} kcal · P${totP} C${totC} F${totF}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '') +
+    (note ? `\n\n${note}` : '');
   return { html: page('Meal Plan', body, brand, accent), text };
 }
 
