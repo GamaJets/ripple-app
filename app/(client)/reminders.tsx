@@ -131,8 +131,8 @@ export default function Reminders() {
 
   const addSupp = () => {
     const nm = name.trim(); const h = parseInt(sh, 10); const m = parseInt(sm, 10);
-    if (!nm) { Alert.alert('Name it', 'Give the supplement or reminder a name.'); return; }
-    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the time', 'Use 24-hour time — 08:00 is eight in the morning, 20:00 is eight in the evening.'); return; }
+    if (!nm) { Alert.alert('Name It', 'Give the supplement or reminder a name.'); return; }
+    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the Time', 'Use 24-hour time — 08:00 is eight in the morning, 20:00 is eight in the evening.'); return; }
     // Every day unless they say otherwise, because that is what this control
     // did before day pickers existed and changing the default silently would
     // change what "Add Reminder" means for everybody who already knows it.
@@ -201,7 +201,7 @@ export default function Reminders() {
     // them by.
     if (read !== 'ready') {
       Alert.alert(
-        read === 'loading' ? 'Still reading your reminders' : 'Your reminders could not be read',
+        read === 'loading' ? 'Still Reading Your Reminders' : 'Your Reminders Could Not Be Read',
         read === 'loading'
           ? 'Your saved reminders have not come off this phone yet, so what is on screen is not them. Nothing has been changed — try again in a moment.'
           : 'Your saved reminders could not be read off this phone, so what is on screen is the starting settings rather than yours. Nothing has been changed: saving now would replace the reminders you have set with these. Close this screen and open it again.',
@@ -220,7 +220,7 @@ export default function Reminders() {
     try {
       await AsyncStorage.setItem(KEY, JSON.stringify(saved));
     } catch {
-      Alert.alert('Not saved', 'Your reminder settings could not be stored on this phone, so nothing was scheduled and nothing was changed. Try again in a moment.');
+      Alert.alert('Not Saved', 'Your reminder settings could not be stored on this phone, so nothing was scheduled and nothing was changed. Try again in a moment.');
       return;
     }
 
@@ -242,20 +242,20 @@ export default function Reminders() {
     // above the body "You'll get 0 daily reminders", a title and a count that
     // contradict each other over nothing being scheduled at all.
     if (!pushAvailable()) {
-      Alert.alert('Settings saved, nothing scheduled yet',
+      Alert.alert('Settings Saved, Nothing Scheduled Yet',
         'This build cannot schedule notifications, so no reminder has been set. Your settings are kept and will be scheduled on their own once notifications are working — you do not have to come back to this screen.');
       return;
     }
     if (scheduled === 0) {
       Alert.alert(
-        wanted === 0 ? 'Saved' : 'Saved, but nothing will be sent',
+        wanted === 0 ? 'Saved' : 'Saved, but Nothing Will Be Sent',
         wanted === 0
           ? 'No reminders are set. Turn one on, or add your own, and it will be scheduled.'
           : 'Your settings are saved, but this phone is not allowing notifications from us, so nothing was scheduled. Turn them on for this app in your phone’s Settings — they will be scheduled the next time you open the app, without coming back here.',
       );
       return;
     }
-    Alert.alert('Reminders set',
+    Alert.alert('Reminders Set',
       `${plan.length} reminder${plan.length === 1 ? '' : 's'}, ${scheduled} notification${scheduled === 1 ? '' : 's'} a week.`
       + (scheduled < wanted ? ` ${wanted - scheduled} could not be scheduled.` : ''));
   };
@@ -309,7 +309,7 @@ export default function Reminders() {
         <PageHead title="Reminders" subtitle="Gentle daily nudges" />
 
         {!pushAvailable() ? (
-          <Notice kicker="Not sending yet" title="Nothing can be scheduled on this build"
+          <Notice kicker="Not Sending Yet" title="Nothing Can Be Scheduled on This Build"
             note="You can set your reminders up here and they are kept. They will be scheduled on their own once notifications are working — you do not have to come back to this screen." />
         ) : null}
 
@@ -320,8 +320,8 @@ export default function Reminders() {
         {read === 'loading' ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading the reminders you have saved…</Text>
         ) : read === 'error' ? (
-          <Notice tone={t.warn} kicker="Not read"
-            title="Your saved reminders could not be read on this phone"
+          <Notice tone={t.warn} kicker="Not Read"
+            title="Your Saved Reminders Could Not Be Read on This Phone"
             note="What is set below is this screen's starting point rather than yours, so saving is switched off — it would replace the reminders you have set, and leave the ones already scheduled with no way to stop them. Anything you have already set is still saved and still arriving. Close this screen and open it again." />
         ) : null}
 
@@ -349,7 +349,7 @@ export default function Reminders() {
           {hydration ? (
             <View>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Every</Text>
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>{seg(2, every, setEvery, '2 hours')}{seg(3, every, setEvery, '3 hours')}{seg(4, every, setEvery, '4 hours')}</View>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>{seg(2, every, setEvery, '2 Hours')}{seg(3, every, setEvery, '3 Hours')}{seg(4, every, setEvery, '4 Hours')}</View>
               {/* Two bare boxes reading [9] to [21] under the word "Between".
                   Nothing said they were hours, and nothing said they were a
                   24-hour clock — so somebody who wants nudges until nine in the
@@ -378,7 +378,7 @@ export default function Reminders() {
                   <Text style={{ ...ty.caption, color: t.ink2 }}>No nudges yet — the last hour is earlier in the day than the first.</Text>
                 </View>
               ) : null}
-              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>On these days · {daysLabel(hydrationDays)}</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>On These Days · {daysLabel(hydrationDays)}</Text>
               {dayPicker(hydrationDays, (d) => setHydrationDays((p) => toggleDay(p, d)), 'Hydration nudges')}
               {hydrationDays.length === 0 ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
@@ -398,7 +398,7 @@ export default function Reminders() {
             nobody chose — the same rule that keeps the app from inventing a
             step goal or a water target. */}
         <Section>
-          <SectionHead title="Training And Body" />
+          <SectionHead title="Training and Body" />
           {(['training', 'weighin', 'photo'] as FixedKind[]).map((k, i) => {
             const f = fixed[k] ?? { on: false, hour: k === 'weighin' ? 7 : 18, minute: 0, days: [...EVERY_DAY] };
             const label = k === 'training' ? 'Train Today' : k === 'weighin' ? 'Weigh In' : 'Progress Photo';

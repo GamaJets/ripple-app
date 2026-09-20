@@ -188,9 +188,9 @@ export default function OwnerGrowth() {
   const activated = trainers.filter((x) => x.clients > 0).length;
   const funnelPct = (n: number) => (roll.trainers ? Math.round((n / roll.trainers) * 100) : 0);
   const funnel: [string, number, number][] = [
-    ['Signed up', roll.trainers, 100],
-    ['Activated (has clients)', activated, funnelPct(activated)],
-    ['Delivering sessions', roll.trainers - idle, funnelPct(roll.trainers - idle)],
+    ['Signed Up', roll.trainers, 100],
+    ['Activated (Has Clients)', activated, funnelPct(activated)],
+    ['Delivering Sessions', roll.trainers - idle, funnelPct(roll.trainers - idle)],
   ];
 
   // Awaited now that a code is a row rather than a number in memory. The old
@@ -234,12 +234,12 @@ export default function OwnerGrowth() {
     // still in it.
     const c = code.trim().toUpperCase().replace(/\s+/g, '');
     const r = await addPromo(code, disc);
-    if (!r.ok) { Alert.alert('Cannot create', r.reason ?? 'Try a different code.'); return; }
+    if (!r.ok) { Alert.alert('Cannot Create', r.reason ?? 'Try a different code.'); return; }
     setCode('');
     // Set exactly when the check did not run, and cleared when it did — so a
     // caveat never stands over a later code it is not about.
     setLastCaveat(r.caveat ? { code: c, note: r.caveat } : null);
-    Alert.alert('Code created',
+    Alert.alert('Code Created',
       // `plainExact` on the discount for the reason the promo rows below give:
       // the separator in a printed figure is the reader's, not English's.
       [`${c} · ${plainExact(disc)}% off is now live.`, r.caveat].filter(Boolean).join(' '));
@@ -444,7 +444,7 @@ export default function OwnerGrowth() {
 
           <View style={{ marginTop: sp.xl }}>
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>
-              Last {PHONE_MONTHS} months
+              Last {PHONE_MONTHS} Months
             </Text>
             {churn.loading ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>Reading your memberships…</Text>
@@ -535,7 +535,7 @@ export default function OwnerGrowth() {
             </View>
           )}
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Clients by trainer</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Clients by Trainer</Text>
             {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
               : trainersUnread ? <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so their clients could not be counted.</Text>
               : ca.byTrainer.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on the roster yet.</Text> : null}
@@ -635,12 +635,12 @@ export default function OwnerGrowth() {
                   sites still threw the answer away, so a refused toggle or a
                   refused delete was a silent no-op. The provider went to the
                   trouble of finding out; the screen has to say. */}
-              <Pressable onPress={async () => { if (!await toggleActive(p.id)) Alert.alert('Not changed', `“${p.code}” could not be switched ${p.active ? 'off' : 'on'}, so it is still ${p.active ? 'active' : 'off'}.`); }} accessibilityRole="button"
+              <Pressable onPress={async () => { if (!await toggleActive(p.id)) Alert.alert('Not Changed', `“${p.code}” could not be switched ${p.active ? 'off' : 'on'}, so it is still ${p.active ? 'active' : 'off'}.`); }} accessibilityRole="button"
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 6 }}>
                 <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: p.active ? t.brand : t.ink3 }} />
                 <Text style={{ ...ty.caption, color: t.ink2 }}>{p.active ? 'Active' : 'Off'}</Text>
               </Pressable>
-              <Pressable onPress={async () => { if (!await removePromo(p.id)) Alert.alert('Not deleted', `“${p.code}” could not be deleted, so it is still live and can still be redeemed.`); }} accessibilityLabel="Delete code" accessibilityRole="button" hitSlop={8}
+              <Pressable onPress={async () => { if (!await removePromo(p.id)) Alert.alert('Not Deleted', `“${p.code}” could not be deleted, so it is still live and can still be redeemed.`); }} accessibilityLabel="Delete code" accessibilityRole="button" hitSlop={8}
                 style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
                 <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
               </Pressable>

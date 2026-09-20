@@ -79,7 +79,7 @@ export default function Notices() {
                 time was to close the app. A notice is how a gym says it is shut
                 tomorrow, and telling somebody to retry while offering no way to
                 is worse than saying nothing. */}
-            <Notice tone={t.crit} kicker="Not read" title="We couldn’t read your notices"
+            <Notice tone={t.crit} kicker="Not Read" title="We couldn’t read your notices"
               note={rows.length
                 ? 'What is below is what we had before the read failed. There may be a newer notice that is not on this list.'
                 : 'This is not an empty noticeboard — it is one we could not open. Try again, or ask at the desk.'}>
@@ -101,7 +101,7 @@ export default function Notices() {
         ) : null}
 
         <Section>
-          <SectionHead title="Posted To You" note={status === 'ready' && rows.length ? String(rows.length) : undefined} />
+          <SectionHead title="Posted to You" note={status === 'ready' && rows.length ? String(rows.length) : undefined} />
 
           {status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your notices…</Text>

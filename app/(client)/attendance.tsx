@@ -258,13 +258,13 @@ export default function Attendance() {
     // and not this screen's verdict.
     const tone = o.tone === 'good' ? 'brand' : o.tone === 'ahead' ? 'blue' : 'neutral';
     const title = e.source === 'floor'
-      ? 'Gym visit'
+      ? 'Gym Visit'
       : e.klass
         ? e.klass.title
         // Rule 3 in src/lib/attendance.ts made visible: this is not a class with
         // no name, it is a class we were not allowed to read. Saying so beats a
         // blank, and beats inventing "Class".
-        : 'A class we could not read';
+        : 'A Class We Could Not Read';
     const where = e.klass
       ? [e.klass.kind, e.klass.instructor, e.klass.branch, e.klass.room].filter(Boolean).join(' · ')
       : e.source === 'floor'
@@ -311,7 +311,7 @@ export default function Attendance() {
 
         {status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Not read" title="We couldn’t read your attendance"
+            <Notice tone={t.crit} kicker="Not Read" title="We couldn’t read your attendance"
               note={events.length
                 // When the list came off this device, say WHEN. "Not confirmed
                 // current" is true of a cache from four minutes ago and of one
@@ -480,7 +480,7 @@ export default function Attendance() {
                 <View key={e.key}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ paddingVertical: sp.md }}>
-                    <Text style={{ ...ty.body, color: t.ink }}>A class we could not read</Text>
+                    <Text style={{ ...ty.body, color: t.ink }}>A Class We Could Not Read</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       Booked {dayLabel(e.booking?.bookedAt ?? null)} — the booking date, not the class date.
                     </Text>

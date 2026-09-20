@@ -429,9 +429,9 @@ export default function Coach() {
 
   const disclosure = () => (
     <View>
-      {bullets('Always sent when you ask something', ALWAYS_SENT, t.ink3)}
-      {bullets('Only sent if you say yes', SENT_WITH_PERMISSION, t.brand)}
-      {bullets('Never sent', NEVER_SENT, t.ink3)}
+      {bullets('Always Sent When You Ask Something', ALWAYS_SENT, t.ink3)}
+      {bullets('Only Sent If You Say Yes', SENT_WITH_PERMISSION, t.brand)}
+      {bullets('Never Sent', NEVER_SENT, t.ink3)}
       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{WHERE_IT_GOES}</Text>
     </View>
   );
@@ -502,13 +502,13 @@ export default function Coach() {
             </View>
           ) : consent === 'unasked' ? (
             <View>
-              <Notice tone={t.brand} kicker="Your data" title={CONSENT_TITLE} note={CONSENT_BODY}>
+              <Notice tone={t.brand} kicker="Your Data" title={CONSENT_TITLE} note={CONSENT_BODY}>
                 {disclosure()}
               </Notice>
               {/* The same disclaimer the Injuries screen and the Injury
                   Document screen carry, in the same words, finally on the
                   screen that actually transmits the injuries. */}
-              <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice" note={NOT_MEDICAL_ADVICE} />
+              <Notice tone={t.s3} kicker="Guidance Only" title="Not medical advice" note={NOT_MEDICAL_ADVICE} />
               <View style={{ marginTop: sp.lg, gap: sp.sm }}>
                 <Cta label="Yes, Use My Numbers" onPress={() => answer('yes')} wide />
                 {/* A Cta and not a Ghost. Both answers are real answers and
@@ -651,7 +651,7 @@ export default function Coach() {
                     got back. */}
                 {msgs.length ? (
                   <Ghost label="Clear This Chat" onPress={() => Alert.alert(
-                    'Clear this conversation?',
+                    'Clear This Conversation?',
                     `All ${msgs.length} ${msgs.length === 1 ? 'message' : 'messages'} go, including everything you have told your coach about your training, your injuries and how you have been feeling. This cannot be undone and there is no copy anywhere else — ${BRAND.label} does not keep one on our servers.`,
                     [
                       { text: 'Keep It', style: 'cancel' },

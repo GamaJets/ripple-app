@@ -139,8 +139,8 @@ export default function Social() {
  ) : (
  !scansWhole && cd.scansStatus !== 'loading' ? (
  <View style={{ marginTop: sp.lg }}>
-  <Notice tone={t.warn} kicker="Your progress"
-   title={cd.scansStatus === 'error' ? 'We couldn’t read your scans' : 'Not all of your scans could be read'}
+  <Notice tone={t.warn} kicker="Your Progress"
+   title={cd.scansStatus === 'error' ? 'We Couldn’t Read Your Scans' : 'Not All of Your Scans Could Be Read'}
    note={cd.scansStatus === 'error'
     ? 'There is nothing to share from this screen right now, and that is a fault here rather than an absence in your record. Your scans are safe.'
     : 'You have more scans on record than can be read in one go, and "since your first scan" means the first one — which may not be among them. A figure that would go into a post has to be the right one, so none is offered.'} />

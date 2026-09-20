@@ -79,7 +79,7 @@ export function LockScreen() {
             ends the session, so the next person starts at sign-in — and says so
             when it could not establish that. See `leave` above. */}
         <Pressable onPress={() => { void leave(); }}
-          hitSlop={8} accessibilityRole="button" accessibilityLabel="Sign out"
+          hitSlop={8} accessibilityRole="button" accessibilityLabel="Sign Out"
           style={{ paddingVertical: sp.md }}>
           <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Sign Out</Text>
         </Pressable>

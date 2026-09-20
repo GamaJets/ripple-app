@@ -63,7 +63,7 @@ export default function ShareSessionClip() {
   // happen; there is nothing to explain now, and a confirmation step in front
   // of a confirmation step is just a tap.
   const share = async () => {
-    if (!uri) { Alert.alert('Add a clip', 'Record or choose the session video first.'); return; }
+    if (!uri) { Alert.alert('Add a Clip', 'Record or choose the session video first.'); return; }
     setBusy(true);
     await shareSessionNatively(caption.trim() || 'My training session', uri);
     setBusy(false);
@@ -114,7 +114,7 @@ export default function ShareSessionClip() {
               whole of what a sighted coach is told, and a screen reader was
               told nothing at all — so a second tap landed on a control that
               was already working. */}
-          <Pressable onPress={share} disabled={busy} accessibilityRole="button" accessibilityLabel="Share this clip"
+          <Pressable onPress={share} disabled={busy} accessibilityRole="button" accessibilityLabel="Share This Clip"
             accessibilityState={{ disabled: busy, busy }}
             style={{ backgroundColor: t.brand, borderRadius: radius.md, minHeight: 56, paddingVertical: sp.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
             {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={20} color={t.brandInk} />}

@@ -215,11 +215,11 @@ export default function InjuryDoc() {
     // the second lock on that door — and it says which of the two silences it
     // is rather than leaving the screen looking as though the tap missed.
     if (res.outcome === 'unavailable') {
-      Alert.alert('This version cannot open your files', `${DOCUMENT_PICKER_UNAVAILABLE_NOTE} A photo of the page works in the meantime and is read the same way.`);
+      Alert.alert('This Version Cannot Open Your Files', `${DOCUMENT_PICKER_UNAVAILABLE_NOTE} A photo of the page works in the meantime and is read the same way.`);
       return;
     }
     if (res.outcome === 'error') {
-      Alert.alert('That file could not be opened', 'Nothing was read and nothing was saved. Try it again, or photograph the page instead.');
+      Alert.alert('That File Could Not Be Opened', 'Nothing was read and nothing was saved. Try it again, or photograph the page instead.');
       return;
     }
     if (res.outcome === 'cancelled') return;
@@ -280,7 +280,7 @@ export default function InjuryDoc() {
     const fresh = await signInjuryDoc(doc.path);
     if (!fresh) {
       Alert.alert(
-        'Could not open it just now',
+        'Could Not Open It Just Now',
         'Your document is still stored — this is a problem getting a link to it, not a missing file. Pull the list down to refresh and try again.',
       );
       return;
@@ -300,7 +300,7 @@ export default function InjuryDoc() {
     // silences are different sentences: a build with no in-app browser cannot
     // be fixed by tapping again, and must not fall through to the system one.
     if (!opened) {
-      Alert.alert('Could not open it privately', IN_APP_BROWSER_UNAVAILABLE_NOTE);
+      Alert.alert('Could Not Open It Privately', IN_APP_BROWSER_UNAVAILABLE_NOTE);
     }
   };
 
@@ -328,15 +328,15 @@ export default function InjuryDoc() {
 
   const removeDoc = (doc: InjuryDocFile) => {
     Alert.alert(
-      'Delete this document?',
+      'Delete This Document?',
       'The file is removed from your account. Any injuries you already confirmed from it stay — they are yours now, not the document\'s.',
       [
-        { text: 'Keep it', style: 'cancel' },
+        { text: 'Keep It', style: 'cancel' },
         {
           text: 'Delete', style: 'destructive', onPress: async () => {
             const gone = await deleteInjuryDoc(doc.path);
             // Only the delete's own answer decides what we say happened.
-            if (!gone) { Alert.alert('It is still there', 'That document could not be deleted just now, so it has not been. Try again in a moment.'); return; }
+            if (!gone) { Alert.alert('It Is Still There', 'That document could not be deleted just now, so it has not been. Try again in a moment.'); return; }
             refreshDocs();
           },
         },
@@ -470,7 +470,7 @@ export default function InjuryDoc() {
           Photograph a physio report, a scan result or a doctor's note. We suggest what to disclose; you decide what goes in.
         </Text>
 
-        <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice"
+        <Notice tone={t.s3} kicker="Guidance Only" title="Not Medical Advice"
           note="Nothing here reads, checks or corrects a diagnosis. For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
 
         {/* This notice used to say "The document stays in your account and only
@@ -544,7 +544,7 @@ export default function InjuryDoc() {
           <View>
             <Rule />
             <Section>
-              <Notice tone={t.brand} kicker="Sent nowhere" title={REFUSED_TITLE} note={REFUSED_NOTE}>
+              <Notice tone={t.brand} kicker="Sent Nowhere" title={REFUSED_TITLE} note={REFUSED_NOTE}>
                 {!result.recorded ? (
                   // Said out loud rather than swallowed. Nothing was sent — the
                   // refusal is honoured by not acting — but the note under this
@@ -593,7 +593,7 @@ export default function InjuryDoc() {
           <View>
             <Rule />
             <Section>
-              <Notice tone={t.warn} kicker="Saved, not sent" title={RECORD_FAILED_TITLE} note={RECORD_FAILED_NOTE}>
+              <Notice tone={t.warn} kicker="Saved, Not Sent" title={RECORD_FAILED_TITLE} note={RECORD_FAILED_NOTE}>
                 <View style={{ marginTop: sp.md, flexDirection: 'row', gap: sp.sm }}>
                   <Ghost label="Try Another Photo" onPress={() => pick(true)} />
                   <Ghost label={ADD_IT_MYSELF_LABEL} onPress={() => router.replace('/(client)/injuries')} />
@@ -607,7 +607,7 @@ export default function InjuryDoc() {
           <View>
             <Rule />
             <Section>
-              <Notice tone={t.warn} kicker={result.stored === 'ready' ? 'Saved, not read' : 'Nothing saved'}
+              <Notice tone={t.warn} kicker={result.stored === 'ready' ? 'Saved, Not Read' : 'Nothing Saved'}
                 title="We could not read that"
                 note={result.error ?? 'Something went wrong reading that document.'}>
                 <View style={{ marginTop: sp.md, flexDirection: 'row', gap: sp.sm }}>
@@ -839,7 +839,7 @@ export default function InjuryDoc() {
                   const fresh = await signInjuryDoc(doc.path);
                   if (!fresh) {
                     Alert.alert(
-                      'Still could not open it',
+                      'Still Could Not Open It',
                       'Your document is still stored — this is a problem getting a link to it, not a missing file. Close this and pull the list down to refresh, then try again.',
                     );
                     return;

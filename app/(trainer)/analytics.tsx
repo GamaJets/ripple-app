@@ -686,7 +686,7 @@ export default function TrainerAnalytics() {
     setGoalBusy(false);
     setGoalOpen(false);
     const said = goalSaveLine(outcome);
-    if (said) Alert.alert('Set on this phone', said);
+    if (said) Alert.alert('Set on This Phone', said);
   };
   const [digest, setDigest] = useState('');
   const [digestBusy, setDigestBusy] = useState(false);
@@ -1037,7 +1037,7 @@ export default function TrainerAnalytics() {
         months: monthWindow(new Date(), YEAR_WINDOW).map((m) => m.key),
       }, reads, localDayKey(Date.now()));
       const blocked = fileShareBlocker();
-      const how = await shareTextFile(file.csv, file.filename, 'text/csv', 'Your analytics');
+      const how = await shareTextFile(file.csv, file.filename, 'text/csv', 'Your Analytics');
       // Said after, because it is about what actually left the phone.
       if (how === 'text' && blocked) Alert.alert('Sent as Text', blocked);
       else if (!file.complete) Alert.alert('Exported, but Incomplete', analyticsShareNote(file, revHist.months));
@@ -1222,7 +1222,7 @@ export default function TrainerAnalytics() {
             is a dash. Without it the screen reads as a coaching business with
             nothing in it rather than as a screen that could not look. */}
         {figureStatus === 'error' ? (
-          <Notice tone={t.warn} kicker="Analytics" title="These figures could not be worked out"
+          <Notice tone={t.warn} kicker="Analytics" title="These Figures Could Not Be Worked Out"
             note={rosterStatus === 'error' && sessionsStatus === 'error'
               ? 'Neither your roster nor your sessions came back, so nothing on this screen has been counted. Every dash below means unknown, not zero.'
               : rosterStatus === 'error'
@@ -1244,7 +1244,7 @@ export default function TrainerAnalytics() {
             <Card tone={t.warn}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
-                <Text style={{ ...ty.micro, color: t.ink3 }}>Revenue at risk</Text>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Revenue at Risk</Text>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <View style={{ flex: 1 }}>
@@ -1373,7 +1373,7 @@ export default function TrainerAnalytics() {
 
               Every other explanatory sentence on this screen is a caption
               beneath its head; this one now is too. */}
-          <SectionHead title="At-risk Clients" />
+          <SectionHead title="At-Risk Clients" />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>
             {bandNote('at_risk')} Plus anyone there is nothing on record for.
           </Text>
@@ -1564,7 +1564,7 @@ export default function TrainerAnalytics() {
           <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.warn} style={{ marginTop: sp.md }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Not yet marked</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Not Yet Marked</Text>
             </View>
             <Text style={{ ...ty.label, color: t.ink2 }}>
               {unmarkedLine(month)}
@@ -1902,7 +1902,7 @@ export default function TrainerAnalytics() {
                      backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: digestBusy || !figuresWhole ? 0.4 : 1 }}>
             {digestBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
             <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>
-              {digestBusy ? 'Writing…' : !figuresWhole ? 'Needs figures it could not read' : digest ? 'Regenerate' : 'Generate digest'}
+              {digestBusy ? 'Writing…' : !figuresWhole ? 'Needs figures it could not read' : digest ? 'Regenerate' : 'Generate Digest'}
             </Text>
           </Pressable>
         </Section>
@@ -1914,7 +1914,7 @@ export default function TrainerAnalytics() {
               never had anywhere to go. It sends the same figures through the
               same filter — see app/(trainer)/assistant.tsx for why it will not
               name a client. */}
-          <ListRow icon="sparkle" tone="purple" title="Ask The Assistant"
+          <ListRow icon="sparkle" tone="purple" title="Ask the Assistant"
             note="A conversation about your own figures, with no client named to it"
             onPress={() => router.push('/(trainer)/assistant')} />
           {/* Out of the app. The statement already does this for the money and
@@ -1959,7 +1959,7 @@ export default function TrainerAnalytics() {
               the common case, not a rare one: 35 of the 54 live tenants have
               `tenants.currency` NULL. Dropped entirely when there is no unit to
               name, and the sentence under the field says what that means. */}
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Monthly revenue target{myCur ? ` (${myCur})` : ''}</Text>
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Monthly Revenue Target{myCur ? ` (${myCur})` : ''}</Text>
           <TextInput value={gRev} onChangeText={setGRev} keyboardType="number-pad" placeholder="4000" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: myCur ? sp.md : 6 }} />
           {/* Said where the unit would have been named, so a coach typing 4000
@@ -1971,7 +1971,7 @@ export default function TrainerAnalytics() {
               {noCur('this target is saved as a plain number and shown as a dash rather than an amount')}
             </Text>
           ) : null}
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Client target</Text>
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Client Target</Text>
           <TextInput value={gCli} onChangeText={setGCli} keyboardType="number-pad" placeholder="12" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.xl }} />
           {/* Targets follow the account now, so this tap leaves the phone.

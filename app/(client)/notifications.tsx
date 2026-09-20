@@ -24,10 +24,10 @@ export default function ClientNotifications() {
   return (
     <NotificationInbox
       group="client"
-      kicker="Your inbox"
+      kicker="Your Inbox"
       title="Notifications"
       blurb="Bookings, cancellations and anything your coach or gym has sent you."
-      emptyTitle="Nothing to catch up on"
+      emptyTitle="Nothing to Catch Up On"
       // Says what the inbox does NOT carry, because the bell used to open the
       // message thread and people will arrive here looking for a conversation.
       emptyNote="Session changes and offers land here. Messages from your coach stay in your chat."

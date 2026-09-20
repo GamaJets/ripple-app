@@ -191,7 +191,7 @@ export default function Classes() {
       classTermsLine(policy),
     ].join('\n\n');
     return new Promise<boolean>((resolve) => {
-      Alert.alert(full === true ? 'Join this waitlist?' : 'Book this class?', body, [
+      Alert.alert(full === true ? 'Join This Waitlist?' : 'Book This Class?', body, [
         { text: 'Not Now', style: 'cancel', onPress: () => resolve(false) },
         { text: full === true ? 'Join Waitlist' : 'Book It', onPress: () => resolve(true) },
       ], { cancelable: true, onDismiss: () => resolve(false) });
@@ -210,10 +210,10 @@ export default function Classes() {
       // class is full and the member has arranged their evening around a place
       // they never had. See src/lib/outbox.ts on which writes may wait.
       // What CAN be improved is saying why, which is what `retryLine` does.
-      Alert.alert('Not booked', `We could not get you into ${c.title}. Nothing has been reserved. ${retryLine(reach)}`);
+      Alert.alert('Not Booked', `We could not get you into ${c.title}. Nothing has been reserved. ${retryLine(reach)}`);
       return;
     }
-    if (st === 'waitlist') Alert.alert('Added to waitlist', `${c.title} is full — you're on the waitlist and we'll move you up if a spot opens.`);
+    if (st === 'waitlist') Alert.alert('Added to Waitlist', `${c.title} is full — you're on the waitlist and we'll move you up if a spot opens.`);
     else {
       // ── the sentence is decided by what actually happened ────────────────
       //
@@ -275,7 +275,7 @@ export default function Classes() {
       // src/lib/reachability.ts, which is how this app knows the difference
       // without a native connectivity module.
       Alert.alert(
-        wasWaitlist ? 'Still on the waitlist' : 'Not cancelled',
+        wasWaitlist ? 'Still on the Waitlist' : 'Not Cancelled',
         wasWaitlist
           ? `You are still on the waitlist for ${c.title} — that did not save, so nothing has changed. ${retryLine(reach)}`
           : `Your seat in ${c.title} on ${dayLabel(c.startsAt)} at ${timeLabel(c.startsAt)} is still booked — that did not save, so nothing has changed and the gym still expects you. ${retryLine(reach)}`,
@@ -295,9 +295,9 @@ export default function Classes() {
     // screen has always shown. So the slow path and the broken path both end
     // where the screen already was.
     const policy = await fetchClassCancelPolicy(c.id);
-    Alert.alert('Cancel booking?', classCancelBody(`${c.title} · ${c.branch} · ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}`, c.startsAt, Date.now(), policy), [
-      { text: 'Keep it', style: 'cancel' },
-      { text: 'Cancel booking', style: 'destructive', onPress: () => { void doCancel(); } },
+    Alert.alert('Cancel Booking?', classCancelBody(`${c.title} · ${c.branch} · ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}`, c.startsAt, Date.now(), policy), [
+      { text: 'Keep It', style: 'cancel' },
+      { text: 'Cancel Booking', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);
   };
 
@@ -392,7 +392,7 @@ export default function Classes() {
              indicator hidden made the later branches look as though they did
              not exist, particularly at the larger text sizes. */
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.lg }}>
-            {chip('All branches', branch === null, () => setBranch(null))}
+            {chip('All Branches', branch === null, () => setBranch(null))}
             {branches.map((b) => chip(b, branch === b, () => setBranch(b === branch ? null : b)))}
           </View>
         ) : null}
@@ -589,7 +589,7 @@ export default function Classes() {
                 // Shoreditch yet" is exactly the sentence that stops a member
                 // turning up to one.
                 : classStatus === 'partial' ? 'More timetable than we can read at once'
-                : `No classes scheduled${branch ? ' at ' + branch : ''} yet`}
+                : `No Classes Scheduled${branch ? ' at ' + branch : ''} Yet`}
             </Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>
               {/* 'partial' had no branch here either, so it inherited the

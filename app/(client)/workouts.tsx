@@ -668,7 +668,7 @@ export default function Train() {
     // member logging "bench 3x8 @135" stored 297lb.
     const lifts = parseWorkoutText(nlw, wu);
     // The example is written in the member's own unit.
-    if (!lifts.length) { Alert.alert('Could not read that', wu === 'lb' ? 'Try e.g. "bench 3x8 135lb, squat 225lb 5 5 5".' : 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".'); return; }
+    if (!lifts.length) { Alert.alert('Could Not Read That', wu === 'lb' ? 'Try e.g. "bench 3x8 135lb, squat 225lb 5 5 5".' : 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".'); return; }
     const nowISO = new Date().toISOString();
     // No kcal — see `buildEntries` in the session runner. The figure this
     // used to carry was `volume / 60 + sets * 8`, which knows nothing about
@@ -684,8 +684,8 @@ export default function Train() {
     // successful one — in both directions, since it is also no longer the same
     // event as a lost one.
     if (out === 'stored') toast.say(`${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
-    else if (out === 'unsent') Alert.alert('Saved on this phone', `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet — nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and ${lifts.length === 1 ? 'goes' : 'go'} up on their own the next time you have signal.`);
-    else Alert.alert('Not saved', 'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box — sending it again as it is will be rejected again.');
+    else if (out === 'unsent') Alert.alert('Saved on This Phone', `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet — nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and ${lifts.length === 1 ? 'goes' : 'go'} up on their own the next time you have signal.`);
+    else Alert.alert('Not Saved', 'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box — sending it again as it is will be rejected again.');
   };
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
@@ -1101,7 +1101,7 @@ export default function Train() {
       // `workoutLog`, so the row disappears on its own once they are in.
       if (out !== 'stored') {
         Alert.alert(
-          out === 'unsent' ? 'Saved on this phone' : 'Not imported',
+          out === 'unsent' ? 'Saved on This Phone' : 'Not Imported',
           out === 'unsent'
             ? 'No connection, so these have not reached your training log yet — they are saved on this phone and go up on their own next time you have signal. Your watch still has them either way.'
             : 'Your training log rejected these, so nothing was imported and nothing is waiting to send. Your watch still has them.');
@@ -1169,8 +1169,8 @@ export default function Train() {
   // `setDate` past the end of a month rolls into the next one, so this arithmetic
   // survives a week that straddles a month or a year boundary without any help.
   const weekEnd0 = new Date(week0); weekEnd0.setDate(week0.getDate() + 6);
-  const weekLabel = weekOffset === 0 ? 'This week'
-    : weekOffset === -1 ? 'Last week'
+  const weekLabel = weekOffset === 0 ? 'This Week'
+    : weekOffset === -1 ? 'Last Week'
     : `${week0.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${weekEnd0.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
   const dateFor = (i: number) => { const d = new Date(week0); d.setDate(week0.getDate() + i); return d; };
   const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -1407,7 +1407,7 @@ export default function Train() {
       // Never an empty runner. `startGate` in src/lib/startGate.ts is the whole
       // story of what mounting one costs, and the reason is always in `skipped`
       // — this is the one path that can produce nothing, and it says which.
-      Alert.alert('Nothing to repeat in that one',
+      Alert.alert('Nothing to Repeat in That One',
         c.skipped.length ? c.skipped[0].reason : 'No sets were recorded in that session.');
       return;
     }
@@ -1637,7 +1637,7 @@ export default function Train() {
           // Still an alert, and deliberately: this one says the log is not
           // what the screen just showed, and the entry is back on it.
           putBack();
-          Alert.alert('Not deleted', `${movement(l.exercise)} is still in your log — we could not reach the server to remove it.`);
+          Alert.alert('Not Deleted', `${movement(l.exercise)} is still in your log — we could not reach the server to remove it.`);
         }
       },
     });
@@ -1763,7 +1763,7 @@ export default function Train() {
     // to fold a rejected `readLift` into `loadKg = null`, so a mistyped 4225
     // silently erased the target the member was trying to correct.
     const table = ladderToPlanRows(cxRows, cxUnit);
-    if (!table.ok) { Alert.alert('Check that', table.reason); return; }
+    if (!table.ok) { Alert.alert('Check That', table.reason); return; }
     const setRows = table.setRows;
     // The two numbers are one fact — see src/lib/setRows.ts. A table of four
     // rows under `sets: 3` shows the member "3/3 sets" with a fourth row
@@ -1993,7 +1993,7 @@ export default function Train() {
     // gone at the next launch, and now means they are on the phone waiting.
     const zoned = !!extra.zones && zoneSecondsTotal(extra.zones) > 0;
     if (out === 'unsent') {
-      Alert.alert('Saved on this phone',
+      Alert.alert('Saved on This Phone',
         `No connection, so your ${KIND_LABEL[kind].toLowerCase()} session has not reached your training log yet${zoned ? ' — heart-rate zones and all' : ''}. Nothing is lost: it is saved here and goes up on its own next time you have signal.`);
       // True, and the reason this is not `false`: the session is kept, so the
       // caller may clear its form. Nothing here says it was recorded.
@@ -2001,7 +2001,7 @@ export default function Train() {
       return true;
     }
     if (out === 'refused') {
-      Alert.alert('Not saved',
+      Alert.alert('Not Saved',
         `Your training log rejected this ${KIND_LABEL[kind].toLowerCase()} session, so it has not been recorded${zoned ? ', and the heart-rate zones go with it' : ''}. It is not waiting to send either — logging it again as it is will be rejected again.`);
       return false;
     }
@@ -2099,14 +2099,14 @@ export default function Train() {
     // complaint this screen was changed for. A QUEUED write is durable: the
     // provider has written the entries to this device and will send them.
     if (out === 'refused') {
-      Alert.alert('Not saved',
+      Alert.alert('Not Saved',
         'Your training log rejected this session, so it has not been recorded and it is not waiting to send. Your sets are still here — but saving them again as they are will be rejected again.',
         [{ text: 'OK' }]);
       return;
     }
     if (out === 'unsent') {
       setLogged({}); setCustomEx([]);
-      Alert.alert('Saved on this phone',
+      Alert.alert('Saved on This Phone',
         `No connection, so ${entries.length === 1 ? 'this exercise has' : `these ${entries.length} exercises have`} not reached your training log yet — nothing is lost. They are saved here, they are listed below, and they go up on their own next time you have signal. Your streak, records and your coach's dashboard will not know about them until then.`,
         [{ text: 'OK' }]);
       return;
@@ -2119,7 +2119,7 @@ export default function Train() {
     // absence of "New personal record!" is then an absence of evidence rather
     // than evidence of absence, which is worth saying out loud to somebody who
     // has just put a bar down.
-    Alert.alert('Workout saved',
+    Alert.alert('Workout Saved',
       `${entries.length} exercise${entries.length === 1 ? '' : 's'} logged.${pr ? ' New personal record!' : ''} `
       + (historyWhole
         ? 'Your streak and records are updated.'
@@ -2303,7 +2303,7 @@ export default function Train() {
             Reading what you have disclosed — nothing below has been checked against your injuries yet.
           </Flag>
         ) : !injRead ? (
-          <Notice tone={t.crit} kicker="Injury" title="Your injuries could not be read"
+          <Notice tone={t.crit} kicker="Injury" title="Your Injuries Could Not Be Read"
             note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or skip it, and pull down to try again." />
         ) : null}
         {start.canStart ? (
@@ -2311,7 +2311,7 @@ export default function Train() {
         ) : start.note && start.safety ? (
           // A heading rather than a footnote, because this one is the app
           // having taken today's session away from them for their own safety.
-          <Notice tone={t.crit} kicker="Injury" title="Today's session is on hold" note={start.note} />
+          <Notice tone={t.crit} kicker="Injury" title="Today's Session Is on Hold" note={start.note} />
         ) : start.note ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{start.note}</Text>
         ) : null}
@@ -2346,10 +2346,10 @@ export default function Train() {
         {programUnknown ? (
           <View style={{ marginTop: sp.lg }}>
             {programStatus === 'loading' ? (
-              <Notice tone={t.ink3} kicker="Your plan" title="Still checking for a coach plan"
+              <Notice tone={t.ink3} kicker="Your Plan" title="Still Checking for a Coach Plan"
                 note={`Today’s session below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as it lands.`} />
             ) : (
-              <Notice tone={t.warn} kicker="Your plan" title="We couldn’t check for a coach plan"
+              <Notice tone={t.warn} kicker="Your Plan" title="We Couldn’t Check for a Coach Plan"
                 note={`Today’s session below is ${BRAND.label}'s automatic program, not one your coach wrote. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
             )}
           </View>
@@ -2462,7 +2462,7 @@ export default function Train() {
             ahead can never be mistaken for having been moved on. */}
         {blk.weeks.length > 1 ? (
           <View style={{ marginTop: sp.lg }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your block</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your Block</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.sm, paddingEnd: sp.md }}>
               {blk.weeks.map((w, i) => {
@@ -2502,7 +2502,7 @@ export default function Train() {
                 to train. */}
             {weekOnScreen?.note ? (
               <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>From your coach</Text>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>From Your Coach</Text>
                 <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{weekOnScreen.note}</Text>
               </View>
             ) : null}
@@ -2576,7 +2576,7 @@ export default function Train() {
                   metric majority, who are reading the record itself. */}
               {loadNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{loadNote}</Text> : null}
               {deload.due && !deloadDismiss ? (
-                <Notice tone={t.s3} kicker="Recovery" title="Time for a deload week"
+                <Notice tone={t.s3} kicker="Recovery" title="Time for a Deload Week"
                   note={`${deload.reason} Drop to ~60% of your usual sets or weight this week.`}>
                   <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                     <Ghost label="Dismiss" onPress={() => setDeloadDismiss(true)} />
@@ -2584,7 +2584,7 @@ export default function Train() {
                 </Notice>
               ) : null}
               {cd.focusAreas.length > 0 ? (
-                <Notice tone={t.brand} kicker="From your progress photo" title={`Emphasising ${cd.focusAreas.join(' · ')}`}
+                <Notice tone={t.brand} kicker="From Your Progress Photo" title={`Emphasising ${cd.focusAreas.join(' · ')}`}
                   note="These moves come first today.">
                   <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                     <Ghost label="Clear" onPress={() => cd.setFocusAreas([])} />
@@ -2765,10 +2765,10 @@ export default function Train() {
                             accessibilityLabel={`Clear the sets you logged for ${shownName(e)}`}
                             hitSlop={hitSlopFor(27)}
                             onPress={() => Alert.alert(
-                              'Clear these sets?',
+                              'Clear These Sets?',
                               `The ${(logged[_id] || []).length} set${(logged[_id] || []).length === 1 ? '' : 's'} you have typed against ${shownName(e)} today are discarded. Nothing else on your plan changes.`,
                               [
-                                { text: 'Keep them', style: 'cancel' },
+                                { text: 'Keep Them', style: 'cancel' },
                                 { text: 'Clear', style: 'destructive', onPress: () => { setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; }); tapLight(); } },
                               ],
                             )}
@@ -2884,7 +2884,7 @@ export default function Train() {
                               squat is not advice about the leg press. */}
                           {e.note && nameOf(e) === e.name ? (
                             <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
-                              <Text style={{ ...ty.micro, color: t.ink3 }}>From your coach</Text>
+                              <Text style={{ ...ty.micro, color: t.ink3 }}>From Your Coach</Text>
                               <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{e.note}</Text>
                             </View>
                           ) : null}
@@ -2916,7 +2916,7 @@ export default function Train() {
                                       : `Log ${quickReps(e.reps)} reps at ${fig(liftLabel(sug.weight, wu))} of ${shownName(e)}`}
                                     onPress={() => quickLog(e)}
                                     style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 6 }}>
-                                    <Text style={{ ...ty.caption, ...font('600'), color: t.brandText }}>Log this</Text>
+                                    <Text style={{ ...ty.caption, ...font('600'), color: t.brandText }}>Log This</Text>
                                   </Pressable>
                                 ) : null}
                               </View>
@@ -2983,7 +2983,7 @@ export default function Train() {
                       prescription: there is no movement yet to take one from. */}
                   <Ghost label="Add an Exercise You Did" icon="plus" onPress={() => { setEditingKey(null); setCxName(''); setCxSets('3'); setCxRows(resizeLadder([], 3)); setAddOpen(true); }} />
                   {removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length > 0 ? (
-                    <Ghost label={`Put back ${removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length} removed`} icon="swap" onPress={() => { setRemovedEx((prev) => prev.filter((u) => u.indexOf(dayIdx + ':') !== 0)); tapLight(); }} />
+                    <Ghost label={`Put Back ${removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length} Removed`} icon="swap" onPress={() => { setRemovedEx((prev) => prev.filter((u) => u.indexOf(dayIdx + ':') !== 0)); tapLight(); }} />
                   ) : null}
                 </View>
               ) : null}
@@ -3036,7 +3036,7 @@ export default function Train() {
                six written ones use. Minutes and routines, not minutes instead
                of routines. */
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.xs }}>Stretch routines</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.xs }}>Stretch Routines</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
                 Guided, one position at a time, with the hold counted down for you. Twelve stretches in the catalogue are moving
                 sequences and play as animations; the rest are held, and a still is what a held stretch looks like.
@@ -3087,7 +3087,7 @@ export default function Train() {
               {stretchCat.status === 'loading' ? (
                 <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>Reading the stretch catalogue…</Text>
               ) : stretchCat.status === 'error' ? (
-                <Notice tone={t.warn} kicker="Stretch" title="We could not read the stretch list"
+                <Notice tone={t.warn} kicker="Stretch" title="We Could Not Read the Stretch List"
                   note="That is our end, not yours — the stretches are still there, and the ready-made routines below are unaffected.">
                   <View style={{ marginTop: sp.md }}>
                     <Ghost label="Try Again" onPress={() => { void stretchCat.reload(); }} />
@@ -3097,7 +3097,7 @@ export default function Train() {
                 // Nought rows and no error is what a session that has not
                 // restored looks like, and it is not an empty catalogue. Same
                 // sentence as app/(client)/library.tsx, for the same reason.
-                <Notice tone={t.warn} kicker="Stretch" title="Sign in to build a routine"
+                <Notice tone={t.warn} kicker="Stretch" title="Sign In to Build a Routine"
                   note="The stretch list is only available once you are signed in, so this was not allowed to look it up. Nothing has been removed." />
               ) : stretchCat.status === 'partial' ? (
                 // A prefix of the list, not the list. Nothing on screen would
@@ -3127,7 +3127,7 @@ export default function Train() {
                       something we could not do rather than something you got
                       wrong. */}
                   {built?.problem ? (
-                    <Notice tone={t.s3} kicker="Stretch" title="We could not build that one" note={built.problem} />
+                    <Notice tone={t.s3} kicker="Stretch" title="We Could Not Build That One" note={built.problem} />
                   ) : null}
 
                   {built?.routine ? (
@@ -3188,7 +3188,7 @@ export default function Train() {
                   it; the hero up there is about today's lifting plan and would
                   make "Start Sauna" underneath it read as part of that. */}
               <Cta label={`Start ${ctype}`} wide onPress={() => { const at = Date.now(); setResumeAt(null); rememberSession({ kind: 'timed', sessionKind: mode, activity: ctype, startedAt: at }); void startLiveActivity(ctype, at); setTimed({ kind: mode as SessionKind, activity: ctype }); tapLight(); }} />
-              <Text style={{ ...ty.micro, color: t.ink3, marginTop: layout.section, marginBottom: sp.md }}>Or log one you have already done</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: layout.section, marginBottom: sp.md }}>Or Log One You Have Already Done</Text>
 
               {/* Recovery is not cardio, and this form used to treat it as if it
                   were: logging a sauna asked for Distance, km and Avg watts.
@@ -3582,8 +3582,8 @@ export default function Train() {
                     {pending.length ? (
                       <View style={{ marginBottom: sp.lg }}>
                         <Notice
-                          kicker="From your watch"
-                          title={`${pending.length} workout${pending.length > 1 ? 's' : ''} not in your log`}
+                          kicker="From Your Watch"
+                          title={`${pending.length} Workout${pending.length > 1 ? 's' : ''} Not in Your Log`}
                           note={pending.slice(0, 3).map((sm) => sm.activity).join(' · ') + (pending.length > 3 ? ` and ${pending.length - 3} more` : '')}
                         >
                           <View style={{ marginTop: sp.md }}>
@@ -3607,8 +3607,8 @@ export default function Train() {
                       <View style={{ marginBottom: sp.lg }}>
                         <Notice
                           tone={t.warn}
-                          kicker="From your watch"
-                          title="Not everything could be read"
+                          kicker="From Your Watch"
+                          title="Not Everything Could Be Read"
                           note={watchNote}
                         />
                       </View>
@@ -3725,7 +3725,7 @@ export default function Train() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRepeatPick(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), maxHeight: '76%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Repeat a session</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>Repeat a Session</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
             The movements and sets you recorded, ready to run again. Today&rsquo;s plan is left exactly as it is — this runs instead of it for one session, and does not mark it done.
           </Text>
@@ -3748,7 +3748,7 @@ export default function Train() {
               // Translated for READING only. The names that identify the
               // movements are the logged ones and never leave `s.entries`.
               const names = s.entries.filter((e) => Array.isArray(e.sets) && e.sets.length > 0).map((e) => movement(e.exercise));
-              const when = s.day ? prettyDay(s.day) : 'A session';
+              const when = s.day ? prettyDay(s.day) : 'A Session';
               const line = `${sessionSummary(s)} · ${names.join(', ')}`;
               return (
                 <Pressable key={s.t} accessibilityRole="button" accessibilityLabel={`Repeat ${when}. ${line}`}
@@ -3844,7 +3844,7 @@ export default function Train() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>{editingKey ? 'Edit exercise' : 'Add an exercise'}</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>{editingKey ? 'Edit Exercise' : 'Add an Exercise'}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{editingKey ? 'Rename it, or change the sets and reps you are aiming for.' : "Log something you did that isn't in today's plan."}</Text>
           <TextInput value={cxName} onChangeText={setCxName} autoFocus returnKeyType="done" onSubmitEditing={commitCx} blurOnSubmit={false} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} accessibilityLabel="Exercise name" style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, marginBottom: sp.md }} />
           {/* ── how many sets, and then a row for each of them ─────────────
@@ -3891,7 +3891,7 @@ export default function Train() {
             )}
           </View>
           <Pressable disabled={!cxName.trim()} onPress={commitCx} style={{ backgroundColor: cxName.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-            <Text style={{ ...ty.label, ...font('600'), color: cxName.trim() ? t.brandInk : t.ink3 }}>{editingKey ? 'Save changes' : 'Add to today'}</Text>
+            <Text style={{ ...ty.label, ...font('600'), color: cxName.trim() ? t.brandInk : t.ink3 }}>{editingKey ? 'Save Changes' : 'Add to Today'}</Text>
           </Pressable>
           <Pressable onPress={() => { setAddOpen(false); setEditingKey(null); }} style={{ paddingVertical: sp.md, alignItems: 'center' }}><Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text></Pressable>
         </View>
@@ -4151,7 +4151,7 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed, reach, onP
   if (!liveZone && !hasZones) {
     return (
       <View style={{ marginTop: sp.xl, paddingVertical: sp.md, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
-        <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>Heart-rate Zones</Text>
+        <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>Heart-Rate Zones</Text>
         {/* rtl-ok: a navigation PATH inside an English sentence — "the screen
             called X, and inside it the thing called Y". The separator belongs to
             the sentence, not to the layout: dropping FORWARD_CHAR into it would
@@ -4330,14 +4330,14 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
 
   const discard = () => {
     Alert.alert(
-      `Discard this ${KIND_LABEL[kind].toLowerCase()} session?`,
+      `Discard This ${KIND_LABEL[kind]} Session?`,
       // The clock the member is LOOKING at. Once `finish` has run the screen
       // shows `finalElapsed`, frozen at the tap, while `elapsed` keeps
       // counting underneath — so this dialog said "1:50 on the clock" over a
       // screen reading 1:31. Two numbers for one session, in the sentence
       // asking somebody to throw it away.
       `${clock(finished ? finalElapsed : elapsed)} on the clock. Nothing is written to your log.`,
-      [{ text: 'Keep going', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }],
+      [{ text: 'Keep Going', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }],
     );
   };
 
@@ -4397,7 +4397,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
                 </View>
               </Field>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                <Field label="Avg watts" hint="optional">
+                <Field label="Avg Watts" hint="optional">
                   <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" style={inp} />
                 </Field>
                 <Field label="Calories" hint="kcal · optional">
@@ -5181,7 +5181,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         if (fs && fs.length === exercises.length) setRpes(fs.map((a) => (Array.isArray(a) ? a : [])));
         if (typeof d.idx === 'number' && d.idx >= 0 && d.idx < exercises.length) setIdx(d.idx);
         Alert.alert(
-          'Picked up where you left off',
+          'Picked Up Where You Left Off',
           // `were` was fixed while the count was not: one recovered set read
           // "1 set from this session were still on this phone".
           (() => {
@@ -5264,21 +5264,21 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     let r: number;
     if (timedOn) {
       const held = readHold(reps);
-      if (!held.ok) { Alert.alert('How long was the hold?', held.reason); return; }
+      if (!held.ok) { Alert.alert('How Long Was the Hold?', held.reason); return; }
       r = held.secs;
     } else {
       r = parseInt(reps, 10) || 0;
       // Said, not swallowed. This returned silently, so tapping the tick with an
       // empty reps box — the commonest thing to do after typing only the load —
       // did nothing at all, gave no haptic and left the member tapping harder.
-      if (!r) { Alert.alert('How many reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
+      if (!r) { Alert.alert('How Many Reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
     }
     // Refused rather than coerced: `parseFloat(kg) || 0` is what this shipped
     // with, and a mistyped load silently becoming 0 records a bodyweight set
     // in the middle of a session and drags the volume, the PR check and the
     // next session's target down with it.
     const read = readLift(load, unit);
-    if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
+    if (!read.ok) { Alert.alert('Check That Load', read.reason); return; }
     const wkg = read.kg ?? 0;
     // An empty load box IS a bodyweight set — this screen's own alert two lines
     // up has said so for as long as it has existed, and until now the app threw
@@ -5613,11 +5613,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   const endSession = () => {
     if (!loggedSets) { onClose(); return; }
     Alert.alert(
-      'End this session?',
+      'End This Session?',
       `${loggedSets} set${loggedSets === 1 ? '' : 's'} logged so far. Save them to your log, or discard the session.`,
       [
-        { text: 'Keep going', style: 'cancel' },
-        { text: 'Save and end', onPress: () => finish() },
+        { text: 'Keep Going', style: 'cancel' },
+        { text: 'Save and End', onPress: () => finish() },
         { text: 'Discard', style: 'destructive', onPress: () => { forgetGuidedDraft(); onClose(); } },
       ],
     );
@@ -5693,7 +5693,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     const strip: { label: string; value: string; dot?: string }[] = [
       { label: 'Time', value: `${Math.floor(finalElapsed / 60)}:${String(finalElapsed % 60).padStart(2, '0')}` },
     ];
-    if (sessionKcal != null) strip.push({ label: 'kcal burned', value: fig(sessionKcal) });
+    if (sessionKcal != null) strip.push({ label: 'kcal Burned', value: fig(sessionKcal) });
     if (hrPeak != null) strip.push({ label: 'Peak Bpm', value: fig(hrPeak), dot: hrColor(hrPeak, age) });
     if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg Bpm', value: fig(w.today.heartRateAvg) });
     return (
@@ -5709,7 +5709,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
             {saveState === 'saving' ? 'Saving…'
               : saveState === 'failed' ? 'Not Saved Yet'
-              : saveState === 'queued' ? 'Waiting To Send'
+              : saveState === 'queued' ? 'Waiting to Send'
               : 'Session Complete'}
           </Text>
           <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, textTransform: 'capitalize' }}>{focus}</Text>
@@ -5719,7 +5719,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                   declined them, so they are NOT queued — the provider drops a
                   refused row rather than retrying it on every launch forever —
                   and closing this screen really does lose them. */}
-              <Notice tone={t.crit} kicker="Your training log" title="Your log refused this session"
+              <Notice tone={t.crit} kicker="Your Training Log" title="Your Log Refused This Session"
                 note={`${num(totalSets)} set${totalSets === 1 ? '' : 's'} are still on this phone and are listed below, but they were rejected rather than lost on the way, so they are not recorded and they are not waiting to send. Closing this screen loses them.`}>
                 <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                   <Ghost label="Try Saving Again" onPress={() => { void retry(); }} />
@@ -5735,7 +5735,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                   saves them — signal is. Nothing here asks the member to stay on
                   the screen or to do anything at all, because there is nothing
                   they need to do. */}
-              <Notice tone={t.warn} kicker="Your training log" title="Saved on this phone, not in your log yet"
+              <Notice tone={t.warn} kicker="Your Training Log" title="Saved on This Phone, Not in Your Log Yet"
                 note={`${num(totalSets)} set${totalSets === 1 ? '' : 's'} are saved on this phone and listed below. They have not reached your log yet — they go up on their own the next time the app has signal, and it is safe to close this. Until then your streak, your records and your coach's dashboard do not know about them.`}>
                 <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                   <Ghost label="Try Sending Now" onPress={() => { void retry(); }} />
@@ -5745,7 +5745,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           ) : null}
           {saveState === 'idle' && totalSets === 0 ? (
             <View style={{ marginTop: sp.lg }}>
-              <Notice tone={t.ink3} kicker="Nothing logged" title="No sets were recorded"
+              <Notice tone={t.ink3} kicker="Nothing Logged" title="No Sets Were Recorded"
                 note="Nothing has been written to your log, because nothing was entered. Close this and the session is simply not there — no empty workout, no dot on the calendar." />
             </View>
           ) : null}
@@ -5756,7 +5756,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               // the session the two figures are the same and the old label is
               // the right one; where they differ, "Sets" over a number that is
               // not the number of sets logged is the lie.
-              { label: uncountedSets > 0 ? 'Working sets' : 'Sets', value: fig(uncountedSets > 0 ? workingSets : totalSets) },
+              { label: uncountedSets > 0 ? 'Working Sets' : 'Sets', value: fig(uncountedSets > 0 ? workingSets : totalSets) },
               // See volumeHeadline: tonnes for a metric reader, pounds for an imperial
       // one, because a short ton is 10% off a tonne and would read as the same
       // unit to anybody comparing this with a coach's console.
@@ -5835,7 +5835,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                           </Field>
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Field label="Avg watts" hint="optional">
+                          <Field label="Avg Watts" hint="optional">
                             <TextInput
                               value={raw.watts}
                               onChangeText={(v) => setCardioAt(i, { watts: v })}
@@ -5884,11 +5884,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               if (saveState === 'saving') return;
               if (saveState !== 'failed') { forgetGuidedDraft(); onClose(); return; }
               Alert.alert(
-                'Close without saving?',
+                'Close Without Saving?',
                 'These sets have not reached your log. Closing loses them — there is no copy anywhere else.',
                 [
-                  { text: 'Try saving again', onPress: () => { void retry(); } },
-                  { text: 'Close and lose them', style: 'destructive', onPress: () => { forgetGuidedDraft(); onClose(); } },
+                  { text: 'Try Saving Again', onPress: () => { void retry(); } },
+                  { text: 'Close and Lose Them', style: 'destructive', onPress: () => { forgetGuidedDraft(); onClose(); } },
                 ],
               );
             }}
@@ -6117,7 +6117,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.sm }}>{restIsMethods ? `Part of the ${methodFor(ex.method).method.label.toLowerCase()}` : ex.restSec != null ? 'Set by your coach' : `App default of ${DEFAULT_REST_SEC} seconds`}</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={skipRest}
         hitSlop={8} style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md, minHeight: MIN_TARGET, justifyContent: 'center' }}>
-        <Text style={{ ...ty.label, ...font('600'), color: t.nightInk3 }}>Skip rest</Text>
+        <Text style={{ ...ty.label, ...font('600'), color: t.nightInk3 }}>Skip Rest</Text>
       </Pressable>
     </View>
   ) : null;
@@ -6138,7 +6138,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         <View style={{ width: 40 }} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: sp.md }}>
-        <Text style={{ ...ty.micro, color: t.nightInk2 }}>Exercise {idx + 1} of {exercises.length}{paused ? ' · paused' : ''}</Text>
+        <Text style={{ ...ty.micro, color: t.nightInk2 }}>Exercise {idx + 1} of {exercises.length}{paused ? ' · Paused' : ''}</Text>
         <Text accessibilityLabel={`Session time ${sessionClock}`} style={{ ...ty.micro, ...numeric, color: t.nightInk2 }}>{sessionClock}</Text>
       </View>
       <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
@@ -6245,14 +6245,14 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      gave. */
   const coachNote = ex.note && nameOf(ex) === ex.name ? (
     <View style={{ marginTop: sp.lg, backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.lg }}>
-      <Text style={{ ...ty.micro, color: t.ink3 }}>From your coach</Text>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>From Your Coach</Text>
       <Text style={{ ...ty.body, color: t.ink, marginTop: sp.xs }}>{ex.note}</Text>
     </View>
   ) : null;
 
   const prBlock = prMsg ? (
     <View style={{ marginTop: sp.xl }}>
-      <Notice tone={t.s3} kicker="Personal record" title={prMsg} />
+      <Notice tone={t.s3} kicker="Personal Record" title={prMsg} />
     </View>
   ) : null;
 
@@ -6263,7 +6263,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      health record. */
   const pausedNotice = paused ? (
     <View style={{ marginTop: sp.lg }}>
-      <Notice kicker="Paused" title="Your session clock is stopped"
+      <Notice kicker="Paused" title="Your Session Clock Is Stopped"
         note="The clock, your rest countdown and your time in each heart-rate zone are all held where they are. Nothing you have logged is affected. Resume when you are back." />
     </View>
   ) : null;
@@ -6329,7 +6329,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         <>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: sp.sm }}>
             <Icon name="clock" size={14} color={t.ink3} />
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Last time{recall.when ? ` · ${recall.when}` : ''}</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Last Time{recall.when ? ` · ${recall.when}` : ''}</Text>
           </View>
           <View
             accessibilityRole="text"
@@ -6368,7 +6368,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      read out in the member's unit. */
   const rampBlock = done.length === 0 ? (() => { const readTop = readLift(load, unit); const wu = warmupSets(readTop.ok ? (readTop.kg ?? 0) : 0); return wu.length ? (
     <View style={{ marginTop: sp.xl }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: sp.sm }}><Icon name="flame" size={14} color={t.s3} /><Text style={{ ...ty.micro, color: t.ink3 }}>Warm-up ramp</Text></View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: sp.sm }}><Icon name="flame" size={14} color={t.s3} /><Text style={{ ...ty.micro, color: t.ink3 }}>Warm-up Ramp</Text></View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
         {wu.map((ws, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6 }}><Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{fig(liftLabel(ws.kg, unit))} × {ws.reps}</Text></View>)}
       </View>
@@ -6574,14 +6574,14 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             </View>
             <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap', justifyContent: 'center' }}>
               <SetKindChip t={nt} on={bwOn} onToggle={() => setBwOn((v) => !v)}
-                label="Bodyweight set"
-                onLabel={`Bodyweight set — the box above is what you added, in ${unit}`}
+                label="Bodyweight Set"
+                onLabel={`Bodyweight Set — the box above is what you added, in ${unit}`}
                 a11yHint={bwOn
                   ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
                   : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'} />
               <SetKindChip t={nt} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
-                label="Timed set"
-                onLabel="Timed set — the first box is seconds held"
+                label="Timed Set"
+                onLabel="Timed Set — the first box is seconds held"
                 a11yHint={timedOn
                   ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
                   : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'} />
@@ -6597,7 +6597,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             {barLoad ? (
               <View style={{ marginTop: sp.lg }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
-                  <Text style={{ ...ty.micro, color: nt.ink3 }}>Per side</Text>
+                  <Text style={{ ...ty.micro, color: nt.ink3 }}>Per Side</Text>
                   {/* The bar, switchable. Two entries in `BARS`, so this is a
                       toggle rather than a picker — and it is a control rather
                       than a caption because the women's bar is on the rack of
@@ -6652,7 +6652,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               <View style={{ backgroundColor: t.night2, borderRadius: radius.lg, padding: 14, marginTop: sp.md }}>
                 <View accessible accessibilityLabel={`Heart-rate zone ${liveZone} of 5, ${zoneName(liveZone)}`}
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm }}>
-                  <Text style={{ ...ty.caption, ...font('600'), color: t.nightInk2 }}>Heart-rate Zone</Text>
+                  <Text style={{ ...ty.caption, ...font('600'), color: t.nightInk2 }}>Heart-Rate Zone</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: zoneColor(liveZone) }} />
                     <Text style={{ ...ty.caption, ...font('700'), color: t.nightInk }}>Zone {liveZone} · {zoneName(liveZone)}</Text>
@@ -6698,9 +6698,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             {prBlock}
             {pendingFeel != null ? (
               <View style={{ marginTop: sp.xl }}>
-                <Text style={{ ...ty.micro, color: nt.ink3, marginBottom: sp.md }}>How did that set feel?</Text>
+                <Text style={{ ...ty.micro, color: nt.ink3, marginBottom: sp.md }}>How Did That Set Feel?</Text>
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  {(([['easy', 'Easy', t.good], ['ok', 'Just right', t.brandBright], ['hard', 'Hard', t.crit]]) as ['easy' | 'ok' | 'hard', string, string][]).map(([f, lbl, c]) => (
+                  {(([['easy', 'Easy', t.good], ['ok', 'Just Right', t.brandBright], ['hard', 'Hard', t.crit]]) as ['easy' | 'ok' | 'hard', string, string][]).map(([f, lbl, c]) => (
                     <Pressable key={f} accessibilityRole="button" accessibilityLabel={`That set felt ${lbl.toLowerCase()}`} onPress={() => chooseFeel(f)} style={{ flex: 1, backgroundColor: nt.surface2, borderRadius: radius.sm, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c }} />
                       <Text style={{ ...ty.label, ...font('500'), color: nt.ink }}>{lbl}</Text>
@@ -6735,7 +6735,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.xl, minHeight: MIN_TARGET }}
               >
                 <Icon name="video" size={14} color={t.ink3} />
-                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>See how this is done</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>See How This Is Done</Text>
                 <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
               </Pressable>
             </View>
@@ -6876,7 +6876,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                   accessibilityLabel={`Start the ${restClock(plannedRest)} rest`}
                   onPress={() => startRest(plannedRest)}
                   style={{ borderRadius: radius.lg, padding: sp.lg, alignItems: 'center', marginTop: sp.xl, backgroundColor: t.night2 }}>
-                  <Text style={{ ...ty.label, ...font('600'), color: t.nightInk }}>Start rest</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.nightInk }}>Start Rest</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.nightInk2, marginTop: 2 }}>
                     {restClock(plannedRest)}{ex.restSec != null ? ' · set by your coach' : ` · app default`}
                   </Text>
@@ -7153,7 +7153,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
     const sets: WorkoutDraftSet[] = [];
     for (let i = 0; i < rows.length; i++) {
       const read = readLift(rows[i].load, unit);
-      if (!read.ok) { Alert.alert(`Check set ${i + 1}`, read.reason); return; }
+      if (!read.ok) { Alert.alert(`Check Set ${i + 1}`, read.reason); return; }
       sets.push({
         reps: parseInt(rows[i].reps, 10) || 0,
         kg: read.kg ?? 0,
@@ -7162,7 +7162,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
       });
     }
     const read = readWorkoutEdit(entry, { name, sets, mins, dist, distUnit, watts, kcal });
-    if (!read.ok) { Alert.alert('Check that', read.reason); return; }
+    if (!read.ok) { Alert.alert('Check That', read.reason); return; }
     setBusy(true);
     const saved = await onSave(read.value);
     setBusy(false);
@@ -7180,7 +7180,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
       // `retryLine` appends when the server DID read it and refuse. "did not
       // reach your record" is true either way, and is the thing the member
       // cares about: what their log now says.
-      Alert.alert('Not saved', `Your correction did not reach your record, so this entry still reads as it did — on this phone as well. ${retryLine(reach)}`);
+      Alert.alert('Not Saved', `Your correction did not reach your record, so this entry still reads as it did — on this phone as well. ${retryLine(reach)}`);
     }
   };
 
@@ -7195,7 +7195,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '86%', ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: sp.lg }}>
           <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, ...font('500'), color: t.ink3 }}>Cancel</Text></Pressable>
-          <Text style={{ ...ty.head, color: t.ink }}>Edit entry</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>Edit Entry</Text>
           <Pressable onPress={save} hitSlop={8} disabled={busy}><Text style={{ ...ty.body, ...font('600'), color: busy ? t.ink3 : t.brandText }}>{busy ? 'Saving…' : 'Save'}</Text></Pressable>
         </View>
         <ScrollView contentContainerStyle={{ padding: sp.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -7292,7 +7292,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                   </View>
                 </Field>
               </View>
-              <Field label="Avg watts" hint="optional" style={{ marginTop: sp.md }}>
+              <Field label="Avg Watts" hint="optional" style={{ marginTop: sp.md }}>
                 <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" style={inp} />
               </Field>
             </View>
@@ -7310,7 +7310,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                   heading over both is how a plank came to read as reps. */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: 6 }}>
                 <View style={{ width: 22 }} />
-                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps or seconds</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps or Seconds</Text>
                 <Text style={{ ...ty.caption, color: 'transparent' }}>×</Text>
                 <View style={{ flex: 1 }}><WeightUnitToggle compact /></View>
                 <View style={{ width: 24 }} />
@@ -7336,12 +7336,12 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                       to every board exactly as a set logged live does. */}
                   <View style={{ flexDirection: 'row', gap: sp.lg, paddingStart: 22 + sp.sm }}>
                     <SetKindChip t={t} on={r.bw} onToggle={() => { flagAt(i, 'bw'); tapLight(); }}
-                      label={`Set ${i + 1} bodyweight`} onLabel={`Set ${i + 1} bodyweight`}
+                      label={`Set ${i + 1} Bodyweight`} onLabel={`Set ${i + 1} Bodyweight`}
                       a11yHint={r.bw
                         ? `The load box beside it is what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
                         : 'Turn this on for a pull-up, a dip or a press-up.'} />
                     <SetKindChip t={t} on={r.timed} onToggle={() => { flagAt(i, 'timed'); tapLight(); }}
-                      label={`Set ${i + 1} timed`} onLabel={`Set ${i + 1} timed`}
+                      label={`Set ${i + 1} Timed`} onLabel={`Set ${i + 1} Timed`}
                       a11yHint={r.timed
                         ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
                         : 'Turn this on for a plank or a wall sit, where the set is a length of time rather than a count.'} />

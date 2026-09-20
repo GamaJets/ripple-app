@@ -153,8 +153,8 @@ import {
  *  thing and a coach should be able to widen the window rather than be told
  *  there is nothing to post about. */
 const SPANS: { days: number; label: string }[] = [
-  { days: 7, label: 'Last 7 days' },
-  { days: 30, label: 'Last 30 days' },
+  { days: 7, label: 'Last 7 Days' },
+  { days: 30, label: 'Last 30 Days' },
 ];
 
 type Mode = 'week' | 'result';
@@ -493,7 +493,7 @@ export default function ShareKit() {
   });
 
   const share = async () => {
-    if (!build.ok) { Alert.alert('Nothing to share yet', build.why); return; }
+    if (!build.ok) { Alert.alert('Nothing to Share Yet', build.why); return; }
     setBusy(true);
     const png = await capture();
     const r = await sharePngAsset(png ?? '', build.card.filename, build.card.caption);
@@ -501,7 +501,7 @@ export default function ShareKit() {
 
     if (r.sent === 'image') {
       Alert.alert(
-        'Card sent to your share sheet',
+        'Card Sent to Your Share Sheet',
         r.captionCopied
           ? 'Your caption is on the clipboard — paste it into the post. A share sheet cannot carry an image and its words to the same place, so they travel separately.'
           : 'Copy your caption from the box on this screen before you post — this version of the app could not put it on the clipboard for you.',
@@ -512,7 +512,7 @@ export default function ShareKit() {
     // have different answers and neither of them is "try again".
     const moduleReason = imageShareBlocker();
     Alert.alert(
-      'Sent as text instead',
+      'Sent as Text Instead',
       moduleReason
         ? `${moduleReason}\n\nYour caption has gone to the share sheet.`
         : 'Your phone could not turn the card into an image just now, so the caption has gone to the share sheet on its own. Nothing has been posted — you still choose where it goes.',
@@ -580,14 +580,14 @@ export default function ShareKit() {
     const wasPostingTo = ig.account?.ready ? ig.account.username : null;
     setIgBusy(true);
     const r = await connectInstagram();
-    if (!r.ok) { setIgBusy(false); Alert.alert('Not connected', r.reason); return; }
+    if (!r.ok) { setIgBusy(false); Alert.alert('Not Connected', r.reason); return; }
 
     if (r.chosen) {
       setIgBusy(false);
       setPages(null);
       ig.reload();
       Alert.alert(
-        'Instagram connected',
+        'Instagram Connected',
         `Cards will post to ${r.chosen.igUsername ? `@${r.chosen.igUsername}` : r.chosen.name}.${r.warning ? `\n\n${r.warning}` : ''}`,
       );
       return;
@@ -606,7 +606,7 @@ export default function ShareKit() {
       // `ig_user_id: null` over whatever was there, and there is nothing in
       // this list to put back — see the note on the restore below.
       Alert.alert(
-        'Nothing to post to',
+        'Nothing to Post To',
         'None of the Pages this login can see has an Instagram Business or Creator account linked to it, so there is nowhere for a post to go. Link one in Meta Business Suite and connect again.'
         + (wasPostingTo ? `\n\nThat sign-in has also cleared the account Repple was posting to. Connect again with the Meta login that reaches @${wasPostingTo}.` : ''),
       );
@@ -640,7 +640,7 @@ export default function ShareKit() {
       if (back.ok) {
         setPages(null);
         Alert.alert(
-          'Instagram reconnected',
+          'Instagram Reconnected',
           `Cards still post to @${wasPostingTo}. To post from one of the other accounts this login reaches, disconnect below and connect again.`,
         );
         return;
@@ -648,21 +648,21 @@ export default function ShareKit() {
       // The restore was refused. The list is the way back, and it is now on
       // the screen rather than nowhere.
       setPages(withIg);
-      Alert.alert('Pick your account again', `${back.reason}\n\nPick the account you post from.`);
+      Alert.alert('Pick Your Account Again', `${back.reason}\n\nPick the account you post from.`);
       return;
     }
 
     setIgBusy(false);
     setPages(withIg);
     ig.reload();
-    Alert.alert('Choose the account', 'Your Meta login reaches more than one Instagram account. Pick the one you post from — nothing posts anywhere until you do.');
+    Alert.alert('Choose the Account', 'Your Meta login reaches more than one Instagram account. Pick the one you post from — nothing posts anywhere until you do.');
   };
 
   const choose = async (p: PageChoice) => {
     setIgBusy(true);
     const r = await chooseInstagramPage(p.id);
     setIgBusy(false);
-    if (!r.ok) { Alert.alert('Not saved', r.reason); return; }
+    if (!r.ok) { Alert.alert('Not Saved', r.reason); return; }
     setPages(null);
     ig.reload();
   };
@@ -671,7 +671,7 @@ export default function ShareKit() {
     setIgBusy(true);
     const r = await disconnectInstagram();
     setIgBusy(false);
-    if (!r.ok) { Alert.alert('Still connected', r.reason); return; }
+    if (!r.ok) { Alert.alert('Still Connected', r.reason); return; }
     setPages(null);
     ig.reload();
   };
@@ -680,7 +680,7 @@ export default function ShareKit() {
     // The gate again at the moment of pressing, not only at the moment of
     // drawing. Nothing between the two can have changed the card without this
     // recomputing, and asking twice costs nothing.
-    if (!igGate.ok) { Alert.alert('Not posted', igGate.why); return; }
+    if (!igGate.ok) { Alert.alert('Not Posted', igGate.why); return; }
     setIgBusy(true);
     const png = await capture();
     // The bytes now exist and this is the last moment before they could leave.
@@ -688,7 +688,7 @@ export default function ShareKit() {
     // those bytes have it in them and nothing else in this function would know.
     if (photoOnCardRef.current) {
       setIgBusy(false);
-      Alert.alert('Not posted', PHOTO_KEEPS_THE_SHARE_SHEET);
+      Alert.alert('Not Posted', PHOTO_KEEPS_THE_SHARE_SHEET);
       return;
     }
     const r = await publishCardToInstagram(igGate.card, png ?? '', build.ok ? build.card.kind : 'week');
@@ -706,7 +706,7 @@ export default function ShareKit() {
     // sending them to check their account is sending them nowhere.
     const permission = /permission/i.test(r.reason);
     Alert.alert(
-      r.containerCreated ? 'Not published' : 'Nothing was posted',
+      r.containerCreated ? 'Not Published' : 'Nothing Was Posted',
       permission ? reviewRefusalNote(r.reason) : r.reason,
     );
   };
@@ -758,12 +758,12 @@ export default function ShareKit() {
             // for both, because to the CARD they are the same refusal — but to
             // the coach they are not, and this is the line they read.
             build.reason === 'unread' && sessionsPending ? (
-              <Notice kicker="Reading your sessions" title="No card yet"
+              <Notice kicker="Reading Your Sessions" title="No Card Yet"
                 note="Still reading what you have delivered. Nothing has failed — the figures for a card appear here once the read lands." />
             ) : (
             <Notice tone={build.reason === 'unread' ? undefined : t.brand}
-              kicker={build.reason === 'unread' ? 'Could not read your sessions' : build.reason === 'consent' ? 'Their call, not yours' : 'Nothing to put on it yet'}
-              title="No card"
+              kicker={build.reason === 'unread' ? 'Could Not Read Your Sessions' : build.reason === 'consent' ? 'Their Call, Not Yours' : 'Nothing to Put on It Yet'}
+              title="No Card"
               note={build.why} />
             )
           )}
@@ -820,13 +820,13 @@ export default function ShareKit() {
               <Check
                 on={okFigures}
                 onPress={() => setOkFigures((v) => !v)}
-                title="They agreed these figures can be posted publicly"
+                title="They Agreed These Figures Can Be Posted Publicly"
                 note="Without this there is no card to share — not a warning you can tap past."
               />
               <Check
                 on={okName}
                 onPress={() => setOkName((v) => !v)}
-                title="They agreed to be named"
+                title="They Agreed to Be Named"
                 note="Off by default, and asked separately. Their name is removed from your caption too."
               />
               {okName ? (
@@ -854,7 +854,7 @@ export default function ShareKit() {
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>{SEEING_IS_NOT_PUBLISHING}</Text>
 
               {rosterStatus === 'error' ? (
-                <Notice kicker="Could not read your clients" title="No photos offered"
+                <Notice kicker="Could Not Read Your Clients" title="No Photos Offered"
                   note="Your book could not be read, so there is nobody to look up permissions for. This is not a coach with no clients." />
               ) : rosterStatus === 'loading' ? (
                 // Two states used to fall past this branch into the chip row
@@ -917,13 +917,13 @@ export default function ShareKit() {
                       without a photo.
                     </Text>
                   ) : sentStatus === 'error' ? (
-                    <Notice kicker="Could not read their photos" title="No photos offered"
+                    <Notice kicker="Could Not Read Their Photos" title="No Photos Offered"
                       note="What this client has sent you could not be read, so nothing is offered. Nothing has been posted and this is not a client who sent none." />
                   ) : grants.status === 'error' ? (
                     // The distinction this whole item turns on. Their photos
                     // read fine; what they AGREED to did not, and a card is not
                     // made out of an unanswered question.
-                    <Notice kicker="Could not read their permissions" title="No photo on this card"
+                    <Notice kicker="Could Not Read Their Permissions" title="No Photo on This Card"
                       note={publishConsentNote('unknown') ?? ''} />
                   ) : usable === null ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading what they have agreed to…</Text>

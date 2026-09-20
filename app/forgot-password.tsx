@@ -80,7 +80,7 @@ export default function ForgotPassword() {
               <View style={{ marginTop: sp.sm }}>
                 <Cta wide disabled={!canGo} onPress={send} label={busy ? 'Sending…' : 'Send Reset Link'} />
               </View>
-              <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back to sign in" style={{ marginTop: sp.lg, alignItems: 'center', paddingVertical: sp.sm }}>
+              <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back to Sign In" style={{ marginTop: sp.lg, alignItems: 'center', paddingVertical: sp.sm }}>
                 <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Back to Sign In</Text>
               </Pressable>
               {!USE_SUPABASE ? (

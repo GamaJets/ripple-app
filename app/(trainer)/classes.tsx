@@ -313,7 +313,7 @@ export default function TrainerClasses() {
       refresh();
       Alert.alert(title, done);
     } catch (e) {
-      Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so nothing has changed on the timetable. Try again once you have signal.');
+      Alert.alert('Not Saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so nothing has changed on the timetable. Try again once you have signal.');
     } finally { setMBusy(false); }
   };
 
@@ -342,12 +342,12 @@ export default function TrainerClasses() {
     // that has been and gone. Said under the control as well, because a Save
     // that silently will not commit reads as a broken button.
     if (patch.startsAt && Date.parse(patch.startsAt) <= Date.now()) {
-      Alert.alert('That time has already passed',
+      Alert.alert('That Time Has Already Passed',
         `${patch.title} would start ${dayShort(patch.startsAt)} at ${timeLabel(patch.startsAt)}, which is behind you. Members cannot book a class in the past, and the ones who already booked this would be holding a place at a time that has gone. Pick a time that is still ahead.`);
       return;
     }
     if (countsKnown && patch.capacity < c.booked) {
-      Alert.alert('Capacity is below the bookings',
+      Alert.alert('Capacity Is Below the Bookings',
         `${c.booked} ${c.booked === 1 ? 'person has' : 'people have'} already booked this class, so it cannot hold ${patch.capacity}. Cancel a booking first, or leave the capacity where it is.`);
       return;
     }
@@ -382,9 +382,9 @@ export default function TrainerClasses() {
           assertChanged('That change to the series', n);
           setManage(null);
           refresh();
-          Alert.alert('Series updated', `${n} ${n === 1 ? 'class' : 'classes'} from this one onward ${n === 1 ? 'was' : 'were'} changed. Classes that have already run are untouched, because they are the gym's record of what happened.`);
+          Alert.alert('Series Updated', `${n} ${n === 1 ? 'class' : 'classes'} from this one onward ${n === 1 ? 'was' : 'were'} changed. Classes that have already run are untouched, because they are the gym's record of what happened.`);
         } catch (e) {
-          Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so nothing has changed on the timetable.');
+          Alert.alert('Not Saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so nothing has changed on the timetable.');
         } finally { setMBusy(false); }
       })();
       return;
@@ -395,7 +395,7 @@ export default function TrainerClasses() {
     const done = patch.startsAt
       ? `${patch.title} now starts ${dayShort(patch.startsAt)} at ${timeLabel(patch.startsAt)}. Everyone who booked it keeps their place — tell them, because moving a class does not notify anybody.`
       : `${patch.title} was changed.`;
-    void runWrite('Class updated', done, () => updateClass(supabase, c.id, patch));
+    void runWrite('Class Updated', done, () => updateClass(supabase, c.id, patch));
   };
 
   /**
@@ -438,7 +438,7 @@ export default function TrainerClasses() {
   const callOff = (c: GymClass) => {
     const why = mReason.trim();
     if (!why) {
-      Alert.alert('Say why it is off',
+      Alert.alert('Say Why It Is Off',
         'A cancelled class with no reason tells the next reader nothing. "Instructor off sick" and "nobody booked it" are the two answers that are worth having in three months.');
       return;
     }
@@ -474,17 +474,17 @@ export default function TrainerClasses() {
         setManage(null);
         refresh();
         Alert.alert(
-          series ? 'Series called off' : 'Class called off',
+          series ? 'Series Called Off' : 'Class Called Off',
           classOffConfirmation(ids.length, told.people, told.pushed, told.partial),
         );
       } catch (e) {
-        Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so the classes are still on the timetable.');
+        Alert.alert('Not Saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so the classes are still on the timetable.');
       } finally { setMBusy(false); }
     })();
   };
 
   const putBackOn = (c: GymClass) => {
-    void runWrite('Class back on', `${c.title} is on the timetable again and can be booked.`,
+    void runWrite('Class Back On', `${c.title} is on the timetable again and can be booked.`,
       () => restoreClass(supabase, c.id));
   };
 
@@ -499,13 +499,13 @@ export default function TrainerClasses() {
    * failed read is exactly the number that would make this look safe.
    */
   const removeClass = (c: GymClass) => {
-    Alert.alert('Remove this class?',
+    Alert.alert('Remove This Class?',
       `${c.title} is deleted outright. Use Call Off instead for a class that was on the timetable and did not happen — that keeps the row and the record.`, [
       { text: 'Keep It', style: 'cancel' },
       {
         text: 'Remove',
         style: 'destructive',
-        onPress: () => { void runWrite('Class removed', `${c.title} is off the timetable.`, () => deleteClass(supabase, c.id)); },
+        onPress: () => { void runWrite('Class Removed', `${c.title} is off the timetable.`, () => deleteClass(supabase, c.id)); },
       },
     ]);
   };
@@ -576,7 +576,7 @@ export default function TrainerClasses() {
     // had got wrong, and report it as added. One chip fixes it.
     const first = startIso();
     if (Date.parse(first) <= Date.now()) {
-      Alert.alert('That time has already passed',
+      Alert.alert('That Time Has Already Passed',
         `${title.trim()} would start ${dayShort(first)} at ${timeLabel(first)}, which is behind you. Members cannot book a class in the past, so it would be on nobody's timetable however many weeks it repeated for. Pick a time that is still ahead.`);
       return;
     }
@@ -602,7 +602,7 @@ export default function TrainerClasses() {
     );
     if (roomNote) {
       const go = await new Promise<boolean>((resolve) => {
-        Alert.alert('Check the room', roomNote, [
+        Alert.alert('Check the Room', roomNote, [
           { text: 'Change It', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Add Anyway', onPress: () => resolve(true) },
         ], { cancelable: true, onDismiss: () => resolve(false) });
@@ -652,15 +652,15 @@ export default function TrainerClasses() {
       // retry from.
       if (saved === weeks) { setTitle(''); setRoom(''); }
       if (saved === weeks) {
-        Alert.alert(weeks > 1 ? 'Classes added' : 'Class added', weeks > 1
+        Alert.alert(weeks > 1 ? 'Classes Added' : 'Class Added', weeks > 1
           ? `${weeks} weekly ${nm} classes at ${br}, starting ${when}.`
           : `${nm} · ${br} · ${when}`);
       } else if (saved === 0) {
-        Alert.alert('Not on the timetable', weeks > 1
+        Alert.alert('Not on the Timetable', weeks > 1
           ? `None of the ${weeks} ${nm} classes reached the server, so they are on this phone only and nobody can book them. They will be gone when you reopen the app — try again once you have signal.`
           : `${nm} did not reach the server, so it is on this phone only and nobody can book it. It will be gone when you reopen the app — try again once you have signal.`);
       } else {
-        Alert.alert('Partly added', `${saved} of ${weeks} ${nm} classes reached the server. The other ${weeks - saved} are on this phone only and cannot be booked — add them again once you have signal.`);
+        Alert.alert('Partly Added', `${saved} of ${weeks} ${nm} classes reached the server. The other ${weeks - saved} are on this phone only and cannot be booked — add them again once you have signal.`);
       }
     } finally { setBusy(false); }
   };
@@ -815,7 +815,7 @@ export default function TrainerClasses() {
                             : places === 0 ? 'No classes scheduled yet.'
                               : `Across ${live.length} ${live.length === 1 ? 'class' : 'classes'}`}
                   </Text>
-                  {drawn && waiting > 0 ? <TonedChip tone="amber" label={`${waiting} waiting`} /> : null}
+                  {drawn && waiting > 0 ? <TonedChip tone="amber" label={`${waiting} Waiting`} /> : null}
                 </View>
               </View>
             </Section>
@@ -836,7 +836,7 @@ export default function TrainerClasses() {
           ) : (<>
 
           <TextInput value={title} onChangeText={setTitle} placeholder="Class title — e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={inp}
-            accessibilityLabel="Class title" />
+            accessibilityLabel="Class Title" />
 
           <Text style={[lbl, { marginTop: sp.md }]}>Type</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
@@ -872,7 +872,7 @@ export default function TrainerClasses() {
               already writes into. */}
           <Text style={[lbl, { marginTop: sp.md }]}>Week</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
-            {[0, 1, 2, 3, 4, 5, 6, 7].map((w) => chip(w === 0 ? 'This week' : w === 1 ? 'Next week' : `In ${w} weeks`, weekOff === w, () => setWeekOff(w)))}
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((w) => chip(w === 0 ? 'This Week' : w === 1 ? 'Next Week' : `In ${w} Weeks`, weekOff === w, () => setWeekOff(w)))}
           </ScrollView>
 
           <Text style={[lbl, { marginTop: sp.md }]}>Day</Text>
@@ -885,7 +885,7 @@ export default function TrainerClasses() {
               when training happens, and 5am to 10pm excluded the 4am opener
               and the late shift. */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-            {stepper('Start hour', fmtClock(hour, 0), () => setHour((h) => (h + 23) % 24), () => setHour((h) => (h + 1) % 24))}
+            {stepper('Start Hour', fmtClock(hour, 0), () => setHour((h) => (h + 23) % 24), () => setHour((h) => (h + 1) % 24))}
             {/* "Minutes" — directly under "Start hour", and setting the class
                 LENGTH. A coach reads "Start hour: 6:00 PM · Minutes: 45" as a
                 quarter to seven, and the control that actually sets the minutes
@@ -896,7 +896,7 @@ export default function TrainerClasses() {
             {stepper('Capacity', String(cap), () => setCap((c) => (c > 4 ? c - 1 : c)), () => setCap((c) => c + 1))}
           </View>
 
-          <Text style={[lbl, { marginTop: sp.md }]}>Start time</Text>
+          <Text style={[lbl, { marginTop: sp.md }]}>Start Time</Text>
           <View style={{ flexDirection: 'row', gap: 7 }}>
             {SERIES_MINUTES.map((m) => (
               <View key={m} style={{ flex: 1 }}>
@@ -929,7 +929,7 @@ export default function TrainerClasses() {
           ) : null}
 
           <Text style={[lbl, { marginTop: sp.md }]}>Repeat</Text>
-          {seg([[1, 'Just once'], [4, 'Weekly ×4'], [8, 'Weekly ×8'], [12, 'Weekly ×12']] as const, weeks, setWeeks)}
+          {seg([[1, 'Just Once'], [4, 'Weekly ×4'], [8, 'Weekly ×8'], [12, 'Weekly ×12']] as const, weeks, setWeeks)}
 
           <View style={{ height: sp.lg }} />
           <Cta label={busy ? 'Adding…' : 'Add Class'} wide disabled={!canAdd || busy} onPress={submit} />
@@ -952,8 +952,8 @@ export default function TrainerClasses() {
               control. Only drawn once there is something to repeat. */}
           {upcoming.length > 0 ? (
             <View style={{ marginBottom: sp.md }}>
-              <Text style={lbl}>Same Again runs for</Text>
-              {seg([[4, '4 more weeks'], [8, '8 more weeks'], [12, '12 more weeks']] as const, againWeeks, setAgainWeeks)}
+              <Text style={lbl}>Same Again Runs For</Text>
+              {seg([[4, '4 More Weeks'], [8, '8 More Weeks'], [12, '12 More Weeks']] as const, againWeeks, setAgainWeeks)}
               {/* One line. It states what the write will and will not do, which
                   is data about an act; the paragraph arguing for it was prose. */}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -966,7 +966,7 @@ export default function TrainerClasses() {
               shows a coach with forty classes on the books a blank schedule and
               the words "No classes yet", and they plan their week around it. */}
           {status === 'error' ? (
-            <Notice tone={t.warn} kicker="Timetable" title="Your schedule could not be read"
+            <Notice tone={t.warn} kicker="Timetable" title="Your Schedule Could Not Be Read"
               note="Nothing is listed below because the classes did not come back — it does not mean nothing is scheduled. Anything you add here may duplicate a class that is already on the timetable, so check again once you have signal.">
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={refresh} /></View>
             </Notice>
@@ -1025,7 +1025,7 @@ export default function TrainerClasses() {
                           exactly the claim that would stop the second session.
                           The dash on the meter below already says the numbers
                           are unknown. */}
-                      {countsKnown && c.waiting != null && c.waiting > 0 ? <TonedChip tone="orange" label={`${c.waiting} waiting`} /> : null}
+                      {countsKnown && c.waiting != null && c.waiting > 0 ? <TonedChip tone="orange" label={`${c.waiting} Waiting`} /> : null}
                     </View>
                   ) : null}
                   {off ? (
@@ -1173,7 +1173,7 @@ export default function TrainerClasses() {
                           {MOVE_DAYS.map((o) => {
                             const at = daysLater(manage.startsAt, o);
                             if (!at) return null;
-                            return chip(o === 0 ? `${dayShort(at)} · as typed` : dayShort(at), mDayOff === o, () => setMDayOff(o));
+                            return chip(o === 0 ? `${dayShort(at)} · As Typed` : dayShort(at), mDayOff === o, () => setMDayOff(o));
                           })}
                         </ScrollView>
 
@@ -1185,11 +1185,11 @@ export default function TrainerClasses() {
                               put in their diaries — so a 24-hour-clock coach set
                               the new time in a notation they do not use, on the
                               action with the most people downstream of it. */}
-                          {stepper('Start hour', fmtClock(mHour, 0),
+                          {stepper('Start Hour', fmtClock(mHour, 0),
                             () => setMHour((h) => (h + 23) % 24), () => setMHour((h) => (h + 1) % 24))}
                         </View>
 
-                        <Text style={[lbl, { marginTop: sp.md }]}>Start time</Text>
+                        <Text style={[lbl, { marginTop: sp.md }]}>Start Time</Text>
                         <View style={{ flexDirection: 'row', gap: 7 }}>
                           {SERIES_MINUTES.map((m) => (
                             <View key={m} style={{ flex: 1 }}>
@@ -1231,10 +1231,10 @@ export default function TrainerClasses() {
                         button. */}
                     {manage.seriesId ? (
                       <View style={{ marginTop: sp.md }}>
-                        <Text style={lbl}>Apply to</Text>
+                        <Text style={lbl}>Apply To</Text>
                         <View style={{ flexDirection: 'row', gap: 7 }}>
                           {chip('This Class', !mSeries, () => setMSeries(false))}
-                          {chip('This And Later', mSeries, () => setMSeries(true))}
+                          {chip('This and Later', mSeries, () => setMSeries(true))}
                         </View>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                           Classes that have already run are never changed. They are the gym's record of what happened.
@@ -1248,14 +1248,14 @@ export default function TrainerClasses() {
                     <Rule />
 
                     {/* ── calling it off ────────────────────────────────────── */}
-                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Call it off</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Call It Off</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.sm }}>
                       The class stays on the timetable marked as cancelled, and keeps its bookings, its check-ins and its waiting list. That is the evidence the hour was wanted.
                     </Text>
                     <TextInput value={mReason} onChangeText={setMReason} placeholder="Why is it off? e.g. instructor off sick" placeholderTextColor={t.ink3} style={inp}
                       accessibilityLabel="Why the class is off" />
                     <View style={{ height: sp.md }} />
-                    <Ghost label={mSeries && manage.seriesId ? 'Call Off This And Later' : 'Call Off This Class'} onPress={() => callOff(manage)} />
+                    <Ghost label={mSeries && manage.seriesId ? 'Call Off This and Later' : 'Call Off This Class'} onPress={() => callOff(manage)} />
 
                     {/* ── or erase it, if nobody ever booked it ─────────────── */}
                     {canRemove(manage) ? (

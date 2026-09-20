@@ -378,15 +378,15 @@ export default function Messages() {
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
     // A cancel carries neither, and must raise nothing at anybody.
-    if (error) { Alert.alert('That file cannot be sent', error); return; }
+    if (error) { Alert.alert('That File Cannot Be Sent', error); return; }
     if (attachment) setPending(attachment);
   };
 
   const onAttach = () => {
-    Alert.alert('Add to your message', 'Your coach will be able to see this, and nobody else.', [
-      { text: 'Take a photo', onPress: () => { attach('photo'); } },
-      { text: 'Record a video', onPress: () => { attach('video'); } },
-      { text: 'Choose from your library', onPress: () => { attach('library'); } },
+    Alert.alert('Add to Your Message', 'Your coach will be able to see this, and nobody else.', [
+      { text: 'Take a Photo', onPress: () => { attach('photo'); } },
+      { text: 'Record a Video', onPress: () => { attach('video'); } },
+      { text: 'Choose from Your Library', onPress: () => { attach('library'); } },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -451,7 +451,7 @@ export default function Messages() {
         style: blocked ? 'default' : 'destructive',
         onPress: async () => {
           const r = blocked ? await safety.unblock() : await safety.block();
-          if (!r.ok) { Alert.alert(blocked ? 'Not unblocked' : 'Not blocked', r.error ?? 'That did not save.'); return; }
+          if (!r.ok) { Alert.alert(blocked ? 'Not Unblocked' : 'Not Blocked', r.error ?? 'That did not save.'); return; }
           Alert.alert(
             blocked ? 'Unblocked' : 'Blocked',
             blocked
@@ -494,7 +494,7 @@ export default function Messages() {
     if (!body) return;
     if (!(await copyToClipboard(body))) {
       Alert.alert(
-        'Not copied',
+        'Not Copied',
         HAS_NATIVE_CLIPBOARD
           ? 'That could not be put on your clipboard just now. Try again in a moment.'
           : 'This version of the app cannot use the clipboard. Updating to the latest build adds it.',
@@ -512,7 +512,7 @@ export default function Messages() {
     setReportBusy(true);
     const res = await safety.report(category, reportNote, reportFor.messageId);
     setReportBusy(false);
-    if (!res.id) { Alert.alert('Not reported', res.error ?? 'That did not save.'); return; }
+    if (!res.id) { Alert.alert('Not Reported', res.error ?? 'That did not save.'); return; }
     setReportFor(null); setReportNote('');
     Alert.alert('Reported', reportFiledLine(category, safety.state));
   };
@@ -529,7 +529,7 @@ export default function Messages() {
     // signal is not a message that failed: the words are safe, they are marked
     // under the bubble as waiting, and they go on their own. Heading it "Not
     // sent" would tell somebody to type it again.
-    if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to send' : 'Not sent', res.reason);
+    if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to Send' : 'Not Sent', res.reason);
   };
   // The stamp under every bubble. It was a hardcoded English weekday array
   // glued to `${d.getDate()}/${d.getMonth() + 1}` — day-before-month, which a
@@ -785,8 +785,8 @@ export default function Messages() {
                 ].filter(Boolean).join('. ')}
                 accessibilityHint={mine ? undefined : 'Opens the report options for this message'}
                 accessibilityActions={mine ? undefined : [
-                  { name: 'activate', label: 'Report this message' },
-                  { name: 'longpress', label: 'Report this message' },
+                  { name: 'activate', label: 'Report This Message' },
+                  { name: 'longpress', label: 'Report This Message' },
                 ]}
                 onAccessibilityAction={mine ? undefined : (e) => {
                   if (e.nativeEvent.actionName !== 'activate' && e.nativeEvent.actionName !== 'longpress') return;
@@ -912,7 +912,7 @@ export default function Messages() {
           <View key={r.id} style={{ paddingHorizontal: G, paddingTop: sp.md }}>
             <Notice
               tone={t.crit}
-              kicker="Not delivered"
+              kicker="Not Delivered"
               title="This message was refused"
               note={refusedBodyNote(r, now.getTime())}
             >
@@ -975,7 +975,7 @@ export default function Messages() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>
-              {reportFor?.messageId ? 'Report this message' : 'Report this conversation'}
+              {reportFor?.messageId ? 'Report This Message' : 'Report This Conversation'}
             </Text>
 
             {/* ── the way out of the app for a message's words ──────────────
@@ -988,10 +988,10 @@ export default function Messages() {
             {reportFor?.body ? (
               <View style={{ marginTop: sp.md }}>
                 <Pressable onPress={() => { void copyMessage(reportFor.body); }}
-                  accessibilityRole="button" accessibilityLabel="Copy this message"
+                  accessibilityRole="button" accessibilityLabel="Copy This Message"
                   accessibilityHint="Puts the words of this message on your clipboard"
                   style={{ paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Copy this message</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Copy This Message</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
                     Puts the words on your clipboard. Nothing is reported and nobody is told.
                   </Text>
@@ -1018,7 +1018,7 @@ export default function Messages() {
             ))}
 
             <Rule />
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Anything you want to add</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Anything You Want to Add</Text>
             <TextInput value={reportNote} onChangeText={setReportNote} multiline editable={!reportBusy}
               placeholder="Optional. Nobody but us reads this." placeholderTextColor={t.ink3}
               style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, textAlignVertical: 'top' }} />

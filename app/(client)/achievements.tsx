@@ -191,7 +191,7 @@ export default function Achievements() {
     if (!b) { watch.acknowledge(); return; }
     setBurst(true);
     Alert.alert(
-      `Badge unlocked · ${b.title}`,
+      `Badge Unlocked · ${b.title}`,
       (typeof b.cheer === 'string' ? b.cheer : '')
         + (watch.alsoUnlocked > 0
           ? ` ${watch.alsoUnlocked === 1 ? 'One more badge' : `${watch.alsoUnlocked} more badges`} unlocked at the same time.`

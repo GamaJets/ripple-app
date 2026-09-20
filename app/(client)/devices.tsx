@@ -235,7 +235,7 @@ export default function Devices() {
   logWhole ? isLogged(sm, importedIds, log) : (importedIds.has(sm.id) ? true : null);
  const findWorkouts = async () => {
    if (!canImport) {
-     Alert.alert('Import workouts', 'Connect Apple Health or WHOOP first (in Connected Apps above), then tap Find my workouts.');
+     Alert.alert('Import Workouts', 'Connect Apple Health or WHOOP first (in Connected Apps above), then tap Find my workouts.');
      return;
    }
    setWkBusy(true);
@@ -250,9 +250,9 @@ export default function Devices() {
      // same sentence sits under the list where it can be read against them
      // rather than over the top of them.
      const note = wkNoteFor(r);
-     if (!r.samples.length && note) Alert.alert('Import workouts', note);
+     if (!r.samples.length && note) Alert.alert('Import Workouts', note);
    } catch (e: any) {
-     Alert.alert('Import workouts', e?.message || 'Could not read your workouts.');
+     Alert.alert('Import Workouts', e?.message || 'Could not read your workouts.');
    } finally {
      setWkBusy(false);
    }
@@ -271,7 +271,7 @@ export default function Devices() {
  const importOne = async (sm: WorkoutSample) => {
   if (alreadyLogged(sm)) return;
   const out = await logWorkouts([await withHr(sm)]);
-  if (out !== 'stored') { Alert.alert('Import workouts', importNote(sm.activity, out, false)); return; }
+  if (out !== 'stored') { Alert.alert('Import Workouts', importNote(sm.activity, out, false)); return; }
   markImported([sm.id]);
   tapLight();
  };
@@ -279,7 +279,7 @@ export default function Devices() {
   const fresh = (wk || []).filter((sm) => !alreadyLogged(sm));
   if (!fresh.length) return;
   const out = await logWorkouts(await Promise.all(fresh.map(withHr)));
-  if (out !== 'stored') { Alert.alert('Import workouts', importNote(`Those ${fresh.length} workout${fresh.length === 1 ? '' : 's'}`, out, fresh.length !== 1)); return; }
+  if (out !== 'stored') { Alert.alert('Import Workouts', importNote(`Those ${fresh.length} workout${fresh.length === 1 ? '' : 's'}`, out, fresh.length !== 1)); return; }
   markImported(fresh.map((sm) => sm.id));
   tapLight();
  };
@@ -354,7 +354,7 @@ export default function Devices() {
   const raw = (minsDraft[key] || '').trim();
   const n = Number(raw);
   if (!raw || !Number.isFinite(n) || n <= 0) {
-   Alert.alert('Session length', 'Enter how many minutes this session ran. There is no default: left blank, it stays out of Apple Health rather than going in with a made-up length.');
+   Alert.alert('Session Length', 'Enter how many minutes this session ran. There is no default: left blank, it stays out of Apple Health rather than going in with a made-up length.');
    return;
   }
   setSessionMins(sessionT, Math.round(n));
@@ -850,7 +850,7 @@ export default function Devices() {
  // adopted when the server holds the new value.
  const toggleWellnessShare = async (on: boolean) => {
   const ok = await wellnessShare.setShared(on);
-  if (!ok) Alert.alert('Not saved', 'That could not be changed. Your coach still sees what they saw before. Try again in a moment.');
+  if (!ok) Alert.alert('Not Saved', 'That could not be changed. Your coach still sees what they saw before. Try again in a moment.');
  };
 
  return (
@@ -1281,7 +1281,7 @@ export default function Devices() {
      ) : (
       <Notice
        tone={t.warn}
-       kicker="Import workouts"
+       kicker="Import Workouts"
        title="Nothing to show, and not because there is nothing"
        note={wkNote ?? 'Your workouts could not be read.'}>
        <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={findWorkouts} /></View>
@@ -1295,7 +1295,7 @@ export default function Devices() {
       {wkNote ? (
        <Notice
         tone={t.warn}
-        kicker="Import workouts"
+        kicker="Import Workouts"
         title="This is not all of your training"
         note={wkNote} />
       ) : null}
@@ -1367,7 +1367,7 @@ export default function Devices() {
    </Text>
    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
     <View style={{ flex: 1 }}>
-     <Text style={{ ...ty.body, color: t.ink }}>Let my coach see these</Text>
+     <Text style={{ ...ty.body, color: t.ink }}>Let My Coach See These</Text>
      <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
       Turning it off again hides the nights and glasses you have already logged, as well as the next ones. Only your current coach can see them, and only while they are your coach.
      </Text>
@@ -1525,7 +1525,7 @@ export default function Devices() {
      {/* Ready — every one of these has a length that came from somewhere real. */}
      {hkPlan.writable.length ? (
       <View style={{ marginTop: sp.lg }}>
-       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Ready to write</Text>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Ready to Write</Text>
        {hkPlan.writable.map((p, i) => (
         <View key={p.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{p.activityLabel}</Text>
@@ -1554,7 +1554,7 @@ export default function Devices() {
      {/* Blocked — stated plainly, with the one thing that would unblock it. */}
      {hkPlan.skipped.length ? (
       <View style={{ marginTop: sp.xl }}>
-       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>No length recorded — not written</Text>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>No Length Recorded — Not Written</Text>
        {hkPlan.skipped.map((sk, i) => (
         <View key={sk.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{sk.exercises[0] || 'Session'}{sk.exercises.length > 1 ? ` +${sk.exercises.length - 1}` : ''}</Text>
@@ -1585,8 +1585,8 @@ export default function Devices() {
       {hkBusy ? <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Writing to Apple Health…" /> : (<>
        <Cta
         label={hkPlan.writable.length
-         ? `Write ${hkPlan.writable.length} ${hkPlan.writable.length === 1 ? 'session' : 'sessions'}`
-         : 'Nothing to write'}
+         ? `Write ${hkPlan.writable.length} ${hkPlan.writable.length === 1 ? 'Session' : 'Sessions'}`
+         : 'Nothing to Write'}
         disabled={hkPlan.writable.length === 0}
         onPress={writeHk}
        />
@@ -1605,7 +1605,7 @@ export default function Devices() {
      <View style={{ marginTop: sp.lg }}>
       <Notice
        tone={hkResult.state === 'done' && hkResult.failed.length === 0 ? undefined : t.warn}
-       kicker="Last write"
+       kicker="Last Write"
        title={summariseResult(hkResult)}
       >
        {hkResult.state === 'done' && hkResult.failed.length ? (

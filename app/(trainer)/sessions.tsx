@@ -152,8 +152,8 @@ import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
  */
 const OUTCOMES: { id: SessionOutcome; label: string; short: string; wholeDay: boolean; tone: (t: Theme) => string }[] = [
   { id: 'completed',      label: 'Went Ahead',    short: 'Done',        wholeDay: true, tone: (t) => t.brand },
-  { id: 'no_show',        label: 'Did Not Turn Up', short: 'No show',   wholeDay: true, tone: (t) => t.crit },
-  { id: 'late_cancelled', label: 'Cancelled Late', short: 'Late cxl',   wholeDay: true, tone: (t) => t.s3 },
+  { id: 'no_show',        label: 'Did Not Turn Up', short: 'No Show',   wholeDay: true, tone: (t) => t.crit },
+  { id: 'late_cancelled', label: 'Cancelled Late', short: 'Late Cxl',   wholeDay: true, tone: (t) => t.s3 },
   { id: 'cancelled',      label: 'Cancelled in Time', short: 'Cxl',     wholeDay: true, tone: (t) => t.ink3 },
 ];
 
@@ -499,7 +499,7 @@ export default function TrainerSessions() {
     setAnswering(null);
     await loadRequests();
     if (!res.ok) {
-      Alert.alert('Not answered', answerRefusalNote(res.reason, res.className));
+      Alert.alert('Not Answered', answerRefusalNote(res.reason, res.className));
       return;
     }
     setDeclineNote((p) => { const next = { ...p }; delete next[r.id]; return next; });
@@ -525,7 +525,7 @@ export default function TrainerSessions() {
       ok: push.ok, recorded: push.recorded, inboxKept: push.inboxKept, partial: push.partial,
     });
     if (told) lines.push(told);
-    Alert.alert(accept ? 'Session created' : 'Answered', lines.join('\n\n'), [{ text: 'OK' }]);
+    Alert.alert(accept ? 'Session Created' : 'Answered', lines.join('\n\n'), [{ text: 'OK' }]);
   }
 
 
@@ -749,7 +749,7 @@ export default function TrainerSessions() {
         kind: 'session-outcome', sessionId: s.id, clientName: s.clientName ?? null, outcome, rateCents,
       });
       if (out === 'refused') {
-        Alert.alert('Not recorded',
+        Alert.alert('Not Recorded',
           'That outcome was not saved and is not waiting to send — the session may no longer exist, or it is not yours to mark.');
         return;
       }
@@ -757,7 +757,7 @@ export default function TrainerSessions() {
       // that is where it actually still is — and the sentence names the cause,
       // which unlike a refusal is one the coach can clear themselves.
       if (out === 'full') {
-        Alert.alert('Not recorded', floorFullLine('That outcome'));
+        Alert.alert('Not Recorded', floorFullLine('That outcome'));
         return;
       }
       // The session leaves the queue and JOINS the record, in the same tap and
@@ -771,11 +771,11 @@ export default function TrainerSessions() {
       setJustMarked((prev) => [{ s, outcome }, ...prev].slice(0, 8));
       tapLight();
       if (out === 'unsent') {
-        Alert.alert('Kept on this phone', keptOfflineLine('That outcome'));
+        Alert.alert('Kept on This Phone', keptOfflineLine('That outcome'));
       }
     } catch (e) {
       reportError('sessions.mark', e);
-      Alert.alert('Not recorded', 'That outcome was not saved. Check your connection and try again.');
+      Alert.alert('Not Recorded', 'That outcome was not saved. Check your connection and try again.');
     } finally { setBusy(null); }
   };
 
@@ -798,7 +798,7 @@ export default function TrainerSessions() {
     setSending(true);
     try {
       const line = flushResultLine(await floor.flush());
-      if (line) Alert.alert('Sending finished', line);
+      if (line) Alert.alert('Sending Finished', line);
     } finally { setSending(false); }
   };
 
@@ -831,7 +831,7 @@ export default function TrainerSessions() {
       if (out === 'refused') {
         // The server read it and declined, so the outcome stands. Named as what
         // is true of the RECORD, because that is what the coach has to act on.
-        Alert.alert('Not undone',
+        Alert.alert('Not Undone',
           `${who} is still recorded as “${stands}” — the session may no longer exist, or it is not yours to change.`);
         return;
       }
@@ -857,7 +857,7 @@ export default function TrainerSessions() {
        * pay — on the outcome that is still recorded.
        */
       if (out === 'full') {
-        Alert.alert('Not undone',
+        Alert.alert('Not Undone',
           `${who} is still recorded as “${stands}”. ${floorFullLine('Taking that outcome back')}`);
         return;
       }
@@ -871,7 +871,7 @@ export default function TrainerSessions() {
         // Kept, not saved, and never the other way round. What matters to the
         // coach here is the half that IS now true: the outcome they retracted
         // will not be sent, whatever this phone was carrying.
-        Alert.alert('Kept on this phone', keptOfflineLine('Taking that outcome back'));
+        Alert.alert('Kept on This Phone', keptOfflineLine('Taking that outcome back'));
       }
     } catch (e) {
       // The row may keep its outcome on the server, so saying nothing here
@@ -879,7 +879,7 @@ export default function TrainerSessions() {
       // and the gym pays, or does not pay, on the outcome that is still
       // recorded.
       reportError('sessions.undo', e);
-      Alert.alert('Not undone', `${who} may still be recorded as “${stands}”. Check your connection and tap undo again.`);
+      Alert.alert('Not Undone', `${who} may still be recorded as “${stands}”. Check your connection and tap undo again.`);
     }
   };
 
@@ -895,11 +895,11 @@ export default function TrainerSessions() {
       ? `\n\nYou have narrowed this list, so this is the ${day.rows.length} shown and not necessarily every unmarked session on that day. Clear the filters first if you meant all of them.`
       : '';
     Alert.alert(
-      `${label} — all ${day.rows.length}?`,
+      `${label} — All ${day.rows.length}?`,
       `Every unmarked session on ${day.label} that is shown below will be recorded as "${label}". You can undo each one afterwards.${narrowNote}`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Mark all', onPress: async () => { for (const s of day.rows) await mark(s, outcome); } },
+        { text: 'Mark All', onPress: async () => { for (const s of day.rows) await mark(s, outcome); } },
       ],
     );
   };
@@ -1064,7 +1064,7 @@ export default function TrainerSessions() {
                       </View>
                     );
                   })}
-                  <Notice kicker="WHAT YES DOES" title="It creates the session" note={COACH_ACCEPT_RULE} />
+                  <Notice kicker="WHAT YES DOES" title="It Creates the Session" note={COACH_ACCEPT_RULE} />
                 </>
               );
             })()}
@@ -1245,7 +1245,7 @@ export default function TrainerSessions() {
         ) : rows.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
             <Icon name="check" size={26} color={t.brand} />
-            <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>All caught up</Text>
+            <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>All Caught Up</Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
               Every session that has already happened has an outcome recorded{hasGym ? ', so nothing is holding payroll up.' : '.'}
             </Text>
@@ -1264,7 +1264,7 @@ export default function TrainerSessions() {
               <SectionHead title={day.label} note={`${day.rows.length} to mark`} />
 
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.md }}>
-                <Text style={{ ...ty.caption, color: t.ink3, alignSelf: 'center' }}>Whole day:</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, alignSelf: 'center' }}>Whole Day:</Text>
                 {/* The label is the control's own claim about an irreversible
                     batch write, and it said "every session on Friday 14 March"
                     while a filter was on — `days` is `byDay(shownRows)` and
@@ -1368,7 +1368,7 @@ export default function TrainerSessions() {
                           queue itself, so it clears the moment the act goes up. */}
                       {floor.pending.some((q) => q.act.kind === 'session-outcome' && q.act.sessionId === e.s.id) ? (
                         <View style={{ marginTop: 3 }}>
-                          <SyncBadge state="queued" label="On this phone · waiting to send" />
+                          <SyncBadge state="queued" label="On This Phone · Waiting to Send" />
                         </View>
                       ) : null}
                     </View>

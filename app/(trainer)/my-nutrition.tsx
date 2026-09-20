@@ -253,7 +253,7 @@ export default function MyNutrition() {
    */
   const saveOwn = async (patch: { goal?: Goal; diet?: Diet; activity?: number }) => {
     if (!(await own.save(patch))) {
-      Alert.alert('Not saved',
+      Alert.alert('Not Saved',
         'That answer did not reach your account, so nothing has changed and no target has been worked out from it. Try again in a moment.');
     }
   };
@@ -399,7 +399,7 @@ export default function MyNutrition() {
       // meal exists, and leaving it in the boxes as well invites a second one
       // against the same day.
       clearForm();
-      Alert.alert('Saved on this phone',
+      Alert.alert('Saved on This Phone',
         `No connection, so ${read.value.name} has not reached your food log yet — nothing is lost. It is saved here, it is already counted in today's total above, and it goes up on its own the next time you have signal.`);
       return;
     }
@@ -421,11 +421,11 @@ export default function MyNutrition() {
    * with the day's total quietly different again.
    */
   const remove = (e: FoodEntry) => {
-    Alert.alert('Remove this meal?', `${e.name} — ${num(e.kcal)} kcal — comes off your own log for today, and today's totals go back down by it.`, [
+    Alert.alert('Remove This Meal?', `${e.name} — ${num(e.kcal)} kcal — comes off your own log for today, and today's totals go back down by it.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         if (!(await fl.removeFood(e.id))) {
-          Alert.alert('Not removed', `${e.name} is still on your log — we could not reach the server to take it out, so it is still counting toward today.`);
+          Alert.alert('Not Removed', `${e.name} is still on your log — we could not reach the server to take it out, so it is still counting toward today.`);
         }
       } },
     ]);
@@ -496,7 +496,7 @@ export default function MyNutrition() {
           {/* ── can what follows be trusted? ─────────────────────────────── */}
           {fl.status === 'error' ? (
             <Section>
-              <Notice tone={t.warn} kicker="Your food log" title="We couldn’t read your food log"
+              <Notice tone={t.warn} kicker="Your Food Log" title="We Couldn’t Read Your Food Log"
                 note="Your own meals are safe — this screen cannot see them right now. Nothing has been reset, and an empty list below means unknown rather than none." />
             </Section>
           ) : fl.status === 'partial' ? (
@@ -508,7 +508,7 @@ export default function MyNutrition() {
           {/* ── can anything typed below actually be stored? ──────────────── */}
           {home === 'no-record' ? (
             <Section>
-              <Notice tone={t.crit} kicker="Nowhere to store it" title="This account cannot keep a food log yet"
+              <Notice tone={t.crit} kicker="Nowhere to Store It" title="This Account Cannot Keep a Food Log Yet"
                 note="Meals are stored against your profile, and we could not find one for this account. Anything you type below would be refused by the server, so the form is closed rather than throwing what you enter away. Signing out and back in usually rebuilds it; if it does not, your account needs looking at.">
                 <View style={{ marginTop: sp.lg }}>
                   <Ghost label="Log My Training Instead" icon="dumbbell" onPress={() => router.push('/(trainer)/my-training')} />
@@ -517,7 +517,7 @@ export default function MyNutrition() {
             </Section>
           ) : home === 'unknown' ? (
             <Section>
-              <Notice tone={t.warn} kicker="Not checked" title="We couldn’t check whether meals will save"
+              <Notice tone={t.warn} kicker="Not Checked" title="We Couldn’t Check Whether Meals Will Save"
                 note="You can still try. If the meal does not reach the server you will be told so, and it will not be counted as logged." />
             </Section>
           ) : null}
@@ -550,7 +550,7 @@ export default function MyNutrition() {
                   : `Today’s calories could not be counted. ${heroNote}`} />
             </View>
             <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
-              {!whole ? 'Calories not counted' : left ? `${heroFigure} kcal ${left.net >= 0 ? 'left' : 'over'}` : `${heroFigure} kcal eaten`}
+              {!whole ? 'Calories Not Counted' : left ? `${heroFigure} kcal ${left.net >= 0 ? 'left' : 'over'}` : `${heroFigure} kcal Eaten`}
             </Text>
             {/* Over is said in the ring's colour and in the word; crit as
                 caption ink is under AA on the light palettes, so the sentence
@@ -565,7 +565,7 @@ export default function MyNutrition() {
           {target && !burn ? (
             <Notice
               tone={t.warn}
-              kicker={appleState === 'connected' ? 'Nothing read today' : 'Not connected'}
+              kicker={appleState === 'connected' ? 'Nothing Read Today' : 'Not Connected'}
               title={appleState === 'connected'
                 ? 'No activity has come back from Apple Health today'
                 : 'Apple Health is not connected'}
@@ -606,7 +606,7 @@ export default function MyNutrition() {
                 <Text style={{ ...ty.caption, color: gate.reason === 'unread' ? t.ink2 : t.ink3 }}>{gate.why}</Text>
                 {gate.reason === 'unasked' ? (
                   <>
-                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>What are you training for?</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>What Are You Training For?</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                       {(['fatloss', 'tone', 'muscle'] as Goal[]).map((g) => (
                         <Pressable key={g} onPress={() => { void saveOwn({ goal: g }); }}
@@ -617,7 +617,7 @@ export default function MyNutrition() {
                       ))}
                     </View>
 
-                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>How do you eat?</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>How Do You Eat?</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                       {(['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] as Diet[]).map((d) => (
                         <Pressable key={d} onPress={() => { void saveOwn({ diet: d }); }}
@@ -631,7 +631,7 @@ export default function MyNutrition() {
                     {/* A named level and never a decimal in a box: 1.55 is the
                         largest single input to a maintenance figure and it is
                         not a number anybody can calibrate themselves against. */}
-                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>How active is your week?</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>How Active Is Your Week?</Text>
                     {ACTIVITY_LEVELS.map((a) => {
                       const on = activityLevelOf(own.inputs.activity) === a.id;
                       return (

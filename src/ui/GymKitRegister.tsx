@@ -101,7 +101,7 @@ export function GymKitRegister({ kit }: { kit: MyGymKit }) {
         status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3 }}>Reading your gym’s register…</Text>
         ) : (
-          <Notice tone={t.warn} kicker="Gym kit" title="The register could not be read" note={view.note}>
+          <Notice tone={t.warn} kicker="Gym Kit" title="The register could not be read" note={view.note}>
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Try Again" onPress={kit.refresh} a11yLabel="Read the gym’s equipment register again" />
             </View>
@@ -130,7 +130,7 @@ export function GymKitRegister({ kit }: { kit: MyGymKit }) {
         <View>
           {view.down.length > 0 ? (
             <View style={{ marginBottom: view.service.length > 0 ? sp.lg : 0 }}>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Out of action</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Out of Action</Text>
               {view.down.map((d, i) => (
                 <View key={d.id} style={{ marginTop: i === 0 ? 0 : sp.md }}>
                   {/* A dot and ink, never coloured text — `t.crit` as a text
@@ -149,7 +149,7 @@ export function GymKitRegister({ kit }: { kit: MyGymKit }) {
 
           {view.service.length > 0 ? (
             <View>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Due a service</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Due a Service</Text>
               {view.service.map((s, i) => (
                 <View key={s.id} style={{ marginTop: i === 0 ? 0 : sp.md }}>
                   <Flag tone={s.state === 'overdue' ? t.serious : t.warn}>{s.label}</Flag>

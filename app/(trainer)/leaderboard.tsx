@@ -220,10 +220,10 @@ export default function Leaderboard() {
               a coach with a full book that they have no clients, which is the
               most expensive sentence it can say. */}
           {status === 'error' ? (
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
               note="Nothing is ranked below because the roster did not come back — it does not mean nobody is on your book." />
           ) : status === 'partial' ? (
-            <Notice tone={t.warn} kicker="Roster" title="This board is built from part of your book"
+            <Notice tone={t.warn} kicker="Roster" title="This Board Is Built from Part of Your Book"
               note="Your roster came back short, so the ranking below leaves people out and the order is not final." />
           ) : status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
@@ -347,7 +347,7 @@ export default function Leaderboard() {
                         it does not know — and the badge that IS an alert has to
                         stay the only amber thing on the row. */}
                     {disc.kind === 'unread' ? (
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries not read</Text>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries Not Read</Text>
                     ) : null}
                     {/* Amber only for a disclosure made inside the last
                         fortnight — the ones a coach has probably not seen. An
@@ -415,7 +415,7 @@ export default function Leaderboard() {
                   of twenty-five, read short at twelve, tells a coach that
                   twenty-two people are checking in — and finding who is NOT on
                   the board is the whole point of a leaderboard. */}
-              <SectionHead title="Not enough recorded to rank"
+              <SectionHead title="Not Enough Recorded to Rank"
                 note={isWhole(status) ? `${unplaced.length}` : undefined} />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 These clients have never submitted a check-in, so there is no adherence to compare.
@@ -454,7 +454,7 @@ export default function Leaderboard() {
                     {injury || unread || disc.kind === 'unread' ? (
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: 5 }}>
                         {disc.kind === 'unread' ? (
-                          <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries not read</Text>
+                          <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries Not Read</Text>
                         ) : null}
                         {injury ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -499,7 +499,7 @@ export default function Leaderboard() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Added by hand — no account yet"
+              <SectionHead title="Added by Hand — No Account Yet"
                 note={isWhole(status) ? `${noAccount.length}` : undefined} />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 You added these clients to your book yourself, so they have no Repple account and

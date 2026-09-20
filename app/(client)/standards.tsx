@@ -221,7 +221,7 @@ export default function Standards() {
        reason a low one may not be the member's. */}
    {!liftsWhole && logStatus !== 'loading' ? (
     <Notice tone={t.warn} kicker="Standards"
-     title={logStatus === 'error' ? 'We couldn’t read your training log' : 'Not all of your log could be read'}
+     title={logStatus === 'error' ? 'We Couldn’t Read Your Training Log' : 'Not All of Your Log Could Be Read'}
      note={logStatus === 'error'
       ? 'Nothing below is a level you are at — it is a level we could not look up. Your lifts are on your record.'
       : 'You have logged more sessions than this screen can read in one go, so a best lift set before that is not counted here and the level beside it may be under-stated.'} />

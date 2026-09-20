@@ -259,9 +259,9 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
 
   const discard = () => {
     Alert.alert(
-      'Leave this routine?',
+      'Leave This Routine?',
       `${restClock(elapsedSec)} so far. Nothing is written to your log.`,
-      [{ text: 'Keep stretching', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: onClose }],
+      [{ text: 'Keep Stretching', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: onClose }],
     );
   };
 
@@ -303,9 +303,9 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
                 is finished and NOT saved, so this is the one tap on the screen
                 that can lose it. */}
             {mins > 0 ? <Ghost label="Discard" onPress={() => Alert.alert(
-              'Discard this stretch session?',
+              'Discard This Stretch Session?',
               `${restClock(elapsedSec)} on the clock. Nothing is written to your log.`,
-              [{ text: 'Keep it', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }],
+              [{ text: 'Keep It', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }],
             )} /> : null}
           </View>
         </ScrollView>

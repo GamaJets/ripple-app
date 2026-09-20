@@ -381,7 +381,7 @@ export default function FindTrainer() {
     // narrows it for the RPC and says why.
     const r = await joinByCode(code, cd.coachingMode === 'solo' ? 'online' : cd.coachingMode);
     setCodeBusy(false);
-    if (!r.ok) { Alert.alert('That code didn’t work', r.reason); return; }
+    if (!r.ok) { Alert.alert('That Code Didn’t Work', r.reason); return; }
     // Spent, so it does not come back next time. Only now — not when it was
     // shown — because a code that was merely displayed has not done its job.
     setCode('');
@@ -391,7 +391,7 @@ export default function FindTrainer() {
     // already coached by this person. Saying "request sent" again would have
     // them waiting on a second answer that is never coming.
     Alert.alert(
-      r.already ? 'You’ve already asked ' + r.trainerName : 'Request sent to ' + r.trainerName,
+      r.already ? 'You’ve Already Asked ' + r.trainerName : 'Request Sent to ' + r.trainerName,
       r.already
         ? 'Nothing new was sent. ' + r.trainerName + ' has your earlier request, or already coaches you.'
         : r.trainerName + ' sees your request in their app and adds you once they accept. Not who you expected? Check the code with them before they do.',
@@ -539,14 +539,14 @@ export default function FindTrainer() {
     const { mode: m, ok } = await acceptInvite(id);
     if (!ok) {
       Alert.alert(
-        'Not connected yet',
+        'Not Connected Yet',
         'We could not link you to ' + (coachName || 'your coach') + '. Your invitation is still here — try accepting it again in a moment.',
       );
       return;
     }
     cd.setCoachingMode(m);
     notifySuccess();
-    Alert.alert('You are connected', (coachName || 'Your coach') + ' is now your ' + COACHED_MODE_SHORT[m].toLowerCase() + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
+    Alert.alert('You Are Connected', (coachName || 'Your coach') + ' is now your ' + COACHED_MODE_SHORT[m].toLowerCase() + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
   };
 
   // Every sentence on these cards is composed in src/lib/gymInvite.ts, where it
@@ -582,7 +582,7 @@ export default function FindTrainer() {
     const r = await gym.accept(card.id);
     setAcceptingGym(null);
     if (!r.ok) {
-      Alert.alert('Not accepted', r.message ?? 'Nothing was accepted.');
+      Alert.alert('Not Accepted', r.message ?? 'Nothing was accepted.');
       // Ask again: the invitation may have been withdrawn or used elsewhere,
       // and the card must stop offering a button for a row that is gone.
       gym.reload();
@@ -590,7 +590,7 @@ export default function FindTrainer() {
     }
     notifySuccess();
     Alert.alert(
-      'You have joined',
+      'You Have Joined',
       acceptedMessage(inv ? gym.gymNames.get(inv.tenantId) ?? null : null),
       [
         { text: 'Not Now', style: 'cancel' },
@@ -796,7 +796,7 @@ export default function FindTrainer() {
       // Narrowed on `fate`, never on `!asker.uid`: `string` includes ''.
       if (asker.fate !== null) {
         Alert.alert(
-          asker.fate === 'signed-out' ? 'Sign in required' : 'We couldn’t check your account',
+          asker.fate === 'signed-out' ? 'Sign In Required' : 'We Couldn’t Check Your Account',
           asker.fate === 'signed-out'
             ? `Sign in to ${BRAND.label} to request coaching.`
             : authGateMessage(asker.fate),
@@ -821,7 +821,7 @@ export default function FindTrainer() {
       }).select('id');
       const duplicate = !!error && /duplicate|unique/i.test(error.message);
       if (error && !duplicate) {
-        Alert.alert('Could not send request', error.message);
+        Alert.alert('Could Not Send Request', error.message);
         return;
       }
 
@@ -842,9 +842,9 @@ export default function FindTrainer() {
         setSent((s) => ({ ...s, [coach.id]: true }));
         notifySuccess();
         Alert.alert(
-          'Already asked',
+          'Already Asked',
           `You have already asked ${coach.name} to coach you and they have not answered yet. Asking again does not move you up any list — they still have the first one.`,
-          [{ text: 'Got it' }],
+          [{ text: 'Got It' }],
         );
         return;
       }
@@ -853,7 +853,7 @@ export default function FindTrainer() {
       if (!made?.length) {
         reportError('findTrainer.request', new Error('coach_requests insert returned no row'));
         Alert.alert(
-          'Not sent',
+          'Not Sent',
           `Your request to ${coach.name} was not stored, so they have not been asked. Nothing has been sent anywhere — try again in a moment.`,
           [{ text: 'OK' }],
         );
@@ -906,11 +906,11 @@ export default function FindTrainer() {
       // the person waiting. `sendPushChecked` records the inbox row before it
       // sends, so a failed push still leaves something the coach will see.
       Alert.alert(
-        'Request sent',
+        'Request Sent',
         push.ok
           ? `${coach.name} has been notified on their phone. You'll be connected once they accept — nothing changes on your app until then.`
           : `${coach.name} will see your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request the next time they open their app — we couldn't reach their phone just now. You'll be connected once they accept.`,
-        [{ text: 'Got it' }]
+        [{ text: 'Got It' }]
       );
     } catch (e) {
       reportError('findTrainer.request', e);
@@ -929,7 +929,7 @@ export default function FindTrainer() {
       // says whether the phone or the server is the reason, rather than sending
       // somebody to their router over a refusal. See src/lib/reachability.ts.
       Alert.alert(
-        stored ? 'Request sent, but not notified' : 'Could not send request',
+        stored ? 'Request Sent, but Not Notified' : 'Could Not Send Request',
         stored
           ? `${coach.name} has your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request and will see it the next time they open their app — we couldn't reach their phone just now. Do not ask again: it is already with them.`
           : `${coach.name} has not been asked and nothing has been sent anywhere. ${retryLine(reach)}`,
@@ -948,10 +948,10 @@ export default function FindTrainer() {
   const askToRequest = (c: Coach, m: CoachedMode) => {
     if (!coach || coach.id === c.id) { void request(c, m); return; }
     Alert.alert(
-      `Ask ${c.name} instead of ${coachLabel(coach.name)}?`,
+      `Ask ${c.name} Instead of ${coachLabel(coach.name)}?`,
       replaceCoachNote(coach.name, c.name),
       [
-        { text: 'Keep my coach', style: 'cancel' },
+        { text: 'Keep My Coach', style: 'cancel' },
         { text: `Ask ${c.name}`, onPress: () => { void request(c, m); } },
       ],
     );
@@ -1081,7 +1081,7 @@ export default function FindTrainer() {
                 being coached must not read this as confirmation that nobody
                 is — that is the state in which they would stop asking to
                 leave. */}
-            <Notice tone={t.warn} kicker="Your coach" title="We couldn’t check who coaches you"
+            <Notice tone={t.warn} kicker="Your Coach" title="We Couldn’t Check Who Coaches You"
               note="This is our end, not an answer about you. Until it loads we can’t show you your coach or let you leave them, so don’t read this as nobody coaching you.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
@@ -1119,8 +1119,8 @@ export default function FindTrainer() {
           <View style={{ marginTop: sp.lg }}>
             {received.map((iv) => (
               <Notice key={iv.id} tone={t.brand}
-                kicker="Coaching invitation"
-                title={`${iv.coachName || 'A Coach'} invited you`}
+                kicker="Coaching Invitation"
+                title={`${iv.coachName || 'A Coach'} Invited You`}
                 note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect — their program, feedback and messaging turn on for you.`}>
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                   <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineInvite(iv.id)} /></View>
@@ -1164,7 +1164,7 @@ export default function FindTrainer() {
 
         {gym.status === 'error' ? (
           <View style={{ marginTop: sp.lg }}>
-            <Notice tone={t.warn} kicker="Your gym" title="We couldn’t check for a gym invitation"
+            <Notice tone={t.warn} kicker="Your Gym" title="We Couldn’t Check for a Gym Invitation"
               note="This is our end, not an answer about you. If a gym has invited you it is still waiting — this screen simply could not read it.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={gym.reload} />
@@ -1175,7 +1175,7 @@ export default function FindTrainer() {
           <View style={{ marginTop: sp.lg }}>
             {gymCards.map((card) => (
               <Notice key={card.id} tone={card.canAccept ? t.brand : t.warn}
-                kicker="Gym invitation" title={card.title} note={card.note}>
+                kicker="Gym Invitation" title={card.title} note={card.note}>
                 {/* No button at all on one that cannot be redeemed. The SQL
                     would refuse it, and a button that fails is worse than the
                     sentence explaining why there is none. */}
@@ -1294,7 +1294,7 @@ export default function FindTrainer() {
 
         {/* ── the direct path ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Have a code from your coach?" />
+          <SectionHead title="Have a Code from Your Coach?" />
           {/* rtl-ok: a navigation PATH inside an English sentence — "the screen
             called X, and inside it the thing called Y". The separator belongs to
             the sentence, not to the layout: dropping FORWARD_CHAR into it would
@@ -1344,7 +1344,7 @@ export default function FindTrainer() {
               screen turned this into "No coaches listed yet", which a client has
               no way to tell apart from the truth. */}
           {status === 'error' ? (
-            <Notice tone={t.warn} kicker="Directory" title="We couldn’t load the directory"
+            <Notice tone={t.warn} kicker="Directory" title="We Couldn’t Load the Directory"
               note={`This is our end, not an empty directory. Until it loads we can't tell you who is coaching on ${BRAND.label}.`}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
@@ -1361,7 +1361,7 @@ export default function FindTrainer() {
               <View style={{ width: 52, height: 52, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.md }}>
                 <Icon name="people" size={24} color={t.ink3} />
               </View>
-              <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>No coaches listed yet</Text>
+              <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>No Coaches Listed Yet</Text>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>Trainers appear here once they publish their profile to the directory. If a coach has invited you directly, their invitation shows above.</Text>
             </View>
           ) : coaches.map((c, i) => (
@@ -1486,13 +1486,13 @@ export default function FindTrainer() {
               <View style={{ marginBottom: sp.lg }}>
                 {sessionFeeAmount(sel.sessionFee) != null ? (
                   <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                    <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session Fee</Text>
                     <Text style={{ ...value(20), color: t.ink }}>{feeText(sel.id, sessionFeeAmount(sel.sessionFee)!)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginStart: 4 }}>/ session</Text>
                   </View>
                 ) : (
                   <>
-                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 2 }}>Session fee</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 2 }}>Session Fee</Text>
                     {/* The one field on this sheet that could not say it was
                         unknown. An unreadable rate is flagged; a rate nobody has
                         stated, and a rate of nothing, are facts rather than
@@ -1522,7 +1522,7 @@ export default function FindTrainer() {
                   the thing a serious client is here to check. Every row says
                   whose claim it is; nothing on this screen may imply Repple
                   looked at a certificate, because Repple has not. */}
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Qualifications & insurance</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Qualifications & Insurance</Text>
               {credStatus === 'loading' ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>Loading.</Text>
               ) : credsFor(sel.id) === null ? (
@@ -1635,7 +1635,7 @@ export default function FindTrainer() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{sel.name} has your request. You'll be connected when they accept.</Text>
                 </View>
               ) : (<>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Start coaching</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Start Coaching</Text>
                 {/* Without the pending-requests read, the absence of a "Request
                     pending" badge is not evidence that none is outstanding —
                     it's evidence we couldn't look. Sending again is harmless
@@ -1668,7 +1668,7 @@ export default function FindTrainer() {
                     between them had nothing to pick on. */}
                 {COACHED_MODES.map((m) => (
                   <View key={m} style={{ marginBottom: sp.md }}>
-                    <Cta label={`Request ${COACHED_MODE_SHORT[m].toLowerCase()} coaching`} wide onPress={() => askToRequest(sel, m)} />
+                    <Cta label={`Request ${COACHED_MODE_SHORT[m]} Coaching`} wide onPress={() => askToRequest(sel, m)} />
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, textAlign: 'center' }}>{COACHING_MODE_NOTE[m]}</Text>
                   </View>
                 ))}

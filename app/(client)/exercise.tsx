@@ -485,11 +485,11 @@ export default function ExerciseScreen() {
         return 'stored';
       }
       if (out === 'unsent') {
-        Alert.alert('Saved on this phone',
+        Alert.alert('Saved on This Phone',
           'No connection, so this set has not reached your training log yet — nothing is lost. It is saved here and goes up on its own next time you have signal.');
         return 'unsent';
       }
-      Alert.alert('Not saved',
+      Alert.alert('Not Saved',
         'Your training log rejected this set, so it has not been recorded and it is not waiting to send.');
       return 'refused';
     } finally { setSaving(false); }
@@ -547,12 +547,12 @@ export default function ExerciseScreen() {
     let v: number;
     if (timedOn) {
       const held = readHold(repsText);
-      if (!held.ok) { Alert.alert('How long was the hold?', held.reason); return; }
+      if (!held.ok) { Alert.alert('How Long Was the Hold?', held.reason); return; }
       v = held.secs;
     } else {
       const r = parseInt(repsText, 10);
       if (!Number.isFinite(r) || r <= 0) {
-        Alert.alert('How many reps?', `Type the reps you did before completing the set. The ${wu} box can stay empty for a bodyweight set.`);
+        Alert.alert('How Many Reps?', `Type the reps you did before completing the set. The ${wu} box can stay empty for a bodyweight set.`);
         return;
       }
       v = r;
@@ -560,7 +560,7 @@ export default function ExerciseScreen() {
     const read = readLift(loadText, wu);
     // Left in the box on a refusal, with the reason said, rather than cleared
     // — the number was typed once and the app has no better guess.
-    if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
+    if (!read.ok) { Alert.alert('Check That Load', read.reason); return; }
     // An empty load box IS a bodyweight set. Recorded rather than inferred
     // later: a stored 0 cannot be told apart from a load nobody typed.
     const set: LoggedSet = { value: v, kg: read.kg, bw: bwOn || read.kg == null, timed: timedOn };
@@ -794,7 +794,7 @@ export default function ExerciseScreen() {
       ...(onGround ? { backgroundColor: t.surface, ...elevation.card } : { backgroundColor: t.surface2 }) }}>
       <IconPlate icon="message" tone="blue" size={36} />
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>From your coach</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>From Your Coach</Text>
         <Text style={{ ...ty.body, color: t.ink }} accessibilityLabel={`From your coach: ${coachCue}`}>{coachCue}</Text>
       </View>
     </View>
@@ -854,7 +854,7 @@ export default function ExerciseScreen() {
           return <Text style={{ ...ty.label, color: t.ink3 }}>{clipRefusalLine(stop)}</Text>;
         }
         return (<>
-          <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>Send your coach a form check</Text>
+          <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>Send Your Coach a Form Check</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{MEMBER_CONSENT_NOTE}</Text>
           <TextInput
             value={clipNote}
@@ -924,10 +924,10 @@ export default function ExerciseScreen() {
                 a11yLabel="Delete the clip you sent your coach"
                 onPress={() => {
                   Alert.alert(
-                    'Delete this clip?',
+                    'Delete This Clip?',
                     'It goes from your coach’s screen and from this app. Deleting it is final — there is no copy anywhere else.',
                     [
-                      { text: 'Keep it', style: 'cancel' },
+                      { text: 'Keep It', style: 'cancel' },
                       { text: 'Delete', style: 'destructive', onPress: async () => {
                         const gone = await deleteFormClip(clipSent);
                         // `deleteFormClip` counts the rows, so a
@@ -1029,7 +1029,7 @@ export default function ExerciseScreen() {
                 <Text style={{ ...ty.caption, color: t.nightInk2 }}>App default of {DEFAULT_REST_SEC} seconds</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={skipRest}
                   hitSlop={8} style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md }}>
-                  <Text style={{ ...ty.label, ...font('600'), color: t.nightInk3 }}>Skip rest</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.nightInk3 }}>Skip Rest</Text>
                 </Pressable>
               </View>
             ) : null}
@@ -1091,7 +1091,7 @@ export default function ExerciseScreen() {
             <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap', justifyContent: 'center', marginTop: sp.sm }}>
               <SetKindChip
                 t={nightTheme} on={bwOn} onToggle={() => setBwOn((v) => !v)}
-                label="Bodyweight set"
+                label="Bodyweight Set"
                 onLabel={`Bodyweight set — the box is what you added, in ${wu}`}
                 a11yHint={bwOn
                   ? `The box holds what you added on top of your own weight, in ${wu}. Turn this off for a set on a bar or a machine.`
@@ -1099,7 +1099,7 @@ export default function ExerciseScreen() {
               />
               <SetKindChip
                 t={nightTheme} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
-                label="Timed set"
+                label="Timed Set"
                 onLabel="Timed set — the first box is seconds held"
                 a11yHint={timedOn
                   ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
@@ -1277,7 +1277,7 @@ export default function ExerciseScreen() {
                 loaded day is a sentence, not a line. */}
             {isWhole(logStatus) && summary ? (
               <Section>
-                <SectionHead title="Best Set Over Time" note={`Est. 1RM · ${wu}`} />
+                <SectionHead title="Best Set over Time" note={`Est. 1RM · ${wu}`} />
                 <ChartShell status={logStatus} points={bestSeries.points}
                   emptyLine="No set of this with a load on the bar is on record yet, so there is no best set to chart."
                   onePointLine="One day with a loaded set so far. The line appears from the second.">

@@ -793,7 +793,7 @@ export function Cta({ label, onPress, tone, wide, disabled, a11yLabel }: {
 const ICON_NAMES: Partial<Record<IconName, string>> = {
   back: 'Back', search: 'Search', share: 'Share', pencil: 'Edit', minus: 'Remove',
   message: 'Messages', chat: 'Messages', calendar: 'Calendar', bell: 'Notifications',
-  plus: 'Add', settings: 'Settings', heart: 'Heart rate', camera: 'Camera',
+  plus: 'Add', settings: 'Settings', heart: 'Heart Rate', camera: 'Camera',
   video: 'Video', chart: 'Charts', trophy: 'Records', clock: 'History',
   swap: 'Swap', sparkle: 'Suggestions', grid: 'More', chevron: 'More',
 };
@@ -1362,7 +1362,7 @@ export function PartialRead({ what, shown, onPress }: {
   return (
     <Notice
       tone={t.warn}
-      kicker="Not the whole list"
+      kicker="Not the Whole List"
       title={shown != null ? `Showing the first ${num(shown)}` : 'Showing part of the list'}
       note={`There are more ${what} than fit in one read. What is listed is real and current. The rest are on the server and not on this screen, so anything here that looks like a total is not one.`}
     >

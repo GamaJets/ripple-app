@@ -211,15 +211,15 @@ export default function ClientGymAgreementsScreen() {
 
   function sign(a: MemberAgreement) {
     const blocker = signingBlocker(a, typedName, agreed, read.includes(a.id));
-    if (blocker) { Alert.alert('Not yet', blocker); return; }
-    if (!tenantId) { Alert.alert('Not yet', 'Your gym could not be identified, so there is nothing to sign this against.'); return; }
+    if (blocker) { Alert.alert('Not Yet', blocker); return; }
+    if (!tenantId) { Alert.alert('Not Yet', 'Your gym could not be identified, so there is nothing to sign this against.'); return; }
     Alert.alert(
       `Sign “${a.title}”?`,
       SIGNING_RULE,
       [
-        { text: 'Not yet', style: 'cancel' },
+        { text: 'Not Yet', style: 'cancel' },
         {
-          text: 'Sign it',
+          text: 'Sign It',
           onPress: async () => {
             setBusyId(a.id);
             try {
@@ -254,7 +254,7 @@ export default function ClientGymAgreementsScreen() {
               // be worth nothing to either party.
               const already = e?.code === '23505' || /duplicate key|already exists/i.test(String(e?.message ?? ''));
               Alert.alert(
-                already ? 'Already signed' : 'Not signed',
+                already ? 'Already Signed' : 'Not Signed',
                 already
                   ? 'Your gym already holds your signature for this version, so it has not been asked for again. Nothing is outstanding on it.'
                   : `${e?.message ?? 'That could not be saved.'} Nothing has been recorded, so as far as your gym can see you have not signed it.`,
@@ -285,13 +285,13 @@ export default function ClientGymAgreementsScreen() {
    */
   function withdraw(a: MemberAgreement) {
     const blocker = withdrawBlocker(a, revocations);
-    if (blocker) { Alert.alert('Not yet', blocker); return; }
-    if (!tenantId) { Alert.alert('Not yet', 'Your gym could not be identified, so there is nothing to record this against.'); return; }
+    if (blocker) { Alert.alert('Not Yet', blocker); return; }
+    if (!tenantId) { Alert.alert('Not Yet', 'Your gym could not be identified, so there is nothing to record this against.'); return; }
     Alert.alert(
       withdrawTitle(a.title),
       `${WITHDRAW_WHAT_IT_DOES}\n\n${WITHDRAW_WHAT_IT_DOES_NOT}\n\n${WITHDRAW_CANNOT_BE_UNDONE}`,
       [
-        { text: 'Keep it as it is', style: 'cancel' },
+        { text: 'Keep It as It Is', style: 'cancel' },
         {
           text: WITHDRAW_LABEL,
           style: 'destructive',
@@ -308,7 +308,7 @@ export default function ClientGymAgreementsScreen() {
               // relation, and the re-read below then takes the button away.
               const gone = e?.code === '42P01';
               Alert.alert(
-                gone ? 'Not switched on' : 'Not withdrawn',
+                gone ? 'Not Switched On' : 'Not Withdrawn',
                 gone
                   ? WITHDRAW_UNAVAILABLE_NOTE
                   : `${e?.message ?? 'That could not be recorded.'}`,

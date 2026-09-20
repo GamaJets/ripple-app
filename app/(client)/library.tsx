@@ -495,7 +495,7 @@ export default function Library() {
  const [saving, setSaving] = useState(false);
  const addSet = () => {
   const r = parseInt(reps, 10) || 0;
-  if (r <= 0) { Alert.alert('How many reps?', 'A set needs a rep count. The weight can be left blank for a bodyweight movement.'); return; }
+  if (r <= 0) { Alert.alert('How Many Reps?', 'A set needs a rep count. The weight can be left blank for a bodyweight movement.'); return; }
   // Blank weight is 0 and stays 0 — that is a bodyweight set, which is a real
   // set, and the log already renders a 0 kg set as bodyweight rather than as a
   // missing figure.
@@ -512,7 +512,7 @@ export default function Library() {
   // It also refuses text that is not a number instead of silently making it a
   // bodyweight set, and states its bound in the unit on screen.
   const load = readLift(kg, wu);
-  if (!load.ok) { Alert.alert('Check that load', load.reason); return; }
+  if (!load.ok) { Alert.alert('Check That Load', load.reason); return; }
   // A blank box is testimony, not a zero: `readLift` returns a null load for it
   // and that null is what says "my own bodyweight". A typed load on top of it
   // is what was ADDED — the belt — exactly as `setLoadKg` reads it.
@@ -528,9 +528,9 @@ export default function Library() {
   // the log by this path would otherwise have been the one set in the session
   // stored in the wrong unit — the hardest kind of wrong figure to ever notice.
   const trailing = readLift(kg, wu);
-  if (!trailing.ok) { Alert.alert('Check that load', trailing.reason); return; }
+  if (!trailing.ok) { Alert.alert('Check That Load', trailing.reason); return; }
   const pending = (parseInt(reps, 10) || 0) > 0 ? [...banked, [parseInt(reps, 10), trailing.kg ?? 0, trailing.kg == null] as [number, number, boolean]] : banked;
-  if (!pending.length) { Alert.alert('Nothing to log', 'Add a set first — reps, and the weight if there was one.'); return; }
+  if (!pending.length) { Alert.alert('Nothing to Log', 'Add a set first — reps, and the weight if there was one.'); return; }
   setSaving(true);
   // No `kcal`. Train derives an energy estimate across a whole session's work;
   // one set logged on its own has no session around it to derive from, and the
@@ -549,13 +549,13 @@ export default function Library() {
    // Kept rather than lost, so the sheet closes and the banked sets are
    // cleared exactly as they are on a real save — leaving them in the form as
    // well is how one set becomes two.
-   Alert.alert('Saved on this phone', `${open.name} has not reached your training log yet — there is no connection. Nothing is lost: it is saved on this phone and goes up on its own next time you have signal.`);
+   Alert.alert('Saved on This Phone', `${open.name} has not reached your training log yet — there is no connection. Nothing is lost: it is saved on this phone and goes up on its own next time you have signal.`);
    setBanked([]); setReps(''); setKg('');
    close();
    return;
   }
   if (out === 'refused') {
-   Alert.alert('Not logged', `${open.name} was rejected by your training log, so it has not been recorded and it is not waiting to send. Logging it again as it is will be rejected again.`);
+   Alert.alert('Not Logged', `${open.name} was rejected by your training log, so it has not been recorded and it is not waiting to send. Logging it again as it is will be rejected again.`);
    return;
   }
   notifySuccess();

@@ -174,7 +174,7 @@ export default function Referral() {
     const ok = await copyToClipboard(text);
     if (!ok) {
       Alert.alert(
-        'Not copied',
+        'Not Copied',
         HAS_NATIVE_CLIPBOARD
           ? 'That could not be put on your clipboard just now. Share My Invite sends the same link straight to whichever app you pick.'
           : 'This version of the app cannot use the clipboard. Share My Invite sends the same link straight to whichever app you pick.',

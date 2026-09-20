@@ -149,7 +149,7 @@ export default function ClientIntakeScreen() {
   const callEmergency = () => {
     if (!dialEmergency) return;
     Linking.openURL(dialEmergency).catch(() => {
-      Alert.alert('Could not open the dialler', DIAL_UNAVAILABLE_NOTE);
+      Alert.alert('Could Not Open the Dialler', DIAL_UNAVAILABLE_NOTE);
     });
   };
 
@@ -174,7 +174,7 @@ export default function ClientIntakeScreen() {
             the navigation would be two answers to one gesture. */}
         <PageHead title="Intake" subtitle={fullName || undefined}
           trailing={id && !param
-            ? <Ghost icon="people" a11yLabel="Pick someone else" onPress={() => setPicked(null)} />
+            ? <Ghost icon="people" a11yLabel="Pick Someone Else" onPress={() => setPicked(null)} />
             : undefined} />
 
         {/* Nobody chosen. The same picker client-report.tsx shows, and for the
@@ -271,14 +271,14 @@ export default function ClientIntakeScreen() {
                       calmest component and not a warning: this is a referral,
                       not a verdict, and a red banner would be the app forming a
                       clinical opinion about somebody's heart. */}
-                  <Notice tone={t.s5} kicker="What this means" title="A conversation with a doctor, not a decision about training"
+                  <Notice tone={t.s5} kicker="What This Means" title="A conversation with a doctor, not a decision about training"
                     note={READINESS_SEE_A_DOCTOR} />
                 </View>
               ) : null}
 
               {unanswered.length > 0 ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Not answered</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Not Answered</Text>
                   {unanswered.map((q) => (
                     <Text key={q.id} style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{q.prompt}</Text>
                   ))}
@@ -290,9 +290,9 @@ export default function ClientIntakeScreen() {
             <Rule />
             <Section>
               <SectionHead title="What They Want" />
-              <Line t={t} label="In their words" value={intake.want.headline} />
-              <Line t={t} label="By when" value={intake.want.by} />
-              <Line t={t} label="Why now" value={intake.want.why} />
+              <Line t={t} label="In Their Words" value={intake.want.headline} />
+              <Line t={t} label="By When" value={intake.want.by} />
+              <Line t={t} label="Why Now" value={intake.want.why} />
               {!intake.want.headline.trim() ? (
                 <Text style={{ ...ty.body, color: t.ink2 }}>{who} has not answered this part yet.</Text>
               ) : null}
@@ -302,13 +302,13 @@ export default function ClientIntakeScreen() {
             <Rule />
             <Section>
               <SectionHead title="What They Have Done" />
-              <Line t={t} label="Training behind them" value={labelOf(TRAINING_YEARS, intake.history.years)} />
+              <Line t={t} label="Training Behind Them" value={labelOf(TRAINING_YEARS, intake.history.years)} />
               <Line t={t} label="Kinds"
                 value={intake.history.kinds.length
                   ? intake.history.kinds.map((k) => labelOf(TRAINING_KINDS, k)).filter(Boolean).join(', ')
                   : null} />
-              <Line t={t} label="Doing at the moment" value={intake.history.doingNow} />
-              <Line t={t} label="Coached before"
+              <Line t={t} label="Doing at the Moment" value={intake.history.doingNow} />
+              <Line t={t} label="Coached Before"
                 value={intake.history.coachedBefore == null ? null : intake.history.coachedBefore === 'yes' ? 'Yes' : 'No'} />
             </Section>
 
@@ -317,8 +317,8 @@ export default function ClientIntakeScreen() {
             <Section>
               <SectionHead title="What They Have Tried" />
               <Line t={t} label="Worked" value={intake.tried.worked} />
-              <Line t={t} label="Did not" value={intake.tried.didnt} />
-              <Line t={t} label="Will not do again" value={intake.tried.wont} />
+              <Line t={t} label="Did Not" value={intake.tried.didnt} />
+              <Line t={t} label="Will Not Do Again" value={intake.tried.wont} />
               {intake.tried.wont.trim() ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                   Worth taking literally. Somebody who says this and then finds it in week one of
@@ -331,23 +331,23 @@ export default function ClientIntakeScreen() {
             <Rule />
             <Section>
               <SectionHead title="When They Can Train" />
-              <Line t={t} label="Days a week"
+              <Line t={t} label="Days a Week"
                 value={intake.availability.daysPerWeek == null ? null : String(intake.availability.daysPerWeek)} />
-              <Line t={t} label="Session length"
+              <Line t={t} label="Session Length"
                 value={intake.availability.sessionMins == null ? null : `${intake.availability.sessionMins} minutes`} />
-              <Line t={t} label="Times that suit"
+              <Line t={t} label="Times That Suit"
                 value={intake.availability.times.length
                   ? intake.availability.times.map((w) => labelOf(TIME_WINDOWS, w)).filter(Boolean).join(', ')
                   : null} />
               <Line t={t} label="Where" value={labelOf(TRAINING_PLACES, intake.availability.place)} />
-              <Line t={t} label="Equipment they can reach" value={intake.availability.equipment} />
+              <Line t={t} label="Equipment They Can Reach" value={intake.availability.equipment} />
             </Section>
 
             {/* ── the rest of their week ───────────────────────────────── */}
             <Rule />
             <Section>
               <SectionHead title="Their Week" />
-              <Line t={t} label="Their days" value={labelOf(WORK_KINDS, intake.practical.work)} />
+              <Line t={t} label="Their Days" value={labelOf(WORK_KINDS, intake.practical.work)} />
               {/* `fig` on the hours, because a client answers this with a
                   half — "About 7.5 hours" — and a bare interpolation writes an
                   English full stop on a coach's handset whatever its language.
@@ -355,13 +355,13 @@ export default function ClientIntakeScreen() {
                   is integral by construction. */}
               <Line t={t} label="Sleep"
                 value={intake.practical.sleepHours == null ? null : `About ${fig(intake.practical.sleepHours)} hours`} />
-              <Line t={t} label="Anything else" value={intake.practical.anythingElse} />
+              <Line t={t} label="Anything Else" value={intake.practical.anythingElse} />
             </Section>
 
             {/* ── emergency contact ────────────────────────────────────── */}
             <Rule />
             <Section>
-              <SectionHead title="Who To Call" />
+              <SectionHead title="Who to Call" />
               <Line t={t} label="Name" value={intake.emergency.name} />
               {/* ── the one line on this screen that gets read in a hurry ──
                   This was a `<Line>`: a number in a Text node, four taps deep,

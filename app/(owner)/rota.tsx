@@ -391,7 +391,7 @@ export default function OwnerRota() {
     // 10:00–18:00 at the gym and the coach was rostered four hours late.
     const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role, zone);
     if (!draft) {
-      Alert.alert('That is not a shift', 'The finish time has to be after the start time.');
+      Alert.alert('That Is Not a Shift', 'The finish time has to be after the start time.');
       return;
     }
     setBusy(true);
@@ -401,13 +401,13 @@ export default function OwnerRota() {
       await load();
     } catch (e) {
       reportError('rota.add', e);
-      Alert.alert('Could not save that shift', 'Nothing was written. Check your connection and try again.');
+      Alert.alert('Could Not Save That Shift', 'Nothing was written. Check your connection and try again.');
     } finally { setBusy(false); }
   };
 
   const togglePulled = (s: Shift) => {
     const next = s.status === 'scheduled' ? 'cancelled' : 'scheduled';
-    const verb = next === 'cancelled' ? 'Pull this shift' : 'Put this shift back';
+    const verb = next === 'cancelled' ? 'Pull This Shift' : 'Put This Shift Back';
     Alert.alert(`${verb}?`, next === 'cancelled'
       ? 'It stays on the rota struck through, so the hole it leaves is visible rather than silent.'
       : `${nameOf(s.trainerId, s.trainerName)} goes back on the rota for this shift.`, [
@@ -421,7 +421,7 @@ export default function OwnerRota() {
         catch (e) {
           reportError('rota.status', e);
           Alert.alert(
-            next === 'cancelled' ? 'Could not pull that shift' : 'Could not put that shift back',
+            next === 'cancelled' ? 'Could Not Pull That Shift' : 'Could Not Put That Shift Back',
             (e instanceof Error && e.message) || 'The rota is unchanged. Check your connection and try again.',
           );
         }
@@ -760,7 +760,7 @@ export default function OwnerRota() {
         {roster.length > 0 ? (
           <>
             <Section>
-              <SectionHead title="Hours Per Trainer" />
+              <SectionHead title="Hours per Trainer" />
               {/* Against the longest week on the rota, so the bars compare
                   the staff with each other. A shift with an unreadable end has
                   no length: `hours` is then null, and the Meter draws no fill
@@ -828,12 +828,12 @@ export default function OwnerRota() {
 
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={lab}>Starts (hour)</Text>
+                  <Text style={lab}>Starts (Hour)</Text>
                   <TextInput value={from} onChangeText={setFrom} keyboardType="number-pad" maxLength={2}
                     style={inp} accessibilityLabel="Start hour" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={lab}>Finishes (hour)</Text>
+                  <Text style={lab}>Finishes (Hour)</Text>
                   <TextInput value={to} onChangeText={setTo} keyboardType="number-pad" maxLength={2}
                     returnKeyType="done" onSubmitEditing={() => { void commitAdd(); }}
                     style={inp} accessibilityLabel="Finish hour" />
@@ -846,7 +846,7 @@ export default function OwnerRota() {
                   : `Those hours are this device’s, not the gym’s — ${clock.note}.`}
               </Text>
 
-              <Text style={{ ...lab, marginTop: sp.lg }}>On for</Text>
+              <Text style={{ ...lab, marginTop: sp.lg }}>On For</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.lg }}>
                 {ROLES.map((r) => (
                   <Chip key={r.key} label={r.label} on={role === r.key} tone={t.brand}
@@ -859,7 +859,7 @@ export default function OwnerRota() {
                 accessibilityState={{ disabled: !who || busy }}
                 style={{ backgroundColor: who && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
                 <Text style={{ ...ty.label, ...font('600'), color: who && !busy ? t.brandInk : t.ink3 }}>
-                  {busy ? 'Saving…' : 'Put on the rota'}
+                  {busy ? 'Saving…' : 'Put on the Rota'}
                 </Text>
               </Pressable>
               <Ghost label="Cancel" onPress={() => setAddOpen(false)} />

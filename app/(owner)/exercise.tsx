@@ -104,7 +104,7 @@ export default function OwnerExercise() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Looking this movement up…</Text>
           </View>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Exercise" title="This could not be read"
+          <Notice tone={t.warn} kicker="Exercise" title="This Could Not Be Read"
             note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
         ) : animUrl ? (
           <>
@@ -133,8 +133,8 @@ export default function OwnerExercise() {
           // silhouette implying a demonstration we do not have — which on this
           // screen would misrepresent the product to the person buying it.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No illustration for this one'
-              : signedOut ? 'Not read on this session'
+            title={detail ? 'No Illustration for This One'
+              : signedOut ? 'Not Read on This Session'
               : 'Not in Our Catalogue'}
             note={detail
               ? 'This movement has no artwork, so members see its name, its muscles and the written steps. Your coaches can film their own clip for it from the trainer app.'

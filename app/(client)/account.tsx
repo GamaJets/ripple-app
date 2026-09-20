@@ -158,12 +158,12 @@ export default function Account() {
       // Offered rather than done. Most password changes are housekeeping, and
       // signing a member out of their own tablet uninvited is its own small
       // harm. `endOtherSessions` keeps THIS session — see the note on it.
-      Alert.alert('Password changed',
+      Alert.alert('Password Changed',
         'Your new password is in place. Anywhere else you are signed in stays signed in until that session expires — including any phone or tablet you no longer have.',
         [
-          { text: 'Leave them', style: 'cancel' },
+          { text: 'Leave Them', style: 'cancel' },
           {
-            text: 'Sign out everywhere else',
+            text: 'Sign Out Everywhere Else',
             onPress: async () => {
               const out = await endOtherSessions(supabase.auth);
               // Both outcomes are said. "We could not do it" is the one that
@@ -171,7 +171,7 @@ export default function Account() {
               // and has not is worse off than one who knows they must ring
               // support.
               Alert.alert(
-                out.ok ? 'Signed out everywhere else' : 'Still signed in elsewhere',
+                out.ok ? 'Signed Out Everywhere Else' : 'Still Signed In Elsewhere',
                 out.ok
                   ? 'Every other phone, tablet and browser signed in to this account has been signed out. This phone stays signed in, and your new password is what gets any of them back.'
                   : `${out.note} Your password HAS been changed, so nothing new can sign in — but a device already signed in may still be. Try again in a moment.`,
@@ -203,7 +203,7 @@ export default function Account() {
       // account, not from the fact that a call returned.
       await loadPending();
       if (res.outcome === 'changed') {
-        Alert.alert('Email changed',
+        Alert.alert('Email Changed',
           `Your account now uses ${res.requested}. That is the address to sign in with from now on, and the one a password reset will go to.`);
         return;
       }
@@ -280,11 +280,11 @@ export default function Account() {
             </Flag>
           ) : null}
 
-          {label('New email address')}
+          {label('New Email Address')}
           <TextInput value={newEmail} onChangeText={(v) => { setNewEmail(v); setEmNote(null); }}
             placeholder="you@example.com" placeholderTextColor={t.ink3}
             autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress"
-            accessibilityLabel="New email address" style={inp} />
+            accessibilityLabel="New Email Address" style={inp} />
           {emNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{emNote}</Flag> : null}
           <View style={{ marginTop: sp.md }}>
             <Expandable title="Who Sees This Address">
@@ -301,19 +301,19 @@ export default function Account() {
         {/* ── password ───────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Password" />
-          {label('Current password')}
+          {label('Current Password')}
           <TextInput value={current} onChangeText={(v) => { setCurrent(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="password"
             placeholder="The one you use now" placeholderTextColor={t.ink3}
-            accessibilityLabel="Current password" style={inp} />
+            accessibilityLabel="Current Password" style={inp} />
 
-          {label('New password')}
+          {label('New Password')}
           <TextInput value={next} onChangeText={(v) => { setNext(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="newPassword"
             placeholder={`At least ${MIN_PASSWORD} characters`} placeholderTextColor={t.ink3}
-            accessibilityLabel="New password" style={inp} />
+            accessibilityLabel="New Password" style={inp} />
 
-          {label('New password again')}
+          {label('New Password Again')}
           <TextInput value={confirm} onChangeText={(v) => { setConfirm(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="newPassword"
             placeholder="Type it a second time" placeholderTextColor={t.ink3}

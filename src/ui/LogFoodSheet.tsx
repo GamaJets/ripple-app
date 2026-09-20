@@ -138,7 +138,7 @@ export function LogFoodSheet({ food, photoUri, title, note, onLog, onClose }: {
 
             {note ? <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{note}</Text> : null}
 
-            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What it was</Text>
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What It Was</Text>
             <TextInput value={name} onChangeText={setName} placeholder="What was it?" placeholderTextColor={t.ink3}
               accessibilityLabel="Food name" style={{ ...field, marginBottom: sp.md }} />
 
@@ -158,7 +158,7 @@ export function LogFoodSheet({ food, photoUri, title, note, onLog, onClose }: {
                 a "per 100 g" printed over a figure that is per serving is exactly
                 the quiet wrongness this sheet exists to remove. */}
             <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>
-              How many{per ? ` · the figures above are ${per}` : ' portions'}
+              How Many{per ? ` · the figures above are ${per}` : ' Portions'}
             </Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
               {QUANTITIES.map((s) => {

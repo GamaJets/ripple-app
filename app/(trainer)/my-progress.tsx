@@ -305,7 +305,7 @@ export default function MyProgress() {
     if (out === 'stored') {
       notifySuccess();
       clear();
-      Alert.alert('Weigh-in logged', 'It is on your own record and on the trend above.');
+      Alert.alert('Weigh-in Logged', 'It is on your own record and on the trend above.');
       return;
     }
     if (out === 'unsent') {
@@ -313,7 +313,7 @@ export default function MyProgress() {
       // server yet. Cleared for the same reason 'stored' is: the weigh-in
       // exists, and leaving it in the boxes as well invites a second one.
       clear();
-      Alert.alert('Saved on this phone',
+      Alert.alert('Saved on This Phone',
         'No connection, so this weigh-in has not reached your record yet — nothing is lost. It is saved here, it is on the trend above, and it goes up on its own the next time you have signal.');
       return;
     }
@@ -346,7 +346,7 @@ export default function MyProgress() {
     // reads an inch entry as centimetres, which turns a 32 in waist into a
     // 32 cm one.
     for (const { key } of METRICS) { const cm = lengthToCm(tape[key], lu); if (cm != null && cm > 0) parsed[key] = cm; }
-    if (Object.keys(parsed).length === 0) { Alert.alert('Nothing to save', 'Enter at least one measurement.'); return; }
+    if (Object.keys(parsed).length === 0) { Alert.alert('Nothing to Save', 'Enter at least one measurement.'); return; }
     setTapeBusy(true);
     const out = await ms.addEntry(parsed);
     setTapeBusy(false);
@@ -360,12 +360,12 @@ export default function MyProgress() {
     // either: the numbers stay in front of the coach until they are actually on
     // their record. But it is not a loss and must not be described as one.
     if (out === 'queued') {
-      Alert.alert('Waiting to send',
+      Alert.alert('Waiting to Send',
         'No signal, so these are saved on this phone and have not reached your record yet. They go up on their own once you are back online.');
       return;
     }
     // Not cleared, and not called saved.
-    Alert.alert('Not saved',
+    Alert.alert('Not Saved',
       'These are on screen but could not be sent to your account, so they will be gone at the next launch. Save again in a moment.');
   };
 
@@ -440,7 +440,7 @@ export default function MyProgress() {
     if (stored) {
       notifySuccess();
       setScanWt(''); setScanBf(''); setScanSm('');
-      Alert.alert('Scan saved', 'It is on your own record, and your daily calorie target on My Nutrition is now built from it.');
+      Alert.alert('Scan Saved', 'It is on your own record, and your daily calorie target on My Nutrition is now built from it.');
       return;
     }
     // Not cleared. What was typed is the only copy of it, and this is the one
@@ -467,7 +467,7 @@ export default function MyProgress() {
           {/* ── can what follows be trusted? ─────────────────────────────── */}
           {bodyStatus === 'error' ? (
             <Section>
-              <Notice tone={t.warn} kicker="Your record" title="We couldn’t read your body record"
+              <Notice tone={t.warn} kicker="Your Record" title="We Couldn’t Read Your Body Record"
                 note="Your own weigh-ins and measurements are safe — this screen cannot see them right now. Nothing has been reset, and an empty history below means unknown rather than none." />
             </Section>
           ) : bodyStatus === 'partial' ? (

@@ -388,12 +388,12 @@ export default function Home() {
     // alert, no state change, no mark. app/(client)/reminders.tsx answers the
     // same four outcomes with four different sentences.
     if (!pushAvailable()) {
-      Alert.alert('Nothing scheduled', 'This build cannot schedule notifications, so no reminder has been set. Your streak is unaffected.');
+      Alert.alert('Nothing Scheduled', 'This build cannot schedule notifications, so no reminder has been set. Your streak is unaffected.');
       return;
     }
     if (!allows('motivation', notifyPrefs())) {
       Alert.alert(
-        'Motivation nudges are off',
+        'Motivation Nudges Are Off',
         'You have turned off nudges about streaks and badges, so this reminder was not scheduled. Turn them back on in Notifications and this button will work.',
         [
           { text: 'Not Now', style: 'cancel' },
@@ -410,10 +410,10 @@ export default function Home() {
     // must not be one the screen itself was refusing to print.
     try { id = await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + streak + '-day streak going.', when, { route: '/(client)/workouts' }, 'motivation'); } catch { id = null; }
     if (!id) {
-      Alert.alert('Nothing scheduled', 'That reminder could not be set — this phone may not be allowing notifications from us. Nothing has changed about your streak.');
+      Alert.alert('Nothing Scheduled', 'That reminder could not be set — this phone may not be allowing notifications from us. Nothing has changed about your streak.');
       return;
     }
-    Alert.alert('Reminder set', `We will nudge you at ${when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} tonight. Log a session before then and you can ignore it.`);
+    Alert.alert('Reminder Set', `We will nudge you at ${when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} tonight. Log a session before then and you can ignore it.`);
   };
   // Priced with the member's own weight over time, so a pull-up counts. See
   // src/lib/bodyweightSets.ts — an unweighed member's bodyweight sets are
@@ -939,7 +939,7 @@ export default function Home() {
               intent is the only line here the member has to be told about,
               because their model is that it happened. */}
           {lapsedKinds.map((k) => (
-            <Notice key={`lapsed-${k}`} tone={t.warn} kicker="Not sent"
+            <Notice key={`lapsed-${k}`} tone={t.warn} kicker="Not Sent"
               title="Something waited too long to send" note={lapsedNote(k)}>
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}><Ghost label="Got It" onPress={() => outbox?.clearLapsed()} /></View>
@@ -948,13 +948,13 @@ export default function Home() {
           ))}
 
           {waiting.length > 0 ? (
-            <Notice tone={t.warn} kicker="Waiting to send"
+            <Notice tone={t.warn} kicker="Waiting to Send"
               title={waiting.length === 1 ? 'One thing is still on this phone' : 'Some things are still on this phone'}
               note={waiting.join(' ')} />
           ) : null}
 
           {sevInj ? (
-            <Notice tone={t.crit} kicker="From your coach" title="Your plan is adjusted for your injury"
+            <Notice tone={t.crit} kicker="From Your Coach" title="Your plan is adjusted for your injury"
               note={`I've eased off ${sevInj.groups.join(' & ').toLowerCase()} while your ${sevInj.areas.join(' & ').toLowerCase()} ${sevInj.areas.length > 1 ? 'are' : 'is'} severe — risky moves are swapped or paused. Let's train safely around it.`}>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flexGrow: 2, flexBasis: 180 }}><Cta label="Get a Safe Plan" wide onPress={() => router.push('/(client)/coach?ask=injury')} /></View>
@@ -964,13 +964,13 @@ export default function Home() {
           ) : null}
 
           {myInvites.length === 0 && invitesStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Coaching invitations"
+            <Notice tone={t.warn} kicker="Coaching Invitations"
               title="Could not check for invitations"
               note="This is not the same as having none. If a coach has invited you, it will appear here once this loads — pull down to try again." />
           ) : null}
 
           {myInvites.length > 0 ? (
-            <Notice tone={t.brand} kicker="Coaching invitation"
+            <Notice tone={t.brand} kicker="Coaching Invitation"
               title={`${myInvites[0].coachName || 'A Coach'} invited you`}
               note={`${COACHED_MODE_SHORT[myInvites[0].mode]} coaching. ${COACHING_MODE_NOTE[myInvites[0].mode]} Accept to connect.`}>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
@@ -982,7 +982,7 @@ export default function Home() {
                     // the link; a refused accept used to move the whole app
                     // into coached mode with no coach behind it.
                     const { mode, ok } = await acceptCoachInvite(iv.id);
-                    if (!ok) { Alert.alert('Not connected yet', 'We could not link you to that coach. The invitation is still here — try again in a moment.'); return; }
+                    if (!ok) { Alert.alert('Not Connected Yet', 'We could not link you to that coach. The invitation is still here — try again in a moment.'); return; }
                     c.setCoachingMode(mode);
                   }} />
                 </View>
@@ -1148,7 +1148,7 @@ export default function Home() {
           <View style={{ marginTop: sp.lg }}>
             {risk.atRisk ? (
               <Notice tone={protectedTonight ? t.brand : t.warn}
-                kicker={protectedTonight ? 'Streak protected' : 'Streak at risk'}
+                kicker={protectedTonight ? 'Streak Protected' : 'Streak at Risk'}
                 title={protectedTonight ? `A freeze is holding your ${streak}-day streak` : `Your ${streak}-day streak is on the line`}
                 note={protectedTonight
                   ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight is covered, but training keeps it growing.`
@@ -1165,7 +1165,7 @@ export default function Home() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                   <Icon name="sparkle" size={20} color={t.brand} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.head, color: t.ink }}>Personalise your plan</Text>
+                    <Text style={{ ...ty.head, color: t.ink }}>Personalise Your Plan</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>One minute — tailors your workouts and meals to you.</Text>
                   </View>
                   <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
@@ -1299,7 +1299,7 @@ export default function Home() {
             dashboard. */}
         {gymAnn ? (<>
           <Section>
-            <SectionHead title="From Your Gym" note="All notices" onPress={() => router.push('/(client)/notices')} />
+            <SectionHead title="From Your Gym" note="All Notices" onPress={() => router.push('/(client)/notices')} />
             <Text style={{ ...ty.body, color: t.ink2 }}>{gymAnn.body}</Text>
             {/* Dated for the same reason the coach's note is, and it matters
                 more here: a gym notice is usually about a DATE — closed Monday,

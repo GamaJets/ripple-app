@@ -278,7 +278,7 @@ export default function Receipts() {
 
         {status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Not read" title="We couldn’t read your payments"
+            <Notice tone={t.crit} kicker="Not Read" title="We Couldn’t Read Your Payments"
               note={rows.length
                 // When the list came off this device, say WHEN. "Not confirmed
                 // current" is equally true of a copy from four minutes ago and
@@ -339,10 +339,10 @@ export default function Receipts() {
         {/* ── where it came from ──────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Where It Came From" />
-          <SourceLine t={t} first label="Paid at your gym" taken={paid.gym} status={status} />
-          <SourceLine t={t} label="Passes and drop-ins" taken={paid.passes} status={passStatus} />
-          <SourceLine t={t} label="Bought from a trainer" taken={paid.sales} status={saleStatus} />
-          <SourceLine t={t} label="Coaching renewals" taken={paid.renewals} status={renewalStatus} />
+          <SourceLine t={t} first label="Paid at Your Gym" taken={paid.gym} status={status} />
+          <SourceLine t={t} label="Passes and Drop-ins" taken={paid.passes} status={passStatus} />
+          <SourceLine t={t} label="Bought from a Trainer" taken={paid.sales} status={saleStatus} />
+          <SourceLine t={t} label="Coaching Renewals" taken={paid.renewals} status={renewalStatus} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAID_EXCLUDES_CASH}</Text>
         </Section>
 
@@ -354,7 +354,7 @@ export default function Receipts() {
             This page is money that has already moved. What your gym has invoiced you for — including anything still outstanding — is its own record.
           </Text>
           <View style={{ marginTop: sp.md }}>
-            <Ghost label="Invoices From Your Gym" onPress={() => router.push('/(client)/invoices')} />
+            <Ghost label="Invoices from Your Gym" onPress={() => router.push('/(client)/invoices')} />
           </View>
         </Section>
 
@@ -437,7 +437,7 @@ export default function Receipts() {
 
         {/* ── what a trainer sold you, through Repple ─────────────────────── */}
         <Section>
-          <SectionHead title="Bought From a Trainer" note={isWhole(saleStatus) && sales.length ? `${sales.length}` : undefined} />
+          <SectionHead title="Bought from a Trainer" note={isWhole(saleStatus) && sales.length ? `${sales.length}` : undefined} />
           {saleStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your purchases…</Text>
           ) : saleStatus === 'error' ? (

@@ -270,7 +270,7 @@ export default function FoodLog() {
   */
  const stampFor = (): { at: string; backdated: boolean } | null => {
   const r = readLogDay(logDay);
-  if (!r.ok) { Alert.alert('Check the day', r.reason); return null; }
+  if (!r.ok) { Alert.alert('Check the Day', r.reason); return null; }
   return { at: r.at, backdated: r.backdated };
  };
 
@@ -419,9 +419,9 @@ export default function FoodLog() {
  //   list that nothing will ever store is the silent version of this bug.
  const warnUnsaved = (what: string, out: 'unsent' | 'refused') =>
   out === 'unsent'
-   ? Alert.alert('Saved on this phone',
+   ? Alert.alert('Saved on This Phone',
      `No connection, so ${what} is not in your food log on the server yet. It is counting toward today and goes up on its own next time you have signal.`)
-   : Alert.alert('Not logged',
+   : Alert.alert('Not Logged',
      `${what} was rejected by your food log, so it is not saved and it is not counting toward today. Adding it again as it is will be rejected again.`);
 
  /**
@@ -446,8 +446,8 @@ export default function FoodLog() {
   */
  const sayBackdated = (what: string, out: WriteOutcome, day: string) => {
   if (out === 'stored') { toast.say(`${what} — ${backdatedStoredNote(day, today)}`); return; }
-  if (out === 'unsent') { Alert.alert('Saved on this phone', `${what}: ${backdatedUnsentNote(day, today)}`); return; }
-  Alert.alert('Not logged',
+  if (out === 'unsent') { Alert.alert('Saved on This Phone', `${what}: ${backdatedUnsentNote(day, today)}`); return; }
+  Alert.alert('Not Logged',
    `${what} was rejected by your food log, so it is not saved and nothing was added to ${dayLongLabel(day, today)}. Adding it again as it is will be rejected again.`);
  };
 
@@ -488,7 +488,7 @@ export default function FoodLog() {
     // The fifth thing, which is not one of the four: no reader was asked. The
     // feature is off, or the box was empty.
     setNlBusy(false);
-    Alert.alert('Nothing was read', foodAIAvailable()
+    Alert.alert('Nothing Was Read', foodAIAvailable()
      ? 'Try describing it differently, e.g. \"2 eggs, toast and a coffee\".'
      : 'AI food logging turns on with the AI backend.');
     return;
@@ -612,7 +612,7 @@ export default function FoodLog() {
   if (!editing || edBusy) return;
   const read = readFoodEdit({ name: edN, kcal: edK, protein: edP, carbs: edC, fat: edF });
   // A typo is refused rather than rounded to zero — see src/lib/entryEdit.ts.
-  if (!read.ok) { Alert.alert('Check that', read.reason); return; }
+  if (!read.ok) { Alert.alert('Check That', read.reason); return; }
   const before = { name: editing.name, kcal: editing.kcal, protein: editing.protein, carbs: editing.carbs, fat: editing.fat };
   if (!foodChanged(before, read.value)) { setEditing(null); return; }
   setEdBusy(true);
@@ -622,7 +622,7 @@ export default function FoodLog() {
   // are still the ones of record. The sheet stays open with what was typed:
   // closing it would throw the correction away AND imply it had been taken.
   if (!saved) {
-   Alert.alert('Not saved', 'Your correction did not reach the server, so the meal still reads as it did. Nothing has been changed on this phone either — check your connection and try again.');
+   Alert.alert('Not Saved', 'Your correction did not reach the server, so the meal still reads as it did. Nothing has been changed on this phone either — check your connection and try again.');
    return;
   }
   setEditing(null);
@@ -657,7 +657,7 @@ export default function FoodLog() {
     // moment, which is the truth: it is still in the log.
     if (!gone) {
      putBack();
-     Alert.alert('Not removed', `${fe.name} is still in your log — we could not reach the server to remove it. It is still counting toward today.`);
+     Alert.alert('Not Removed', `${fe.name} is still in your log — we could not reach the server to remove it. It is still counting toward today.`);
     }
    },
   });
@@ -832,7 +832,7 @@ export default function FoodLog() {
    // Put back. A star that stays lit over a write that did not land is the
    // screen reading its own guess back to the member.
    setFavs(before);
-   Alert.alert('Not pinned', 'That could not be saved on this phone, so your pinned list has not changed.');
+   Alert.alert('Not Pinned', 'That could not be saved on this phone, so your pinned list has not changed.');
   }
  };
  // The three groups, in the order somebody reads them: what they pinned, what
@@ -931,7 +931,7 @@ export default function FoodLog() {
   if (gate.block === 'unknown') {
    // Still reading the stored answer. Not a refusal and not a yes, and the
    // one honest thing to do with it is wait.
-   Alert.alert('One moment', 'Still checking your answer about photos. Try that again in a moment.');
+   Alert.alert('One Moment', 'Still checking your answer about photos. Try that again in a moment.');
    return;
   }
   // 'unasked' and 'refused' both put the question, so somebody who said no
@@ -982,7 +982,7 @@ export default function FoodLog() {
  setReading(false);
  setPendingPhoto(asset.uri);
  setPendingVia('photo');
- setPendingTitle(read ? 'Check And Log' : 'Enter This Meal');
+ setPendingTitle(read ? 'Check and Log' : 'Enter This Meal');
  // The copy no longer promises to keep the picture. `food_logs` has no image
  // column and `logFood` has never been handed one, so "they'll be logged
  // against this photo" described something the app has never done: the photo
@@ -1055,7 +1055,7 @@ export default function FoodLog() {
  {/* The sentences that explain the screen rather than qualify a figure live
      behind this — a native alert, because they are three short lines and a
      fourth sheet on this screen would be a fourth modal to keep right. */}
- <PageHead title="Food Log" trailing={<Ghost icon="info" a11yLabel="How the food log works" onPress={() => Alert.alert('How The Food Log Works',
+ <PageHead title="Food Log" trailing={<Ghost icon="info" a11yLabel="How the food log works" onPress={() => Alert.alert('How the Food Log Works',
   'Tap a logged meal to correct what it was worth.\n\nUnder Log It Again, tap a food to log the same again — the sheet still asks how much — and tap the heart to keep one at the top.\n\nCommon and restaurant figures are typical portions, not a measurement of yours. A branded row is the product’s own label.')} />} />
 
  {/* ── the figure: what is left in the day ────────────────────────────
@@ -1070,7 +1070,7 @@ export default function FoodLog() {
  <SectionHead title={remK == null ? 'Calories Eaten' : remK >= 0 ? 'Calories Remaining' : 'Calories Over'} />
  {/* Label, figure, unit and sentence are one fact, and one stop. */}
  <View accessible accessibilityLabel={[
-   remK == null ? 'Calories eaten' : remK >= 0 ? 'Calories remaining' : 'Calories over',
+   remK == null ? 'Calories Eaten' : remK >= 0 ? 'Calories Remaining' : 'Calories Over',
    `${!dayWhole ? fig(null) : remK == null ? fig(tot.k) : fig(Math.abs(remK))} kcal`,
    // Not said twice: over a whole day with a target the row of named
    // figures under this speaks eaten, target and burned one at a time.
@@ -1180,7 +1180,7 @@ export default function FoodLog() {
      frame goes is still asked before either opens — see `askPhoto`. */}
  <Cta label="Take a Photo" a11yLabel="Take a meal photo" wide onPress={() => takeMealPhoto(true)} />
  <View style={{ height: sp.sm }} />
- <Ghost label="Choose From Library" a11yLabel="Add meal photo from library" onPress={() => takeMealPhoto(false)} />
+ <Ghost label="Choose from Library" a11yLabel="Add meal photo from library" onPress={() => takeMealPhoto(false)} />
  </>) : way === 'barcode' ? (<>
  <Cta label="Scan a Barcode" a11yLabel="Scan barcode" wide onPress={() => setBcOpen(true)} />
  </>) : way === 'search' ? (<>
@@ -1580,12 +1580,12 @@ export default function FoodLog() {
     <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{PHOTO_DESTINATION_BY_SUBJECT.meal}</Text>
 
     <View style={{ marginTop: sp.lg, gap: sp.xs }}>
-     <Text style={{ ...ty.micro, color: t.ink3 }}>What is sent</Text>
+     <Text style={{ ...ty.micro, color: t.ink3 }}>What Is Sent</Text>
      {PHOTO_SENT_BY_SUBJECT.meal.map((line) => (
       <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>&bull; {line}</Text>
      ))}
      <View style={{ height: sp.sm }} />
-     <Text style={{ ...ty.micro, color: t.ink3 }}>What is not</Text>
+     <Text style={{ ...ty.micro, color: t.ink3 }}>What Is Not</Text>
      {PHOTO_NOT_SENT_BY_SUBJECT.meal.map((line) => (
       <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>&bull; {line}</Text>
      ))}
@@ -1635,7 +1635,7 @@ export default function FoodLog() {
  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
  Today's totals and the calories you have left follow this straight away. It stays on today — correcting a meal does not move it to another day.
  </Text>
- <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Meal name</Text>
+ <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Meal Name</Text>
  <TextInput value={edN} onChangeText={setEdN} placeholder="What was it?" placeholderTextColor={t.ink3} style={{ ...field, marginBottom: sp.md }} />
  {/* The correction sheet, and the one that opens with numbers ALREADY in the
      boxes — so this is where a bare "P" over a filled field is worst: the
@@ -1648,9 +1648,9 @@ export default function FoodLog() {
  ))}
  </View>
  <Pressable onPress={saveEdit} disabled={edBusy} accessibilityState={{ disabled: edBusy, busy: edBusy }} accessibilityRole="button"
- accessibilityLabel={edBusy ? 'Saving the correction' : 'Save the correction'}
+ accessibilityLabel={edBusy ? 'Saving the correction' : 'Save the Correction'}
  style={{ backgroundColor: edBusy ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
- {edBusy ? <ActivityIndicator color={t.ink2} /> : <Text style={{ ...ty.body, ...font('600'), color: t.brandInk }}>Save the correction</Text>}
+ {edBusy ? <ActivityIndicator color={t.ink2} /> : <Text style={{ ...ty.body, ...font('600'), color: t.brandInk }}>Save the Correction</Text>}
  </Pressable>
  {/* Deleting is here as well as in the list, because "this was not a meal at
      all" is the correction somebody arrives at while they have the sheet
@@ -1664,7 +1664,7 @@ export default function FoodLog() {
      without the colour. */}
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
  <Icon name="minus" size={14} color={t.crit} />
- <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Remove this meal</Text>
+ <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Remove This Meal</Text>
  </View>
  </Pressable>
  </View>

@@ -78,7 +78,7 @@ export function EndReasonSheet({
   notes = END_REASON_NOTE,
   explainer = 'This is kept on your own record of the coaching and is the only thing that will ever tell you why people leave you. Nothing here is sent to them.',
   notePlaceholder = 'What they actually said, in their words if you have them.',
-  heading = 'Why it ended',
+  heading = 'Why It Ended',
 }: {
   name: string;
   /** What pressing the primary button will do, in the coach's words. Differs
@@ -133,7 +133,7 @@ export function EndReasonSheet({
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{explainer}</Text>
 
         <Section>
-          <SectionHead title="Pick one" />
+          <SectionHead title="Pick One" />
           <View>
             {reasons.map((r, i) => {
               const on = reason === r;
@@ -174,7 +174,7 @@ export function EndReasonSheet({
         </Section>
 
         <Section>
-          <SectionHead title="Anything else" note="optional" />
+          <SectionHead title="Anything Else" note="optional" />
           <TextInput
             value={note}
             onChangeText={setNote}

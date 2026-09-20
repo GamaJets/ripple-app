@@ -41,7 +41,7 @@ import { reportError } from '../../src/lib/reportError';
 import { fmtFullDay } from '../../src/lib/format';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 
-const STATUS_LABEL: Record<string, string> = { active: 'Active', trialing: 'Trial', past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete' };
+const STATUS_LABEL: Record<string, string> = { active: 'Active', trialing: 'Trial', past_due: 'Past Due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete' };
 
 /**
  * This coach's own Repple invoices, newest first.
@@ -174,7 +174,7 @@ export default function TrainerBilling() {
     try { await Linking.openURL(url); }
     catch (e) {
       reportError('billing.invoices.open', e);
-      Alert.alert('Couldn’t open it', 'This device would not open that invoice. Nothing about it has changed — try Manage Billing for the same page.');
+      Alert.alert('Couldn’t Open It', 'This device would not open that invoice. Nothing about it has changed — try Manage Billing for the same page.');
     }
   };
 
@@ -182,13 +182,13 @@ export default function TrainerBilling() {
     setBusy(plan);
     const r = await subscribeToPlan(plan);
     setBusy(null);
-    if (!r.ok) Alert.alert('Could not start checkout', r.error || 'Try again in a moment.');
+    if (!r.ok) Alert.alert('Could Not Start Checkout', r.error || 'Try again in a moment.');
   };
   const manage = async () => {
     setBusy('portal');
     const r = await openBillingPortal();
     setBusy(null);
-    if (!r.ok) Alert.alert('Billing portal', r.error || 'No active subscription to manage yet.');
+    if (!r.ok) Alert.alert('Billing Portal', r.error || 'No active subscription to manage yet.');
   };
 
   const statusTone = (s: string | null): Tone => (s === 'active' || s === 'trialing' ? 'brand' : s === 'past_due' || s === 'unpaid' ? 'red' : 'neutral');
@@ -207,7 +207,7 @@ export default function TrainerBilling() {
 
         {!available ? (
           <View style={{ marginTop: sp.xl }}>
-            <Notice tone={t.ink3} kicker="Not live yet" title="Billing is not switched on"
+            <Notice tone={t.ink3} kicker="Not Live Yet" title="Billing Is Not Switched On"
               note="Billing turns on once the platform's Stripe keys and plan prices are configured. You'll be able to subscribe and manage payment here." />
           </View>
         ) : null}
@@ -244,12 +244,12 @@ export default function TrainerBilling() {
               figure={trial.state ? String(trial.state.daysLeft) : null}
               sub={trial.state?.daysLeft === 1 ? 'day left' : 'days left'}
               spoken={trial.state
-                ? (trial.state.expired ? 'Your free days are used up' : `${trial.state.daysLeft} of ${TRIAL_DAYS} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`)
+                ? (trial.state.expired ? 'Your Free Days Are Used Up' : `${trial.state.daysLeft} of ${TRIAL_DAYS} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`)
                 : 'Free trial days not read'} />
             <View style={{ flex: 1, minWidth: 160 }}>
               {trial.state ? (
                 <Text style={{ ...ty.head, color: t.ink }}>
-                  {trial.state.expired ? 'Your free days are used up' : `${trial.state.daysLeft} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`}
+                  {trial.state.expired ? 'Your Free Days Are Used Up' : `${trial.state.daysLeft} Free ${trial.state.daysLeft === 1 ? 'Day' : 'Days'} Left`}
                 </Text>
               ) : null}
               <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{trial.note}</Text>

@@ -502,7 +502,7 @@ export default function TrainerAssistant() {
               is a confident answer about a business that does not exist, and
               there is nothing on it for a coach to doubt. */}
           {!figuresWhole ? (
-            <Notice tone={t.warn} kicker="Your figures" title="Not enough has been read to answer from"
+            <Notice tone={t.warn} kicker="Your Figures" title="Not Enough Has Been Read to Answer From"
               note={figureStatus === 'loading'
                 ? 'Still reading your roster and your sessions. Nothing is asked until both have come back, because an answer written from half of them would read exactly like an answer written from all of them.'
                 : figureStatus === 'partial'
@@ -632,7 +632,7 @@ export default function TrainerAssistant() {
                   is where that belongs; `busy` rides on it too, because "still
                   thinking" and "nothing typed" are different reasons to wait. */}
               <Pressable onPress={() => { void send(input); }} disabled={!input.trim() || busy}
-                accessibilityRole="button" accessibilityLabel="Send question"
+                accessibilityRole="button" accessibilityLabel="Send Question"
                 accessibilityState={{ disabled: !input.trim() || busy, busy }}
                 // The bright accent under its deep ink, the pair the hero's
                 // button wears. With nothing to send it is grey, and the arrow

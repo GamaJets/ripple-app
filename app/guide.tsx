@@ -112,12 +112,12 @@ export default function Guide() {
         {/* marginTop to match "Across the app" below. Without it this kicker
             sat hard against the rule above it and read as part of the header
             paragraph rather than as the label on the list under it. */}
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>The tabs</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>The Tabs</Text>
         {tabs.map((s) => block(s, t, 'brand'))}
 
         {topics.length ? (
           <>
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Across the app</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Across the App</Text>
             {topics.map((s) => block(s, t, 'blue'))}
           </>
         ) : null}

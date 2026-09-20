@@ -122,9 +122,9 @@ export default function Offers() {
     setBusy(true);
     const { data, error } = await supabase.rpc('redeem_promo', { p_code: c });
     setBusy(false);
-    if (error) { Alert.alert('Not redeemed', 'That could not be redeemed just now. Try again in a moment.'); return; }
+    if (error) { Alert.alert('Not Redeemed', 'That could not be redeemed just now. Try again in a moment.'); return; }
     const res = (data ?? {}) as { ok?: boolean; reason?: string; discount?: number; code?: string };
-    if (!res.ok) { Alert.alert('Not redeemed', refusal(res.reason, c)); return; }
+    if (!res.ok) { Alert.alert('Not Redeemed', refusal(res.reason, c)); return; }
     setCode('');
     await refresh();
     // Same rule one line later: the RPC's own `discount` goes through the same
@@ -132,7 +132,7 @@ export default function Offers() {
     // rather than announcing "undefined% off" — or a nought.
     const pct = discountOf(res.discount);
     Alert.alert(
-      'Code redeemed',
+      'Code Redeemed',
       pct == null
         ? `${res.code ?? c} is recorded against your account and your gym has been told. We couldn’t read how much it takes off — your gym applies it to your billing and can tell you.`
         // `res.code ?? c`, like the branch above it. The RPC is not obliged to
@@ -181,7 +181,7 @@ export default function Offers() {
           </View>
         </Section>
 
-        <Notice tone={t.ink3} kicker="How this works" title={`${BRAND.label} records it, your gym applies it`}
+        <Notice tone={t.ink3} kicker="How This Works" title={`${BRAND.label} records it, your gym applies it`}
           note={`Redeeming tells your gym you have used the code. The discount comes off through their billing, not through the app — ${BRAND.label} never touches the payment.`} />
 
 

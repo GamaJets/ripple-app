@@ -322,7 +322,7 @@ export default function Cards() {
     setBusy(false);
     if (r.sent === 'image') {
       Alert.alert(
-        'Card sent to your share sheet',
+        'Card Sent to Your Share Sheet',
         r.captionCopied
           ? 'Your words are on the clipboard — paste them into the post. A share sheet cannot carry a picture and its words to the same place, so they travel separately.'
           : 'This version of the app could not put your words on the clipboard, so the picture went on its own.',
@@ -334,7 +334,7 @@ export default function Cards() {
     // image pipeline, the other is that the graphic itself could not be made.
     const blocked = imageShareBlocker();
     Alert.alert(
-      'Sent as text',
+      'Sent as Text',
       blocked ?? 'The picture could not be made on this phone, so your words went on their own. The card on screen is unchanged.',
     );
   };

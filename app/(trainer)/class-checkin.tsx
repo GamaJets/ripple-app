@@ -424,7 +424,7 @@ export default function ClassCheckin() {
                   figure={counted ? String(present) : null} sub={counted ? `of ${booked}` : undefined}
                   spoken={`Checked in, ${counted ? `${present} of ${booked}` : 'not counted'}. ${note}`} />
                 <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flex: 1, minWidth: 140, gap: sp.xs }}>
-                  {pct != null ? <TonedChip tone={pct >= 100 ? 'brand' : 'blue'} label={`${pct}% in`} /> : null}
+                  {pct != null ? <TonedChip tone={pct >= 100 ? 'brand' : 'blue'} label={`${pct}% In`} /> : null}
                   <Text style={{ ...ty.label, color: t.ink2 }}>{note}</Text>
                 </View>
               </View>
@@ -436,7 +436,7 @@ export default function ClassCheckin() {
         {/* ── the trainer's own estimate ──────────────────────────────────── */}
         <Section>
           <SectionHead title="Pay Estimate" />
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>Rate per attendee</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>Rate per Attendee</Text>
           <TextInput value={rate} onChangeText={onRateChange} onEndEditing={() => persistRate(rate)} onBlur={() => persistRate(rate)}
             keyboardType="decimal-pad" placeholder="Your rate" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />

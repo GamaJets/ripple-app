@@ -194,7 +194,7 @@ export default function Muscles() {
     <Segmented style={{ marginTop: sp.md }}
       value={String(days) as `${WindowDays}`}
       onChange={(k) => setDays(Number(k) as WindowDays)}
-      options={WINDOWS.map((d) => ({ key: String(d) as `${WindowDays}`, label: `${d} Days`, a11yLabel: `Last ${d} days` }))} />
+      options={WINDOWS.map((d) => ({ key: String(d) as `${WindowDays}`, label: `${d} Days`, a11yLabel: `Last ${d} Days` }))} />
   );
 
   const frame = (children: React.ReactNode) => (
@@ -216,7 +216,7 @@ export default function Muscles() {
   if (signedOut) {
     return frame(
       <><Section>
-        <SectionHead title="Sign in to see this" />
+        <SectionHead title="Sign in to See This" />
         <Text style={{ ...ty.body, color: t.ink2 }}>
           The exercise catalogue is only available once you are signed in, so we cannot say which
           muscles your sessions worked. Your training is not affected and nothing is missing
@@ -246,7 +246,7 @@ export default function Muscles() {
   if (board.status === 'error') {
     return frame(
       <><Section>
-        <SectionHead title="Could not read this" />
+        <SectionHead title="Could Not Read This" />
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
           We could not read your training, the exercise catalogue, or both, so there is no picture
           of your muscles to draw. Nothing has been lost — this screen failed to read what is

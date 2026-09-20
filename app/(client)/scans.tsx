@@ -387,9 +387,9 @@ export default function Scans() {
   // machine and deliberately stays in kilograms; src/lib/progressExport.ts
   // argues that at PROGRESS_CSV_HEADER, and the dialog below says so before
   // anybody sends one.
-  const sendPdf = async () => { const rows = exportRows(); const { html, text } = progressDoc(cd.name, rows, appName, t.brand, wu); await shareDoc(html, text, 'My progress'); };
-  const sendCsv = async () => { await shareTextFile(progressCsv(exportRows()), 'my-progress.csv', 'text/csv', 'My progress'); };
-  const sendSummary = async () => { await shareText(progressSummary(cd.name, exportRows(), appName, wu), 'My progress'); };
+  const sendPdf = async () => { const rows = exportRows(); const { html, text } = progressDoc(cd.name, rows, appName, t.brand, wu); await shareDoc(html, text, 'My Progress'); };
+  const sendCsv = async () => { await shareTextFile(progressCsv(exportRows()), 'my-progress.csv', 'text/csv', 'My Progress'); };
+  const sendSummary = async () => { await shareText(progressSummary(cd.name, exportRows(), appName, wu), 'My Progress'); };
 
   // ── the handover document ────────────────────────────────────────────────
   //
@@ -452,18 +452,18 @@ export default function Scans() {
         body: 'The body diagram, how long each muscle has rested, and what you train most and least.' };
     }
     if (muscleBoard7.status === 'error') {
-      return { head: 'Could not read this', mark: t.crit,
+      return { head: 'Could Not Read This', mark: t.crit,
         body: 'Your training is not affected — this panel could not read it.' };
     }
     if (muscleBoard7.status === 'partial') {
-      return { head: 'Part of your week is missing', mark: t.warn,
+      return { head: 'Part of Your Week Is Missing', mark: t.warn,
         body: 'Some of the last seven days did not come back. What is shaded was trained; there may be more.' };
     }
     if (muscleShading7.hasWork) {
-      return { head: 'See it on the body',
+      return { head: 'See It on the Body',
         body: 'The body diagram, how long each muscle has rested, and what you train most and least.' };
     }
-    return { head: 'Nothing logged in seven days',
+    return { head: 'Nothing Logged in Seven Days',
       body: 'Log a session and the muscles it worked appear here.' };
   }, [muscleBoard7.status, muscleShading7.hasWork, t.crit, t.warn]);
 
@@ -532,14 +532,14 @@ export default function Scans() {
   const shareForProfessional = () => {
     const doc = buildReport();
     Alert.alert(
-      'Summary for a health professional',
+      'Summary for a Health Professional',
       reportShareBlurb(doc) + '\n\n'
       + (pdfExportAvailable()
         ? 'It goes as a PDF through your phone\u2019s share sheet, so it can reach a physio, a doctor, a new coach — anyone you choose.'
         : 'This build cannot produce a PDF, so it goes as plain text instead. Nothing is left out of it: every figure and every caveat is in the text.'),
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, 'Health & training summary'); } },
+        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, 'Health & Training Summary'); } },
       ],
     );
   };
@@ -551,7 +551,7 @@ export default function Scans() {
     // nothing to send. Nothing goes out until there is something in it.
     if (!rows.length) {
       Alert.alert(
-        cd.scansStatus === 'error' ? 'Your scans could not be read' : 'Nothing to send yet',
+        cd.scansStatus === 'error' ? 'Your Scans Could Not Be Read' : 'Nothing to Send Yet',
         cd.scansStatus === 'error'
           ? 'Sending now would show your coach an empty record, which is not the same as an empty history. Try again once the screen has loaded your scans.'
           : 'Add a body scan first, and your report, spreadsheet and summary will all have something in them.',
@@ -574,9 +574,9 @@ export default function Scans() {
       ? 'Spreadsheet — the same rows, sent as text you can paste into a spreadsheet. ' + blocker
       : 'Spreadsheet — a .csv file, one row per scan, for a coach or another app to import.') + csvUnit;
     const options: { text: string; onPress?: () => void; style?: 'cancel' }[] = [];
-    if (pdf) options.push({ text: 'PDF report', onPress: () => { void sendPdf(); } });
+    if (pdf) options.push({ text: 'PDF Report', onPress: () => { void sendPdf(); } });
     options.push({ text: 'Spreadsheet (CSV)', onPress: () => { void sendCsv(); } });
-    options.push({ text: 'Short summary', onPress: () => { void sendSummary(); } });
+    options.push({ text: 'Short Summary', onPress: () => { void sendSummary(); } });
     // Android's dialog has three button slots and React Native keeps only the
     // first three, so a fourth row does not fail loudly — it disappears. The
     // one that would disappear is this Cancel. The dialog is dismissable there
@@ -584,7 +584,7 @@ export default function Scans() {
     // than shipped as a button that exists on one platform and not the other.
     if (Platform.OS !== 'android' || options.length < 3) options.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert(
-      'Share your progress',
+      'Share Your Progress',
       `${progressSpanLabel(rows)}.\n\n`
       // The PDF is not offered on a build that cannot make one, and until now
       // it was not MENTIONED either — so a client who had been told the app
@@ -592,10 +592,10 @@ export default function Scans() {
       // word about the third. Silence about a missing feature reads as the
       // feature having been taken away. Said once, and only while it is true.
       + (pdf
-        ? 'PDF report — a one-page document with every scan and the change since your first.\n'
+        ? 'PDF Report — a one-page document with every scan and the change since your first.\n'
         : 'PDF report — the copy of the app on this phone can\u2019t make one. Update to the latest version and it will; the two below work either way.\n')
       + csvLine + '\n'
-      + 'Short summary — a few lines of text for a message, a story or a post.\n\n'
+      + 'Short Summary — a few lines of text for a message, a story or a post.\n\n'
       + `Whichever you pick opens your phone's share sheet, so it can go to your coach, Instagram, WhatsApp, anywhere. ${appName} posts nothing on its own.`,
       options,
     );
@@ -945,7 +945,7 @@ export default function Scans() {
     // figures the form insists on.
     const mNum = weightToKg(sm, wu);
     const m = sm.trim() && mNum != null && mNum > 0 ? mNum : null;
-    if (!w || !f) { Alert.alert('Add the numbers', 'Enter at least weight and body-fat % from your InBody report.'); return; }
+    if (!w || !f) { Alert.alert('Add the Numbers', 'Enter at least weight and body-fat % from your InBody report.'); return; }
 
     // ── the muscle figure, against the weight beside it ───────────────────
     //
@@ -972,15 +972,15 @@ export default function Scans() {
       // would send somebody to check a unit that was never the problem.
       const tooLow = muscleDoubt.typedLooksMetric;
       Alert.alert(
-        'Check the muscle figure',
+        'Check the Muscle Figure',
         `You have ${typed} of muscle against ${weightLabel(w, wu)} of body weight, which is ${tooLow ? 'less' : 'more'} than a body usually carries. `
         + (tooLow
           ? `InBody sheets print muscle in kilograms, and read that way your figure is ${other}. Which does your sheet say?`
           : `Read as pounds instead, your figure is ${other}. Which does your sheet say?`),
         [
-          { text: tooLow ? `The sheet says kilograms` : `The sheet says pounds`,
+          { text: tooLow ? `The Sheet Says Kilograms` : `The Sheet Says Pounds`,
             onPress: () => { void saveScan({ muscleKg: muscleDoubt.asKg }); } },
-          { text: 'The figure is right', onPress: () => { void saveScan({ muscleKg: m }); } },
+          { text: 'The Figure Is Right', onPress: () => { void saveScan({ muscleKg: m }); } },
           { text: 'Cancel', style: 'cancel' },
         ],
       );
@@ -1050,7 +1050,7 @@ export default function Scans() {
         // Nothing was kept. The sheet stays open with the numbers still in it:
         // the person typed them off a printout they may no longer be holding,
         // and clearing the form here would make them find it again.
-        Alert.alert('Not saved', notKeptNote('scan', q.result === 'full' ? 'full' : 'unavailable'));
+        Alert.alert('Not Saved', notKeptNote('scan', q.result === 'full' ? 'full' : 'unavailable'));
         return;
       }
       // Kept. The form clears, because there is nothing left to retype.
@@ -1063,7 +1063,7 @@ export default function Scans() {
       // told them was not there.
       setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
       Alert.alert(
-        'Saved on this phone',
+        'Saved on This Phone',
         'Your scan is saved on this phone and has not reached your record yet — it goes up on its own next time you have signal. It is in your list and your targets here have moved with it in the meantime, and nobody else can see it until it sends.',
       );
       return;
@@ -1074,23 +1074,23 @@ export default function Scans() {
     // thing it does know: the scan is on the record.
     if (!historyKnown) {
       Alert.alert(
-        'Scan saved',
+        'Scan Saved',
         'Your scan is on your record. Your other scans could not be read just now, so this screen cannot say whether it is your most recent one or what it changed about your targets — pull down on Progress once you have signal and it will.',
       );
       return;
     }
     if (!isNewest) {
-      Alert.alert('Scan saved to history', 'This scan is dated ' + fmt(newISO) + ', earlier than your most recent scan (' + fmt(curLatestISO) + '). It\'s added to your progress tracking and graphs — but your meal plan stays on your most recent scan. Only a newer scan re-tunes your plan.');
+      Alert.alert('Scan Saved to History', 'This scan is dated ' + fmt(newISO) + ', earlier than your most recent scan (' + fmt(curLatestISO) + '). It\'s added to your progress tracking and graphs — but your meal plan stays on your most recent scan. Only a newer scan re-tunes your plan.');
       return;
     }
     if (!before) {
-      Alert.alert('Scan saved', 'Your first measurements are in — daily targets are now ' + after.kcal + ' kcal / ' + after.protein + 'g protein, and your meal plan is built from them.');
+      Alert.alert('Scan Saved', 'Your first measurements are in — daily targets are now ' + after.kcal + ' kcal / ' + after.protein + 'g protein, and your meal plan is built from them.');
       return;
     }
     const dK = after.kcal - before.kcal, dP = after.protein - before.protein;
     const sign = (x: number) => (x > 0 ? '+' + x : String(x));
     const changed = Math.abs(dK) >= 5 || Math.abs(dP) >= 2;
-    Alert.alert(changed ? 'Scan saved — plan auto-tuned' : 'Scan saved', changed
+    Alert.alert(changed ? 'Scan Saved — Plan Auto-Tuned' : 'Scan Saved', changed
       // Both weights are read out in the client's unit — each is a reading in
       // its own right, so each converts as a value rather than the pair being
       // treated as one span.
@@ -1163,11 +1163,11 @@ export default function Scans() {
    *  a public post, and it should not look like a preference. */
   const allowPublishing = (p: ProgressPhoto) => {
     const blocked = publishBlocker(p.id, coach, shares);
-    if (blocked) { Alert.alert('Nothing changed', blocked); return; }
+    if (blocked) { Alert.alert('Nothing Changed', blocked); return; }
     const c = coach!;
     Alert.alert(publishAskTitle(c.name), publishAskBody(c.name), [
       { text: 'No', style: 'cancel' },
-      { text: 'Yes, they can', onPress: async () => {
+      { text: 'Yes, They Can', onPress: async () => {
         setPubBusy(true);
         try {
           // The row comes back FROM the server. Nothing here records an
@@ -1177,7 +1177,7 @@ export default function Scans() {
           setPubsErr(null);
         } catch (e) {
           reportError('scans.photos.allowPublish', e);
-          Alert.alert('Nothing changed', 'That was not saved, so this photo still cannot be published. Try again in a moment.');
+          Alert.alert('Nothing Changed', 'That was not saved, so this photo still cannot be published. Try again in a moment.');
           await loadPubs();
         } finally { setPubBusy(false); }
       } },
@@ -1191,16 +1191,16 @@ export default function Scans() {
   const stopPublishing = (p: ProgressPhoto) => {
     const c = coach;
     if (!c) return;
-    Alert.alert('Take this permission back?', withdrawPublishBody(c.name), [
-      { text: 'Leave it', style: 'cancel' },
-      { text: 'Take it back', style: 'destructive', onPress: async () => {
+    Alert.alert('Take This Permission Back?', withdrawPublishBody(c.name), [
+      { text: 'Leave It', style: 'cancel' },
+      { text: 'Take It Back', style: 'destructive', onPress: async () => {
         setPubBusy(true);
         try {
           await withdrawPublish(p.id, c.id);
           setPubs((x) => (x === null ? null : x.filter((y) => y.photoId !== p.id)));
         } catch (e) {
           reportError('scans.photos.withdrawPublish', e);
-          Alert.alert('Still allowed', 'That was not withdrawn, so this photo can still be published. Try again in a moment.');
+          Alert.alert('Still Allowed', 'That was not withdrawn, so this photo can still be published. Try again in a moment.');
           await loadPubs();
         } finally { setPubBusy(false); }
       } },
@@ -1255,7 +1255,7 @@ export default function Scans() {
       return true;
     } catch (e) {
       reportError('scans.photos.upload', e);
-      Alert.alert('Not saved', 'That photo could not be saved, so it is not in your progress yet. The original in your camera roll is untouched — try again in a moment.');
+      Alert.alert('Not Saved', 'That photo could not be saved, so it is not in your progress yet. The original in your camera roll is untouched — try again in a moment.');
       return false;
     } finally { setPhotoBusy(false); }
   };
@@ -1277,7 +1277,7 @@ export default function Scans() {
   const physiqueCheck = async (fromCamera: boolean) => {
     const keep = await new Promise<'save' | 'read-only' | null>((resolve) => {
       Alert.alert(
-        'Have a photo read?',
+        'Have a Photo Read?',
         'Two things can happen here and they are separate.\n\n'
         // Named, like every other door in the app. "An AI" is a category; a
         // member deciding whether to send a full-body photograph of themselves
@@ -1302,7 +1302,7 @@ export default function Scans() {
     // The photo is saved only if they said so. It is told the same truth about
     // whether that worked as any other progress photo.
     if (keep === 'save') await savePhoto(asset.uri);
-    if (!visionAvailable() || !asset.base64) { Alert.alert('AI not on yet', 'Physique analysis turns on with the AI backend.'); return; }
+    if (!visionAvailable() || !asset.base64) { Alert.alert('AI Not On Yet', 'Physique analysis turns on with the AI backend.'); return; }
     setPhys(null); setPhysOpen(true); setPhysBusy(true);
     let pb = asset.base64;
     // The resize is an optimisation, not the read. `pb` already holds the
@@ -1314,7 +1314,7 @@ export default function Scans() {
     try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) pb = mm.base64; } catch { /* see above: the original base64 is still in `pb` */ }
     const r = await analyzePhysique(pb, 'image/jpeg');
     setPhysBusy(false);
-    if (r) setPhys(r); else { setPhysOpen(false); Alert.alert('Could not analyze', 'Try a clearer, well-lit full-body photo.'); }
+    if (r) setPhys(r); else { setPhysOpen(false); Alert.alert('Could Not Analyze', 'Try a clearer, well-lit full-body photo.'); }
   };
 
   /**
@@ -1412,7 +1412,7 @@ export default function Scans() {
           // exactly what happened rather than "something went wrong" — the
           // difference is whether the photo is still there.
           await loadPhotos();
-          Alert.alert('Still there', 'That photo could not be deleted, so nothing was removed. Try again in a moment.');
+          Alert.alert('Still There', 'That photo could not be deleted, so nothing was removed. Try again in a moment.');
         } finally { setPhotoBusy(false); }
       },
     });
@@ -1423,10 +1423,10 @@ export default function Scans() {
    *  database keeps: a later photo has no grant row and nothing writes one. */
   const sendToCoach = (p: ProgressPhoto) => {
     const blocked = sendBlocker(p, coach, shares);
-    if (blocked) { Alert.alert('Not sent', blocked); return; }
+    if (blocked) { Alert.alert('Not Sent', blocked); return; }
     const c = coach!;
     const who = c.name || 'your coach';
-    Alert.alert(`Send this photo to ${who}?`,
+    Alert.alert(`Send This Photo to ${who}?`,
       `They will be able to open this one photo, and only this one. Photos you add later are not sent. You can take it back whenever you like.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Send', onPress: async () => {
@@ -1439,7 +1439,7 @@ export default function Scans() {
           toast.say(`Sent. ${who} can now open this photo until you take it back.`);
         } catch (e) {
           reportError('scans.photos.share', e);
-          Alert.alert('Not sent', `That photo was not sent, so ${who} still cannot see it. Nothing about your photos has changed. Try again in a moment.`);
+          Alert.alert('Not Sent', `That photo was not sent, so ${who} still cannot see it. Nothing about your photos has changed. Try again in a moment.`);
           await loadShares();
         } finally { setShareBusy(false); }
       } },
@@ -1452,16 +1452,16 @@ export default function Scans() {
     const c = coach;
     if (!c) return;
     const who = c.name || 'your coach';
-    Alert.alert('Take this photo back?', `${who} will no longer be able to open it. ${revokeCaveat()}`, [
-      { text: 'Leave it', style: 'cancel' },
-      { text: 'Take it back', style: 'destructive', onPress: async () => {
+    Alert.alert('Take This Photo Back?', `${who} will no longer be able to open it. ${revokeCaveat()}`, [
+      { text: 'Leave It', style: 'cancel' },
+      { text: 'Take It Back', style: 'destructive', onPress: async () => {
         setShareBusy(true);
         try {
           await unsharePhoto(p.id, c.id);
           setShares((s) => (s === null ? null : s.filter((x) => x.photoId !== p.id)));
         } catch (e) {
           reportError('scans.photos.unshare', e);
-          Alert.alert('Still shared', `That photo was not withdrawn, so ${who} can still see it. Try again in a moment.`);
+          Alert.alert('Still Shared', `That photo was not withdrawn, so ${who} can still see it. Try again in a moment.`);
           await loadShares();
         } finally { setShareBusy(false); }
       } },
@@ -1479,11 +1479,11 @@ export default function Scans() {
     const pubState = publishStateOf(p.id, pubs);
     const when = fmtFullDay(p.takenAt);
     const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
-    if (state === 'sent') buttons.push({ text: 'Take back from coach', onPress: () => takeBackFromCoach(p) });
-    else if (state === 'private') buttons.push({ text: 'Send to coach', onPress: () => sendToCoach(p) });
-    if (state === 'sent' && pubState === 'allowed') buttons.push({ text: 'Stop them publishing it', onPress: () => stopPublishing(p) });
-    else if (state === 'sent' && pubState === 'not-allowed') buttons.push({ text: 'Let them publish it', onPress: () => allowPublishing(p) });
-    buttons.push({ text: 'Delete photo', style: 'destructive', onPress: () => removePhoto(p) });
+    if (state === 'sent') buttons.push({ text: 'Take Back from Coach', onPress: () => takeBackFromCoach(p) });
+    else if (state === 'private') buttons.push({ text: 'Send to Coach', onPress: () => sendToCoach(p) });
+    if (state === 'sent' && pubState === 'allowed') buttons.push({ text: 'Stop Them Publishing It', onPress: () => stopPublishing(p) });
+    else if (state === 'sent' && pubState === 'not-allowed') buttons.push({ text: 'Let Them Publish It', onPress: () => allowPublishing(p) });
+    buttons.push({ text: 'Delete Photo', style: 'destructive', onPress: () => removePhoto(p) });
     buttons.push({ text: 'Cancel', style: 'cancel' });
     // Two sentences, because there are two separate promises about this photo
     // and collapsing them is exactly the confusion this feature exists inside.
@@ -1564,7 +1564,7 @@ export default function Scans() {
     const w = weightToKg(eWt, wu);
     const f = readNumber(eBf);
     if (w == null || !(w > 0) || f == null || !(f > 0)) {
-      Alert.alert('Check the numbers', 'A scan needs a weight and a body-fat percentage. Clearing one is not the same as correcting it — delete the scan instead if it should not be there.');
+      Alert.alert('Check the Numbers', 'A scan needs a weight and a body-fat percentage. Clearing one is not the same as correcting it — delete the scan instead if it should not be there.');
       return;
     }
     // Blank muscle means the report gave none, and clearing the box has to be
@@ -1598,7 +1598,7 @@ export default function Scans() {
       if (warn || clash) {
         const proceed = await new Promise<boolean>((resolve) => {
           Alert.alert(
-            'Move this scan?',
+            'Move This Scan?',
             [`${fmt(editing.takenAt)} becomes ${fmt(toISO ?? '')}.`, warn, clash].filter(Boolean).join(' '),
             [
               { text: 'Keep the Date', style: 'cancel', onPress: () => resolve(false) },
@@ -1622,7 +1622,7 @@ export default function Scans() {
       // The sheet stays open with the corrected numbers in it. Closing it would
       // leave a corrected figure on screen that is not on the server, which is
       // the state this whole screen's read-status handling exists to avoid.
-      Alert.alert('Not saved', 'That correction could not be saved, so the scan on your record is unchanged and so are your targets. Your numbers are still here — try again in a moment.');
+      Alert.alert('Not Saved', 'That correction could not be saved, so the scan on your record is unchanged and so are your targets. Your numbers are still here — try again in a moment.');
       return;
     }
     // A moved date changes the ORDER of the history, and the order is what
@@ -1646,7 +1646,7 @@ export default function Scans() {
     // deleting a duplicate has a right to know that.
     const isNewest = cd.scans.length > 0 && cd.scans[cd.scans.length - 1].id === sc.id;
     Alert.alert(
-      'Delete this scan?',
+      'Delete This Scan?',
       // Same rule as the row's label: the weight is omitted rather than
       // dashed, because this line is prose in a confirmation somebody is about
       // to act on irreversibly.
@@ -1665,7 +1665,7 @@ export default function Scans() {
             const ok = await cd.deleteScan(sc.id);
             setEBusy(false);
             if (!ok) {
-              Alert.alert('Not deleted', 'That scan could not be removed, so it is still on your record and still visible to your coach. Nothing has been changed — try again in a moment.');
+              Alert.alert('Not Deleted', 'That scan could not be removed, so it is still on your record and still visible to your coach. Nothing has been changed — try again in a moment.');
               return;
             }
             setEditId(null);
@@ -2050,7 +2050,7 @@ export default function Scans() {
         {/* ── the one card: the scan you can act on ───────────────────────── */}
         <Section>
           <ActionCard
-            title={latest ? 'Latest InBody Scan' : 'Add your first InBody scan'}
+            title={latest ? 'Latest InBody Scan' : 'Add Your First InBody Scan'}
             // The scan's OWN figures and the scan's OWN date. This card is the
             // one place on the screen whose subject really is the scan, so it
             // may differ from the Weight tile below — and it now says the date
@@ -2197,7 +2197,7 @@ export default function Scans() {
               "Could not check" and "none shared" look nothing alike on purpose:
               one is reassurance, the other is the absence of it. */}
           <View style={{ backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.md, marginBottom: sp.lg }}>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>Your coach can see{sharedNote(shares) ? ' · ' + sharedNote(shares) : ''}</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>Your Coach Can See{sharedNote(shares) ? ' · ' + sharedNote(shares) : ''}</Text>
             {sharesErr ? (
               <View>
                 <Flag tone={t.warn}>
@@ -2231,7 +2231,7 @@ export default function Scans() {
                         {p ? fmtFullDay(p.takenAt) : 'A photo not in the list above'}
                       </Text>
                       <Pressable onPress={() => { if (p && !shareBusy) takeBackFromCoach(p); }} hitSlop={8} disabled={!p || shareBusy}>
-                        <Text style={{ ...ty.caption, ...font('600'), color: p ? t.brand : t.ink3 }}>Take back</Text>
+                        <Text style={{ ...ty.caption, ...font('600'), color: p ? t.brand : t.ink3 }}>Take Back</Text>
                       </Pressable>
                     </View>
                   );
@@ -2249,7 +2249,7 @@ export default function Scans() {
               unlanded read says so, no coach means there is nobody to agree
               with, and a real empty list is a real answer. */}
           <View style={{ backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.md, marginBottom: sp.lg }}>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>Your coach can publish</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>Your Coach Can Publish</Text>
             {pubsErr ? (
               <View>
                 <Flag tone={t.warn}>
@@ -2280,7 +2280,7 @@ export default function Scans() {
                         {p ? fmtFullDay(p.takenAt) : 'A photo not in the list above'}
                       </Text>
                       <Pressable onPress={() => { if (p && !pubBusy) stopPublishing(p); }} hitSlop={8} disabled={!p || pubBusy}>
-                        <Text style={{ ...ty.caption, ...font('600'), color: p ? t.brand : t.ink3 }}>Take back</Text>
+                        <Text style={{ ...ty.caption, ...font('600'), color: p ? t.brand : t.ink3 }}>Take Back</Text>
                       </Pressable>
                     </View>
                   );
@@ -2566,7 +2566,7 @@ export default function Scans() {
             consequential also should not be the option below "Short summary".
         */}
         <Section>
-          <SectionHead title="Share With a Professional" />
+          <SectionHead title="Share with a Professional" />
           <Text style={{ ...ty.label, color: t.ink2 }}>
             A summary a physio, a doctor or a new coach can read: your body composition over time, your tape
             measurements, the training you have logged, and any injuries you have recorded.
@@ -2690,7 +2690,7 @@ export default function Scans() {
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{scanScreenPromise(sheetRecipients)}</Text>
             <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
               <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Take Photo</Text></Pressable>
-              <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Upload scan</Text></Pressable>
+              <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Upload Scan</Text></Pressable>
             </View>
             {img && (
               <View style={{ marginBottom: sp.md }}>
@@ -2721,7 +2721,7 @@ export default function Scans() {
                 )}
               </View>
             )}
-            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Scan date</Text>
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Scan Date</Text>
             <Pressable onPress={() => setShowDate(true)} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{scanDateLabel()}</Text><Icon name="calendar" size={15} color={t.ink3} />
             </Pressable>
@@ -2748,7 +2748,7 @@ export default function Scans() {
               <Field label="Weight" hint={wu} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
                 <TextInput value={wt} onChangeText={setWt} keyboardType="decimal-pad" style={input} />
               </Field>
-              <Field label="Body fat" hint="%" a11y="Body fat percentage">
+              <Field label="Body Fat" hint="%" a11y="Body fat percentage">
                 <TextInput value={bf} onChangeText={setBf} keyboardType="decimal-pad" style={input} />
               </Field>
               <Field label="Muscle" hint={wu} a11y={wu === 'kg' ? 'Skeletal muscle in kilograms' : 'Skeletal muscle in pounds'}>
@@ -2777,7 +2777,7 @@ export default function Scans() {
                 photographed before this existed went to both companies unasked
                 and has no row. See sheetSendLine's 'no-record'. */}
             <View style={{ marginTop: sp.xl }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Sheets you have been asked about</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Sheets You Have Been Asked About</Text>
               {consentStatus === 'loading' ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>Checking…</Text>
               ) : consentStatus === 'error' ? (
@@ -2823,7 +2823,7 @@ export default function Scans() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}> </Text>
-            <Text style={{ ...ty.head, color: t.ink }}>Scan date</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Scan Date</Text>
             <Pressable onPress={() => setShowDate(false)} hitSlop={8}><Text style={{ ...ty.label, ...font('600'), color: t.brand }}>Done</Text></Pressable>
           </View>
           <View style={{ position: 'relative' }}>
@@ -2937,7 +2937,7 @@ export default function Scans() {
             <Field label="Weight" hint={wu} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
               <TextInput value={eWt} onChangeText={setEWt} keyboardType="decimal-pad" style={input} />
             </Field>
-            <Field label="Body fat" hint="%" a11y="Body fat percentage">
+            <Field label="Body Fat" hint="%" a11y="Body fat percentage">
               <TextInput value={eBf} onChangeText={setEBf} keyboardType="decimal-pad" style={input} />
             </Field>
             <Field label="Muscle" hint={wu} a11y={wu === 'kg' ? 'Skeletal muscle in kilograms' : 'Skeletal muscle in pounds'}>
@@ -2966,7 +2966,7 @@ export default function Scans() {
               of the member as a question they can answer with "Keep the Date". */}
           {eDate ? (
             <View style={{ marginBottom: sp.lg }}>
-              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Scan date</Text>
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Scan Date</Text>
               <Pressable onPress={() => setEShowDate(true)}
                 accessibilityRole="button"
                 accessibilityLabel={`Scan date, ${fmt(eWheelISO())}`}
@@ -3014,7 +3014,7 @@ export default function Scans() {
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}> </Text>
-              <Text style={{ ...ty.head, color: t.ink }}>Scan date</Text>
+              <Text style={{ ...ty.head, color: t.ink }}>Scan Date</Text>
               <Pressable onPress={() => setEShowDate(false)} hitSlop={8}
                 accessibilityRole="button" accessibilityLabel="Done"><Text style={{ ...ty.label, ...font('600'), color: t.brand }}>Done</Text></Pressable>
             </View>
@@ -3052,7 +3052,7 @@ export default function Scans() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
-            <Text style={{ ...ty.title, color: t.ink }}>{physBusy ? 'Analyzing…' : 'AI physique read'}</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>{physBusy ? 'Analyzing…' : 'AI Physique Read'}</Text>
             <Ghost label="Close" onPress={() => setPhysOpen(false)} />
           </View>
           {physBusy ? (
@@ -3061,31 +3061,31 @@ export default function Scans() {
             <View>
               {phys.bodyFatPct != null ? (
                 <View style={{ marginBottom: sp.lg }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Estimated body fat</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Estimated Body Fat</Text>
                   <Text style={{ ...value(30), color: t.ink, marginTop: 2 }}>{phys.bodyFatPct}%</Text>
                 </View>
               ) : null}
               {phys.notes ? <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{phys.notes}</Text> : null}
               {phys.focusAreas.length > 0 ? (
                 <View>
-                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Focus next on</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Focus Next On</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                     {phys.focusAreas.map((a) => (<View key={a} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: sp.sm }}><Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{a}</Text></View>))}
                   </View>
                   {recommendedExercises(focusToGroups(phys.focusAreas)).length > 0 ? (
                     <View style={{ marginTop: sp.lg }}>
-                      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Recommended moves · tap to watch form</Text>
+                      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Recommended Moves · tap to watch form</Text>
                       {recommendedExercises(focusToGroups(phys.focusAreas)).map((ex) => (
                         <Pressable key={ex.name} onPress={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + ex.name + ' proper form'))} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                           <View style={{ flex: 1 }}><Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{ex.name}</Text><Text style={{ ...ty.caption, color: t.ink3 }}>{ex.group}</Text></View>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Icon name="play" size={14} color={t.brand} /><Text style={{ ...ty.label, color: t.ink2 }}>Watch demo</Text></View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Icon name="play" size={14} color={t.brand} /><Text style={{ ...ty.label, color: t.ink2 }}>Watch Demo</Text></View>
                         </Pressable>
                       ))}
                     </View>
                   ) : null}
                   {focusToGroups(phys.focusAreas).length > 0 ? (
                     <View style={{ marginTop: sp.lg }}>
-                      <Cta label="Emphasise These in My Plan" wide onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} />
+                      <Cta label="Emphasise These in My Plan" wide onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan Updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} />
                     </View>
                   ) : null}
                 </View>

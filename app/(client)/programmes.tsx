@@ -180,7 +180,7 @@ export default function Programmes() {
     return (
       <>
         <Section>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Ready-made programme</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Ready-Made Programme</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{name?.text ?? x.id}</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{metaLine(x)}</Text>
           {description ? (
@@ -218,7 +218,7 @@ export default function Programmes() {
             sets, the reps and the rests all come off the programme row — so the
             list is shown and the gap is named rather than the screen refusing. */}
         {movements.status === 'error' ? (
-          <Notice tone={t.warn} kicker="Movement names" title="The names of these movements could not be read"
+          <Notice tone={t.warn} kicker="Movement Names" title="The names of these movements could not be read"
             note="The programme itself is below and is complete. What is missing is only the catalogue name for each line, so the rows are listed by their catalogue id. Pull down to try again." />
         ) : null}
         {movements.status === 'ready' && movements.missing.length ? (

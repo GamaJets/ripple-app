@@ -205,28 +205,28 @@ export default function Measurements() {
  const saveFix = async () => {
   if (!fixing) return;
   const cm = lengthToCm(fixVal, lu);
-  if (cm == null || cm <= 0) { Alert.alert('Check that figure', `Type the ${fixing.label.toLowerCase()} measurement in ${lu}.`); return; }
+  if (cm == null || cm <= 0) { Alert.alert('Check That Figure', `Type the ${fixing.label.toLowerCase()} measurement in ${lu}.`); return; }
   const done = await updateMetric(fixing.at, fixing.key, cm);
   setFixing(null);
   // The answer is read. A correction reported over a write the server refused
   // would leave the wrong figure on the record with the member believing it is
   // gone — which is the failure this whole control exists to end, restated.
   if (done) toast.say(`${fixing.label} corrected.`);
-  else Alert.alert('Not corrected', `That change did not reach your account, so your ${fixing.label.toLowerCase()} is still exactly as it was. Try again in a moment.`);
+  else Alert.alert('Not Corrected', `That change did not reach your account, so your ${fixing.label.toLowerCase()} is still exactly as it was. Try again in a moment.`);
  };
  const removeFix = () => {
   if (!fixing) return;
   const f = fixing;
   Alert.alert(
-   `Remove this ${f.label.toLowerCase()} figure?`,
+   `Remove This ${f.label} Figure?`,
    'It comes off this date only. Everything else you measured that day stays, and so does every other date.',
    [
-    { text: 'Keep it', style: 'cancel' },
+    { text: 'Keep It', style: 'cancel' },
     { text: 'Remove', style: 'destructive', onPress: () => { void (async () => {
       const gone = await removeMetric(f.at, f.key);
       setFixing(null);
       if (gone) toast.say(`${f.label} removed.`);
-      else Alert.alert('It is still there', `That figure could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.`);
+      else Alert.alert('It Is Still There', `That figure could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.`);
     })(); } },
    ],
   );
@@ -240,7 +240,7 @@ export default function Measurements() {
  // an inch entry as centimetres, which is only invisible while the preference
  // does nothing — the moment it does, a 32 in waist becomes a 32 cm one.
  for (const { key } of METRICS) { const cm = lengthToCm(vals[key], lu); if (cm != null && cm > 0) parsed[key] = cm; }
- if (Object.keys(parsed).length === 0) { Alert.alert('Nothing to save', 'Enter at least one measurement.'); return; }
+ if (Object.keys(parsed).length === 0) { Alert.alert('Nothing to Save', 'Enter at least one measurement.'); return; }
  // `addEntry` says which of three things happened, and its answer was once
  // being thrown away entirely — so a refused write showed the entry on screen,
  // said "Saved", and lost it at the next launch. The client is told which one
@@ -259,11 +259,11 @@ export default function Measurements() {
  // — so both keep the interruption.
  if (out === 'stored') { toast.say('Measurements logged.'); return; }
  if (out === 'queued') {
-  Alert.alert('Waiting to send',
+  Alert.alert('Waiting to Send',
    'No signal, so these are saved on this phone and have not reached your account yet. They go up on their own once you are back online, under today\u2019s date.');
   return;
  }
- Alert.alert('Not saved',
+ Alert.alert('Not Saved',
   'These are on screen but could not be sent to your account, so they will be gone at the next launch. Enter them again in a moment.');
  };
 

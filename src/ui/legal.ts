@@ -55,7 +55,7 @@ export async function openLegalDoc(which: LegalDoc): Promise<void> {
   const opened = await openInAppBrowser(url);
   if (!opened) {
     Alert.alert(
-      `Couldn’t open the ${legalDocTitle(which)}`,
+      `Couldn’t Open the ${legalDocTitle(which)}`,
       `It is published at ${url}. Open that in your browser to read it.`,
     );
   }

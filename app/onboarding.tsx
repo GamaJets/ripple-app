@@ -87,17 +87,17 @@ export default function Onboarding() {
     // has not landed keeps the owner here with their typing intact.
     if (!tenant) {
       if (tenantStatus === 'loading') {
-        Alert.alert('One moment', 'Your gym is still being set up. Nothing has been lost — tap Open Studio again in a second.');
+        Alert.alert('One Moment', 'Your gym is still being set up. Nothing has been lost — tap Open Studio again in a second.');
         return;
       }
-      Alert.alert('Not saved', 'We could not reach your gym record, so nothing was saved and nothing was lost. The name and colour are under Brand; the session fee is under Ops.');
+      Alert.alert('Not Saved', 'We could not reach your gym record, so nothing was saved and nothing was lost. The name and colour are under Brand; the session fee is under Ops.');
       router.replace('/(owner)/dashboard');
       return;
     }
     setSaving(true);
     const okWrite = await updateTenant(patch);
     setSaving(false);
-    if (!okWrite) { Alert.alert('Could not save', 'Your gym details were not saved. The name and colour are under Brand; the session fee is under Ops.'); }
+    if (!okWrite) { Alert.alert('Could Not Save', 'Your gym details were not saved. The name and colour are under Brand; the session fee is under Ops.'); }
     router.replace('/(owner)/dashboard');
   };
 
@@ -122,7 +122,7 @@ export default function Onboarding() {
               meta="What your members and trainers see. Change it later under Brand." />
 
             <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
-            <Text style={lab}>Gym name</Text>
+            <Text style={lab}>Gym Name</Text>
             <TextInput
               value={gymName}
               onChangeText={setGymName}
@@ -131,14 +131,14 @@ export default function Onboarding() {
               autoCapitalize="words"
               returnKeyType="next"
               style={inp}
-              accessibilityLabel="Gym name"
+              accessibilityLabel="Gym Name"
             />
 
             {/* The very first money question the product asks an owner, and it
                 named a currency for them. `tenants.currency` exists; a gym
                 being set up has not chosen one yet, so the honest thing is to
                 ask for the number and not to put a currency on it. */}
-            <Text style={{ ...lab, marginTop: sp.lg }}>What one delivered session pays</Text>
+            <Text style={{ ...lab, marginTop: sp.lg }}>What One Delivered Session Pays</Text>
             <TextInput
               value={fee}
               onChangeText={setFee}
@@ -148,7 +148,7 @@ export default function Onboarding() {
               returnKeyType="done"
               onSubmitEditing={() => { void saveGym(); }}
               style={inp}
-              accessibilityLabel="What one delivered session pays"
+              accessibilityLabel="What One Delivered Session Pays"
             />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
               Payroll is counted against this. Left blank, payroll shows a dash, not a guess.

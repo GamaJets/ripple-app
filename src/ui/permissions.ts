@@ -64,7 +64,7 @@ export async function ensureMediaPermission(
   // The sheet is still available — it was just declined. Nothing to open.
   if (perm.canAskAgain) {
     Alert.alert(
-      'Access not granted',
+      'Access Not Granted',
       `${BRAND.label} needs ${thing} to ${purpose}. Tap it again and choose Allow.`,
     );
     return false;
@@ -101,10 +101,10 @@ export function offerCameraSettings(purpose: string): void {
  *  changed. Shared so the two entry points cannot drift into two sentences. */
 function offerSettings(thing: string, purpose: string): void {
   Alert.alert(
-    'Turn on access in Settings',
+    'Turn On Access in Settings',
     `iOS will not ask again, so ${thing} has to be switched on in Settings to ${purpose}.`,
     [
-      { text: 'Not now', style: 'cancel' },
+      { text: 'Not Now', style: 'cancel' },
       { text: 'Open Settings', onPress: () => { Linking.openSettings().catch(() => {}); } },
     ],
   );

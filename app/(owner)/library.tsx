@@ -63,7 +63,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
  *  hand, and the count a screen shows is counted at the time. A figure in
  *  prose is a claim with no test behind it — the most it can honestly do is
  *  say when somebody last looked. */
-const UNRECORDED = 'Not recorded';
+const UNRECORDED = 'Not Recorded';
 
 const ALL = 'All';
 
@@ -293,7 +293,7 @@ export default function OwnerLibrary() {
           ) : null}
         </View>
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle group</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle Group</Text>
         <Chips options={groups} value={group} onChange={setGroup}
           a11y={(g) => (g === ALL ? 'Show every muscle group' : `Show ${g} only`)} />
 
@@ -318,7 +318,7 @@ export default function OwnerLibrary() {
             // Not "no exercises". The catalogue is there; we could not read it,
             // and an owner sizing up the platform must not be shown an empty
             // list as though that were the product.
-            <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
+            <Notice tone={t.warn} kicker="Catalogue" title="The Exercise List Could Not Be Read"
               note="This is our end, not yours — the movements are still there. Nothing below this line is a statement about what the platform covers.">
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Try Again" onPress={() => { reload(); }} />
@@ -353,7 +353,7 @@ export default function OwnerLibrary() {
                     <View style={{ marginTop: sp.md }}>
                       {/* A count, not a bare "Show more". The number is the
                           point: it says how much is still below. */}
-                      <Ghost label={`Show ${Math.min(PAGE, list.length - shown)} more of ${list.length - shown}`}
+                      <Ghost label={`Show ${Math.min(PAGE, list.length - shown)} More of ${list.length - shown}`}
                         onPress={() => setShown((n) => n + PAGE)} />
                     </View>
                   ) : null}

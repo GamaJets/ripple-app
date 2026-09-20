@@ -88,7 +88,7 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
         <Field label={bwOn ? 'Added' : 'Load'} accessory={<WeightUnitToggle />} a11y={bwOn ? (unit === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight') : (unit === 'kg' ? 'Load in kilograms' : 'Load in pounds')}>
           <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad" style={inp} />
         </Field>
-        <Pressable accessibilityRole="button" accessibilityLabel="Log set" onPress={() => {
+        <Pressable accessibilityRole="button" accessibilityLabel="Log Set" onPress={() => {
           // The first box is checked HERE and said out loud. This guarded with a
           // bare `if (!reps) return`, so tapping the button with an empty box —
           // which is what happens when somebody types the load first and then
@@ -96,17 +96,17 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
           let value: number;
           if (timedOn) {
             const held = readHold(first);
-            if (!held.ok) { Alert.alert('How long was the hold?', held.reason); return; }
+            if (!held.ok) { Alert.alert('How Long Was the Hold?', held.reason); return; }
             value = held.secs;
           } else {
             const r = parseInt(first, 10);
-            if (!Number.isFinite(r) || r <= 0) { Alert.alert('How many reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
+            if (!Number.isFinite(r) || r <= 0) { Alert.alert('How Many Reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
             value = r;
           }
           const read = readLift(kg, unit);
           // Left in the box on a refusal, with the reason said, rather than
           // cleared — the number was typed once and the app has no better guess.
-          if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
+          if (!read.ok) { Alert.alert('Check That Load', read.reason); return; }
           // An empty load box IS a bodyweight set, which is what this screen's
           // alert has always told people. Recorded rather than inferred later: a
           // stored 0 cannot be told apart from a load nobody typed, and
@@ -114,13 +114,13 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
           onLog({ value, kg: read.kg, bw: bwOn || read.kg == null, timed: timedOn });
           setFirst(''); setKg('');
         }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
-          <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log set</Text>
+          <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log Set</Text>
         </Pressable>
       </View>
       <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap' }}>
         <SetKindChip
           t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)}
-          label="Bodyweight set"
+          label="Bodyweight Set"
           onLabel={`Bodyweight set — the box above is what you added, in ${unit}`}
           a11yHint={bwOn
             ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
@@ -128,7 +128,7 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
         />
         <SetKindChip
           t={t} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
-          label="Timed set"
+          label="Timed Set"
           onLabel="Timed set — the first box is seconds held"
           a11yHint={timedOn
             ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'

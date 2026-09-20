@@ -1062,7 +1062,7 @@ export function NotificationInbox(f: InboxFraming) {
           // left to be inferred from a list that looks authoritative.
           <Notice
             tone={t.crit}
-            kicker="Not confirmed"
+            kicker="Not Confirmed"
             title={items.length ? 'This is the last copy on this phone' : 'Your notifications could not be read'}
             note={items.length
               ? 'The server did not answer, so anything sent since you were last connected is not on this list.'

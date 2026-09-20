@@ -717,12 +717,12 @@ export default function WeeklyReport() {
         <View>
           <Rule />
           <Section>
-            <SectionHead title="Your week in a nutshell" note={reportWhole ? undefined : 'from what loaded'} />
+            <SectionHead title="Your Week in a Nutshell" note={reportWhole ? undefined : 'from what loaded'} />
             {coachAvailable() && consent === 'unknown' ? (
               <Text style={{ ...ty.caption, color: t.ink3 }}>Checking what you asked us to share…</Text>
             ) : coachAvailable() && consent === 'unasked' ? (
               <View>
-                <Notice tone={t.brand} kicker="Your data" title={REPORT_CONSENT_TITLE} note={REPORT_CONSENT_BODY}>
+                <Notice tone={t.brand} kicker="Your Data" title={REPORT_CONSENT_TITLE} note={REPORT_CONSENT_BODY}>
                   {/* Rendered from src/lib/reportShare.ts (the "sent" half) and
                       src/lib/coachShare.ts (the "never" half) rather than typed
                       here, so the list cannot drift from what is actually sent.
@@ -735,14 +735,14 @@ export default function WeeklyReport() {
                       built from, so a new fact line without a bullet does not
                       compile. */}
                   <View style={{ marginTop: sp.md }}>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>Only sent if you say yes</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>Only Sent If You Say Yes</Text>
                     {REPORT_SHARE_BULLETS.map((x) => (
                       <View key={x} style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.xs }}>
                         <Text style={{ ...ty.label, color: t.brand }}>•</Text>
                         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{x}</Text>
                       </View>
                     ))}
-                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Never sent</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Never Sent</Text>
                     {NEVER_SENT.map((x) => (
                       <View key={x} style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.xs }}>
                         <Text style={{ ...ty.label, color: t.ink3 }}>•</Text>

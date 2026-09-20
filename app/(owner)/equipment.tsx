@@ -74,9 +74,9 @@ import {
 const STATE_LABEL: Record<ServiceState, string> = {
   overdue: 'Overdue',
   due: 'Due',
-  unrecorded: 'Never serviced',
-  ok: 'In date',
-  unscheduled: 'No schedule',
+  unrecorded: 'Never Serviced',
+  ok: 'In Date',
+  unscheduled: 'No Schedule',
 };
 
 function toneFor(t: Theme, s: ServiceState): string {
@@ -246,12 +246,12 @@ export default function OwnerEquipment() {
       await load();
     } catch (e) {
       reportError('equipment.add', e);
-      Alert.alert('Could not add that', 'The item was not saved. Check your connection and try again.');
+      Alert.alert('Could Not Add That', 'The item was not saved. Check your connection and try again.');
     } finally { setBusy(false); }
   };
 
   const markServiced = (e: Equipment) => {
-    Alert.alert('Serviced today?', `${e.name} will be recorded as serviced on ${today}.`, [
+    Alert.alert('Serviced Today?', `${e.name} will be recorded as serviced on ${today}.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Record', onPress: async () => {
         // Said out loud: a service that was not written leaves the machine on
@@ -274,7 +274,7 @@ export default function OwnerEquipment() {
         }
         catch (err) {
           reportError('equipment.service', err);
-          Alert.alert('Could not record that service',
+          Alert.alert('Could Not Record That Service',
             (err instanceof Error && err.message) || 'Nothing was written. Check your connection and try again.');
         }
       } },
@@ -283,7 +283,7 @@ export default function OwnerEquipment() {
 
   const toggleStatus = (e: Equipment) => {
     const next = e.status === 'in_service' ? 'out_of_service' : 'in_service';
-    const verb = next === 'out_of_service' ? 'Take out of service' : 'Put back in service';
+    const verb = next === 'out_of_service' ? 'Take Out of Service' : 'Put Back in Service';
 
     /**
      * Taking a machine out asks WHY, and putting it back does not.
@@ -308,18 +308,18 @@ export default function OwnerEquipment() {
         await load();
       } catch (err) {
         reportError('equipment.status', err);
-        Alert.alert(`Could not ${verb.toLowerCase()}`,
+        Alert.alert(`Could Not ${verb}`,
           (err instanceof Error && err.message) || 'The register is unchanged. Check your connection and try again.');
       }
     };
 
     if (next === 'out_of_service' && typeof Alert.prompt === 'function') {
       Alert.prompt(
-        'What is wrong with it?',
+        'What Is Wrong with It?',
         `${e.name}${e.quantity > 1 ? ` (${e.quantity} units)` : ''} — this is what everyone else sees beside it until it is back.`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Take out', style: 'destructive', onPress: (v?: string) => { void write((v ?? '').trim() || null); } },
+          { text: 'Take Out', style: 'destructive', onPress: (v?: string) => { void write((v ?? '').trim() || null); } },
         ],
         'plain-text',
       );
@@ -482,7 +482,7 @@ export default function OwnerEquipment() {
             wondering what their members will actually be shown for it is one
             tap away here, and would be nowhere from a revenue roll-up. */}
         <Section>
-          <SectionHead title="What the platform can teach on it" />
+          <SectionHead title="What the Platform Can Teach on It" />
           <ListRow icon="dumbbell" tone="purple" title="Exercise Library"
             note="Every movement, filtered by the equipment it needs"
             onPress={() => router.push('/(owner)/library')} />
@@ -491,7 +491,7 @@ export default function OwnerEquipment() {
 
 
         <Section>
-          <SectionHead title={loaded && list.length ? `All kit · ${list.length}` : 'All kit'} />
+          <SectionHead title={loaded && list.length ? `All Kit · ${list.length}` : 'All Kit'} />
           {failed ? (
             <View style={{ marginBottom: loaded && list.length ? sp.md : 0 }}>
               <Flag tone={t.crit}>
@@ -619,7 +619,7 @@ export default function OwnerEquipment() {
                   <TextInput value={qty} onChangeText={setQty} keyboardType="number-pad" style={inp} accessibilityLabel="Quantity" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={lab}>Service every (days)</Text>
+                  <Text style={lab}>Service Every (Days)</Text>
                   <TextInput value={interval} onChangeText={setInterval} keyboardType="number-pad"
                     placeholder="Optional" placeholderTextColor={t.ink3} returnKeyType="done"
                     onSubmitEditing={() => { void commitAdd(); }} style={inp} accessibilityLabel="Service interval in days" />
@@ -647,7 +647,7 @@ export default function OwnerEquipment() {
                 accessibilityHint={!name.trim() ? 'Give the item a name first.' : undefined}
                 style={{ backgroundColor: name.trim() && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
                 <Text style={{ ...ty.label, ...font('600'), color: name.trim() && !busy ? t.brandInk : t.ink3 }}>
-                  {busy ? 'Adding…' : 'Add to the register'}
+                  {busy ? 'Adding…' : 'Add to the Register'}
                 </Text>
               </Pressable>
               <Ghost label="Cancel" onPress={() => setAddOpen(false)} />

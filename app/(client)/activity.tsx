@@ -384,14 +384,14 @@ export default function Activity() {
                   it is only true under a whole read. */}
               <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>
                 {feedStatus === 'loading' ? 'Reading…'
-                  : feedStatus === 'error' ? 'Nothing we could read'
+                  : feedStatus === 'error' ? 'Nothing We Could Read'
                   // 'partial' had no arm of its own and fell through to "Nothing
                   // yet", which is the very claim a truncated read cannot
                   // support. The buttons below were already withheld under it —
                   // check:whole saw to that — and the sentence above them went
                   // on saying the opposite.
-                  : feedStatus === 'partial' ? 'Nothing in the part we could read'
-                  : 'Nothing yet'}
+                  : feedStatus === 'partial' ? 'Nothing in the Part We Could Read'
+                  : 'Nothing Yet'}
               </Text>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
                 {feedStatus === 'loading' ? 'Your training, check-ins and bookings are on their way.'

@@ -250,7 +250,7 @@ export default function CoachBrand() {
             <SectionHead title="Trading Name" />
             <TextInput value={nameField} onChangeText={(v) => { setNameDraft(v); if (nameMsg) setNameMsg(null); }}
               placeholder="What you coach under" placeholderTextColor={t.ink3}
-              maxLength={MAX_BRAND_NAME} accessibilityLabel="Trading name" style={inp} />
+              maxLength={MAX_BRAND_NAME} accessibilityLabel="Trading Name" style={inp} />
             {nameMsg && nameMsg.bad ? (
               <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{nameMsg.text}</Flag>
             ) : (

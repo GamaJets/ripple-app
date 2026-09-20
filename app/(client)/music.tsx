@@ -301,7 +301,7 @@ export default function Music() {
      return;
    }
    Alert.alert(
-     'Play it where?',
+     'Play It Where?',
      'Spotify plays on a device rather than inside this app. Pick one and it starts there.',
      [
        ...usable.slice(0, 4).map((d) => ({
@@ -591,7 +591,7 @@ export default function Music() {
  // standing over a dead token, is the claim this screen keeps being fixed
  // for. A service added back here without its own state falls through to
  // "Not yet" rather than borrowing Spotify's word for it.
- const label = s.id === 'spotify' ? linkActionLabel(link, spotifyName) : conn[s.id] ? 'Connected' : 'Not yet';
+ const label = s.id === 'spotify' ? linkActionLabel(link, spotifyName) : conn[s.id] ? 'Connected' : 'Not Yet';
  const held = s.id === 'spotify' ? spotifyUsable || needsReconnect : conn[s.id];
  const verb = label === 'Reconnect' ? 'Reconnect ' : held ? 'Disconnect ' : 'Connect ';
  const busy = s.id === 'spotify' && spotifyBusy;

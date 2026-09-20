@@ -406,7 +406,7 @@ export default function StatementOfRecord() {
     const doc = statementDoc(statement);
     setBusy(false);
     Alert.alert(
-      'Send this statement',
+      'Send This Statement',
       statementShareBlurb(statement) + '\n\n'
       + (pdfExportAvailable()
         ? 'It goes as a PDF through your phone’s share sheet.'
@@ -438,7 +438,7 @@ export default function StatementOfRecord() {
     setBusy(false);
     const blocker = fileShareBlocker();
     Alert.alert(
-      items ? 'Send the line items' : 'Send the summary file',
+      items ? 'Send the Line Items' : 'Send the Summary File',
       statementShareBlurb(statement) + (blocker ? '\n\n' + blocker : ''),
       [
         { text: 'Cancel', style: 'cancel' },
@@ -570,7 +570,7 @@ export default function StatementOfRecord() {
                 </View>
               </ScrollView>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
-                <Text style={{ ...ty.caption, color: t.ink3 }}>Starting on day</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Starting on Day</Text>
                 <TextInput
                   value={String(start.day)}
                   onChangeText={(v) => {
@@ -587,8 +587,8 @@ export default function StatementOfRecord() {
                 />
                 {!isCalendarStart(start) ? (
                   <Pressable onPress={() => chooseStart(CALENDAR_YEAR_START)} hitSlop={8}
-                    accessibilityRole="button" accessibilityLabel="Use the calendar year">
-                    <Text style={{ ...ty.label, color: t.brand }}>Use the calendar year</Text>
+                    accessibilityRole="button" accessibilityLabel="Use the Calendar Year">
+                    <Text style={{ ...ty.label, color: t.brand }}>Use the Calendar Year</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -674,7 +674,7 @@ export default function StatementOfRecord() {
             {/* ── what could not be read, above every figure ────────────── */}
             {!statement.complete ? (
               <>
-                <Notice tone={t.crit} kicker="Not the whole picture" title="Parts of your record could not be read"
+                <Notice tone={t.crit} kicker="Not the Whole Picture" title="Parts of Your Record Could Not Be Read"
                   note="What is missing is named below. Nothing on this screen that is blank is a statement that you recorded nothing." />
                 <Section>
                   {statement.caveats.map((c, i) => (
@@ -694,8 +694,8 @@ export default function StatementOfRecord() {
             {nothingRecorded ? (
               <>
                 <Notice
-                  kicker="Nothing recorded"
-                  title="This Period Has Nothing In It"
+                  kicker="Nothing Recorded"
+                  title="This Period Has Nothing in It"
                   note="Every read came back in full, so this is your record rather than a failure. This app only holds what went through it — money a client handed you in cash, sent by transfer, or paid at a gym's front desk was never here to list. You can put those on the record yourself by issuing an invoice for them, and they will be on next year's statement."
                 />
                 <Rule />
@@ -783,7 +783,7 @@ export default function StatementOfRecord() {
                 heading above each says which way, so no column of it totals to
                 anything. The per-currency totals are the sections above. */}
             <Section>
-              <SectionHead title="The Lines In This Period"
+              <SectionHead title="The Lines in This Period"
                 note={lines && lines.total != null ? String(lines.total) : undefined} />
               {lines?.withheld ? (
                 <Flag style={{ marginTop: sp.sm }}>{lines.withheld}</Flag>

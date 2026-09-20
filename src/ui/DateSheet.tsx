@@ -105,7 +105,7 @@ const STEP_SIZE = 36;
  * fixes exactly that and must stay reachable from it.
  */
 export function DateSheet({
-  visible, value, onCancel, onPick, heading = 'Pick a day', note, range, fallback,
+  visible, value, onCancel, onPick, heading = 'Pick a Day', note, range, fallback,
 }: {
   visible: boolean;
   /** The field's current contents. '' or null when it is empty. */

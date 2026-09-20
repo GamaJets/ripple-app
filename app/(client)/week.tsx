@@ -254,10 +254,10 @@ export default function ThisWeek() {
         {programUnknown ? (
           <View style={{ marginTop: sp.lg }}>
             {stillChecking ? (
-              <Notice tone={t.ink3} kicker="This week" title="Still checking for a coach plan"
+              <Notice tone={t.ink3} kicker="This Week" title="Still Checking for a Coach Plan"
                 note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as it lands.`} />
             ) : (
-              <Notice tone={t.warn} kicker="This week" title="We couldn’t check for a coach plan"
+              <Notice tone={t.warn} kicker="This Week" title="We Couldn’t Check for a Coach Plan"
                 note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
             )}
           </View>
@@ -268,7 +268,7 @@ export default function ThisWeek() {
             an unmarked week and reads it as a week they let slip. */}
         {logStatus === 'error' ? (
           <View style={{ marginTop: sp.lg }}>
-            <Notice tone={t.warn} kicker="This week" title="We couldn’t read your training log"
+            <Notice tone={t.warn} kicker="This Week" title="We Couldn’t Read Your Training Log"
               note="Days you have already trained may not be marked below. Nothing has been lost — this screen just can't see it right now." />
           </View>
         ) : logStatus === 'partial' ? (
@@ -280,7 +280,7 @@ export default function ThisWeek() {
              own sentence, because "we could not read it" and "we could not read
              all of it" are two different things to be told. */
           <View style={{ marginTop: sp.lg }}>
-            <Notice tone={t.warn} kicker="This week" title="We couldn’t read your whole training log"
+            <Notice tone={t.warn} kicker="This Week" title="We Couldn’t Read Your Whole Training Log"
               note="You have more history than we can read at once, so some days you trained may not be marked below. Nothing has been lost." />
           </View>
         ) : null}
@@ -335,7 +335,7 @@ export default function ThisWeek() {
             const done = logged.has(isoDay(date));
             // A rest day says so and stays tappable — somebody who trains on a
             // day off still wants Train, and the log below still marks it.
-            const focus = workout ? workout.focus : 'Rest day';
+            const focus = workout ? workout.focus : 'Rest Day';
             // Counted the way Train's hero counts the same day: the plan's own
             // rows through `setCount`, so a coach's set table is the sets it
             // holds and the two screens cannot disagree about one day.

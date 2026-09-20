@@ -63,9 +63,9 @@ import { num1 } from '../../src/lib/format';
 import { END_ALIGN, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 const MOBILITY = [
- { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
- { name: 'Hip & lower-body', dur: '5 min', moves: ['90/90 hip switch ×8', 'Couch stretch 45s/side', 'Ankle rocks ×12/side', 'Glute bridge ×15'] },
- { name: 'Shoulders & upper', dur: '5 min', moves: ['Wall slides ×12', 'Thread the needle ×6/side', 'Doorway pec stretch 30s', 'Scapular push-ups ×12'] },
+ { name: 'Full-Body Warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
+ { name: 'Hip & Lower-Body', dur: '5 min', moves: ['90/90 hip switch ×8', 'Couch stretch 45s/side', 'Ankle rocks ×12/side', 'Glute bridge ×15'] },
+ { name: 'Shoulders & Upper', dur: '5 min', moves: ['Wall slides ×12', 'Thread the needle ×6/side', 'Doorway pec stretch 30s', 'Scapular push-ups ×12'] },
 ];
 
 /** How many nights of device sleep the screen asks for and lists. */
@@ -356,7 +356,7 @@ export default function Recovery() {
  const confirmRemoveNight = (id: string, hours: number, at: string) => {
   const nightLabel = new Date(at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   Alert.alert(
-   'Remove this night?',
+   'Remove This Night?',
    `${hours} hours on ${nightLabel} would come off your sleep log, and out of your average and your readiness score with it. This cannot be undone.`,
    [
     { text: 'Keep It', style: 'cancel' },
@@ -365,7 +365,7 @@ export default function Recovery() {
      style: 'destructive',
      onPress: async () => {
       const gone = await removeSleep(id);
-      if (!gone) Alert.alert('It is still there', 'That night could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.');
+      if (!gone) Alert.alert('It Is Still There', 'That night could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.');
      },
     },
    ],
@@ -475,7 +475,7 @@ export default function Recovery() {
    {/* Only when we KNOW there is no goal. A head that links to the goal
        editor because the goal read had not landed sends somebody to change a
        target on the strength of a number that had not arrived. */}
-   <SectionHead title="Hydration" note={hydration.offerGoal ? 'Set a water goal' : undefined}
+   <SectionHead title="Hydration" note={hydration.offerGoal ? 'Set a Water Goal' : undefined}
     onPress={hydration.offerGoal ? () => router.push('/(client)/habits') : undefined} />
    <View accessible accessibilityLabel={['Hydration', [fig(hydration.showCount ? cups : null), hydration.showRing && goalCups != null ? `of ${goalCups} glasses` : !hydration.showCount ? 'glasses today' : cups === 1 ? 'glass today' : 'glasses today'].join(' '), hydration.text].join(', ')}>
     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
@@ -544,7 +544,7 @@ export default function Recovery() {
     avgBpm={hrSource === 'whoop' ? whoopMetrics?.heartRateAvg ?? null : null}
     maxBpm={hrSource === 'whoop' ? whoopMetrics?.heartRateMax ?? null : null}
     age={age}
-    title="Heart-rate Zones"
+    title="Heart-Rate Zones"
     subtitle={
       hrSource === 'apple' ? 'Today, from your Apple Watch'
       : hrSource === 'whoop' ? "Today's workouts, from WHOOP"
@@ -573,7 +573,7 @@ export default function Recovery() {
        averaged into it: a number somebody remembered in the morning and a
        number a ring measured are not the same kind of fact, and blending
        them would make both unfalsifiable. */}
-   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From your devices</Text>
+   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From Your Devices</Text>
    {connectedKey === '' ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>
      No device connected. Connect a watch or a ring in Watch &amp; Devices and your nights appear here, each one labelled with which device recorded it.
@@ -656,7 +656,7 @@ export default function Recovery() {
    </>)}
 
    <View style={{ height: sp.xl }} />
-   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Logged by you</Text>
+   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Logged by You</Text>
    <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
     <TextInput value={hrs} onChangeText={setHrs} keyboardType="decimal-pad" accessibilityLabel="Hours slept"
      style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, width: 78, textAlign: 'center' }} />
@@ -679,19 +679,19 @@ export default function Recovery() {
    <Cta label="Log Sleep" wide disabled={!((readNumber(hrs) ?? 0) > 0) || q < 1} onPress={() => {
     const h = readNumber(hrs) ?? 0;
     const why = sleepRefusal(h, q);
-    if (why) { Alert.alert('That night was not logged', why); return; }
+    if (why) { Alert.alert('That Night Was Not Logged', why); return; }
     void (async () => {
      const out = await addSleep(h, q);
      if (out === 'refused') {
       // The provider refused it after the check above passed, which the two
       // agreeing about the range makes very unlikely — and "unlikely" is not
       // "cannot", and a member whose night vanished is owed the sentence.
-      Alert.alert('That night was not logged', sleepRefusal(h, q) ?? 'That night could not be stored, so nothing has been logged.');
+      Alert.alert('That Night Was Not Logged', sleepRefusal(h, q) ?? 'That night could not be stored, so nothing has been logged.');
       return;
      }
      setHrs(''); setQ(0);
      if (out === 'unsent') {
-      Alert.alert('Saved on this phone', 'That night has not reached your account yet — there is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
+      Alert.alert('Saved on This Phone', 'That night has not reached your account yet — there is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
      }
     })();
    }} />
@@ -827,7 +827,7 @@ export default function Recovery() {
 
   {/* ── rest-day guidance ───────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Rest-day Guidance" />
+   <SectionHead title="Rest-Day Guidance" />
    <Text style={{ ...ty.body, color: t.ink2 }}>Aim for 1–2 rest days a week. Deload every 4–6 weeks (drop ~40% volume) to let strength catch up. Light walking, mobility, and 7–9 h sleep beat total inactivity for recovery.</Text>
   </Section>
  </ScrollView>

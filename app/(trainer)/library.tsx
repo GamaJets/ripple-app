@@ -400,13 +400,13 @@ export default function TrainerLibrary() {
   // whether a COACH has filmed this movement, which is what the section above
   // it is titled. So it now says that, and stops denying the thumbnail.
   const clipNote = (c: Clip) =>
-    c === 'mine' ? 'Your clip'
-      : c === 'academy' ? 'Academy clip'
+    c === 'mine' ? 'Your Clip'
+      : c === 'academy' ? 'Academy Clip'
         // Not "Your clip". The coach filmed it and their client cannot watch
         // it, and a row that says only "Your clip" is the screen agreeing with
         // the belief that put it there.
-        : c === 'local' ? 'On this phone only'
-          : c === 'none' ? 'Not filmed'
+        : c === 'local' ? 'On This Phone Only'
+          : c === 'none' ? 'Not Filmed'
             : null;
 
   // Every figure here is a count over the rows we hold. Under 'partial' those
@@ -549,7 +549,7 @@ export default function TrainerLibrary() {
             }}>
             <Icon name={mineOnly ? 'check' : 'grid'} size={13} color={mineOnly ? t.brandInk : t.ink3} />
             <Text style={{ ...ty.label, ...font(mineOnly ? '600' : '500'), color: mineOnly ? t.brandInk : t.ink2 }}>
-              {countable ? `In your programmes · ${num(programmedHere)}` : 'In your programmes'}
+              {countable ? `In Your Programmes · ${num(programmedHere)}` : 'In Your Programmes'}
             </Text>
           </Pressable>
         ) : null}
@@ -598,14 +598,14 @@ export default function TrainerLibrary() {
               a gap in what we could read and not a gap in what they filmed. */}
           {status !== 'error' && !clipsKnown ? (
             vidStatus === 'error' ? (
-              <Notice tone={t.warn} kicker="Your Clips" title="Your clip library could not be read"
+              <Notice tone={t.warn} kicker="Your Clips" title="Your Clip Library Could Not Be Read"
                 note="The movements below are real. What is missing is whether you have filmed each one — so that column is blank rather than telling you that you have not.">
                 <View style={{ marginTop: sp.lg }}>
                   <Ghost label="Try Again" a11yLabel="Try reading your clip library again" onPress={() => { reloadVideos(); }} />
                 </View>
               </Notice>
             ) : vidStatus === 'partial' ? (
-              <Notice tone={t.warn} kicker="Your Clips" title="Only part of your clip library was read"
+              <Notice tone={t.warn} kicker="Your Clips" title="Only Part of Your Clip Library Was Read"
                 note="A movement marked as yours is definitely yours. One marked with nothing may still have a clip we did not reach in this read, so no row claims you have not filmed it.">
                 <View style={{ marginTop: sp.lg }}>
                   <Ghost label="Try Again" a11yLabel="Try reading your clip library again" onPress={() => { reloadVideos(); }} />
@@ -617,7 +617,7 @@ export default function TrainerLibrary() {
           {/* Signed out, or a session still resolving: every clip's owner is
               unknown, so none can be called yours. */}
           {status !== 'error' && clipsKnown && !ownershipKnown ? (
-            <Notice tone={t.warn} kicker="Your Clips" title="We cannot tell which clips are yours"
+            <Notice tone={t.warn} kicker="Your Clips" title="We Cannot Tell Which Clips Are Yours"
               note="Nobody is signed in on this device, so the clip column says nothing rather than crediting your own filming to somebody else." />
           ) : null}
 
@@ -627,7 +627,7 @@ export default function TrainerLibrary() {
             // Not "no exercises". The catalogue is there and we could not read
             // it, and a coach shown an empty list would conclude there is
             // nothing to programme.
-            <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
+            <Notice tone={t.warn} kicker="Catalogue" title="The Exercise List Could Not Be Read"
               note="This is our end, not yours — the movements are still there. Nothing below this line is a statement about what you can programme.">
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Try Again" onPress={() => { reload(); }} />
@@ -750,7 +750,7 @@ export default function TrainerLibrary() {
                     <View style={{ marginTop: sp.md }}>
                       {/* A count, not a bare "Show more". The number is the
                           point: it says how much is still below. */}
-                      <Ghost label={`Show ${num(Math.min(PAGE, list.length - shown))} more of ${num(list.length - shown)}`}
+                      <Ghost label={`Show ${num(Math.min(PAGE, list.length - shown))} More of ${num(list.length - shown)}`}
                         onPress={() => setShown((n) => n + PAGE)} />
                     </View>
                   ) : null}

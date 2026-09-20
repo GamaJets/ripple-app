@@ -23,10 +23,10 @@ export default function OwnerNotifications() {
   return (
     <NotificationInbox
       group="owner"
-      kicker="Your inbox"
+      kicker="Your Inbox"
       title="Notifications"
       blurb="Anything sent to you directly. Your gym's numbers live on the dashboard."
-      emptyTitle="Nothing has been sent to you"
+      emptyTitle="Nothing Has Been Sent to You"
       emptyNote="Offers you push go to your members, not here. This is where anything addressed to you personally arrives."
     />
   );

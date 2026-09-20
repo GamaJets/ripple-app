@@ -139,15 +139,15 @@ export default function Nudges() {
 
   const setAside = (item: Nudge) => {
     Alert.alert(
-      `Set ${item.name ?? 'this client'} aside?`,
+      `Set ${item.name ?? 'This Client'} Aside?`,
       `They will not be suggested again for ${item.mutedDaysIfDismissed} days. They stay on your Clients tab throughout — this only stops the prompt.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Set aside',
+          text: 'Set Aside',
           onPress: () => {
             void n.recordDismissed(item.clientId, item.drift, item.observed).then((r) => {
-              if (!r.ok) Alert.alert('Not recorded', r.reason);
+              if (!r.ok) Alert.alert('Not Recorded', r.reason);
             });
           },
         },
@@ -157,7 +157,7 @@ export default function Nudges() {
 
   const bringBack = (m: MutedRow) => {
     void n.undismiss(m.clientId).then((r) => {
-      if (!r.ok) Alert.alert('Not brought back', r.reason);
+      if (!r.ok) Alert.alert('Not Brought Back', r.reason);
     });
   };
 
@@ -165,7 +165,7 @@ export default function Nudges() {
     <View key={item.clientId}
       style={{ paddingVertical: sp.lg, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
-        <Text style={{ ...ty.head, color: t.ink, flexGrow: 1, flexShrink: 1 }}>{item.name ?? 'Unnamed client'}</Text>
+        <Text style={{ ...ty.head, color: t.ink, flexGrow: 1, flexShrink: 1 }}>{item.name ?? 'Unnamed Client'}</Text>
         <TonedChip label={DRIFT_LABEL[item.drift.status]} tone={driftChipTone(item.drift)} />
       </View>
 
@@ -253,7 +253,7 @@ export default function Nudges() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="Who has gone quiet is worked out from training records that live on the server, and there is no local copy of somebody else's. Nothing below is a claim that everybody is fine." />
           </Section>
         ) : n.status === 'loading' ? (
@@ -265,7 +265,7 @@ export default function Nudges() {
           </Section>
         ) : n.status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Unreadable" title="Nothing is suggested, because nothing was read"
+            <Notice tone={t.crit} kicker="Unreadable" title="Nothing Is Suggested, Because Nothing Was Read"
               note="This is not a quiet week. The training records did not come back, so no client can honestly be called quiet — pull back and open this again once you are connected.">
               <View style={{ marginTop: sp.md }}>
                 <Ghost label="Try Again" onPress={() => { void n.reload(); }} />
@@ -274,7 +274,7 @@ export default function Nudges() {
           </Section>
         ) : n.status === 'partial' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Incomplete" title="Only part of the record came back"
+            <Notice tone={t.warn} kicker="Incomplete" title="Only Part of the Record Came Back"
               note="No client is suggested from a partial read. A gap in a training record looks exactly like silence, and this is the one screen where telling those apart is the whole point.">
               <View style={{ marginTop: sp.md }}>
                 <Ghost label="Try Again" onPress={() => { void n.reload(); }} />
@@ -285,8 +285,8 @@ export default function Nudges() {
           <>
             {board.withheld.length ? (
               <Section>
-                <Notice tone={t.warn} kicker="Not assessed"
-                  title={`${board.withheld.length} on your book could not be assessed`}
+                <Notice tone={t.warn} kicker="Not Assessed"
+                  title={`${board.withheld.length} on Your Book Could Not Be Assessed`}
                   note="They are not below, and they are not fine — nothing could be read about them. This list is not your whole book.">
                   <View style={{ marginTop: sp.md }}>
                     {board.withheld.map((w) => (
@@ -325,7 +325,7 @@ export default function Nudges() {
                       style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
                         <Text style={{ ...ty.head, color: t.ink, flexGrow: 1, flexShrink: 1 }}>
-                          {d.name ?? 'Unnamed client'}
+                          {d.name ?? 'Unnamed Client'}
                         </Text>
                         <TonedChip tone="amber" icon="clock"
                           label={`${d.cadence.overdueDays} Day${d.cadence.overdueDays === 1 ? '' : 's'} Late`} />
@@ -396,7 +396,7 @@ export default function Nudges() {
                         <View key={w.clientId}
                           style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                           <Text style={{ ...ty.head, color: t.ink }}>
-                            {w.name ?? 'Unnamed client'}
+                            {w.name ?? 'Unnamed Client'}
                           </Text>
                           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{w.observed}</Text>
                           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
@@ -442,7 +442,7 @@ export default function Nudges() {
                         <View key={m.clientId}
                           style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                           <Text style={{ ...ty.head, color: t.ink }}>
-                            {m.name ?? 'Unnamed client'}
+                            {m.name ?? 'Unnamed Client'}
                           </Text>
                           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>
                             {ACTION_LABEL[m.muted.record.action]} · back in{' '}
@@ -523,7 +523,7 @@ export default function Nudges() {
               const r = await n.recordSent(clientId, drafting.drift, drafting.observed);
               setDrafting(null);
               if (!queued) {
-                if (!r.ok) Alert.alert('Sent, but not recorded', r.reason);
+                if (!r.ok) Alert.alert('Sent, but Not Recorded', r.reason);
                 return body;
               }
               /* Queued. The record write goes over the same connection that
@@ -541,7 +541,7 @@ export default function Nudges() {
               setQueuedFor((prev) => (prev.includes(clientId) ? prev : [...prev, clientId]));
               const waiting = queuedReason
                 ?? 'That message is saved on this phone and has not been sent yet. It goes as soon as you are back online.';
-              Alert.alert('Waiting to send', r.ok
+              Alert.alert('Waiting to Send', r.ok
                 ? waiting
                 : `${waiting} It could not be written to your record of who you have contacted, so they may be suggested again on another device — not on this one.`);
               return body;
@@ -640,7 +640,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
     // this is the one outcome where the sheet stays open, because it is the one
     // where trying again is the right thing to do.
     if (!r.ok && !r.queued) {
-      Alert.alert('Not sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
+      Alert.alert('Not Sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
       return;
     }
     await onSent(text, !r.ok, r.ok ? null : (r.reason ?? null));
@@ -657,7 +657,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
-        <PageHead title={nudge.name ?? 'Client'} subtitle="Draft — nothing sent yet" onBack={onClose} backLabel="Close without sending" />
+        <PageHead title={nudge.name ?? 'Client'} subtitle="Draft — nothing sent yet" onBack={onClose} backLabel="Close Without Sending" />
 
         <Section>
           <Text style={{ ...ty.label, color: t.ink2 }}>{nudge.observed}</Text>

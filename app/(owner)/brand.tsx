@@ -154,7 +154,7 @@ export default function OwnerBrand() {
     // states for itself; this says so again at the moment of the tap, because
     // the note is above the fold and the tap is what the owner remembers.
     if (!known) {
-      Alert.alert('Changed on this phone only',
+      Alert.alert('Changed on This Phone Only',
         status === 'error'
           ? 'Your gym could not be read, so the colour was not saved to it. This phone is drawn in the new colour; the gym still holds whatever it held.'
           : status === 'loading'
@@ -166,7 +166,7 @@ export default function OwnerBrand() {
     try {
       const saved = await updateTenant({ brandColor: color });
       if (!saved) {
-        Alert.alert('Colour not saved',
+        Alert.alert('Colour Not Saved',
           'The colour changed on this device only — your gym still has the colour it had, and other owners will not see this one.');
       }
     } finally { setColorBusy(false); }
@@ -185,7 +185,7 @@ export default function OwnerBrand() {
     setPalette(DEFAULT_PALETTE);
     setAccent(null);
     if (!known) {
-      Alert.alert('Changed on this phone only',
+      Alert.alert('Changed on This Phone Only',
         status === 'error'
           ? 'Your gym could not be read, so its colour was not cleared. This phone is back to the app’s own colour; the gym still holds whatever it held.'
           : status === 'loading'
@@ -197,7 +197,7 @@ export default function OwnerBrand() {
     try {
       const saved = await updateTenant({ brandColor: null });
       if (!saved) {
-        Alert.alert('Colour not cleared',
+        Alert.alert('Colour Not Cleared',
           'This device is back to the app’s own colour, but your gym still holds the one it had.');
       }
     } finally { setColorBusy(false); }
@@ -258,7 +258,7 @@ export default function OwnerBrand() {
           ) : (<>
             <TextInput value={nameField} onChangeText={(v) => { setDraft(v); if (msg) setMsg(null); }}
               placeholder="What the gym is called" placeholderTextColor={t.ink3}
-              accessibilityLabel="Gym name" style={inp} />
+              accessibilityLabel="Gym Name" style={inp} />
             {msg && msg.bad ? (
               <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{msg.text}</Flag>
             ) : (

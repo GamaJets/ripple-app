@@ -178,7 +178,7 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
       const who = await signedInUid('coachRequests.respond');
       if (who.fate !== null) {
         Alert.alert(
-          who.fate === 'signed-out' ? 'Signed out' : 'We couldn’t check your account',
+          who.fate === 'signed-out' ? 'Signed Out' : 'We couldn’t check your account',
           `${authGateMessage(who.fate)} ${r.name} has not been told anything either way and is still waiting.`,
         );
         setBusy(null);
@@ -207,7 +207,7 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
           // Stop here. Writing the roster row after this failed is what
           // produced a coach who could see a name and nothing behind it.
           reportError('coachRequests.link', linkErr);
-          Alert.alert('Could not accept', `${r.name} was not added. ${linkErr.message}`);
+          Alert.alert('Could Not Accept', `${r.name} was not added. ${linkErr.message}`);
           setBusy(null); return;
         }
         // NO roster write here, and its absence is the fix.
@@ -256,13 +256,13 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
         .eq('id', r.id)
         .eq('status', 'pending')
         .select('id');
-      if (uErr) { Alert.alert('Could not update the request', uErr.message); setBusy(null); return; }
+      if (uErr) { Alert.alert('Could Not Update the Request', uErr.message); setBusy(null); return; }
       setReqs((p) => p.filter((x) => x.id !== r.id));
       if (!(answered ?? []).length) {
         // Not an error, and not a send. The accept branch's `link_coaching`
         // above is idempotent, so the roster is right either way; what is wrong
         // is claiming to have just done something somebody else already did.
-        Alert.alert('Already answered',
+        Alert.alert('Already Answered',
           `${r.name}'s request had already been answered — from another device, or a second tap. Nothing has changed and they have not been told twice.`);
         setBusy(null); return;
       }
@@ -287,7 +287,7 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
       if (accept) notifySuccess();
       // One sentence for both branches, and it says which of the two things
       // actually happened rather than claiming a send either way.
-      Alert.alert(accept ? 'Client added' : 'Request declined',
+      Alert.alert(accept ? 'Client Added' : 'Request Declined',
         coachAnswerConfirmation(accept, r.name, told));
     } catch (e) {
       reportError('coachRequests.respond', e);
@@ -328,7 +328,7 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
       <Card tone={t.warn} style={{ marginBottom: sp.lg }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           <Icon name="people" size={15} color={t.warn} />
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching requests</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching Requests</Text>
         </View>
         <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
           We couldn’t check whether anyone has asked to be coached by you. Pull down to try again —

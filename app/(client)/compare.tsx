@@ -275,7 +275,7 @@ export default function Compare() {
 
   const sendFigures = () => {
     if (!pair || !rows) return;
-    void shareText(compareSummary(dayOf(pair.before), dayOf(pair.after), spanDays, rows), 'My progress comparison');
+    void shareText(compareSummary(dayOf(pair.before), dayOf(pair.after), spanDays, rows), 'My Progress Comparison');
   };
 
   const G = layout.gutter;

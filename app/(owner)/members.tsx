@@ -121,7 +121,7 @@ const SEARCH_LIMIT = 12;
 
 const METHODS: PaymentMethod[] = ['card', 'cash', 'transfer', 'direct_debit', 'other'];
 const METHOD_LABEL: Record<PaymentMethod, string> = {
-  card: 'Card', cash: 'Cash', transfer: 'Transfer', direct_debit: 'Direct debit', other: 'Other',
+  card: 'Card', cash: 'Cash', transfer: 'Transfer', direct_debit: 'Direct Debit', other: 'Other',
 };
 
 interface Candidate { id: string; name: string }
@@ -518,7 +518,7 @@ export default function OwnerMembers() {
       await load();
     } catch (e) {
       reportError('members.create', e);
-      Alert.alert('Could not open that membership', 'Nothing was saved. Check your connection and try again.');
+      Alert.alert('Could Not Open That Membership', 'Nothing was saved. Check your connection and try again.');
     } finally { setBusy(false); }
   };
 
@@ -527,7 +527,7 @@ export default function OwnerMembers() {
     const m = freezeFor;
     if (!m) return;
     const refusal = freezeRefusal(fzFrom, fzTo, dayWindow.day);
-    if (refusal) { Alert.alert('Those dates will not work', refusal); return; }
+    if (refusal) { Alert.alert('Those Dates Will Not Work', refusal); return; }
     // Computed here and written in the same update the dates go in, so the pair
     // cannot half-apply. Null when the membership is open-ended: there is no
     // term to extend, and inventing one would sell somebody an end date nobody
@@ -561,7 +561,7 @@ export default function OwnerMembers() {
       setFzFrom(''); setFzTo('');
     } catch (e) {
       reportError('members.freeze', e);
-      Alert.alert('Not paused',
+      Alert.alert('Not Paused',
         (e instanceof Error && e.message) || 'Nothing was changed. Check your connection and try again.');
     } finally { setFzBusy(false); }
   };
@@ -570,13 +570,13 @@ export default function OwnerMembers() {
    *  were given back when it was recorded, and taking them away again on a
    *  correction is not something to do silently. */
   const liftPause = (m: Membership) => {
-    Alert.alert('Remove this pause?', 'The end date stays where it is. If the pause was recorded by mistake, set the end date back yourself.', [
-      { text: 'Keep it', style: 'cancel' },
+    Alert.alert('Remove This Pause?', 'The end date stays where it is. If the pause was recorded by mistake, set the end date back yourself.', [
+      { text: 'Keep It', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         try { await setMembershipFreeze(supabase, m.id, null, null); await load(); }
         catch (e) {
           reportError('members.unfreeze', e);
-          Alert.alert('Not removed', (e instanceof Error && e.message) || 'Nothing was changed.');
+          Alert.alert('Not Removed', (e instanceof Error && e.message) || 'Nothing was changed.');
         }
       } },
     ]);
@@ -599,9 +599,9 @@ export default function OwnerMembers() {
     if (!m) return;
     const next = { startedOn: dtFrom, endsOn: dtTo || null };
     const refusal = datesRefusal(next);
-    if (refusal) { Alert.alert('Those dates will not work', refusal); return; }
+    if (refusal) { Alert.alert('Those Dates Will Not Work', refusal); return; }
     const patch = datesPatch({ startedOn: m.startedOn, endsOn: m.endsOn }, next);
-    if (!patch) { Alert.alert('Nothing to save', 'These are the dates this membership already has.'); return; }
+    if (!patch) { Alert.alert('Nothing to Save', 'These are the dates this membership already has.'); return; }
     setDtBusy(true);
     try {
       await setMembershipDates(supabase, m.id, patch);
@@ -613,7 +613,7 @@ export default function OwnerMembers() {
       // `memberships_owner` arrives here as a thrown error rather than as a
       // silent 204 that leaves the typed dates on screen looking saved.
       reportError('members.dates', e);
-      Alert.alert('Dates not saved',
+      Alert.alert('Dates Not Saved',
         (e instanceof Error && e.message)
         || `Nothing was changed — this membership still starts ${m.startedOn}. Check your connection and try again.`);
     } finally { setDtBusy(false); }
@@ -621,7 +621,7 @@ export default function OwnerMembers() {
 
   const changeStatus = (m: Membership, next: MembershipStatus) => {
     const verb = next === 'frozen' ? 'Freeze' : next === 'cancelled' ? 'Cancel' : 'Reactivate';
-    Alert.alert(`${verb} this membership?`, `${m.memberName ?? 'This member'} · ${m.planName ?? 'no plan'}`, [
+    Alert.alert(`${verb} This Membership?`, `${m.memberName ?? 'This member'} · ${m.planName ?? 'no plan'}`, [
       { text: 'Back', style: 'cancel' },
       { text: verb, style: next === 'cancelled' ? 'destructive' : 'default', onPress: async () => {
         // The failure was silent before this: `setMembershipStatus` could not
@@ -635,7 +635,7 @@ export default function OwnerMembers() {
         catch (e) {
           reportError('members.status', e);
           Alert.alert(
-            `Could not ${verb.toLowerCase()} that membership`,
+            `Could Not ${verb} That Membership`,
             (e instanceof Error && e.message) || 'Nothing was changed. Check your connection and try again.',
           );
         }
@@ -708,7 +708,7 @@ export default function OwnerMembers() {
       await load();
     } catch (e) {
       reportError('members.payment', e);
-      Alert.alert('Payment not recorded', 'Nothing was saved. Check your connection and try again.');
+      Alert.alert('Payment Not Recorded', 'Nothing was saved. Check your connection and try again.');
     } finally { setBusy(false); }
   };
 
@@ -874,7 +874,7 @@ export default function OwnerMembers() {
                 [
                   ['all', 'Everyone', 'Every membership on the register'],
                   ['expiring', `Renewing · ${EXPIRING_DAYS}d`, `Memberships running out in the next ${EXPIRING_DAYS} days`],
-                  ['overrun', 'Ran out', 'Memberships whose end date has passed and that the door still lets through'],
+                  ['overrun', 'Ran Out', 'Memberships whose end date has passed and that the door still lets through'],
                   ['paused', 'Paused', 'Memberships with a pause recorded that has not finished'],
                 ] as const
               ).map(([key, label, hint]) => {
@@ -1017,7 +1017,7 @@ export default function OwnerMembers() {
                     <Pressable onPress={() => { setPayFor(m); setAmount(''); }} hitSlop={6}
                       accessibilityRole="button" accessibilityLabel={`Take a payment from ${m.memberName ?? 'this member'}`}
                       style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Take payment</Text>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Take Payment</Text>
                     </Pressable>
                     {m.status === 'active' ? (
                       <Pressable onPress={() => changeStatus(m, 'frozen')} hitSlop={6}
@@ -1042,7 +1042,7 @@ export default function OwnerMembers() {
                       accessibilityLabel={`Set pause dates for ${m.memberName ?? 'this membership'}`}
                       style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                       <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>
-                        {m.frozenFrom ? 'Pause dates' : 'Pause dates…'}
+                        {m.frozenFrom ? 'Pause Dates' : 'Pause Dates…'}
                       </Text>
                     </Pressable>
                     {/* The dates the membership RUNS between, which is a
@@ -1059,7 +1059,7 @@ export default function OwnerMembers() {
                       accessibilityRole="button"
                       accessibilityLabel={`Correct the dates on ${m.memberName ?? 'this'} membership`}
                       style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Correct dates</Text>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Correct Dates</Text>
                     </Pressable>
                     {m.status === 'frozen' ? (
                       <Pressable onPress={() => changeStatus(m, 'active')} hitSlop={6}
@@ -1242,12 +1242,12 @@ export default function OwnerMembers() {
                     owner app were the ones that did not. */}
                 <Pressable disabled={!picked || busy} onPress={commitMembership}
                   accessibilityRole="button"
-                  accessibilityLabel={picked ? `Open a membership for ${picked.name ?? 'this member'}` : 'Open membership'}
+                  accessibilityLabel={picked ? `Open a membership for ${picked.name ?? 'this member'}` : 'Open Membership'}
                   accessibilityState={{ disabled: !picked || busy, busy }}
                   accessibilityHint={!picked ? 'Search for a member and choose one first.' : undefined}
                   style={{ backgroundColor: picked && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
                   <Text style={{ ...ty.label, ...font('600'), color: picked && !busy ? t.brandInk : t.ink3 }}>
-                    {busy ? 'Opening…' : 'Open membership'}
+                    {busy ? 'Opening…' : 'Open Membership'}
                   </Text>
                 </Pressable>
                 <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
@@ -1263,7 +1263,7 @@ export default function OwnerMembers() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, ...elevation.e2 }}>
           {freezeFor ? (<>
-            <Text style={{ ...ty.head, color: t.ink }}>Pause this membership</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Pause This Membership</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               {freezeFor.memberName ?? 'This member'} · {freezeFor.planName ?? 'no plan'}. The days are added back on
               the end, so they get the time they paid for.
@@ -1337,7 +1337,7 @@ export default function OwnerMembers() {
         visible={fzPicking != null}
         value={fzPicking === 'to' ? fzTo : fzFrom}
         fallback={fzPicking === 'to' ? (fzFrom || null) : null}
-        heading={fzPicking === 'to' ? 'Last day of the pause' : 'First day of the pause'}
+        heading={fzPicking === 'to' ? 'Last Day of the Pause' : 'First Day of the Pause'}
         note={fzPicking === 'to'
           ? 'The last day they cannot train. It runs again the day after.'
           : 'The first day the membership does not run.'}
@@ -1372,7 +1372,7 @@ export default function OwnerMembers() {
             const notes = datesNotes(term, next, dayWindow.day);
             const stored = termLine(term);
             return (<>
-              <Text style={{ ...ty.head, color: t.ink }}>Correct these dates</Text>
+              <Text style={{ ...ty.head, color: t.ink }}>Correct These Dates</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
                 {datesFor.memberName ?? 'This member'} · {datesFor.planName ?? 'no plan'}.
                 {/* What is stored right now, said before it is replaced. The
@@ -1403,7 +1403,7 @@ export default function OwnerMembers() {
                   accessibilityRole="button" accessibilityLabel="Clear the end date, so this membership runs until somebody stops it"
                   accessibilityState={{ disabled: dtBusy }}
                   style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
-                  <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>No end date</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>No End Date</Text>
                 </Pressable>
               ) : null}
 
@@ -1439,7 +1439,7 @@ export default function OwnerMembers() {
         visible={dtPicking != null}
         value={dtPicking === 'to' ? dtTo : dtFrom}
         fallback={dtPicking === 'to' ? (dtFrom || null) : null}
-        heading={dtPicking === 'to' ? 'The day this membership ends' : 'The day this membership began'}
+        heading={dtPicking === 'to' ? 'The Day This Membership Ends' : 'The Day This Membership Began'}
         note={dtPicking === 'to'
           ? 'The last day it runs. Leave it unset for a membership that runs until somebody stops it.'
           : 'Tenure, cohort retention and the billing anniversary are all measured from this day.'}
@@ -1463,7 +1463,7 @@ export default function OwnerMembers() {
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPayFor(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Take a payment</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Take a Payment</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               {payFor?.memberName ?? 'Member'} · recorded at the desk, not charged to a card.
             </Text>
@@ -1540,7 +1540,7 @@ export default function OwnerMembers() {
                   : !amount.trim() ? 'Enter an amount first.' : undefined}
                 style={{ backgroundColor: payReady ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
                 <Text style={{ ...ty.label, ...font('600'), color: payReady ? t.brandInk : t.ink3 }}>
-                  {busy ? 'Recording…' : 'Record payment'}
+                  {busy ? 'Recording…' : 'Record Payment'}
                 </Text>
               </Pressable>
               <Ghost label="Cancel" onPress={() => setPayFor(null)} />

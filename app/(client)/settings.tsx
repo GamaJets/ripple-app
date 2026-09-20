@@ -205,14 +205,14 @@ export default function Settings() {
       // one section down in the same file: an Android member sent looking for
       // an Apple feature inside an Apple settings app. The vocabulary is the
       // handset's now; see src/lib/appLock.ts.
-      Alert.alert('Not available on this device',
+      Alert.alert('Not Available on This Device',
         `Set up ${lockMethodsLabel(LOCK_PLATFORM)} in ${lockSettingsLabel(LOCK_PLATFORM)}, then this can be turned on.`);
       return;
     }
     const want = !lock.enabled;
     const ok = await lock.setEnabled(want);
     if (!ok && want) {
-      Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
+      Alert.alert('Not Turned On', `${lock.label} was not confirmed, so the lock is still off.`);
     }
   };
   // ── The notification switches ─────────────────────────────────────────────
@@ -242,12 +242,12 @@ export default function Settings() {
     const res = await st.setPushEnabled(want);
     if (res === 'on' || res === 'off') return;
     if (res === 'no-build') {
-      Alert.alert('Not on this build yet',
+      Alert.alert('Not on This Build Yet',
         'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
       return;
     }
     if (res === 'os-refused') {
-      Alert.alert('Turned off on your phone',
+      Alert.alert('Turned Off on Your Phone',
         // Not "…switched off for Repple". This is a white-label build and the
         // app on this phone may not be called Repple at all.
         "Notifications are switched off for this app in your phone's own Settings, so nothing can be delivered until you turn them back on there. Your choice here has been saved.");
@@ -256,12 +256,12 @@ export default function Settings() {
     // 'off-pending'. Said out loud rather than hoped over: somebody who has just
     // turned notifications off and then gets one needs to have been told it
     // might happen.
-    Alert.alert('Saved, but not confirmed',
+    Alert.alert('Saved, but Not Confirmed',
       "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
   };
 
   const signOut = () => {
-    Alert.alert('Sign out', 'You will need your email and password to sign back in.', [
+    Alert.alert('Sign Out', 'You will need your email and password to sign back in.', [
       { text: 'Cancel', style: 'cancel' },
       // Sent back to the sign-in screen explicitly. The only auth gate is the
       // one in app/index.tsx, which redirects when !authed — and that route is
@@ -279,7 +279,7 @@ export default function Settings() {
       // without it, so the previous member's coach could still reach this
       // handset. It lives in src/ui/auth.tsx now rather than on this screen,
       // because the coach and owner apps sign out too.
-      { text: 'Sign out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
+      { text: 'Sign Out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
   // Said under the picker rather than left implied. Repple records weight in
@@ -366,7 +366,7 @@ export default function Settings() {
       // named after a company they do not deal with, and it is the name they
       // will search for in two years — the argument is in src/lib/gdpr.ts and
       // this screen was the one place still ignoring it.
-      await shareTextFile(res.json, MY_DATA_FILENAME, 'application/json', 'Export my data');
+      await shareTextFile(res.json, MY_DATA_FILENAME, 'application/json', 'Export My Data');
       // The manifest, so the files can be saved from the row below. Kept
       // whether or not the export was complete, along with WHETHER it was —
       // a count over a short read is the same defect as an empty table over a
@@ -379,7 +379,7 @@ export default function Settings() {
         // parts are NAMED rather than counted, because "3 parts" tells nobody
         // whether their payments are in the file.
         Alert.alert(
-          'That copy is incomplete',
+          'That Copy Is Incomplete',
           incompleteExportLine(res.failed.map((f) => f.table), BRAND.supportEmail),
         );
       }
@@ -390,7 +390,7 @@ export default function Settings() {
       // "Not exported", not "something went wrong": the member needs to know
       // that no copy of their data was made, because the next thing this screen
       // offers them is deleting it.
-      Alert.alert('Not exported',
+      Alert.alert('Not Exported',
         `We couldn't put your data together just now, so no copy has been made. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
     } finally { setDataBusy(false); }
   };
@@ -412,13 +412,13 @@ export default function Settings() {
     setSavingPath(f.path);
     try {
       const b64 = await readMyFile(f.bucket, f.path);
-      if (!b64) { Alert.alert('Not saved', saveFileFailure(fileShareBlocker())); return; }
+      if (!b64) { Alert.alert('Not Saved', saveFileFailure(fileShareBlocker())); return; }
       // The object key's last segment. It is the name this app chose at upload
       // and is already safe on every platform (see `injuryDocObjectPath` and
       // `messageAttachmentPath`), so nothing here has to invent one.
       const name = f.path.split('/').pop() || 'file';
-      const ok = await shareBinaryFile(b64, name, 'application/octet-stream', 'Save this file');
-      if (!ok) Alert.alert('Not saved', saveFileFailure(fileShareBlocker()));
+      const ok = await shareBinaryFile(b64, name, 'application/octet-stream', 'Save This File');
+      if (!ok) Alert.alert('Not Saved', saveFileFailure(fileShareBlocker()));
     } finally { setSavingPath(null); }
   };
   const deleteAccount = () => {
@@ -427,17 +427,17 @@ export default function Settings() {
     // somebody deleting their account had no reason to think their
     // physiotherapy report was anywhere but gone with it.
     Alert.alert(
-      'Delete your account?',
+      'Delete Your Account?',
       'This requests permanent deletion of your account and all your data. This cannot be undone.\n\n'
       + DELETION_FILES_NOTE,
       [
-      { text: 'Keep my account', style: 'cancel' },
+      { text: 'Keep My Account', style: 'cancel' },
       // The failure branch used to say "We've recorded your request", which was a
       // claim the app could not stand behind — request_account_deletion() had
       // just refused. It now says nothing was scheduled, and does NOT sign the
       // person out, because being signed out of a retry is the last thing you
       // want when the request did not land.
-      { text: 'Request deletion', style: 'destructive', onPress: async () => {
+      { text: 'Request Deletion', style: 'destructive', onPress: async () => {
         const ok = await requestAccountDeletion();
         await loadDeletion();
         // "Check your connection" was printed here whatever had happened, and
@@ -451,28 +451,28 @@ export default function Settings() {
         // at the one moment they most need an escalation that works, was sent
         // to a company they have never heard of, that cannot act for their gym,
         // and whose existence they were never told about.
-        if (!ok) { Alert.alert('Not requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`); return; }
-        Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. Signing you out of this phone now.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }]);
+        if (!ok) { Alert.alert('Not Requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`); return; }
+        Alert.alert('Deletion Requested', 'Your account is scheduled for deletion and your data will be erased. Signing you out of this phone now.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }]);
       } },
       ],
     );
   };
   const withdrawDeletion = () => {
-    Alert.alert('Withdraw your deletion request?', 'Your account and everything in it will be kept. You can ask to be deleted again at any time.', [
-      { text: 'Leave it pending', style: 'cancel' },
-      { text: 'Withdraw request', onPress: async () => {
+    Alert.alert('Withdraw Your Deletion Request?', 'Your account and everything in it will be kept. You can ask to be deleted again at any time.', [
+      { text: 'Leave It Pending', style: 'cancel' },
+      { text: 'Withdraw Request', onPress: async () => {
         if (withdrawBusy) return; setWithdrawBusy(true);
         try {
           const ok = await withdrawAccountDeletion();
           if (!ok) {
             reportError('settings.withdrawDeletion', new Error('withdraw_account_deletion did not clear the request'));
-            Alert.alert('Not withdrawn', `Your deletion request is still in place — nothing has changed. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
+            Alert.alert('Not Withdrawn', `Your deletion request is still in place — nothing has changed. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
             return;
           }
           // Re-read rather than assume: what the screen shows next comes from the
           // profile row, not from the fact that a call returned.
           await loadDeletion();
-          Alert.alert('Request withdrawn', 'Your account will be kept and nothing has been deleted.');
+          Alert.alert('Request Withdrawn', 'Your account will be kept and nothing has been deleted.');
         } finally { setWithdrawBusy(false); }
       } },
     ]);
@@ -519,7 +519,7 @@ export default function Settings() {
             from rows people open every week. Every section is the one it was;
             only the sequence changed. */}
         <Section>
-          <SectionHead title="Signed in as" />
+          <SectionHead title="Signed In As" />
           <Line t={t} first label="Name" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.name)} />
           <Line t={t} label="Email" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.email)} />
           {/* The middle ground this section did not have. It offered sign-out
@@ -607,7 +607,7 @@ export default function Settings() {
               <Text style={{ ...ty.label, color: t.ink3 }}>In short: we store your training, nutrition and body data to power your plan. Health data is never sold or shared with advertisers. You can export or delete your data at any time from your account. Photos and scans are stored securely and visible only to you and your coach.</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The policy you agreed to is the full document.</Text>
               <View style={{ flexDirection: 'row' }}>
-                <Ghost label="Read The Privacy Policy" onPress={() => { void openLegalDoc('privacy'); }} />
+                <Ghost label="Read the Privacy Policy" onPress={() => { void openLegalDoc('privacy'); }} />
               </View>
             </View>
           ) : null}
@@ -619,7 +619,7 @@ export default function Settings() {
               <Text style={{ ...ty.label, color: t.ink3 }}>In short: {BRAND.label} provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The terms you agreed to are the full document.</Text>
               <View style={{ flexDirection: 'row' }}>
-                <Ghost label="Read The Terms Of Service" onPress={() => { void openLegalDoc('terms'); }} />
+                <Ghost label="Read the Terms of Service" onPress={() => { void openLegalDoc('terms'); }} />
               </View>
             </View>
           ) : null}
@@ -651,7 +651,7 @@ export default function Settings() {
 
         <Section>
           <SectionHead title="Your Data" />
-          <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export my data">
+          <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export My Data">
             {/* The note names the money and the bookings, because the whole
                 defect was that it had neither and nobody could tell. It promises
                 a LIST of files rather than the files: those are saved one at a
@@ -665,7 +665,7 @@ export default function Settings() {
               that came back short. */}
           {files !== null ? (
             <Pressable onPress={() => setFilesOpen(true)} accessibilityRole="button"
-              accessibilityLabel="Save my files" disabled={files.length === 0}
+              accessibilityLabel="Save My Files" disabled={files.length === 0}
               accessibilityState={{ disabled: files.length === 0 }}>
               <Row t={t} label="Save My Files" sub={filesRowNote(files.length, filesComplete)}
                 right={files.length > 0 ? <Icon name={FORWARD_ICON} size={15} color={t.ink3} /> : undefined} />
@@ -683,7 +683,7 @@ export default function Settings() {
                   <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
                 </Pressable>
               } />
-              <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
+              <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete My Account">
                 <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
@@ -703,7 +703,7 @@ export default function Settings() {
               </Pressable>
             </>
           ) : (
-            <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
+            <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete My Account">
               <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
@@ -744,7 +744,7 @@ export default function Settings() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
-          <Text style={{ ...ty.title, color: t.ink }}>Your files</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Your Files</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>
             {filesRowNote(files?.length ?? 0, filesComplete)} Tap one to save it to your phone.
           </Text>

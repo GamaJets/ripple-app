@@ -414,7 +414,7 @@ export default function OwnerOverview() {
     // than dashed: there is no honest version of this report to send yet.
     if (trainersUnknown) {
       Alert.alert(
-        loading ? 'Still reading your roster' : 'Roster could not be read',
+        loading ? 'Still Reading Your Roster' : 'Roster Could Not Be Read',
         loading
           ? 'Your trainers have not come back yet, so every figure in the report would be a zero this app has not confirmed. Try again in a moment.'
           : 'Your trainers could not be read, so a report built now would state that your gym has no trainers, no clients and no sessions — none of which this app found out. Reload the roster and share it then.',
@@ -435,7 +435,7 @@ export default function OwnerOverview() {
       // under the table saying why, rather than a figure in somebody's guess.
       currency: cur,
     });
-    const how = await shareDoc(doc.html, doc.text, 'Platform report');
+    const how = await shareDoc(doc.html, doc.text, 'Platform Report');
     // Which of the three reasons it fell back to text, rather than asserting
     // the one that is now usually false. shareDoc returns 'text' when
     // printToFileAsync is MISSING, when it THREW, or when sharing is
@@ -450,7 +450,7 @@ export default function OwnerOverview() {
     // GENUINELY is the answer this app still says so — calendar.tsx keeps
     // exactly that sentence, and says in a comment why it earned it.
     if (how === 'text') {
-      Alert.alert('Report shared', pdfExportAvailable()
+      Alert.alert('Report Shared', pdfExportAvailable()
         ? 'Shared as text — the PDF could not be produced on this phone. Nothing is missing from the figures.'
         : 'Shared as text — this build cannot make a PDF. A newer build of the app can.');
     }
@@ -470,7 +470,7 @@ export default function OwnerOverview() {
             gym's NAME is in Brand. */}
         <ScreenHeader
           eyebrow="Your Gym"
-          title={tenant?.name?.trim() || 'Name your gym in Brand'}
+          title={tenant?.name?.trim() || 'Name Your Gym in Brand'}
           actions={<>
             <Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(owner)/explore')} />
             {/* Quiet by design — nothing in the product addresses an owner
@@ -1095,7 +1095,7 @@ function SetUp({ items, onGo }: { items: SetupItem[]; onGo: (route: string) => v
   const unread = left.filter((i) => i.state === 'unknown');
 
   return (
-    <Notice kicker="Set up" title={line ?? 'Some settings are not set yet'}
+    <Notice kicker="Set Up" title={line ?? 'Some Settings Are Not Set Yet'}
       note="Each of these breaks something until it is done. Nothing here is cosmetic.">
       <View style={{ marginTop: sp.sm }}>
         {here.map((i) => {

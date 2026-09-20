@@ -109,11 +109,11 @@ export function CoachCloseQueue({ queue }: { queue: MyCloseQueue }) {
   if (view.kind === 'unread') {
     return (
       <Section>
-        <SectionHead title="Your part of the month" />
+        <SectionHead title="Your Part of the Month" />
         {status === 'loading' ? (
           <Text style={{ ...ty.label, color: t.ink3 }}>Working out which month your gym is closing…</Text>
         ) : (
-          <Notice tone={t.warn} kicker="Month end" title="Your own rows could not be read" note={view.note}>
+          <Notice tone={t.warn} kicker="Month End" title="Your own rows could not be read" note={view.note}>
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Try Again" onPress={queue.refresh} a11yLabel="Read your outstanding work for the month again" />
             </View>
@@ -126,7 +126,7 @@ export function CoachCloseQueue({ queue }: { queue: MyCloseQueue }) {
   if (view.kind === 'no_gym') {
     return (
       <Section>
-        <SectionHead title="Your part of the month" />
+        <SectionHead title="Your Part of the Month" />
         <Text style={{ ...ty.label, color: t.ink3 }}>{view.note}</Text>
       </Section>
     );
@@ -137,7 +137,7 @@ export function CoachCloseQueue({ queue }: { queue: MyCloseQueue }) {
 
   return (
     <Section>
-      <SectionHead title={`Your part of ${view.monthLabel}`} note={closeQueueNote(view) ?? undefined} />
+      <SectionHead title={`Your Part of ${view.monthLabel}`} note={closeQueueNote(view) ?? undefined} />
 
       {/* The heading names a month, so the sentence under it has to say whose
           calendar decided which month that is. A gym with no timezone set gets
@@ -169,7 +169,7 @@ export function CoachCloseQueue({ queue }: { queue: MyCloseQueue }) {
               when={whenLabel(s.startsAt)}
               title={`Session ${withWho(s)}`}
               note="Finished, and nobody has recorded what happened."
-              cta="Mark it"
+              cta="Mark It"
               a11y={`Mark the session ${withWho(s)} on ${whenLabel(s.startsAt)}. Finished, and nobody has recorded what happened.`}
               onPress={() => router.push('/(trainer)/sessions')}
             />
@@ -196,7 +196,7 @@ export function CoachCloseQueue({ queue }: { queue: MyCloseQueue }) {
               when={`${whenLabel(g.startsAt)}${g.branch ? ` · ${g.branch}` : ''}`}
               title={g.title}
               note={gapLine(g)}
-              cta="Take it"
+              cta="Take It"
               a11y={`Take the register for ${g.title}, ${whenLabel(g.startsAt)}. ${gapLine(g)}`}
               onPress={() => router.push({
                 pathname: '/(trainer)/class-checkin',

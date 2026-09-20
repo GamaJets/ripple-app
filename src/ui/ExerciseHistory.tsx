@@ -159,7 +159,7 @@ function MovementRow({ e, shown, unit, windowDays, picked, onPress }: {
       {best != null ? (
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{num(best)} {unit}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>best est. 1RM</Text>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>Best Est. 1RM</Text>
         </View>
       ) : (
         <Text style={{ ...ty.caption, color: t.ink3 }}>
@@ -411,7 +411,7 @@ export function ExerciseTrail({ summary, log, status, windowDays, unit, voice, h
       <View style={{ marginTop: sp.lg }}>
         <Text style={{ ...ty.micro, color: t.ink3 }}>Since the Day Before</Text>
         <View style={{ marginTop: sp.xs }}>
-          <MovementLine label="Top load" unit={unit} decimals={1} from={lastFrom}
+          <MovementLine label="Top Load" unit={unit} decimals={1} from={lastFrom}
             value={liftDeltaIn(trend.sinceLast.topLoadKg, unit)} />
           <MovementLine label="Estimated 1RM" unit={unit} decimals={0} from={lastFrom}
             value={est1RMIn(trend.sinceLast.est1RMKg, unit)} />
@@ -434,7 +434,7 @@ export function ExerciseTrail({ summary, log, status, windowDays, unit, voice, h
             {trend.coversRecord ? 'Since the First Day on Record' : 'Since the First Day on This Page'}
           </Text>
           <View style={{ marginTop: sp.xs }}>
-            <MovementLine label="Top load" unit={unit} decimals={1} from={firstFrom}
+            <MovementLine label="Top Load" unit={unit} decimals={1} from={firstFrom}
               value={liftDeltaIn(trend.sinceFirst.topLoadKg, unit)} />
             <MovementLine label="Estimated 1RM" unit={unit} decimals={0} from={firstFrom}
               value={est1RMIn(trend.sinceFirst.est1RMKg, unit)} />

@@ -241,7 +241,7 @@ export default function Injuries() {
         <PageHead title="Injuries & Limitations" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg, textAlign: 'center' }}>Your coach and your plan train around these — flagging and swapping risky moves.</Text>
 
-        <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice"
+        <Notice tone={t.s3} kicker="Guidance Only" title="Not Medical Advice"
           note="For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
 
         <View style={{ marginTop: sp.md }}>
@@ -335,7 +335,7 @@ export default function Injuries() {
                 </Text>
               ) : choices === 'none' ? null : (
                 <View style={{ marginTop: sp.lg, gap: sp.md }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Assigned knowing about these</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Assigned Knowing About These</Text>
                   {mine.choices.slice(0, 5).map((ch, i) => (
                     <View key={i}>
                       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmtDay(ch.at)}</Text>
@@ -372,7 +372,7 @@ export default function Injuries() {
         {c.injuries.length === 0 && c.profileStatus === 'ready' ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
             <Icon name="check" size={30} color={t.ink3} />
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, marginTop: sp.md }}>No injuries disclosed</Text>
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, marginTop: sp.md }}>No Injuries Disclosed</Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, maxWidth: 260 }}>If something's bothering you, add it here so your plan can adapt.</Text>
           </View>
         ) : c.injuries.length === 0 && c.profileStatus === 'loading' ? (

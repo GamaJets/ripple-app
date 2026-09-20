@@ -355,7 +355,7 @@ export default function SessionCredits() {
         ) : null}
 
         {balanceUnread ? (
-          <Notice tone={t.warn} kicker="Not read" title="We could not read your credits"
+          <Notice tone={t.warn} kicker="Not Read" title="We Could Not Read Your Credits"
             note="This is our end, not a statement about what you have bought. There is no balance above to plan against until it loads.">
             <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={load} /></View>
           </Notice>
@@ -367,7 +367,7 @@ export default function SessionCredits() {
             state, which is the point: an empty ledger under a failed read reads
             as "you have never used a session" to somebody who has used nine. */}
         {historyUnread && !balanceUnread ? (
-          <Notice tone={t.warn} kicker="Not read" title="We could not read your session history"
+          <Notice tone={t.warn} kicker="Not Read" title="We Could Not Read Your Session History"
             note="Your balance above did load and is current. What is missing is the list of which sessions used a credit and which of your bookings are due to draw one.">
             <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={load} /></View>
           </Notice>

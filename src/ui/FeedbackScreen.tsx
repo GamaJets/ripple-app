@@ -60,7 +60,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!body.trim()) { Alert.alert('Add a note', 'Tell us what worked or what to improve.'); return; }
+    if (!body.trim()) { Alert.alert('Add a Note', 'Tell us what worked or what to improve.'); return; }
     setBusy(true);
     // `rating` was passed as `rating || 0` and the `|| 0` was inert: the state
     // is `useState(0)`, so it is already `number` and 0 is the only falsy value
@@ -85,7 +85,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
       // connection for every failure once, and then blamed nothing in
       // particular for any of them; in between it printed the raw Postgres
       // refusal at a member, which is neither.
-      Alert.alert('Not sent', note);
+      Alert.alert('Not Sent', note);
       return;
     }
     notifySuccess();
@@ -96,7 +96,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
     // a Send button under it, which is how the owner's inbox gets the same
     // paragraph twice. The row is on the server; the form should say so.
     setBody(''); setRating(0); setCat('Idea');
-    Alert.alert('Thank you', `Your feedback went to the ${BRAND.label} team.`, [{ text: 'Done', onPress: () => router.back() }]);
+    Alert.alert('Thank You', `Your feedback went to the ${BRAND.label} team.`, [{ text: 'Done', onPress: () => router.back() }]);
   };
 
   return (
@@ -141,7 +141,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
             unchanged — tapping 3 lights 1, 2 and 3 — so the row still reads as
             a magnitude and not five separate choices, and the end labels say
             which direction that magnitude runs in. */}
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How is the experience?</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How Is the Experience?</Text>
         {/* `selected` carries the VALUE, not the fill. It was `rating >= n`,
             which is the right test for the ink and the wrong one for the ear: a
             rating of 3 announced 1, 2 AND 3 as "selected", so a VoiceOver user

@@ -77,7 +77,7 @@ export default function Progression() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         {/* The board's pushed-page head; where the targets come from is the
             one quiet line under the title. */}
-        <PageHead title="Next-session Targets" subtitle="From your logged lifts" />
+        <PageHead title="Next-Session Targets" subtitle="From your logged lifts" />
 
 
         {/* This screen prescribes a load, and every target is

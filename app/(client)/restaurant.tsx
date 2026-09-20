@@ -72,11 +72,11 @@ export default function Restaurant() {
     // server said, including when it refused the row outright.
     const out = await fl.logFood({ name: est.name, kcal: est.kcal, protein: est.protein, carbs: est.carbs, fat: est.fat, via: 'manual' });
     if (out === 'refused') {
-      Alert.alert('Not logged', `${est.name} could not be saved, so it is not on today's record. Your choice is still here — try again in a moment.`);
+      Alert.alert('Not Logged', `${est.name} could not be saved, so it is not on today's record. Your choice is still here — try again in a moment.`);
       return;
     }
     setSel(null); setPortion(1);
-    Alert.alert(out === 'unsent' ? 'Logged — waiting to send' : 'Logged',
+    Alert.alert(out === 'unsent' ? 'Logged — Waiting to Send' : 'Logged',
       `${est.name} · ${num(est.kcal)} kcal${out === 'unsent' ? '. It is kept on this phone and goes up when you have signal.' : ' added to today.'}`);
   };
 

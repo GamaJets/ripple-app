@@ -84,7 +84,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { readState, hasRows, staleNote } from '../../src/lib/staleRead';
 
 type Range = 'week' | 'month' | 'season';
-const RANGES: [Range, string][] = [['week', 'This week'], ['month', 'This month'], ['season', 'Season']];
+const RANGES: [Range, string][] = [['week', 'This Week'], ['month', 'This Month'], ['season', 'Season']];
 
 /**
  * ── "This month" is the CALENDAR month, and it did not used to be ─────────
@@ -216,7 +216,7 @@ function RateRow({ t, existing, busy, cur, onSave, onCancel }: {
             }}
           >
             <Text style={{ ...ty.label, color: kind === k ? t.brandInk : t.ink3 }}>
-              {k === 'per_class' ? 'Per class' : 'Per person'}
+              {k === 'per_class' ? 'Per Class' : 'Per Person'}
             </Text>
           </Pressable>
         ))}
@@ -640,7 +640,7 @@ export default function OwnerClassAnalytics() {
         Check-ins and fill rates below are unaffected.
       </Text>
       <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
-        <Ghost label="Set It In Operations" onPress={() => router.push('/(owner)/ops')} />
+        <Ghost label="Set It in Operations" onPress={() => router.push('/(owner)/ops')} />
       </View>
     </View>
   );
@@ -988,7 +988,7 @@ export default function OwnerClassAnalytics() {
                                  onSave={(amount, kind) => saveRate(v.id, amount, kind)}
                                  onCancel={() => setEditing(null)} />
                       : <View style={{ marginTop: sp.sm, alignSelf: 'flex-start' }}>
-                          <Ghost label={own?.classRateCents != null ? 'Change Rate' : 'Set A Class Rate'} onPress={() => { setWriteErr(null); setEditing(v.id); }} />
+                          <Ghost label={own?.classRateCents != null ? 'Change Rate' : 'Set a Class Rate'} onPress={() => { setWriteErr(null); setEditing(v.id); }} />
                         </View>
                   ) : null}
                 </View>
@@ -1042,7 +1042,7 @@ export default function OwnerClassAnalytics() {
               taken over the wrong set of classes. */}
           <Section>
             <SectionHead
-              title="By Time Of Day"
+              title="By Time of Day"
               note={slots.slots.length ? `${slots.slots.length} slot${slots.slots.length === 1 ? '' : 's'}` : undefined}
             />
             {/* Said before the bars, because it governs what they are made of.
@@ -1154,7 +1154,7 @@ export default function OwnerClassAnalytics() {
                   {cur && paid !== null ? (
                     <View style={{ marginTop: sp.sm, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                       {on ? (
-                        <Text style={{ ...ty.caption, color: t.ink3 }}>On payroll</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3 }}>On Payroll</Text>
                       ) : blocker ? (
                         <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{blocker}</Text>
                       ) : (
@@ -1169,7 +1169,7 @@ export default function OwnerClassAnalytics() {
                               write is in flight; the other rows stay live,
                               because `busy` holds one class id and they are
                               different lines. */}
-                          <Ghost label={busy === r.classId ? 'Adding…' : 'Add To Payroll'} disabled={busy === r.classId} onPress={() => putOnPayroll(r)} />
+                          <Ghost label={busy === r.classId ? 'Adding…' : 'Add to Payroll'} disabled={busy === r.classId} onPress={() => putOnPayroll(r)} />
                           {/* THE SAME EXPRESSION `putOnPayroll` files the line
                               with. It said `cur` while the insert said the
                               coach's own currency, so at a gym that had changed

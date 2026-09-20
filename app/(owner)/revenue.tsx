@@ -477,13 +477,13 @@ export default function OwnerRevenue() {
             absent from it. They are not added to it and not taken off it —
             `NOT_TAKINGS_NOTE` says so in the one place that sentence lives. */}
         {orders === null ? (
-          <Notice tone={t.warn} kicker="Not ruled out"
-            title="Your online sales could not be read"
+          <Notice tone={t.warn} kicker="Not Ruled Out"
+            title="Your Online Sales Could Not Be Read"
             note="So whether any member was charged online without getting what they bought is unknown for this window. That is not the same as nothing having gone wrong." />
         ) : gap?.any ? (
           <Notice tone={gap.unfulfilled.count > 0 ? t.crit : t.warn}
-            kicker="Taken by Stripe, missing from your ledger"
-            title="Money that did not reach your payment record"
+            kicker="Taken by Stripe, Missing from Your Ledger"
+            title="Money That Did Not Reach Your Payment Record"
             note={NOT_TAKINGS_NOTE}>
             <View style={{ marginTop: sp.lg }}>
               <KpiRow items={[
@@ -525,8 +525,8 @@ export default function OwnerRevenue() {
             under the title now also calls; this button is the same action
             beside the sentence that explains why it is needed. */}
         {trainersUnread ? (
-          <Notice tone={t.warn} kicker="Nothing here is your gym's"
-            title="Your roster could not be read"
+          <Notice tone={t.warn} kicker="Nothing Here Is Your Gym's"
+            title="Your Roster Could Not Be Read"
             note="Every figure on this screen is a roll-up of your trainers, so none of them can be stated.">
             <View style={{ marginTop: sp.lg }}>
               <Cta label="Try Again" wide onPress={refresh} />
@@ -685,7 +685,7 @@ export default function OwnerRevenue() {
               are two renders of one fact and must not start disagreeing about
               how to say it. */}
           {roll.atRiskCount > 0 ? (
-            <Notice tone={t.warn} kicker="Needs a look" title={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} flagged`}
+            <Notice tone={t.warn} kicker="Needs a Look" title={`${roll.atRiskCount} Trainer${roll.atRiskCount === 1 ? '' : 's'} Flagged`}
               note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} ${roll.atRiskClients === 1 ? 'is' : 'are'} with them.`}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Review Trainers" wide onPress={() => router.push('/(owner)/trainers')} />

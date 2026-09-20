@@ -147,19 +147,19 @@ export default function CoachAccount() {
       // Offered rather than done. Most password changes are housekeeping, and
       // signing a coach out of the gym's iPad mid-session is its own harm.
       // `endOtherSessions` keeps THIS session — see the note on it.
-      Alert.alert('Password changed',
+      Alert.alert('Password Changed',
         'Your new password is in place. Anywhere else you are signed in stays signed in until that session expires — including any phone or tablet you no longer have, and anything signed in to your account can read your clients’ records.',
         [
-          { text: 'Leave them', style: 'cancel' },
+          { text: 'Leave Them', style: 'cancel' },
           {
-            text: 'Sign out everywhere else',
+            text: 'Sign Out Everywhere Else',
             onPress: async () => {
               const out = await endOtherSessions(supabase.auth);
               // Both outcomes are said. "We could not do it" is the one that
               // matters: a coach who believes they have evicted somebody and
               // has not is worse off than one who knows they must ring support.
               Alert.alert(
-                out.ok ? 'Signed out everywhere else' : 'Still signed in elsewhere',
+                out.ok ? 'Signed Out Everywhere Else' : 'Still Signed in Elsewhere',
                 out.ok
                   ? 'Every other phone, tablet and browser signed in to this account has been signed out. This phone stays signed in, and your new password is what gets any of them back.'
                   : `${out.note} Your password HAS been changed, so nothing new can sign in — but a device already signed in may still be. Try again in a moment.`,
@@ -191,18 +191,18 @@ export default function CoachAccount() {
       // account, not from the fact that a call returned.
       await loadPending();
       if (res.outcome === 'changed') {
-        Alert.alert('Email changed',
+        Alert.alert('Email Changed',
           `Your account now uses ${res.requested}. That is the address to sign in with from now on, and the one a password reset will go to.`);
         return;
       }
       if (res.outcome === 'pending') {
-        Alert.alert('Check your inbox — nothing has changed yet',
+        Alert.alert('Check Your Inbox — Nothing Has Changed Yet',
           `We have sent a confirmation to ${res.requested}. Your account still uses ${signInAddress(email)} and will keep using it until you open that link.\n\n`
           + 'If the link is never opened, nothing happens and your old address goes on working.');
         return;
       }
       // 'unknown'. Said plainly rather than rounded to either neighbour.
-      Alert.alert('We could not confirm what happened',
+      Alert.alert('We Could Not Confirm What Happened',
         `Your request went in, but we could not read your account back to see whether the address changed straight away or a confirmation was sent to ${res.requested}.\n\n`
         + `Check that inbox, and sign in with ${signInAddress(email)} until you know otherwise. Nothing has been lost either way.`);
     } finally { setEmBusy(false); }
@@ -273,11 +273,11 @@ export default function CoachAccount() {
             </Flag>
           ) : null}
 
-          {label('New email address')}
+          {label('New Email Address')}
           <TextInput value={newEmail} onChangeText={(v) => { setNewEmail(v); setEmNote(null); }}
             placeholder="you@example.com" placeholderTextColor={t.ink3}
             autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress"
-            accessibilityLabel="New email address" style={inp} />
+            accessibilityLabel="New Email Address" style={inp} />
           {emNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{emNote}</Flag> : null}
           <View style={{ height: sp.md }} />
           <Cta label={emBusy ? 'Sending…' : 'Change Email Address'} wide disabled={emBusy} onPress={() => { void submitEmail(); }} />
@@ -287,23 +287,23 @@ export default function CoachAccount() {
         {/* ── password ───────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Password" />
-          {label('Current password')}
+          {label('Current Password')}
           <TextInput value={current} onChangeText={(v) => { setCurrent(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="password"
             placeholder="The one you use now" placeholderTextColor={t.ink3}
-            accessibilityLabel="Current password" style={inp} />
+            accessibilityLabel="Current Password" style={inp} />
 
-          {label('New password')}
+          {label('New Password')}
           <TextInput value={next} onChangeText={(v) => { setNext(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="newPassword"
             placeholder={`At least ${MIN_PASSWORD} characters`} placeholderTextColor={t.ink3}
-            accessibilityLabel="New password" style={inp} />
+            accessibilityLabel="New Password" style={inp} />
 
-          {label('New password again')}
+          {label('New Password Again')}
           <TextInput value={confirm} onChangeText={(v) => { setConfirm(v); setPwNote(null); }}
             secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="newPassword"
             placeholder="Type it a second time" placeholderTextColor={t.ink3}
-            accessibilityLabel="Confirm new password" style={inp} />
+            accessibilityLabel="Confirm New Password" style={inp} />
 
           {pwNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{pwNote}</Flag> : null}
 

@@ -262,7 +262,7 @@ export default function TrainerLeads() {
 
   const mark = (lead: LeadRow, state: LeadState) => {
     void book.setState(lead.id, state).then((r) => {
-      if (!r.ok) Alert.alert('Not saved', r.reason);
+      if (!r.ok) Alert.alert('Not Saved', r.reason);
     });
   };
 
@@ -277,7 +277,7 @@ export default function TrainerLeads() {
           style: 'destructive',
           onPress: () => {
             void book.erase(lead.id).then((r) => {
-              if (!r.ok) Alert.alert('Not removed', r.reason);
+              if (!r.ok) Alert.alert('Not Removed', r.reason);
             });
           },
         },
@@ -295,12 +295,12 @@ export default function TrainerLeads() {
       ? `mailto:${lead.contact}`
       : telUrl(lead.contact);
     if (!url) {
-      Alert.alert('Not a number this phone can ring', DIAL_UNAVAILABLE_NOTE);
+      Alert.alert('Not a Number This Phone Can Ring', DIAL_UNAVAILABLE_NOTE);
       return;
     }
     Linking.openURL(url).catch(() => {
       Alert.alert(
-        'Could not open that',
+        'Could Not Open That',
         'Your phone would not open an app for this. The details are on the screen behind this — copy them out by hand.',
       );
     });
@@ -324,7 +324,7 @@ export default function TrainerLeads() {
     const url = followUpLink(lead, draft);
     if (!url) {
       Alert.alert(
-        'Nothing to open it with',
+        'Nothing to Open It With',
         'What they left is neither an email address nor a phone number, so there is no app to hand this to. The details are on the screen behind this — copy them out by hand.',
       );
       return;
@@ -340,7 +340,7 @@ export default function TrainerLeads() {
       },
       () => {
         Alert.alert(
-          'Could not open that',
+          'Could Not Open That',
           'Your phone would not open an app for this. Nothing has been sent and nothing has been recorded.',
         );
       },
@@ -353,7 +353,7 @@ export default function TrainerLeads() {
     setSaving(true);
     void book.addFollowUp(lead.id, draft).then((r) => {
       setSaving(false);
-      if (!r.ok) { Alert.alert('Not recorded', r.reason); return; }
+      if (!r.ok) { Alert.alert('Not Recorded', r.reason); return; }
       setWriting(null);
       setDraft('');
     });
@@ -516,7 +516,7 @@ export default function TrainerLeads() {
 
         {/* Said first, and not softened. */}
         <View style={{ marginTop: sp.xl }}>
-          <Notice tone={t.warn} kicker="Nothing is sent" title="Following these up is you, by hand" note={FOLLOW_UP_IS_MANUAL} />
+          <Notice tone={t.warn} kicker="Nothing Is Sent" title="Following These Up Is You, by Hand" note={FOLLOW_UP_IS_MANUAL} />
         </View>
 
         {/* R5, and its own sentence rather than a clause on the one above.
@@ -845,7 +845,7 @@ export default function TrainerLeads() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34 }}>
-            <Text style={{ ...ty.head, color: t.ink }}>What you did about {writing?.name ?? 'this enquiry'}</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>What You Did About {writing?.name ?? 'this enquiry'}</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
               Repple sent nothing and will send nothing. Write down what you actually did, so the next time you open this
               you know where it got to — and so you do not ring the same person twice.

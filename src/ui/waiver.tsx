@@ -162,7 +162,7 @@ function SignOutWay({ label }: { label: string }) {
   return (
     <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
       <Ghost label={label} onPress={() => Alert.alert(
-        'Sign out?',
+        'Sign Out?',
         'You have agreed to nothing and nothing is recorded either way. Sign out and you can sign back in — on this account or another one — and the release will be waiting exactly as it is now.',
         [
           { text: 'Stay', style: 'cancel' },
@@ -211,9 +211,9 @@ function WaiverScreen({ state, accept, reload, insets }: {
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 + insets.bottom }}>
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>Before you start</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>Before You Start</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>
-          Read this and agree to carry on
+          Read This and Agree to Carry On
         </Text>
         <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
           {BRAND.label} gives you training and nutrition suggestions. It is not medical advice, and

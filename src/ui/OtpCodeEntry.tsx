@@ -210,7 +210,7 @@ export function OtpCodeEntry({
       {digitsOnly(code).length >= MIN_OTP_SUBMIT && digitsOnly(code).length !== length ? (
         <View style={{ alignItems: 'center', marginTop: sp.xl }}>
           <Ghost
-            label={busy ? 'Checking…' : `Confirm ${digitsOnly(code).length} digits`}
+            label={busy ? 'Checking…' : `Confirm ${digitsOnly(code).length} Digits`}
             onPress={() => { if (!busy) void submit(digitsOnly(code)); }}
           />
         </View>

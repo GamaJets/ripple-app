@@ -530,7 +530,7 @@ export default function Onboarding() {
               : 'That is not a height this will record. Feet go in the first box and inches in the second — five foot ten is 5 and 10, not 5.10.'}
           </Text>
         ) : null}
-        <Field label="Body fat" hint="% · optional" a11y="Body fat percentage">
+        <Field label="Body Fat" hint="% · optional" a11y="Body fat percentage">
           <TextInput value={bf} onChangeText={setBf} keyboardType="decimal-pad" style={inp} />
         </Field>
         {bfOk === false ? (

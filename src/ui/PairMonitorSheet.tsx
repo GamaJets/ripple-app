@@ -124,7 +124,7 @@ export function PairMonitorSheet({ t, visible, onClose, reach, hasSample, onPair
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1, paddingEnd: sp.sm }}>
             <Text style={{ ...ty.head, color: t.ink }}>
-              {reach === 'none' ? 'Pair a heart-rate monitor' : 'Check your heart-rate monitor'}
+              {reach === 'none' ? 'Pair a Heart-Rate Monitor' : 'Check Your Heart-Rate Monitor'}
             </Text>
             {/* The first thing said, because it is the fear that kept this
                 sheet from existing: the member is in the middle of a workout

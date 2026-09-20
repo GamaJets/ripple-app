@@ -263,7 +263,7 @@ export default function Records() {
       every notice on this screen was gated on the training log alone. */}
   {!bodyKnown && cd.scansStatus !== 'loading' ? (<>
    <Section>
-    <Notice tone={t.warn} kicker="Records" title="We couldn’t read your weight history"
+    <Notice tone={t.warn} kicker="Records" title="We Couldn’t Read Your Weight History"
      note={cd.scansStatus === 'partial'
       ? 'You have more scans on record than this screen can read at once, so a bodyweight set may be priced against an older weigh-in than the one that applied. Your barbell records are unaffected.'
       : 'Pull-ups, dips and press-ups are priced against what you weighed on the day, and that history did not load — so they are not on the estimated-max board below. They are not gone, and nothing has been reset.'}>
@@ -276,7 +276,7 @@ export default function Records() {
 
   {logStatus === 'error' ? (<>
    <Section>
-    <Notice tone={t.warn} kicker="Records" title="We couldn’t read your training log"
+    <Notice tone={t.warn} kicker="Records" title="We Couldn’t Read Your Training Log"
      note={prs.length === 0
       ? "Your records are safe — this screen can't see them right now. Nothing has been reset."
       : "The board below is what this phone had before the read failed. It is real, but it may not be current — a record set since is not on it. Nothing has been reset."}>
@@ -332,7 +332,7 @@ export default function Records() {
        before the hero, because the hero is the figure it qualifies. */}
    {logStatus === 'partial' ? (<>
     <Section>
-     <Notice tone={t.warn} kicker="Records" title="Read from your recent sessions only"
+     <Notice tone={t.warn} kicker="Records" title="Read from Your Recent Sessions Only"
       note="You have logged more sessions than this screen can read in one go, so this board is your best from the most recent ones. A record set before that is still on your log and is not on this list — nothing has been reset." >
       <View style={{ marginTop: sp.lg }}>
        <Cta label="Try Again" wide onPress={reload} />

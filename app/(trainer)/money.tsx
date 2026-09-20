@@ -842,7 +842,7 @@ export default function CoachMoney() {
             <HeroCard
               eyebrow={`TOTAL TAKEN · ${period.label.toUpperCase()}`}
               // One line per currency. They share a headline and are not a sum.
-              title={pots.length ? pots.map((x) => minorMoney(x.minorUnits, x.currency) ?? `${x.currency} not denominated`).join('\n') : fig(null)}
+              title={pots.length ? pots.map((x) => minorMoney(x.minorUnits, x.currency) ?? `${x.currency} Not Denominated`).join('\n') : fig(null)}
               meta={!range
                 ? 'This month could not be read as two dates, so no figure is stated.'
                 : !monthIn.total
@@ -1243,7 +1243,7 @@ export default function CoachMoney() {
             </Flag>
           ) : plan?.sub ? (
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
-              <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>Your Repple plan</Text>
+              <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>Your Repple Plan</Text>
               <Text style={{ ...ty.label, color: t.ink }}>
                 {plan.sub.plan ?? 'unnamed'}{plan.sub.status ? ` · ${plan.sub.status}` : ''}
               </Text>
@@ -1414,12 +1414,12 @@ export default function CoachMoney() {
                   coin toss dressed as a finding, and they spend real money on
                   it. enoughToTell() is what declines to say it. */}
               {codeTell.rankable ? (
-                <Notice tone={t.good} kicker="Enough to tell"
-                  title={`${codeTell.best.label} is ahead of ${codeTell.runnerUp.label}`}
+                <Notice tone={t.good} kicker="Enough to Tell"
+                  title={`${codeTell.best.label} Is Ahead of ${codeTell.runnerUp.label}`}
                   note={codeTell.note} />
               ) : (
-                <Notice tone={t.s3} kicker="Not enough yet"
-                  title="Too early to say which is working" note={codeTell.note} />
+                <Notice tone={t.s3} kicker="Not Enough Yet"
+                  title="Too Early to Say Which Is Working" note={codeTell.note} />
               )}
 
               {/* The whole of it against the whole of it, or the reason there
@@ -1451,8 +1451,8 @@ export default function CoachMoney() {
                     <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                       {codeFig('Spent', fgs.spent)}
                       {codeFig('Clients', fgs.clients)}
-                      {codeFig('They paid', fgs.revenue)}
-                      {codeFig('Each cost', fgs.perClient)}
+                      {codeFig('They Paid', fgs.revenue)}
+                      {codeFig('Each Cost', fgs.perClient)}
                     </View>
                     {line ? (
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{line}</Text>

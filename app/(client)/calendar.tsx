@@ -840,7 +840,7 @@ export default function Calendar() {
         say(keptOnPhoneNote('planned day'));
         return;
       }
-      Alert.alert('Not saved', `We couldn’t save this day${r.error ? ` (${r.error})` : ''}. Your calendar is unchanged — try again in a moment.`);
+      Alert.alert('Not Saved', `We couldn’t save this day${r.error ? ` (${r.error})` : ''}. Your calendar is unchanged — try again in a moment.`);
       return;
     }
     setPlans((prev) => [...prev.filter((p) => p.dateISO !== day), { dateISO: day, type: planType, note }]);
@@ -865,7 +865,7 @@ export default function Calendar() {
         say(keptOnPhoneNote('change to this day'));
         return;
       }
-      Alert.alert('Not removed', `We couldn’t remove this day${r.error ? ` (${r.error})` : ''}. It is still on your calendar.`);
+      Alert.alert('Not Removed', `We couldn’t remove this day${r.error ? ` (${r.error})` : ''}. It is still on your calendar.`);
       return;
     }
     setPlans((prev) => prev.filter((p) => p.dateISO !== day));
@@ -904,7 +904,7 @@ export default function Calendar() {
         ? `A session comes off your pack the moment you book. You have ${packLeft} left.`
         : 'There are no pack sessions to draw from, so this booking is not covered by one.';
     Alert.alert(
-      'Book this session?',
+      'Book This Session?',
       [`${when}\n${who} An open slot — it is yours once you confirm.`, zoneLine(), credit, cancelTermsLine(policyStatus === 'error' ? null : cancelPolicy)].join('\n\n'),
       [
         { text: 'Not Now', style: 'cancel' },
@@ -920,7 +920,7 @@ export default function Calendar() {
     // below this draws a credit and tells a coach to expect somebody.
     if (hasEnded(s)) {
       Alert.alert(
-        'That hour has gone',
+        'That Hour Has Gone',
         'That time has already passed, so it cannot be booked and nothing has been charged. Pick a time still to come.',
         [{ text: 'OK' }],
       );
@@ -943,7 +943,7 @@ export default function Calendar() {
     const booked = await bookSession(s.id, cd.id);
     if (!booked) {
       Alert.alert(
-        'Not booked',
+        'Not Booked',
         `${slot} was not booked — someone may have taken it first. Pull down to refresh and pick another time.`,
         [{ text: 'OK' }],
       );
@@ -980,7 +980,7 @@ export default function Calendar() {
     if (mayHaveCredits && !redeem.ok) {
       lines.push(`This wasn’t taken off your session pack${redeem.error ? ` (${redeem.error})` : ''} — check your package before you book again.`);
     }
-    Alert.alert('Session booked', lines.join('\n\n'), [{ text: 'Great' }]);
+    Alert.alert('Session Booked', lines.join('\n\n'), [{ text: 'Great' }]);
   }
   function cancel(s: TrainingSession) {
     // Captured once and passed through, so the rule the member is warned about
@@ -1002,7 +1002,7 @@ export default function Calendar() {
       const out = await cancelBookedSession(s, cancelMyBooking, asked, cancelPolicy);
       if (!out.freed) {
         Alert.alert(
-          'Not cancelled',
+          'Not Cancelled',
           // "Check your connection and try again" was said here whatever had
           // happened, and one of the two things that happens is the server
           // reading the cancellation and declining it — a policy, a lapsed
@@ -1039,7 +1039,7 @@ export default function Calendar() {
     // afterwards, by `ptCancelLines`, from the server's own answer.
     const slotLine = ` If anyone is waiting for this slot it goes straight to whoever is first in line; otherwise it re-opens for your coach's other clients.`;
     if (late) {
-      Alert.alert('Cancelling late', `${warn.line}${slotLine} Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: doCancel }]);
+      Alert.alert('Cancelling Late', `${warn.line}${slotLine} Continue?`, [{ text: 'Keep It', style: 'cancel' }, { text: 'Cancel Anyway', style: 'destructive', onPress: doCancel }]);
     } else {
       // MOVING IT IS OFFERED BEFORE CANCELLING IT, and only where moving is
       // actually free: outside the coach's notice window. Until there was a
@@ -1049,8 +1049,8 @@ export default function Calendar() {
       // fee. The picker itself lives on My Bookings rather than being built
       // twice; this is the sentence that tells somebody it exists at the moment
       // they were about to do the costly thing instead.
-      Alert.alert('Cancel session?', `${warn.line}${slotLine}`, [
-        { text: 'Keep it', style: 'cancel' },
+      Alert.alert('Cancel Session?', `${warn.line}${slotLine}`, [
+        { text: 'Keep It', style: 'cancel' },
         ...(canOfferMove(s.startsAt, cancelPolicy)
           ? [{ text: 'Move It Instead', onPress: () => router.push('/(client)/bookings') }]
           : []),
@@ -1062,7 +1062,7 @@ export default function Calendar() {
   async function joinWaitlist(slot: { sessionId: string; startsAt: string }) {
     const res = await joinWait(slot.sessionId);
     if (!res.ok) {
-      Alert.alert('Not added', res.error || `We couldn't put you on the waitlist for ${timeLabel(slot.startsAt)}. Nothing has changed — try again.`, [{ text: 'OK' }]);
+      Alert.alert('Not Added', res.error || `We couldn't put you on the waitlist for ${timeLabel(slot.startsAt)}. Nothing has changed — try again.`, [{ text: 'OK' }]);
       return;
     }
     // `res.waiting ?? 1` and `res.position ?? 1` until tonight, and both halves
@@ -1091,7 +1091,7 @@ export default function Calendar() {
         ? `You’re on the waitlist. Your place in the queue didn’t come back, so we can’t say where in it you are — ${res.waiting === 1 ? 'one person is' : `${res.waiting} people are`} in it. Open this screen again for your place.`
         : `You’re on the waitlist. Neither your place in the queue nor its length came back, so we can’t say where in it you are. You are in it in the order you joined — open this screen again for your place.`;
     Alert.alert(
-      'On the waitlist',
+      'On the Waitlist',
       `${place}\n\nIf whoever has ${timeLabel(slot.startsAt)} cancels, it is booked for you automatically — you don't have to be quick, and nobody can take it ahead of you.`,
       [{ text: 'OK' }],
     );
@@ -1100,10 +1100,10 @@ export default function Calendar() {
   async function leaveWaitlist(slot: { sessionId: string; startsAt: string }) {
     const res = await leaveWait(slot.sessionId);
     if (!res.ok) {
-      Alert.alert('Still on the waitlist', `${res.error || 'That did not save.'} You are still in line for ${timeLabel(slot.startsAt)}, so it could still be booked for you.`, [{ text: 'OK' }]);
+      Alert.alert('Still on the Waitlist', `${res.error || 'That did not save.'} You are still in line for ${timeLabel(slot.startsAt)}, so it could still be booked for you.`, [{ text: 'OK' }]);
       return;
     }
-    Alert.alert('Left the waitlist', `You're no longer in line for ${timeLabel(slot.startsAt)}.`, [{ text: 'OK' }]);
+    Alert.alert('Left the Waitlist', `You're no longer in line for ${timeLabel(slot.startsAt)}.`, [{ text: 'OK' }]);
   }
 
   const G = layout.gutter;
@@ -1298,7 +1298,7 @@ export default function Calendar() {
               below is half an answer and the reader has to be told which half is
               missing before they read a quiet day as a lazy one. */}
           {!logKnown ? (
-            <Notice tone={t.warn} kicker="This day" title="We couldn’t read your training log"
+            <Notice tone={t.warn} kicker="This Day" title="We couldn’t read your training log"
               note="Sessions with your coach are still shown below, but workouts you logged yourself are not — and the coloured dots are missing from the grid above for the same reason. Nothing has been lost.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={reloadLog} />
@@ -1310,7 +1310,7 @@ export default function Calendar() {
               same statement as "you have planned nothing", and the button below
               would otherwise invite somebody to re-plan a day they already have. */}
           {planStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Planned days" title="We couldn’t read what you’ve planned"
+            <Notice tone={t.warn} kicker="Planned Days" title="We couldn’t read what you’ve planned"
               note="Days you marked ahead are not shown, on this day or on the grid. Nothing you planned has been lost — and nothing here should be read as an unplanned day.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setPlanReload((n) => n + 1)} />
@@ -1379,7 +1379,7 @@ export default function Calendar() {
           {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{cachedNote}</Flag> : null}
 
           {selConflict ? (
-            <Notice tone={t.warn} kicker="Your plan and your program" title={selConflict.focus ? `Your program has ${selConflict.focus} on this day` : 'Your program has no session on this day'}
+            <Notice tone={t.warn} kicker="Your Plan and Your Program" title={selConflict.focus ? `Your program has ${selConflict.focus} on this day` : 'Your program has no session on this day'}
               note={selConflict.note} />
           ) : null}
 
@@ -1610,7 +1610,7 @@ export default function Calendar() {
                       chip={mine ? { label: 'On the Waitlist', tone: 'amber' } : { label: 'Taken', tone: 'neutral' }}
                       action={mine
                         ? <Ghost label="Leave" onPress={() => leaveWaitlist(k)} />
-                        : <Ghost label="Wait For It" icon="plus" onPress={() => joinWaitlist(k)} />}
+                        : <Ghost label="Wait for It" icon="plus" onPress={() => joinWaitlist(k)} />}
                     />
                   </View>
                 );
@@ -1741,13 +1741,13 @@ export default function Calendar() {
                   // can explain them and nothing will correct them. So an
                   // unreadable name becomes a generic but true title rather
                   // than a dash somebody finds under next Tuesday.
-                  const title = coachName ? `Training with ${coachName}` : 'Personal training';
-                  const calName = coachName ? `${BRAND.label} — ${coachName}` : `${BRAND.label} — Personal training`;
+                  const title = coachName ? `Training with ${coachName}` : 'Personal Training';
+                  const calName = coachName ? `${BRAND.label} — ${coachName}` : `${BRAND.label} — Personal Training`;
                   // `mine`, which is bounded to what is still to come. It was
                   // the whole history: last March's sessions went permanently
                   // into the member's own diary.
                   const evts = mine.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title }));
-                  await shareIcs(buildIcs(evts, calName), 'repple-sessions.ics', 'Add sessions to your calendar');
+                  await shareIcs(buildIcs(evts, calName), 'repple-sessions.ics', 'Add Sessions to Your Calendar');
                 }} />
             </View>
           ) : null}
@@ -1983,7 +1983,7 @@ export default function Calendar() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '86%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Plan a day</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Plan a Day</Text>
             <Text style={{ ...ty.head, color: t.ink, marginTop: 3 }}>{planFor ? planDayLabel(planFor) : ''}</Text>
             {/* Said once, at the top, before anything is chosen. The client is
                 recording an intention; nothing on this sheet writes to their
@@ -2089,7 +2089,7 @@ export default function Calendar() {
             </Text>
             <Rule />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: sp.lg }}>
-              <Text style={{ ...ty.label, color: t.ink3 }}>Session rate</Text>
+              <Text style={{ ...ty.label, color: t.ink3 }}>Session Rate</Text>
               <Text style={{ ...ty.body, color: t.ink3 }}>— ask your coach</Text>
             </View>
             <View style={{ marginTop: sp.xl }}>

@@ -367,12 +367,12 @@ export default function ClientAttendanceScreen() {
     const mins = dwellMinutes(e.visit);
     const tone = o.tone === 'good' ? t.good : o.tone === 'ahead' ? t.brand : t.ink3;
     const title = e.source === 'floor'
-      ? 'Gym visit'
+      ? 'Gym Visit'
       : e.klass
         ? e.klass.title
         // Rule 3 in src/lib/attendance.ts made visible: not a class with no
         // name, a class this app was not allowed to read.
-        : 'A class we could not read';
+        : 'A Class We Could Not Read';
     const where = e.klass
       ? [e.klass.kind, e.klass.instructor, e.klass.branch, e.klass.room].filter(Boolean).join(' · ')
       : e.source === 'floor'
@@ -417,7 +417,7 @@ export default function ClientAttendanceScreen() {
         {/* ── who ──────────────────────────────────────────────────────────── */}
         {r.status === 'error' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
               note="This is not an empty book. Nobody is listed below because the list did not come back — go back and open this again once you are connected." />
           </Section>
         ) : null}
@@ -451,7 +451,7 @@ export default function ClientAttendanceScreen() {
           <>
             <Rule />
             <Section>
-              <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+              <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
                 note={`You added ${client?.name?.trim().split(/\s+/)[0] || 'them'} to your book by hand, so they have never been a member your gym could record. There is no register with their name on it and no door log to fold together — that is not an empty attendance record and not a failed read. Invite them from your client list and this screen starts from the day they join.`} />
             </Section>
             {client ? (
@@ -470,14 +470,14 @@ export default function ClientAttendanceScreen() {
             {scopeNote ? (
               <Section>
                 <Notice tone={t.warn} kicker="Scope"
-                  title={hasGym === null ? 'We could not tell which gym you belong to' : 'Your account is not attached to a gym'}
+                  title={hasGym === null ? 'We Could Not Tell Which Gym You Belong To' : 'Your Account Is Not Attached to a Gym'}
                   note={scopeNote} />
               </Section>
             ) : null}
 
             {a.status === 'error' ? (
               <Section>
-                <Notice tone={t.crit} kicker="Not read" title="Their attendance could not be read"
+                <Notice tone={t.crit} kicker="Not Read" title="Their Attendance Could Not Be Read"
                   note={a.events.length
                     ? 'What is below is what we had before the read failed. It is not confirmed current, and there may be visits missing from it.'
                     : 'This is NOT a record of them never coming in — it is a record we could not open.'}>
@@ -573,7 +573,7 @@ export default function ClientAttendanceScreen() {
                   attended figure already has a home and a correct source —
                   "Days on record" above, off `attendedDays`. */}
               <SectionHead
-                title={client ? `${client.name} · everything on record` : 'Everything on record'}
+                title={client ? `${client.name} · Everything on Record` : 'Everything on Record'}
                 note={countable && a.events.length ? num(a.events.length) : undefined}
               />
 
@@ -607,7 +607,7 @@ export default function ClientAttendanceScreen() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="On record, date unknown" note={countable ? `${a.undated.length}` : undefined} />
+                  <SectionHead title="On Record, Date Unknown" note={countable ? `${a.undated.length}` : undefined} />
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
                     Classes they booked whose details this app cannot read, so there is no date to put
                     them on. Listed here rather than dropped or guessed onto a day, and not counted above.
@@ -616,7 +616,7 @@ export default function ClientAttendanceScreen() {
                     <View key={e.key}>
                       {i > 0 ? <Rule /> : null}
                       <View style={{ paddingVertical: sp.md }}>
-                        <Text style={{ ...ty.body, color: t.ink }}>A class we could not read</Text>
+                        <Text style={{ ...ty.body, color: t.ink }}>A Class We Could Not Read</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                           Booked {dayLabel(e.booking?.bookedAt ?? null)} — the booking date, not the class date.
                         </Text>

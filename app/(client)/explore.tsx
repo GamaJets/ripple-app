@@ -111,7 +111,7 @@ export default function Explore() {
           <View style={{ marginTop: sp.lg }}>
             <Rule />
             <Section>
-              <SectionHead title="Needs a coach" />
+              <SectionHead title="Needs a Coach" />
               <Text style={{ ...ty.label, color: t.ink3 }}>
                 {hiddenHits.map((f) => f.label).join(', ')} {hiddenHits.length === 1 ? 'is part of this app' : 'are part of this app'}, but {hiddenHits.length === 1 ? 'it is' : 'they are'} something you do with a coach. You are set to training yourself, so {hiddenHits.length === 1 ? 'it is' : 'they are'} hidden rather than missing.
               </Text>

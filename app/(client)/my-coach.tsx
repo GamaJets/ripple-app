@@ -374,15 +374,15 @@ export default function MyCoach() {
 
   const withdraw = () => {
     if (!coachId) return;
-    Alert.alert('Withdraw your review?', WITHDRAW_NOTE, [
-      { text: 'Keep it', style: 'cancel' },
+    Alert.alert('Withdraw Your Review?', WITHDRAW_NOTE, [
+      { text: 'Keep It', style: 'cancel' },
       {
         text: 'Withdraw', style: 'destructive', onPress: () => {
           void (async () => {
             const ok = await withdrawReview(coachId);
             if (!ok) {
               // Nothing changes on screen until the server has said it did.
-              Alert.alert('Not withdrawn', 'Your review is still on their profile. Try again in a moment.');
+              Alert.alert('Not Withdrawn', 'Your review is still on their profile. Try again in a moment.');
               return;
             }
             setTick((n) => n + 1);
@@ -439,7 +439,7 @@ export default function MyCoach() {
       : await endCoaching(coach?.id ?? '');
     setLeaveBusy(false);
     if (!res.ok) {
-      Alert.alert('Not ended', `${res.reason}\n\nThey are still your coach and nothing has changed.`);
+      Alert.alert('Not Ended', `${res.reason}\n\nThey are still your coach and nothing has changed.`);
       return;
     }
     setLeaving(false);
@@ -466,7 +466,7 @@ export default function MyCoach() {
     // there is no live link.
     cd.setCoachingMode('solo');
     Alert.alert(
-      res.ended ? 'You have left' : 'Nothing to end',
+      res.ended ? 'You Have Left' : 'Nothing to End',
       clientEndOutcomeLine(res.ended, reason != null, (res as { reasonStored?: boolean }).reasonStored === true),
       [{ text: 'Done', onPress: () => { setTick((n) => n + 1); void load(); } }],
     );
@@ -1232,7 +1232,7 @@ export default function MyCoach() {
       <Modal visible={leaving} animationType="slide" onRequestClose={() => setLeaving(false)}>
         <EndReasonSheet
           name={coach?.name || 'your coach'}
-          heading="Why you are leaving"
+          heading="Why You Are Leaving"
           verb={leaveBusy ? 'Leaving…' : 'Leave and Tell Them Why'}
           explainer={CLIENT_END_EXPLAINER}
           notePlaceholder="Anything you want them to know, in your own words."

@@ -4354,7 +4354,7 @@ export default function TrainerClients() {
                   NOW, and lets the words be judged against that. */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
+                  <Text style={{ ...ty.body, color: t.ink }}>Also Send a Push</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('coach', null)}</Text>
                 </View>
                 {/* The same control app/(owner)/ops.tsx already fixed, and the

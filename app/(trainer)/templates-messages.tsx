@@ -117,7 +117,7 @@ export default function SavedMessages() {
           // once, there, in the tone it needs.
           detail={lib.status === 'ready' || lib.status === 'error' ? undefined : templatesEmptyLine(lib.status)}>
           <View style={{ marginTop: sp.lg }}>
-            <Cta label="Write A New One" wide onPress={() => open(null)} />
+            <Cta label="Write a New One" wide onPress={() => open(null)} />
           </View>
         </FigureCard>
 
@@ -144,7 +144,7 @@ export default function SavedMessages() {
 
         {offers.length ? (<>
           <Section>
-            <SectionHead title="Ones To Start From" note="Not yours until you add one" />
+            <SectionHead title="Ones to Start From" note="Not yours until you add one" />
             {offers.map((tpl, i) => (
               <View key={tpl.title} style={{ flexDirection: 'row', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <IconPlate icon="sparkle" tone="purple" />
@@ -192,10 +192,10 @@ export default function SavedMessages() {
               <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>
                 {editing?.id ? 'Edit This Message' : 'A New Saved Message'}
               </Text>
-              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What to call it</Text>
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What to Call It</Text>
               <TextInput value={title} onChangeText={setTitle} placeholder="Welcome" placeholderTextColor={t.ink3}
                 style={{ ...inp, marginBottom: sp.md }} />
-              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>The message</Text>
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>The Message</Text>
               <TextInput value={body} onChangeText={setBody} multiline maxLength={MAX_TEMPLATE_BODY}
                 placeholder="Hey {name} — " placeholderTextColor={t.ink3}
                 style={{ ...inp, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.sm }} />

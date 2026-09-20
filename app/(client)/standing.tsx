@@ -294,7 +294,7 @@ export default function StandingAppointments() {
     setBusy(false);
     if (!res.ok) {
       Alert.alert(
-        'Still standing',
+        'Still Standing',
         `${seriesLabel(s)} ${withWhom} is still running — that did not save, so nothing has changed, no session has been removed and your coach has not been told.\n\n${res.error}`,
         [{ text: 'OK' }],
       );
@@ -306,7 +306,7 @@ export default function StandingAppointments() {
     await refreshSessions();
     const r = res.report;
     Alert.alert(
-      'Standing appointment ended',
+      'Standing Appointment Ended',
       `${seriesLabel(s)} ${withWhom} will not repeat again.\n\n`
       + (r.removed
         ? `${r.removed} later session${r.removed === 1 ? '' : 's'} ${r.removed === 1 ? 'was' : 'were'} removed from your calendar and your coach's.`
@@ -393,7 +393,7 @@ export default function StandingAppointments() {
           setBusy(false);
           setPauseFor(null);
           if (!res.report) {
-            Alert.alert('Not paused', res.error ?? 'That did not save, so your sessions are still booked.');
+            Alert.alert('Not Paused', res.error ?? 'That did not save, so your sessions are still booked.');
             return;
           }
           await refreshSessions();
@@ -423,7 +423,7 @@ export default function StandingAppointments() {
   const doPauseRange = (s: RecurringSeries) => {
     const [ty_, tm, td] = todayParts();
     const refusal = pauseRangeRefusal(fromOn, toOn, isoFromParts(ty_, tm, td));
-    if (refusal) { Alert.alert('Those dates will not work', refusal); return; }
+    if (refusal) { Alert.alert('Those Dates Will Not Work', refusal); return; }
     // Local midnight to local end-of-day, built by the same `Date` the rest of
     // this screen's previews use. utc-day-ok: both bounds are constructed from
     // local parts and never sliced out of an ISO string, which is the failure
@@ -446,7 +446,7 @@ export default function StandingAppointments() {
         setBusy(false);
         setPauseFor(null);
         if (!res.report) {
-          Alert.alert('Not paused', res.error ?? 'That did not save, so your sessions are still booked.');
+          Alert.alert('Not Paused', res.error ?? 'That did not save, so your sessions are still booked.');
           return;
         }
         // Cleared only on a pause that landed. A member whose write failed gets
@@ -472,11 +472,11 @@ export default function StandingAppointments() {
         setBusy(true);
         const res = await resumeSeries(skipId);
         setBusy(false);
-        if (!res.resumed) { Alert.alert('Not resumed', res.error ?? 'That did not save.'); return; }
+        if (!res.resumed) { Alert.alert('Not Resumed', res.error ?? 'That did not save.'); return; }
         await refreshSessions();
         void reloadSeries();
         void reloadPauses();
-        Alert.alert('Back on', resumedLine(res.created));
+        Alert.alert('Back On', resumedLine(res.created));
       } },
     ]);
   };
@@ -551,14 +551,14 @@ export default function StandingAppointments() {
       // are both lists this screen may not reason from.
       isWhole(seriesStatus),
     );
-    if (mine) { Alert.alert('Not sent', mine); return; }
+    if (mine) { Alert.alert('Not Sent', mine); return; }
     const myBusy = sessions
       .filter((x) => x.status === 'booked' && x.clientId === cd.id)
       .map((x) => ({ startsAt: x.startsAt, durationMin: x.durationMin }));
     const stop = askBlocker(startsAt, askLength, now, { myBusy });
-    if (stop) { Alert.alert('Not sent', stop); return; }
+    if (stop) { Alert.alert('Not Sent', stop); return; }
     const when = askWhenLabel(startsAt);
-    if (!when) { Alert.alert('Not sent', 'That time could not be read. Pick the day and the time again.'); return; }
+    if (!when) { Alert.alert('Not Sent', 'That time could not be read. Pick the day and the time again.'); return; }
 
     setBusy(true);
     // The note is what makes this a request for a STANDING appointment rather
@@ -568,7 +568,7 @@ export default function StandingAppointments() {
     setBusy(false);
 
     if (!res.ok) {
-      Alert.alert('Not sent', res.reason
+      Alert.alert('Not Sent', res.reason
         ? askRefusalNote(res.reason)
         : 'That did not send, so your coach has not been asked and nothing has been arranged. Try again when you have signal.');
       return;
@@ -607,7 +607,7 @@ export default function StandingAppointments() {
         // src/lib/reachability.ts — and app/(client)/bookings.tsx and
         // app/(client)/classes.tsx already replaced this exact sentence with it.
         Alert.alert(
-          'Not cancelled',
+          'Not Cancelled',
           `Your ${dayLabel(one.startsAt)} ${timeLabel(one.startsAt)} session is still booked — that did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
           [{ text: 'OK' }],
         );
@@ -623,14 +623,14 @@ export default function StandingAppointments() {
     // money and the sheet behind it is about to disappear.
     const stays = ' Your standing appointment keeps running — the week after is still booked.';
     if (warn.late) {
-      Alert.alert('Cancelling late', `${warn.line}${stays} Continue?`, [
-        { text: 'Keep it', style: 'cancel' },
-        { text: 'Cancel anyway', style: 'destructive', onPress: () => { void doCancel(); } },
+      Alert.alert('Cancelling Late', `${warn.line}${stays} Continue?`, [
+        { text: 'Keep It', style: 'cancel' },
+        { text: 'Cancel Anyway', style: 'destructive', onPress: () => { void doCancel(); } },
       ]);
       return;
     }
-    Alert.alert('Cancel this session?', `${warn.line}${stays}`, [
-      { text: 'Keep it', style: 'cancel' },
+    Alert.alert('Cancel This Session?', `${warn.line}${stays}`, [
+      { text: 'Keep It', style: 'cancel' },
       { text: 'Cancel', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);
   };
@@ -801,18 +801,18 @@ export default function StandingAppointments() {
             credit as it is delivered. src/lib/standingAsk.ts carries the whole
             argument. */}
         <Section>
-          <SectionHead title="Ask For A Weekly Time" />
+          <SectionHead title="Ask for a Weekly Time" />
           {cd.coachLinked === false ? (
             /* A KNOWN absence, not an unread one. `coachLinked` is
                `boolean | null` and null means the read did not land — under
                which the ask is still offered, because withdrawing the only
                route to a coach on the strength of a failed read costs the
                member more than the wasted tap it would save. */
-            <Notice kicker="BEFORE YOU CAN ASK" title="You don’t have a coach yet" note={NO_COACH_FOR_STANDING} />
+            <Notice kicker="BEFORE YOU CAN ASK" title="You Don’t Have a Coach Yet" note={NO_COACH_FOR_STANDING} />
           ) : (<>
             <Text style={{ ...ty.label, color: t.ink2 }}>{STANDING_ASK_RULE}</Text>
             <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
-              <Ghost icon="calendar" label="Ask For A Standing Appointment"
+              <Ghost icon="calendar" label="Ask for a Standing Appointment"
                 a11yLabel="Ask your coach for the same time every week"
                 onPress={() => setAsking(true)} />
             </View>
@@ -864,7 +864,7 @@ export default function StandingAppointments() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           {endFor ? (<>
-            <Text style={{ ...ty.head, color: t.ink }}>One session, or the arrangement?</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>One Session, or the Arrangement?</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               {seriesLabel(endFor)} {withWhom}. These are two different things and they do two different things.
             </Text>
@@ -912,11 +912,11 @@ export default function StandingAppointments() {
                             // cancel-style button: nothing here may be the
                             // one a stray tap lands on.
                             Alert.alert(
-                              'End this standing appointment?',
+                              'End This Standing Appointment?',
                               `${seriesLabel(s)} will stop repeating. ${o.detail}`,
                               [
-                                { text: 'Keep it', style: 'cancel' },
-                                { text: 'End it', style: 'destructive', onPress: () => { void endNow(s); } },
+                                { text: 'Keep It', style: 'cancel' },
+                                { text: 'End It', style: 'destructive', onPress: () => { void endNow(s); } },
                               ],
                             );
                           }} />
@@ -947,8 +947,8 @@ export default function StandingAppointments() {
             {/* Said once more under both, because it is the half of the promise
                 a member is most likely to disbelieve: they are leaving a weekly
                 commitment and expect that to be the expensive thing to do. */}
-            <Notice tone={t.brand} kicker="Either way"
-              title="Ending it never costs anything"
+            <Notice tone={t.brand} kicker="Either Way"
+              title="Ending It Never Costs Anything"
               note="However close the next session is, stopping a standing appointment records no cancellation fee. Only cancelling a single session can, and only under your coach’s notice policy." />
             <View style={{ height: sp.lg }} />
             {/* The only emphasised button on the sheet is the one that does
@@ -974,7 +974,7 @@ export default function StandingAppointments() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           {pauseFor ? (<>
-            <Text style={{ ...ty.head, color: t.ink }}>Pause this, or end it?</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Pause This, or End It?</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               {seriesLabel(pauseFor)} {withWhom}. Pausing stops the sessions for a while and keeps the arrangement.
             </Text>
@@ -1009,7 +1009,7 @@ export default function StandingAppointments() {
                   For a holiday you already know the dates of. Your usual time starts again by itself the day after the last one.
                 </Text>
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
-                  {([['from', 'First day away', fromOn], ['to', 'Last day away', toOn]] as const).map(([which, label, val]) => (
+                  {([['from', 'First Day Away', fromOn], ['to', 'Last Day Away', toOn]] as const).map(([which, label, val]) => (
                     <Pressable key={which} onPress={() => setPicking(which)} disabled={busy}
                       accessibilityRole="button" accessibilityLabel={`${label}${val ? `, ${val}` : ', not chosen yet'}`}
                       style={{
@@ -1061,7 +1061,7 @@ export default function StandingAppointments() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAsking(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Ask For A Standing Appointment</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>Ask for a Standing Appointment</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
             {withWhom}. Pick the time you would like every week.
           </Text>
@@ -1069,7 +1069,7 @@ export default function StandingAppointments() {
             {/* Said first and in the app's own words for a one-off ask, because
                 it is the half somebody is most likely to misread: they are
                 asking, and until their coach answers nothing is held. */}
-            <Notice kicker="WHAT THIS DOES" title="It asks — it doesn’t book" note={NOT_A_BOOKING} />
+            <Notice kicker="WHAT THIS DOES" title="It Asks — It Doesn’t Book" note={NOT_A_BOOKING} />
 
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>DAY OF THE WEEK</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
@@ -1217,7 +1217,7 @@ export default function StandingAppointments() {
         value={picking === 'to' ? toOn : fromOn}
         fallback={picking === 'to' ? (fromOn || null) : null}
         range={{ min: isoFromParts(...todayParts()) }}
-        heading={picking === 'to' ? 'Last day away' : 'First day away'}
+        heading={picking === 'to' ? 'Last Day Away' : 'First Day Away'}
         note={picking === 'to'
           ? 'The last date your usual time should not run. It starts again the day after.'
           : 'The first date your usual time should not run.'}

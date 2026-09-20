@@ -194,7 +194,7 @@ export default function GettingStarted() {
             gives every screen — the kit's `ActionBlock`, which is that shape. It
             opens the same route the row does. */}
         {next ? (
-          <ActionBlock title={next.title} reason={next.note} meta="Next up"
+          <ActionBlock title={next.title} reason={next.note} meta="Next Up"
             cta={{ label: 'Open', a11yLabel: `Open ${next.title}`, onPress: () => router.push(next.route as any) }} />
         ) : null}
 

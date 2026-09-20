@@ -43,12 +43,12 @@ export function BuildInfo() {
   // In development (and in Expo Go) there is no embedded update to report.
   const embedded = Updates.isEmbeddedLaunch;
   const rows: [string, string][] = [
-    ['App version', appVersion],
+    ['App Version', appVersion],
     ['Runtime', Updates.runtimeVersion ?? '—'],
     ['Channel', Updates.channel ?? 'none (dev build)'],
     ['Update', embedded ? 'embedded (no OTA applied)' : shortId(Updates.updateId)],
     ['Published', Updates.createdAt ? Updates.createdAt.toLocaleString() : '—'],
-    ['Last check', updateCheckLine(check, (t) => new Date(t).toLocaleTimeString())],
+    ['Last Check', updateCheckLine(check, (t) => new Date(t).toLocaleTimeString())],
   ];
 
   const share = async () => {
@@ -66,7 +66,7 @@ export function BuildInfo() {
         paddingHorizontal: sp.lg, paddingVertical: 13, marginBottom: sp.sm,
       }}>
       <View>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>What’s new</Text>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>What’s New</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>What changed in {appVersion}</Text>
       </View>
       <Text style={{ ...ty.body, color: t.ink3 }}>{FORWARD_CHAR}</Text>

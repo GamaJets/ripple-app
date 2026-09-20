@@ -126,7 +126,7 @@ export function BarcodeSheet({
    */
   const run = async (raw: string, from: 'camera' | 'keyboard') => {
     if (!normalizeBarcode(raw)) {
-      if (from === 'keyboard') Alert.alert('Enter a barcode', 'Type the 8–13 digit number under the barcode.');
+      if (from === 'keyboard') Alert.alert('Enter a Barcode', 'Type the 8–13 digit number under the barcode.');
       return;
     }
     setBusy(true);
@@ -139,14 +139,14 @@ export function BarcodeSheet({
       // one being reported as the second.
       const scanned = from === 'camera' ? `That barcode read as ${raw}. ` : '';
       const said = out.reason === 'busy'
-        ? { title: 'Could not check', body: `${scanned}The food database is busy right now, so we could not look this up. That says nothing about whether the product is in there — try again in a moment, or use “Describe it”.` }
+        ? { title: 'Could Not Check', body: `${scanned}The food database is busy right now, so we could not look this up. That says nothing about whether the product is in there — try again in a moment, or use “Describe it”.` }
         : out.reason === 'offline'
-        ? { title: 'Could not check', body: `${scanned}We could not reach the food database, so we could not look this up. Nothing has been logged, and this says nothing about whether the product is in there. Try again when you have signal, or use “Describe it”.` }
+        ? { title: 'Could Not Check', body: `${scanned}We could not reach the food database, so we could not look this up. Nothing has been logged, and this says nothing about whether the product is in there. Try again when you have signal, or use “Describe it”.` }
         : out.reason === 'no-nutrition'
-        ? { title: 'No figures for it', body: `${scanned}That product is in the Open Food Facts database, but it has no nutrition recorded — so there is nothing to log from it. Enter it with “Describe it” instead.` }
+        ? { title: 'No Figures for It', body: `${scanned}That product is in the Open Food Facts database, but it has no nutrition recorded — so there is nothing to log from it. Enter it with “Describe it” instead.` }
         : out.reason === 'bad-code'
-        ? { title: 'Not a barcode', body: 'That is not an 8 to 13 digit barcode. Type the number printed under the bars.' }
-        : { title: 'Not found', body: `${scanned}There is no match for it in the Open Food Facts database. Try “Describe it” instead.` };
+        ? { title: 'Not a Barcode', body: 'That is not an 8 to 13 digit barcode. Type the number printed under the bars.' }
+        : { title: 'Not Found', body: `${scanned}There is no match for it in the Open Food Facts database. Try “Describe it” instead.` };
       Alert.alert(said.title, said.body,
         // Cleared on the way out, or the camera would refuse to try the same
         // pack twice — and "it did nothing the second time" is how a member
@@ -210,7 +210,7 @@ export function BarcodeSheet({
             </View>
             <Pressable onPress={() => setTyping(true)} style={{ paddingVertical: 10, alignItems: 'center' }}
               accessibilityRole="button" accessibilityLabel="Type the barcode number instead">
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Type it instead</Text>
+              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Type It Instead</Text>
             </Pressable>
           </>) : (<>
             {/* Offered rather than assumed. `permission` is null until
@@ -229,9 +229,9 @@ export function BarcodeSheet({
               keyboardType="number-pad" returnKeyType="done" onSubmitEditing={() => void run(code, 'keyboard')} autoFocus={typing}
               accessibilityLabel="Barcode number"
               style={{ ...ty.head, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 13, letterSpacing: 1, marginBottom: sp.md }} />
-            <Pressable onPress={() => void run(code, 'keyboard')} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Look up and log"
+            <Pressable onPress={() => void run(code, 'keyboard')} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Look Up and Log"
               style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', marginBottom: sp.sm }}>
-              {busy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Look up &amp; log</Text>}
+              {busy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Look Up &amp; Log</Text>}
             </Pressable>
           </>)}
 

@@ -186,11 +186,11 @@ export default function Promotions() {
 
   const create = async (push: boolean) => {
     const c = code.trim().toUpperCase();
-    if (!title.trim() || !c || busy) { Alert.alert('Add details', 'Enter a title and a promo code.'); return; }
+    if (!title.trim() || !c || busy) { Alert.alert('Add Details', 'Enter a title and a promo code.'); return; }
     setBusy(true);
     try {
       const res = await addPromo(c, disc);
-      if (!res.ok) { Alert.alert('Could not create', res.reason || 'Try a different code.'); return; }
+      if (!res.ok) { Alert.alert('Could Not Create', res.reason || 'Try a different code.'); return; }
       const body = (msg.trim() || `${disc}% off with code ${c}`);
       const pushRes = push ? await pushToMembers(body, title) : null;
       setTitle(''); setCode(''); setMsg('');
@@ -199,7 +199,7 @@ export default function Promotions() {
       // in the second half is one `notify_users()` or send-push returned, and
       // `deliverySummary` is what decides whether it may be stated as a total,
       // as "at least", or not at all.
-      Alert.alert('Promotion created',
+      Alert.alert('Promotion Created',
         !pushRes ? `“${c}” created. Push it to members any time.`
           : [
             `“${c}” created.`,
@@ -357,7 +357,7 @@ export default function Promotions() {
               disabled prop, so the pair is gated as a group rather than one of
               them being live while the other is not. */}
           <View pointerEvents={busy ? 'none' : 'auto'} style={{ opacity: busy ? 0.6 : 1 }}>
-            <Cta label={busy ? 'Working…' : 'Create & push to members'} wide onPress={() => create(true)} />
+            <Cta label={busy ? 'Working…' : 'Create & Push to Members'} wide onPress={() => create(true)} />
             <View style={{ height: sp.sm }} />
             <Ghost label="Save Without Pushing" onPress={() => create(false)} />
           </View>
@@ -409,7 +409,7 @@ export default function Promotions() {
                   says so rather than flipping the dot on a screen the server
                   never agreed with. */}
               <Pressable
-                onPress={async () => { if (!await toggleActive(p.id)) Alert.alert('Not changed', `“${p.code}” could not be switched ${p.active ? 'off' : 'on'}, so it is still ${p.active ? 'live' : 'off'}.`); }}
+                onPress={async () => { if (!await toggleActive(p.id)) Alert.alert('Not Changed', `“${p.code}” could not be switched ${p.active ? 'off' : 'on'}, so it is still ${p.active ? 'live' : 'off'}.`); }}
                 accessibilityRole="button"
                 accessibilityLabel={`${p.code} is ${p.active ? 'live' : 'off'} — switch it ${p.active ? 'off' : 'on'}`}
                 hitSlop={6}
@@ -445,7 +445,7 @@ export default function Promotions() {
               ) : null}
               {/* The boolean was discarded here too: a code the server refused
                   to delete vanished from the list and stayed redeemable. */}
-              <Pressable onPress={async () => { if (!await removePromo(p.id)) Alert.alert('Not deleted', `“${p.code}” could not be deleted, so it is still there and, if it is live, can still be redeemed.`); }} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Remove ' + p.code}>
+              <Pressable onPress={async () => { if (!await removePromo(p.id)) Alert.alert('Not Deleted', `“${p.code}” could not be deleted, so it is still there and, if it is live, can still be redeemed.`); }} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Remove ' + p.code}>
                 <Icon name="minus" size={16} color={t.ink3} />
               </Pressable>
             </View>

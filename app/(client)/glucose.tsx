@@ -103,7 +103,7 @@ export default function Glucose() {
    */
   const confirmRemove = (id: string, valueLabel: string, whenLabel: string) => {
     Alert.alert(
-      'Remove this reading?',
+      'Remove This Reading?',
       `${valueLabel} from ${whenLabel} would be taken off your record, and off your average, your highest and your in-range figure with it. Your coach would stop seeing it too. This cannot be undone.`,
       [
         { text: 'Keep It', style: 'cancel' },
@@ -113,7 +113,7 @@ export default function Glucose() {
           onPress: async () => {
             const gone = await g.remove(id);
             if (!gone) {
-              Alert.alert('It is still there', 'That reading could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.');
+              Alert.alert('It Is Still There', 'That reading could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.');
             }
           },
         },
@@ -142,10 +142,10 @@ export default function Glucose() {
 
   /** The alert's title. Four outcomes, four titles, never one shared word. */
   const importTitle = (status: GlucoseReadStatus, added: number): string => {
-    if (status === 'unsupported') return 'Nothing to read from';
-    if (status === 'denied') return `${BRAND.label} has not been given access`;
-    if (status === 'error') return 'Could not be read';
-    return added > 0 ? 'Imported' : 'Up to date';
+    if (status === 'unsupported') return 'Nothing to Read From';
+    if (status === 'denied') return `${BRAND.label} Has Not Been Given Access`;
+    if (status === 'error') return 'Could Not Be Read';
+    return added > 0 ? 'Imported' : 'Up to Date';
   };
 
   const doImport = async () => {
@@ -169,7 +169,7 @@ export default function Glucose() {
     // nothing. `openStore` is null on iOS, where there is nowhere to send them.
     if (r.status === 'denied' && src.openStore) {
       Alert.alert(importTitle(r.status, r.added), text, [
-        { text: 'Not now', style: 'cancel' },
+        { text: 'Not Now', style: 'cancel' },
         { text: `Open ${src.storeName}`, onPress: src.openStore },
       ]);
       return;
@@ -182,19 +182,19 @@ export default function Glucose() {
     if (mmol == null) {
       // Refused rather than rounded — a mg/dL number typed under mmol/L would
       // otherwise land four times too high and sit on every chart forever.
-      Alert.alert('That is not a reading', `Enter a value in ${unit}.`);
+      Alert.alert('That Is Not a Reading', `Enter a value in ${unit}.`);
       return;
     }
     setBusy(true);
     const ok = await g.addManual(mmol);
     setBusy(false);
-    if (!ok) { Alert.alert('Not saved', 'That reading could not be saved. Try again in a moment.'); return; }
+    if (!ok) { Alert.alert('Not Saved', 'That reading could not be saved. Try again in a moment.'); return; }
     setTyped(''); setTyping(false);
   };
 
   const toggleShare = async (on: boolean) => {
     const ok = await g.setShared(on);
-    if (!ok) Alert.alert('Not saved', 'That could not be changed. Try again in a moment.');
+    if (!ok) Alert.alert('Not Saved', 'That could not be changed. Try again in a moment.');
   };
 
   return (
@@ -212,7 +212,7 @@ export default function Glucose() {
             against it. `formatGlucose` is the same function the readings go
             through, so the range and the figures it judges cannot come out in
             two different units again. */}
-        <Notice tone={t.s3} kicker="Not medical advice" title="Readings, not recommendations"
+        <Notice tone={t.s3} kicker="Not Medical Advice" title="Readings, not recommendations"
           note={`The range shown (${formatGlucose(TYPICAL_LOW_MMOL, unit)}–${formatGlucose(TYPICAL_HIGH_MMOL, unit)} ${unit}) is the one commonly quoted for adults, not a target set for you — your targets come from your clinician.`} />
 
         {/* ── The window's headline figures ─────────────────────────────── */}
@@ -322,7 +322,7 @@ export default function Glucose() {
             {src.openStore && importNote?.status === 'denied' ? (
               <Ghost label={`Open ${src.storeName}`} onPress={src.openStore} />
             ) : null}
-            <Ghost label="Add One By Hand" onPress={() => setTyping(true)} />
+            <Ghost label="Add One by Hand" onPress={() => setTyping(true)} />
           </View>
         </Section>
 
@@ -331,7 +331,7 @@ export default function Glucose() {
           <SectionHead title="Your Coach" />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.sm }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, color: t.ink }}>Let my coach see these</Text>
+              <Text style={{ ...ty.body, color: t.ink }}>Let My Coach See These</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
                 Off by default. Turning it off hides the history too.
               </Text>
@@ -393,7 +393,7 @@ export default function Glucose() {
                     <Text style={{ ...ty.body, color: t.ink }}>{fig(p.before ? formatGlucose(p.before.mmol, unit) : null)}</Text>
                   </View>
                   <View>
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>Peak after</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Peak After</Text>
                     <Text style={{ ...ty.body, color: bandColor(band(p.peak?.mmol)) }}>{fig(p.peak ? formatGlucose(p.peak.mmol, unit) : null)}</Text>
                   </View>
                   <View>

@@ -171,7 +171,7 @@ export default function Invoices() {
 
         {status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Not read" title="We couldn’t read your invoices"
+            <Notice tone={t.crit} kicker="Not Read" title="We couldn’t read your invoices"
               note={rows.length
                 ? (cachedAtLine(cachedAt) ?? 'What is listed below is what we had before the read failed. It is not confirmed current, and there may be invoices missing from it.')
                 : 'This is not a record with nothing in it — it is a record we could not open. Pull down to try again, or ask your gym for a copy.'} >
@@ -289,7 +289,7 @@ export default function Invoices() {
             <View style={{ flexDirection: 'row', marginTop: sp.md }}>
               <Ghost label="Send Yourself a Copy"
                 a11yLabel="Send yourself a copy of these invoices"
-                onPress={() => { void shareText(invoiceCopyText(rows, today, status), 'Invoices from your gym'); }} />
+                onPress={() => { void shareText(invoiceCopyText(rows, today, status), 'Invoices from Your Gym'); }} />
             </View>
           ) : null}
         </Section>

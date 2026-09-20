@@ -70,7 +70,7 @@ export function ScheduleOperations({
     <Expandable title="Schedule Tools" note="Availability, time off, calendars and classes">
       <ListRow icon="clock" tone="teal" title="Weekly Availability" note={availabilityNote} onPress={onAvailability} />
       <ListRow icon="lock" tone="amber" title="Block Out Time" note={`Mark ${selectedDay} as unavailable so nobody can book it`} onPress={onBlockTime} />
-      <ListRow icon="calendar" title="Block Time From Your Calendar" tone={deviceCalendarAvailable ? 'blue' : t.ink3}
+      <ListRow icon="calendar" title="Block Time from Your Calendar" tone={deviceCalendarAvailable ? 'blue' : t.ink3}
         note={deviceCalendarNote} onPress={onDeviceCalendar} />
       {googleCalendarNote != null ? (
         <ListRow icon="calendar" tone="blue" title="Google Calendar" note={googleCalendarNote} onPress={onGoogleCalendar} />

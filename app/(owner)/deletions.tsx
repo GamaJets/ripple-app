@@ -293,7 +293,7 @@ export default function OwnerDeletions() {
       // member has not asked to be deleted."), so show them rather than a
       // generic failure that hides which of the two guards fired.
       const msg = e instanceof Error ? e.message : 'Nothing was deleted. Check your connection and try again.';
-      Alert.alert('Not deleted', msg);
+      Alert.alert('Not Deleted', msg);
     } finally { setBusy(null); }
   };
 
@@ -303,7 +303,7 @@ export default function OwnerDeletions() {
    * under your thumb from opening the first.
    */
   const confirm = (p: Pending) => {
-    const who = p.name || 'This account';
+    const who = p.name || 'This Account';
     Alert.alert(
       `Delete ${who}?`,
       `This permanently erases ${who} and everything of theirs — their profile, workouts, logs, scans, messages and bookings — across ${CASCADE_TABLES} tables of this gym's records, and their sign-in account with them.\n\n` +
@@ -313,11 +313,11 @@ export default function OwnerDeletions() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Continue', style: 'destructive', onPress: () => {
           Alert.alert(
-            'This cannot be undone',
+            'This Cannot Be Undone',
             `${who} will be deleted now. There is no undo, no recovery and no backup you can restore them from.`,
             [
-              { text: 'Keep the account', style: 'cancel' },
-              { text: 'Delete permanently', style: 'destructive', onPress: () => { void run(p); } },
+              { text: 'Keep the Account', style: 'cancel' },
+              { text: 'Delete Permanently', style: 'destructive', onPress: () => { void run(p); } },
             ],
           );
         } },
@@ -416,7 +416,7 @@ export default function OwnerDeletions() {
               is a statutory deadline, two lines under a hero showing a dash for
               that same reason. A heading and a figure disagreeing about whether
               a number is known is worse than either answer on its own. */}
-          <SectionHead title={loaded && !queueShort && queue.length ? `The queue · ${queue.length}` : 'The queue'} />
+          <SectionHead title={loaded && !queueShort && queue.length ? `The Queue · ${queue.length}` : 'The Queue'} />
           {failed ? (
             <View style={{ marginBottom: loaded && queue.length ? sp.md : 0 }}>
               <Flag tone={t.crit}>

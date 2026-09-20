@@ -483,7 +483,7 @@ export default function OwnerOrders() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                   {bad ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
                   <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }} numberOfLines={1}>
-                    {o.memberName ?? 'Name not readable'}
+                    {o.memberName ?? 'Name Not Readable'}
                   </Text>
                   <Text style={{ ...ty.body, ...numeric, color: t.ink }}>
                     {/* `money` returns null without a currency and React draws

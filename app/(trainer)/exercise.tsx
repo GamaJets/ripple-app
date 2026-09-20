@@ -260,7 +260,7 @@ export default function TrainerExercise() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Looking this movement up…</Text>
           </View>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Exercise" title="This could not be read"
+          <Notice tone={t.warn} kicker="Exercise" title="This Could Not Be Read"
             note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
         ) : clip ? (
           <View style={hero}><View style={heroClip}><ExerciseVideo video={clip} exerciseName={detail?.name || name} /></View></View>
@@ -642,7 +642,7 @@ export default function TrainerExercise() {
               thing they came to do. It is an OFFER and not a claim: the Videos
               screen checks for itself whether the movement is already covered
               and drops the prompt when it is. */}
-          <Ghost label={clip || !clipsKnown ? 'Your Clip Library' : 'Record a clip for this movement'} icon="video"
+          <Ghost label={clip || !clipsKnown ? 'Your Clip Library' : 'Record a Clip for This Movement'} icon="video"
             onPress={() => {
               if (clipsKnown && sources.mine === 0) {
                 router.push({

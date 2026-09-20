@@ -191,7 +191,7 @@ const PHONE_READ_FAILED =
 
 /** A switch was touched while that was true. Nothing moved — said, rather than
  *  left as a control that appears to do nothing. */
-const PHONE_WRITE_REFUSED_TITLE = 'Your choices could not be read';
+const PHONE_WRITE_REFUSED_TITLE = 'Your Choices Could Not Be Read';
 const PHONE_WRITE_REFUSED =
   'Nothing has been changed. This phone did not hand over the choices you have already made, so what is on screen is '
   + 'not them \u2014 saving now would replace them. Close this screen and open it again.';
@@ -402,7 +402,7 @@ export default function NotificationPrefs() {
     // still work, but saving one and not the other silently is exactly the
     // half-state `quietSaveNote` exists to refuse to hide.
     if (quietOn && remoteHalf && !z) {
-      Alert.alert('Cannot set quiet hours on this phone',
+      Alert.alert('Cannot Set Quiet Hours on This Phone',
         'This phone did not report which timezone it is in, and the hours that stop anything sent to you are applied by a server that has no other way to know. Without it they would be applied in the wrong ones, so nothing has been changed.');
       return;
     }
@@ -467,7 +467,7 @@ export default function NotificationPrefs() {
           <Section>
             <Notice
               tone={t.warn}
-              kicker="Not sending yet"
+              kicker="Not Sending Yet"
               title="This build cannot schedule notifications"
               note="Your choices here are kept and will be honoured, but nothing is being sent on this version of the app at all."
             />
@@ -481,7 +481,7 @@ export default function NotificationPrefs() {
           <Section>
             <Notice
               tone={t.warn}
-              kicker="Not read"
+              kicker="Not Read"
               title={PHONE_READ_FAILED_TITLE}
               note={PHONE_READ_FAILED}
             />
@@ -569,7 +569,7 @@ export default function NotificationPrefs() {
               </View>
               <Pressable onPress={() => { setDraftOn(!quietOn); setQuietNote(null); }}
                 accessibilityRole="switch"
-                accessibilityLabel="Quiet hours"
+                accessibilityLabel="Quiet Hours"
                 accessibilityState={{ checked: quietOn }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
                 style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: quietOn ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
@@ -636,7 +636,7 @@ export default function NotificationPrefs() {
             <View style={{ marginTop: sp.lg }}>
               <Cta
                 label={quietOn ? 'Save Quiet Hours' : 'Turn Quiet Hours Off'}
-                a11yLabel={quietOn ? 'Save quiet hours' : 'Turn quiet hours off'}
+                a11yLabel={quietOn ? 'Save Quiet Hours' : 'Turn Quiet Hours Off'}
                 wide
                 disabled={!canWrite || quietBusy || quietEmpty || !(quietUnsaved || quietSplit)}
                 onPress={() => { void putQuiet(); }} />
@@ -681,7 +681,7 @@ export default function NotificationPrefs() {
             two senders read it, rather than on this handset, which sends none
             of them. */}
         <Section>
-          <SectionHead title="Sent To You" />
+          <SectionHead title="Sent to You" />
 
           {/* Before any switch, for the same reason the build warning is drawn
               before the first list: a switch whose position was never read is

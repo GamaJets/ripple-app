@@ -603,8 +603,8 @@ export default function Messages() {
           <View style={{ paddingTop: sp.lg }}>
             <Notice
               tone={t.crit}
-              kicker="Not loaded"
-              title="We could not read your conversations"
+              kicker="Not Loaded"
+              title="We Could Not Read Your Conversations"
               note="This screen cannot say whether anybody has written to you. Nothing here has been lost — the messages are on the server."
             >
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { refresh(); }} /></View>

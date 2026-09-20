@@ -177,10 +177,10 @@ export default function CoachJoinCode() {
   const copyLink = useCallback(async (code: string, label: string) => {
     const link = handOut(code).link;
     if (!(await copyToClipboard(link))) {
-      Alert.alert('Not copied', copyFailedNote(link), [{ text: 'OK' }]);
+      Alert.alert('Not Copied', copyFailedNote(link), [{ text: 'OK' }]);
       return;
     }
-    Alert.alert('Link copied', copiedNote(label), [{ text: 'Done' }]);
+    Alert.alert('Link Copied', copiedNote(label), [{ text: 'Done' }]);
   }, []);
 
   /** The whole invite, into whichever app the coach is about to use. Core React
@@ -312,7 +312,7 @@ export default function CoachJoinCode() {
             // Code would cost. There is deliberately no rotate button anywhere
             // on this screen: the one place it is offered is the Clients sheet,
             // where the read that would justify it has succeeded.
-            <Notice tone={t.crit} kicker="Not read" title={give.head} note={give.note}>
+            <Notice tone={t.crit} kicker="Not Read" title={give.head} note={give.note}>
               <View style={{ marginTop: sp.md }}>
                 <Ghost label="Try Again" onPress={() => { void load(); }} />
               </View>
@@ -323,7 +323,7 @@ export default function CoachJoinCode() {
 
         {/* ── what the person in front of them does next ──────────────────── */}
         <Section>
-          <SectionHead title="What They Do With It" />
+          <SectionHead title="What They Do with It" />
           <Text style={{ ...ty.label, color: t.ink2 }}>{HOW_THEY_USE_IT}</Text>
           {/* Above the button, because it is the reason to press it. Held back
               until the read has happened at all: `undefined` is "not asked",

@@ -443,7 +443,7 @@ export default function Groups() {
         // is a red button nobody reads.
         const go = await new Promise<boolean>((resolve) => {
           Alert.alert(
-            loaded.length ? 'This programme loads what they disclosed' : 'Never asked about injuries',
+            loaded.length ? 'This Programme Loads What They Disclosed' : 'Never Asked About Injuries',
             [loadedBody, askedNote].filter(Boolean).join('\n\n'),
             [
               { text: loaded.length ? 'Change the Programme' : 'Cancel', style: 'cancel', onPress: () => resolve(false) },
@@ -510,7 +510,7 @@ export default function Groups() {
       }
       setWriteNote(parts.length > 1 ? parts.slice(1).join(' ') : null);
       Alert.alert(
-        done.length === members.length ? 'Assigned' : done.length ? 'Partly assigned' : 'Not assigned',
+        done.length === members.length ? 'Assigned' : done.length ? 'Partly Assigned' : 'Not Assigned',
         parts.join('\n\n'),
         [{ text: 'OK' }],
       );
@@ -526,7 +526,7 @@ export default function Groups() {
     if (res.failed.length) {
       const names = res.failed.map((id) => roster.find((c) => c.id === id)?.name ?? 'One client');
       Alert.alert(
-        res.added.length ? 'Some were not added' : 'Nobody was added',
+        res.added.length ? 'Some Were Not Added' : 'Nobody Was Added',
         `${listNames(names)} ${res.failed.length === 1 ? 'is' : 'are'} not in the group — the server did not accept ${res.failed.length === 1 ? 'them' : 'them'}. Clients you added by hand have no account yet, so there is nothing to assign a programme to until they join.`,
       );
     }
@@ -570,7 +570,7 @@ export default function Groups() {
             the screen where that mistake sends a coach looking for work they
             have not lost. */}
         {groupStatus === 'error' ? (
-          <Notice tone={t.warn} kicker="Groups" title="Your groups could not be read"
+          <Notice tone={t.warn} kicker="Groups" title="Your Groups Could Not Be Read"
             note="Nothing is listed below because the read did not come back — it does not mean you have no groups. Nothing here can be assigned until it loads." />
         ) : groupStatus === 'partial' ? (
           <PartialRead what="groups and the people in them" shown={groups.length} />
@@ -620,7 +620,7 @@ export default function Groups() {
               const nm = newName.trim();
               const id = await createGroup(nm);
               setNewName('');
-              if (!id) { Alert.alert('Not created', `“${nm}” did not reach the server, so it is not in your groups. Try again once you have signal.`); return; }
+              if (!id) { Alert.alert('Not Created', `“${nm}” did not reach the server, so it is not in your groups. Try again once you have signal.`); return; }
               setOpenId(id);
             }} />
           </View>
@@ -639,7 +639,7 @@ export default function Groups() {
                   : 'None chosen yet — pick one from your library.'}
               </Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                <Ghost label={open.program ? 'Change Programme' : 'Choose From Library'} onPress={() => setPickTpl(true)} />
+                <Ghost label={open.program ? 'Change Programme' : 'Choose from Library'} onPress={() => setPickTpl(true)} />
                 <Ghost label="Add Clients" onPress={() => { setPicked({}); setAddOpen(true); }} />
               </View>
               {open.program ? (
@@ -683,7 +683,7 @@ export default function Groups() {
 
               {/* ── who has it and who does not ───────────────────────────── */}
               <View style={{ marginTop: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>Who has it</Text>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Who Has It</Text>
                 <Text style={{ ...ty.body, color: cover.countable ? t.ink : t.ink3, marginTop: 4 }}>{coverLine}</Text>
                 {/* The same sentence as a bar. `cover.countable` is the guard
                     the sentence and the heading's fraction already use: without
@@ -784,11 +784,11 @@ export default function Groups() {
                           else's — which is the whole reason the group owns the
                           list and not the plan. */}
                       <Ghost label="Just Theirs" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { clientId: id, from: 'trainerGroup' } })} />
-                      <Pressable onPress={() => Alert.alert('Remove from group?', `Take ${m.name} out of “${open.name}”? This does not change the programme they are on.`, [
+                      <Pressable onPress={() => Alert.alert('Remove from Group?', `Take ${m.name} out of “${open.name}”? This does not change the programme they are on.`, [
                         { text: 'Keep', style: 'cancel' },
                         { text: 'Remove', style: 'destructive', onPress: async () => {
                           const gone = await removeMember(open.id, id);
-                          if (!gone) Alert.alert('Not removed', `${m.name} is still in “${open.name}” — the removal did not reach the server.`);
+                          if (!gone) Alert.alert('Not Removed', `${m.name} is still in “${open.name}” — the removal did not reach the server.`);
                         } },
                       ])} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + m.name} style={{ padding: 8 }}>
                         <Icon name="minus" size={17} color={t.ink3} />
@@ -814,10 +814,10 @@ export default function Groups() {
                 <Notice tone={t.warn} kicker="Assign" title={plan.label ?? 'Held'} note={plan.reason} />
               ) : null}
               {plan.allowed && plan.heldNote ? (
-                <Notice tone={t.warn} kicker="Not everybody" title="Some of this group is held" note={plan.heldNote} />
+                <Notice tone={t.warn} kicker="Not Everybody" title="Some of This Group Is Held" note={plan.heldNote} />
               ) : null}
               {writeNote ? (
-                <Notice tone={t.warn} kicker="Last assign" title="Not everybody got it" note={writeNote} />
+                <Notice tone={t.warn} kicker="Last Assign" title="Not Everybody Got It" note={writeNote} />
               ) : null}
 
               {/* ── the day the block begins ────────────────────────────
@@ -833,7 +833,7 @@ export default function Groups() {
                   highlight would date a block the coach never chose. */}
               {open.program ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Starts on</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Starts On</Text>
                   <Pressable onPress={() => setStartPick(true)} accessibilityRole="button"
                     accessibilityLabel={startsOn
                       ? `The day this group's block begins. Currently ${startsOn}. Opens a calendar.`
@@ -868,16 +868,16 @@ export default function Groups() {
 
               <View style={{ marginTop: sp.lg }}>
                 <Cta wide disabled={!plan.allowed || busy}
-                  label={busy ? 'Assigning…' : (plan.label ?? `Assign to ${plan.send.length} ${plan.send.length === 1 ? 'client' : 'clients'}`)}
+                  label={busy ? 'Assigning…' : (plan.label ?? `Assign to ${plan.send.length} ${plan.send.length === 1 ? 'Client' : 'Clients'}`)}
                   onPress={doAssign} />
               </View>
 
               <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
-                <Ghost label="Delete Group" onPress={() => Alert.alert('Delete group?', `Remove “${open.name}”? The clients keep the programmes they are on — this only deletes the list.`, [
+                <Ghost label="Delete Group" onPress={() => Alert.alert('Delete Group?', `Remove “${open.name}”? The clients keep the programmes they are on — this only deletes the list.`, [
                   { text: 'Keep', style: 'cancel' },
                   { text: 'Delete', style: 'destructive', onPress: async () => {
                     const gone = await deleteGroup(open.id);
-                    if (!gone) { Alert.alert('Not deleted', `“${open.name}” is still in your groups — the delete did not reach the server.`); return; }
+                    if (!gone) { Alert.alert('Not Deleted', `“${open.name}” is still in your groups — the delete did not reach the server.`); return; }
                     setOpenId(null);
                   } },
                 ])} />
@@ -906,7 +906,7 @@ export default function Groups() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '80%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
-            <Text style={{ ...ty.title, color: t.ink }}>Choose a programme</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Choose a Programme</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
               A copy is taken now, so editing the template later will not quietly redefine what this group is understood to be doing.
             </Text>
@@ -914,7 +914,7 @@ export default function Groups() {
                 coach's own library looks like a healthy library with somebody
                 else's programmes in it. */}
             {tplStatus === 'error' ? (
-              <Notice tone={t.warn} kicker="Library" title="Your saved templates could not be read"
+              <Notice tone={t.warn} kicker="Library" title="Your Saved Templates Could Not Be Read"
                 note="Only the built-in starters are listed. That is not a statement that you have saved nothing." />
             ) : tplStatus === 'partial' ? (
               <PartialRead what="templates in your library" shown={templates.length} />
@@ -924,7 +924,7 @@ export default function Groups() {
                 if (!open) return;
                 setPickTpl(false);
                 const saved = await setGroupProgram(open.id, tpl.program);
-                if (!saved) Alert.alert('Not saved', `“${tpl.name}” is showing as this group's programme on this screen but did not reach the server, so it will be gone when you reopen the app. Try again once you have signal.`);
+                if (!saved) Alert.alert('Not Saved', `“${tpl.name}” is showing as this group's programme on this screen but did not reach the server, so it will be gone when you reopen the app. Try again once you have signal.`);
               }} accessibilityRole="button"
                 accessibilityLabel={`${tpl.name}. ${tpl.program.days.length} days, ${tpl.program.days.reduce((a, d) => a + d.exercises.length, 0)} exercises`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -951,7 +951,7 @@ export default function Groups() {
             {/* An unread roster is not an empty one, and a short one is not the
                 whole book. */}
             {rosterStatus === 'error' ? (
-              <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+              <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
                 note="Nobody is listed below because the roster did not come back — it does not mean you have no clients." />
             ) : rosterStatus === 'partial' ? (
               <PartialRead what="clients on your book" shown={roster.length} />

@@ -124,7 +124,7 @@ export default function PhoneSignIn() {
         <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, marginTop: sp.lg, ...elevation.card }}>
         {stage === 'number' ? (
           <>
-            <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Mobile number</Text>
+            <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Mobile Number</Text>
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
               <Pressable onPress={() => { setSearch(''); setPickerOpen(true); }}
                 accessibilityRole="button" accessibilityLabel={`Country: ${countryFor(iso).name}, +${countryFor(iso).dial}`}
@@ -153,10 +153,10 @@ export default function PhoneSignIn() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 7 }}>We’ll text {e164}</Text>
             ) : null}
 
-            <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginTop: sp.xl, marginBottom: 6 }}>Your name</Text>
+            <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginTop: sp.xl, marginBottom: 6 }}>Your Name</Text>
             <TextInput value={name} onChangeText={setName} placeholder="Only needed the first time"
               placeholderTextColor={t.ink3} autoCapitalize="words" autoComplete="name"
-              accessibilityLabel="Your name" style={field} />
+              accessibilityLabel="Your Name" style={field} />
 
             {error ? (
               <Card tone={t.warn} style={{ marginTop: sp.lg }}>
@@ -170,7 +170,7 @@ export default function PhoneSignIn() {
 
             <Pressable onPress={() => router.replace('/welcome')} hitSlop={8}
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, color: t.ink2 }}>Use email and password instead</Text>
+              <Text style={{ ...ty.label, color: t.ink2 }}>Use Email and Password Instead</Text>
             </Pressable>
           </>
         ) : (
@@ -190,7 +190,7 @@ export default function PhoneSignIn() {
             onResend={() => (sentTo
               ? auth.sendPhoneCode(sentTo)
               : Promise.resolve({ ok: false as const, reason: 'No number to send to. Enter your number again.' }))}
-            changeLabel="Wrong number? Change it"
+            changeLabel="Wrong Number? Change It"
             onChange={() => { setStage('number'); setError(null); }}
           />
         )}

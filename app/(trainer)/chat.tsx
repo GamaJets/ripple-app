@@ -254,15 +254,15 @@ export default function CoachChat() {
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
     // A cancel carries neither, and must raise nothing at anybody.
-    if (error) { Alert.alert('That file cannot be sent', error); return; }
+    if (error) { Alert.alert('That File Cannot Be Sent', error); return; }
     if (attachment) setPending(attachment);
   };
 
   const onAttach = () => {
-    Alert.alert('Add to your message', `Only ${firstName ?? 'your client'} will be able to see this.`, [
-      { text: 'Take a photo', onPress: () => { attach('photo'); } },
-      { text: 'Record a form check', onPress: () => { attach('video'); } },
-      { text: 'Choose from your library', onPress: () => { attach('library'); } },
+    Alert.alert('Add to Your Message', `Only ${firstName ?? 'your client'} will be able to see this.`, [
+      { text: 'Take a Photo', onPress: () => { attach('photo'); } },
+      { text: 'Record a Form Check', onPress: () => { attach('video'); } },
+      { text: 'Choose from Your Library', onPress: () => { attach('library'); } },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -281,7 +281,7 @@ export default function CoachChat() {
         style: blocked ? 'default' : 'destructive',
         onPress: async () => {
           const r = blocked ? await safety.unblock() : await safety.block();
-          if (!r.ok) { Alert.alert(blocked ? 'Not unblocked' : 'Not blocked', r.error ?? 'That did not save.'); return; }
+          if (!r.ok) { Alert.alert(blocked ? 'Not Unblocked' : 'Not Blocked', r.error ?? 'That did not save.'); return; }
           Alert.alert(
             blocked ? 'Unblocked' : 'Blocked',
             blocked
@@ -300,7 +300,7 @@ export default function CoachChat() {
     setReportBusy(true);
     const res = await safety.report(category, reportNote, reportFor.messageId);
     setReportBusy(false);
-    if (!res.id) { Alert.alert('Not reported', res.error ?? 'That did not save.'); return; }
+    if (!res.id) { Alert.alert('Not Reported', res.error ?? 'That did not save.'); return; }
     setReportFor(null); setReportNote('');
     Alert.alert('Reported', reportFiledLine(category, safety.state));
   };
@@ -317,7 +317,7 @@ export default function CoachChat() {
     // signal is not a message that failed: the words are safe, they are marked
     // under the bubble as waiting, and they go on their own. Heading it "Not
     // sent" would tell somebody to type it again.
-    if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to send' : 'Not sent', res.reason);
+    if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to Send' : 'Not Sent', res.reason);
   };
   /* ── the six messages a coach types every week ─────────────────────────
    *
@@ -419,7 +419,7 @@ export default function CoachChat() {
             {/* Casing and full ink are for a real name only; a dash gets neither,
                 so the header never dresses a placeholder up as a person. */}
             <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3 }}>{head.note ?? 'Coaching chat'}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{head.note ?? 'Coaching Chat'}</Text>
           </View>
           {clientId ? <Icon name={FORWARD_ICON} size={16} color={t.ink3} /> : null}
         </Pressable>
@@ -685,7 +685,7 @@ export default function CoachChat() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>
-              {reportFor?.messageId ? 'Report this message' : 'Report this conversation'}
+              {reportFor?.messageId ? 'Report This Message' : 'Report This Conversation'}
             </Text>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>{REPORT_EXPLAINER}</Text>
 
@@ -703,7 +703,7 @@ export default function CoachChat() {
             ))}
 
             <Rule />
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Anything you want to add</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Anything You Want to Add</Text>
             <TextInput value={reportNote} onChangeText={setReportNote} multiline editable={!reportBusy}
               placeholder="Optional. Nobody but us reads this." placeholderTextColor={t.ink3}
               style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, textAlignVertical: 'top' }} />

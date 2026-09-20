@@ -188,7 +188,7 @@ function TriSwitchRow({ t, label, note, state, onPress, first }: {
   );
 }
 
-const ROLE_LABEL: Record<string, string> = { owner: 'Gym owner', trainer: 'Trainer', client: 'Member' };
+const ROLE_LABEL: Record<string, string> = { owner: 'Gym Owner', trainer: 'Trainer', client: 'Member' };
 
 /**
  * A timestamp as the day it happened, or a dash. Never the string "null".
@@ -282,7 +282,7 @@ export default function TrainerSettings() {
     // coach's 10pm at 11pm for half the year and a Los Angeles coach's in the
     // afternoon — a silence at the wrong hours is harder to diagnose than none.
     if (!zone) {
-      Alert.alert('Cannot set quiet hours on this phone',
+      Alert.alert('Cannot Set Quiet Hours on This Phone',
         "This phone did not report which timezone it is in, and quiet hours are applied by a server that has no other way to know. Without it the hours would be applied in the wrong ones, so nothing has been set.");
       return;
     }
@@ -315,14 +315,14 @@ export default function TrainerSettings() {
   const lock = useAppLock();
   const toggleLock = async () => {
     if (!lock.available) {
-      Alert.alert('Not available on this device',
+      Alert.alert('Not Available on This Device',
         'Set up Face ID, Touch ID or a passcode in iOS Settings, then this can be turned on.');
       return;
     }
     const want = !lock.enabled;
     const ok = await lock.setEnabled(want);
     if (!ok && want) {
-      Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
+      Alert.alert('Not Turned On', `${lock.label} was not confirmed, so the lock is still off.`);
     }
   };
 
@@ -399,21 +399,21 @@ export default function TrainerSettings() {
     const res = await st.setPushEnabled(want);
     if (res === 'on' || res === 'off') return;
     if (res === 'no-build') {
-      Alert.alert('Not on this build yet',
+      Alert.alert('Not on This Build Yet',
         'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
       return;
     }
     if (res === 'os-refused') {
       // Not "…switched off for Repple Coach". This is a white-label build and
       // the app on this phone may not be called Repple at all.
-      Alert.alert('Turned off on your phone',
+      Alert.alert('Turned Off on Your Phone',
         "Notifications are switched off for this app in your phone's own Settings, so nothing can be delivered until you turn them back on there. Your choice here has been saved.");
       return;
     }
     // 'off-pending'. Said out loud rather than hoped over: a coach who has just
     // turned notifications off and then gets one needs to have been told it
     // might happen. The reconciler in src/ui/settings.tsx retries every launch.
-    Alert.alert('Saved, but not confirmed',
+    Alert.alert('Saved, but Not Confirmed',
       "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
   };
 
@@ -572,23 +572,23 @@ export default function TrainerSettings() {
 
   const withdraw = () => {
     Alert.alert(
-      'Withdraw your deletion request?',
+      'Withdraw Your Deletion Request?',
       'Your coaching account and everything in it will be kept. You can ask to be deleted again at any time.',
       [
-        { text: 'Leave it pending', style: 'cancel' },
-        { text: 'Withdraw request', onPress: async () => {
+        { text: 'Leave It Pending', style: 'cancel' },
+        { text: 'Withdraw Request', onPress: async () => {
           if (withdrawing) return;
           setWithdrawing(true);
           try {
             const ok = await withdrawAccountDeletion();
             if (!ok) {
               reportError('trainerSettings.withdraw', new Error('withdraw_account_deletion did not clear the request'));
-              Alert.alert('Not withdrawn', `Your deletion request is still in place — nothing has changed. Check your connection and try again, or email ${BRAND.supportEmail} from the address on your account.`);
+              Alert.alert('Not Withdrawn', `Your deletion request is still in place — nothing has changed. Check your connection and try again, or email ${BRAND.supportEmail} from the address on your account.`);
               return;
             }
             // Re-read rather than assume: what shows next comes from the row.
             await loadPending();
-            Alert.alert('Request withdrawn', 'Your account will be kept and nothing has been deleted.');
+            Alert.alert('Request Withdrawn', 'Your account will be kept and nothing has been deleted.');
           } finally { setWithdrawing(false); }
         } },
       ],
@@ -661,12 +661,12 @@ export default function TrainerSettings() {
         // parts are NAMED rather than counted, and the sentence is the one the
         // member's screen shows, from src/lib/dataExport.ts — two wordings for
         // one fact is how they come to disagree.
-        Alert.alert('That copy is incomplete',
+        Alert.alert('That Copy Is Incomplete',
           incompleteExportLine(res.failed.map((f) => f.table), BRAND.supportEmail));
       }
     } catch (e) {
       reportError('trainerSettings.export', e);
-      Alert.alert('Export failed', 'Nothing was exported. Check your connection and try again.');
+      Alert.alert('Export Failed', 'Nothing was exported. Check your connection and try again.');
     } finally { setExporting(false); }
   };
 
@@ -686,19 +686,19 @@ export default function TrainerSettings() {
     setSavingPath(f.path);
     try {
       const b64 = await readMyFile(f.bucket, f.path);
-      if (!b64) { Alert.alert('Not saved', saveFileFailure(fileShareBlocker())); return; }
+      if (!b64) { Alert.alert('Not Saved', saveFileFailure(fileShareBlocker())); return; }
       // The object key's last segment — the name this app chose at upload, and
       // already safe on every platform, so nothing here has to invent one.
       const name = f.path.split('/').pop() || 'file';
       const ok = await shareBinaryFile(b64, name, 'application/octet-stream', 'Save this file');
-      if (!ok) Alert.alert('Not saved', saveFileFailure(fileShareBlocker()));
+      if (!ok) Alert.alert('Not Saved', saveFileFailure(fileShareBlocker()));
     } finally { setSavingPath(null); }
   };
 
   const signOut = () => {
-    Alert.alert('Sign out?', 'You will need your email and password to sign back in. Nothing is deleted.', [
-      { text: 'Stay signed in', style: 'cancel' },
-      { text: 'Sign out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
+    Alert.alert('Sign Out?', 'You will need your email and password to sign back in. Nothing is deleted.', [
+      { text: 'Stay Signed In', style: 'cancel' },
+      { text: 'Sign Out', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
 
@@ -709,24 +709,24 @@ export default function TrainerSettings() {
       if (!ok) {
         // `requestAccountDeletion` returns false only when the write was
         // refused. Saying "noted" here would be inventing a promise.
-        Alert.alert('Not requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again, or contact your gym.');
+        Alert.alert('Not Requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again, or contact your gym.');
         return;
       }
       await loadPending();
       Alert.alert(
-        'Deletion requested',
+        'Deletion Requested',
         `Your request is recorded and now sits in your gym's deletion queue. ${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action it, after which your account and your data are erased permanently.\n\nSigning you out of this phone now.`,
         [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }],
       );
     } catch (e) {
       reportError('trainerSettings.delete', e);
-      Alert.alert('Not requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again.');
+      Alert.alert('Not Requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again.');
     } finally { setDeleting(false); }
   };
 
   const deleteAccount = () => {
     Alert.alert(
-      'Delete your coaching account?',
+      'Delete Your Coaching Account?',
       'This asks for your Repple Coach account and everything of yours to be permanently erased — your coach profile, your programs and templates, your videos, your messages and your session history.\n\n' +
       'Your clients are not deleted. They stay with the gym, but they lose you as their coach, and anything you wrote only to them goes with your account.\n\n' +
       `${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action this. It cannot be undone once they do.\n\n` +
@@ -742,8 +742,8 @@ export default function TrainerSettings() {
       // One wording, from src/lib/dataExport.ts, so the two screens cannot drift.
       COACH_DELETION_FILES_NOTE,
       [
-        { text: 'Keep my account', style: 'cancel' },
-        { text: 'Request deletion', style: 'destructive', onPress: () => { void run(); } },
+        { text: 'Keep My Account', style: 'cancel' },
+        { text: 'Request Deletion', style: 'destructive', onPress: () => { void run(); } },
       ],
     );
   };
@@ -855,7 +855,7 @@ export default function TrainerSettings() {
             now — one control, where the board puts it, rather than the same
             fate offered twice on one screen. */}
         <Section>
-          <SectionHead title="Signed in as" />
+          <SectionHead title="Signed In As" />
           <Line t={t} first label="Name" value={auth.loading ? 'Checking…' : fig(auth.user?.name)} />
           <Line t={t} label="Email" value={auth.loading ? 'Checking…' : fig(auth.user?.email)} />
           <Line t={t} label="Role" value={auth.loading ? 'Checking…' : fig(auth.user ? ROLE_LABEL[auth.user.role] ?? auth.user.role : null)} />
@@ -922,7 +922,7 @@ export default function TrainerSettings() {
                 "Client Messages" had no gap at all between them and read as one
                 two-line title, with the first switch apparently belonging to
                 nothing. The same is true of the heading below. */}
-            <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginBottom: sp.md }}>What you are told about</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginBottom: sp.md }}>What You Are Told About</Text>
             {channelNote ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{channelNote}</Text>
             ) : null}
@@ -967,7 +967,7 @@ export default function TrainerSettings() {
               which they will not trust the switches above either. Three states,
               three sentences: available, not yet, and could-not-find-out. */}
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginBottom: sp.md }}>When you will not be buzzed</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginBottom: sp.md }}>When You Will Not Be Buzzed</Text>
 
             {quiet.status === 'loading' ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Reading your quiet hours…</Text>
@@ -1040,7 +1040,7 @@ export default function TrainerSettings() {
           <SectionHead title="Quiet Clients" />
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
             <View style={{ flex: 1, paddingEnd: sp.md }}>
-              <Text style={{ ...ty.body, color: t.ink }}>Shortest gap between approaches</Text>
+              <Text style={{ ...ty.body, color: t.ink }}>Shortest Gap Between Approaches</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {cooldownStatus === 'ready'
                   ? cooldownNote(cooldownStored)
@@ -1154,7 +1154,7 @@ export default function TrainerSettings() {
             !own ? (
               <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>Reading what you charge in…</Text>
             ) : own.currency ? (<>
-              <Line t={t} first label="Priced in" value={own.currency} />
+              <Line t={t} first label="Priced In" value={own.currency} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>
             </>) : own.canSetOwn ? (<>
               <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
@@ -1179,7 +1179,7 @@ export default function TrainerSettings() {
               </Flag>
             )
           ) : tenant.currency ? (<>
-            <Line t={t} first label="Priced in" value={tenant.currency} />
+            <Line t={t} first label="Priced In" value={tenant.currency} />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>
           </>) : (<>
             <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
@@ -1299,7 +1299,7 @@ export default function TrainerSettings() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
-          <Text style={{ ...ty.title, color: t.ink }}>Your files</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Your Files</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>
             {filesRowNote(files?.length ?? 0, filesComplete)} Tap one to save it to your phone.
           </Text>

@@ -483,7 +483,7 @@ export default function OwnerOps() {
   const askZone = (next: string) => {
     if (!zone || zone === next) { void saveZone(next); return; }
     Alert.alert(
-      'Change this gym’s timezone?',
+      'Change This Gym’s Timezone?',
       `This gym is measured in ${zone}. Changing it to ${next} re-cuts every day, month and payroll period in the owner console — including months already closed, where a late class can move into the month next door.`,
       [
         { text: 'Keep ' + zone, style: 'cancel' },
@@ -573,7 +573,7 @@ export default function OwnerOps() {
     if (curBusy || next === cur) return;
     if (!cur) { void saveCurrency(next); return; }
     Alert.alert(
-      'Change what this gym is priced in?',
+      'Change What This Gym Is Priced In?',
       `This gym is priced in ${cur}. Nothing already recorded is re-denominated — payments, plans and passes keep the currency they were written in — so this gym would hold both ${cur} and ${next}, and any total that mixes them is withheld rather than added up.`,
       [
         { text: `Keep ${cur}`, style: 'cancel' },
@@ -847,7 +847,7 @@ export default function OwnerOps() {
     const { data, error } = await supabase.rpc('resolve_feedback', { p_id: rowId, p_resolved: true });
     if (error || !data) {
       if (error) reportError('ownerOps.resolveTicket', error);
-      Alert.alert('Not resolved', 'This ticket is still open — nothing was saved. Try again in a moment.');
+      Alert.alert('Not Resolved', 'This ticket is still open — nothing was saved. Try again in a moment.');
       return;
     }
     setResolvedAt((p) => ({ ...(p ?? {}), [rowId]: String(data) }));
@@ -911,7 +911,7 @@ export default function OwnerOps() {
   if (delQueue && isWhole(delStatus) && delQueue.count > 0) {
     needs.push({ key: 'deletions', icon: 'clock', name: 'Deletion Requests',
       tone: delQueue.overdue > 0 ? t.crit : t.warn,
-      status: delQueue.overdue > 0 ? 'Overdue' : 'Clock running',
+      status: delQueue.overdue > 0 ? 'Overdue' : 'Clock Running',
       reason: delQueue.overdue > 0
         ? `${delQueue.overdue} of ${delQueue.count} ${delQueue.overdue === 1 ? 'is' : 'are'} past the 30 days members are promised.`
         : `${delQueue.count} member${delQueue.count === 1 ? ' has' : 's have'} asked to be erased.`,
@@ -927,24 +927,24 @@ export default function OwnerOps() {
     ].filter(Boolean);
     needs.push({ key: 'kit', icon: 'wrench', name: 'Equipment',
       tone: kitSum.overdue > 0 ? t.crit : kitSum.due > 0 ? t.warn : t.ink3,
-      status: kitSum.overdue > 0 ? 'Overdue' : kitSum.due > 0 ? 'Due' : 'Never serviced',
+      status: kitSum.overdue > 0 ? 'Overdue' : kitSum.due > 0 ? 'Due' : 'Never Serviced',
       reason: `${parts.join(' · ')}.`,
       onPress: () => router.push('/(owner)/equipment') });
   }
   // The settings other screens are waiting on. Each is asked only of a read
   // that answered: an unset fee under a failed tenant read is not an unset fee.
   if (feeKnown && tenant?.currency == null) {
-    needs.push({ key: 'currency', icon: 'settings', name: 'Currency', tone: t.warn, status: 'Not set',
+    needs.push({ key: 'currency', icon: 'settings', name: 'Currency', tone: t.warn, status: 'Not Set',
       reason: 'Your gym has no currency, so every money figure in the app is a dash.',
       onPress: () => goTo('fee') });
   }
   if (feeKnown && tenant?.sessionFee == null) {
-    needs.push({ key: 'fee', icon: 'settings', name: 'Session Fee', tone: t.warn, status: 'Not set',
+    needs.push({ key: 'fee', icon: 'settings', name: 'Session Fee', tone: t.warn, status: 'Not Set',
       reason: 'Delivered sessions cannot be valued, so payroll on Overview, Revenue and Trainers is withheld.',
       onPress: () => goTo('fee') });
   }
   if (USE_SUPABASE && zoneRead && !zoneErr && !zone && tenant) {
-    needs.push({ key: 'zone', icon: 'calendar', name: 'Timezone', tone: t.warn, status: 'Not set',
+    needs.push({ key: 'zone', icon: 'calendar', name: 'Timezone', tone: t.warn, status: 'Not Set',
       reason: 'Every date in the console is drawn on whichever machine reads it until this gym says where it is.',
       onPress: () => goTo('zone') });
   }
@@ -1093,7 +1093,7 @@ export default function OwnerOps() {
                   only truthful offer is "now, wherever they are". */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.md }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
+                  <Text style={{ ...ty.body, color: t.ink }}>Also Send a Push</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('gym', null)}</Text>
                 </View>
                 {/* This switch is the difference between a note in the app and
@@ -1109,7 +1109,7 @@ export default function OwnerOps() {
               <View pointerEvents={annBusy ? 'none' : 'auto'} style={{ opacity: annBusy ? 0.6 : 1 }}>
                 <Cta wide label={annBusy ? 'Posting…' : 'Post to Members'}
                   onPress={async () => {
-                    if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; }
+                    if (!text.trim()) { Alert.alert('Write Something', 'Enter an announcement.'); return; }
                     setAnnBusy(true);
                     let res;
                     try { res = await addGymAnnouncement(text, { push: annPush }); } finally { setAnnBusy(false); }
@@ -1117,7 +1117,7 @@ export default function OwnerOps() {
                     // once, and a cleared field after a refused write is how a
                     // notice gets lost between the owner and the server.
                     if (!res.ok || !res.delivery) {
-                      Alert.alert('Not posted', 'That could not be posted, so no member has seen it. Your words are still here — try again in a moment.');
+                      Alert.alert('Not Posted', 'That could not be posted, so no member has seen it. Your words are still here — try again in a moment.');
                       return;
                     }
                     setText(''); setAnnPush(false);
@@ -1278,7 +1278,7 @@ export default function OwnerOps() {
               {payPolicy.status === 'loading' ? (
                 <Empty tone={t.ink3}>Reading your gym…</Empty>
               ) : payPolicy.view.kind === 'unread' ? (
-                <Notice tone={t.warn} kicker="Pay policy" title="What you pay for could not be read"
+                <Notice tone={t.warn} kicker="Pay Policy" title="What You Pay for Could Not Be Read"
                   note={POLICY_UNREAD_NOTE}>
                   <View style={{ marginTop: sp.md }}>
                     <Ghost label="Try Again" onPress={payPolicy.refresh}
@@ -1312,7 +1312,7 @@ export default function OwnerOps() {
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {line.outcome} · {line.answer === 'paid' ? 'Paid'
-                          : line.answer === 'unpaid' ? 'Not paid' : 'Not stated'}
+                          : line.answer === 'unpaid' ? 'Not Paid' : 'Not Stated'}
                       </Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line.note}</Text>
                     </View>

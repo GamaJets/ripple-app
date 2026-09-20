@@ -240,7 +240,7 @@ export default function MyRegister() {
 
         {status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Not read" title="Your classes could not be read"
+            <Notice tone={t.crit} kicker="Not Read" title="Your Classes Could Not Be Read"
               note="Nothing is listed below because the read did not come back. This is not a term in which you taught nothing.">
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={reload} /></View>
             </Notice>
@@ -307,7 +307,7 @@ export default function MyRegister() {
 
               {countable && gap ? (
                 <View style={{ marginTop: sp.md }}>
-                  <Notice tone={t.warn} kicker="Gaps" title="Some of this is not in the figures above" note={gap} />
+                  <Notice tone={t.warn} kicker="Gaps" title="Some of This Is Not in the Figures Above" note={gap} />
                 </View>
               ) : null}
             </>

@@ -161,11 +161,11 @@ export default function ResetPassword() {
                   </View>
                 </Card>
               ) : null}
-              <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>New password</Text>
-              <PasswordField value={pw} onChangeText={setPw} placeholder={`New password (${PASSWORD_MIN}+ characters)`} style={inp} accessibilityLabel="New password" autoFocus />
+              <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>New Password</Text>
+              <PasswordField value={pw} onChangeText={setPw} placeholder={`New password (${PASSWORD_MIN}+ characters)`} style={inp} accessibilityLabel="New Password" autoFocus />
               <PasswordRules value={pw} />
-              <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Confirm new password</Text>
-              <PasswordField value={pw2} onChangeText={setPw2} placeholder="Confirm new password" style={inp} accessibilityLabel="Confirm new password" />
+              <Text style={{ ...ty.caption, ...font('600'), color: t.ink2, marginBottom: 6 }}>Confirm New Password</Text>
+              <PasswordField value={pw2} onChangeText={setPw2} placeholder="Confirm new password" style={inp} accessibilityLabel="Confirm New Password" />
               {pw2.length > 0 && pw !== pw2 ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: -6, marginBottom: sp.md }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />

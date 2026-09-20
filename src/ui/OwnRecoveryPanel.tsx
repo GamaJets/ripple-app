@@ -127,14 +127,14 @@ export function OwnRecoveryPanel({ noGoalNote }: {
       // over a refusal says the opposite of what happened.
       setHrs(''); setQ(0);
       if (out === 'unsent') {
-        Alert.alert('Saved on this phone',
+        Alert.alert('Saved on This Phone',
           'That night has not reached your account yet — there is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
       }
     })();
   };
 
   const removeNight = (id: string, hours: number, at: string) => {
-    Alert.alert('Remove this night?',
+    Alert.alert('Remove This Night?',
       `${num1(hours)} hours on ${nightLabel(at)} would come out of your own sleep log, and out of your average and your readiness score with it. This cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -145,7 +145,7 @@ export function OwnRecoveryPanel({ noGoalNote }: {
             // and reappear at the next read is what makes people stop believing
             // a remove button.
             if (!(await removeSleep(id))) {
-              Alert.alert('Not removed',
+              Alert.alert('Not Removed',
                 'That night is still in your log — we could not reach the server to take it out.');
             }
           })();

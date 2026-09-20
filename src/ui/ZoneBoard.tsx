@@ -83,7 +83,7 @@ export function ZoneNow({ zone, bpm, compact }: { zone: ZoneNo | null; bpm?: num
         </Text>
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>{zone ? `Zone ${zone}` : 'No heart rate'}</Text>
+        <Text style={{ ...ty.micro, color: t.ink3 }}>{zone ? `Zone ${zone}` : 'No Heart Rate'}</Text>
         <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>
           {zone ? zoneName(zone) : 'Wear your watch'}
         </Text>

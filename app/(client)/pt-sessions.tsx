@@ -379,10 +379,10 @@ export default function PtSessions() {
     // queued intent and leaving them in the box would send them twice.
     if (r.queued) {
       setNote((p) => ({ ...p, [id]: '' }));
-      Alert.alert('Waiting to send', r.error || 'This is saved on this phone and goes up when you are back online.');
+      Alert.alert('Waiting to Send', r.error || 'This is saved on this phone and goes up when you are back online.');
       return;
     }
-    if (!r.ok) { Alert.alert('Not approved', r.error || 'Could not save that. Try again in a moment.'); return; }
+    if (!r.ok) { Alert.alert('Not Approved', r.error || 'Could not save that. Try again in a moment.'); return; }
     setNote((p) => ({ ...p, [id]: '' }));
     // Approving spends nothing — the credit came off when the session was
     // booked. The balance is re-read anyway rather than left stale, because
@@ -409,7 +409,7 @@ export default function PtSessions() {
         const r = await disputeSession(id, kind, note[id]);
         setBusy(null);
         if (!r.ok) {
-          Alert.alert('Not sent', r.error || 'That did not save, so nothing has been recorded and your coach has not been told.');
+          Alert.alert('Not Sent', r.error || 'That did not save, so nothing has been recorded and your coach has not been told.');
           return;
         }
         setNote((p) => ({ ...p, [id]: '' }));

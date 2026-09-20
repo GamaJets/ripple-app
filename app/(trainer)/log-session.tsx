@@ -336,7 +336,7 @@ export default function LogSession() {
     setSending(true);
     try {
       const line = flushResultLine(await queue.flush());
-      if (line) Alert.alert('Sending finished', line);
+      if (line) Alert.alert('Sending Finished', line);
     } finally { setSending(false); }
   };
   const { clientId, name, sessionId: sessionParam, sessionAt } =
@@ -1098,10 +1098,10 @@ export default function LogSession() {
     const typed = (s.reps ?? '').trim() !== '' || (s.kg ?? '').trim() !== '';
     if (!typed) { removeSet(key, i); return; }
     Alert.alert(
-      `Remove set ${i + 1}?`,
+      `Remove Set ${i + 1}?`,
       `${name} set ${i + 1} has figures in it, and this screen has no undo.`,
       [
-        { text: 'Keep it', style: 'cancel' },
+        { text: 'Keep It', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: () => removeSet(key, i) },
       ],
     );
@@ -1255,7 +1255,7 @@ export default function LogSession() {
     }
     const entries = entriesToWrite(at);
     if (!entries.length) {
-      Alert.alert('Nothing to log', 'Add at least one set with a rep count.');
+      Alert.alert('Nothing to Log', 'Add at least one set with a rep count.');
       return;
     }
     if (!picked) {
@@ -1406,7 +1406,7 @@ export default function LogSession() {
        * fixes what is under it. */
       clearSheet();
       Alert.alert(
-        'Session logged',
+        'Session Logged',
         `${entries.length} exercise${entries.length === 1 ? '' : 's'} added to ${first}'s record. They will see it on their own phone, marked as logged by you, and it counts towards their progress.`,
         [{ text: 'Done', onPress: () => router.back() }],
       );
@@ -1453,7 +1453,7 @@ export default function LogSession() {
     // phone, in the queue, under its own timestamp, and leaving a copy of it in
     // the form is how it gets sent a second time.
     clearSheet();
-    Alert.alert('Kept on this phone',
+    Alert.alert('Kept on This Phone',
       keptOfflineLine('This session'),
       [{ text: 'Done', onPress: () => router.back() }]);
   };
@@ -1826,7 +1826,7 @@ export default function LogSession() {
                 minute they had to invent would be invented detail in somebody
                 else's record. */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
-              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>Start hour</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>Start Hour</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.sm }}>
                 {/* Stepped from the hour ON SCREEN, which is the coach's choice
                     where they have made one and the current hour where they have
@@ -2271,7 +2271,7 @@ export default function LogSession() {
                 ))}
                 <Pressable onPress={() => addSet(r.key)} hitSlop={8} accessibilityRole="button"
                   style={{ paddingVertical: sp.sm, marginTop: 2 }}>
-                  <Text style={{ ...ty.label, ...font('500'), color: t.brand }}>Add a set</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.brand }}>Add a Set</Text>
                 </Pressable>
               </View>
               );
@@ -2320,7 +2320,7 @@ export default function LogSession() {
                 accessibilityLabel="Mark this session as delivered when you save"
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, color: t.ink }}>Mark it delivered</Text>
+                  <Text style={{ ...ty.body, color: t.ink }}>Mark It Delivered</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                     {markDelivered ? DELIVERED_MEANS : NOT_DELIVERED_MEANS}
                   </Text>
@@ -2344,7 +2344,7 @@ export default function LogSession() {
                 disabled={!ready || busy}
                 label={busy
                   ? 'Saving…'
-                  : sessionId ? finishCta(markDelivered, true) : `Log to ${first}'s record`}
+                  : sessionId ? finishCta(markDelivered, true) : `Log to ${first}'s Record`}
                 onPress={save} />
             </View>
             {/* Two different reasons the button is held, and they need
@@ -2379,7 +2379,7 @@ export default function LogSession() {
             thing by hand in `startRest`. */}
         {rest && isLive ? (
           <RestBar key={rest.gen} t={t} endsAt={rest.endsAt}
-            title={`${movement(rest.name)} · set ${rest.setIdx + 1}`}
+            title={`${movement(rest.name)} · Set ${rest.setIdx + 1}`}
             note={rest.fromPlan ? 'Rest from your programme' : `App default of ${DEFAULT_REST_SEC} seconds`}
             onAdd={() => setRest((cur) => (cur && cur.gen === rest.gen ? { ...cur, endsAt: cur.endsAt + 15000 } : cur))}
             onSkip={() => setRest((cur) => (cur && cur.gen === rest.gen ? null : cur))}

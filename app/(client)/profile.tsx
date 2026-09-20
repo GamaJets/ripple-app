@@ -214,7 +214,7 @@ function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => vo
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: sp.lg, borderTopWidth: hairline, borderColor: t.ring, ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
           <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, ...font('500'), color: t.ink3 }}>Cancel</Text></Pressable>
-          <Text style={{ ...ty.head, color: t.ink }}>Date of birth</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>Date of Birth</Text>
           <Pressable onPress={save} hitSlop={8}><Text style={{ ...ty.body, ...font('600'), color: t.brand }}>Done</Text></Pressable>
         </View>
         <View style={{ position: 'relative' }}>
@@ -427,14 +427,14 @@ export default function Profile() {
     if (!up.url) {
       // Nothing is set. A photo the server never received must not be shown
       // here as though it had been — that is the whole defect being closed.
-      Alert.alert('Photo not saved', up.error ?? AVATAR_UPLOAD_FAILED_NOTE);
+      Alert.alert('Photo Not Saved', up.error ?? AVATAR_UPLOAD_FAILED_NOTE);
       return;
     }
     cd.setPhoto(up.url);
   };
-  const changePhoto = () => Alert.alert('Profile photo', undefined, [
+  const changePhoto = () => Alert.alert('Profile Photo', undefined, [
     { text: 'Take Photo', onPress: () => pickPhoto(true) },
-    { text: 'Choose From Library', onPress: () => pickPhoto(false) },
+    { text: 'Choose from Library', onPress: () => pickPhoto(false) },
     ...(cd.photo ? [{ text: 'Remove', style: 'destructive' as const, onPress: () => cd.setPhoto(null) }] : []),
     { text: 'Cancel', style: 'cancel' as const },
   ]);
@@ -567,15 +567,15 @@ export default function Profile() {
     // narrower. They are tested in the order the boxes appear on the sheet, so
     // the sentence names the topmost thing that is wrong.
     if (!heightRead.ok && heightEdited) {
-      Alert.alert('Check that height', heightRead.reason);
+      Alert.alert('Check That Height', heightRead.reason);
       return;
     }
     if (!weightRead.ok && weightVal !== asText(shownWeight)) {
-      Alert.alert('Check that weight', weightRead.reason);
+      Alert.alert('Check That Weight', weightRead.reason);
       return;
     }
     if (!bfRead.ok && bfEdited) {
-      Alert.alert('Check that body fat', bfRead.reason);
+      Alert.alert('Check That Body Fat', bfRead.reason);
       return;
     }
     cd.setName(nameVal.trim() || cd.name);
@@ -628,7 +628,7 @@ export default function Profile() {
   // Greenwich reads back as 13 May — a date of birth off by a day, on the
   // screen where somebody checks it. `fmtFullDay` goes through `localDate` and
   // writes the date the way the reader's own locale does.
-  const dobLabel = cd.dob && fmtFullDay(cd.dob) !== '—' ? fmtFullDay(cd.dob) : 'Select date';
+  const dobLabel = cd.dob && fmtFullDay(cd.dob) !== '—' ? fmtFullDay(cd.dob) : 'Select Date';
 
   // Height and weight in the client's own units. This line printed "cm" and
   // "kg" over the stored figures no matter what the Settings screen said,
@@ -790,7 +790,7 @@ export default function Profile() {
             {/* An empty name used to render as an empty line. Say what to do
                 about it instead of showing nothing. */}
             <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', textAlign: 'center' }} numberOfLines={2}>
-              {cd.name || 'Add your name'}
+              {cd.name || 'Add Your Name'}
             </Text>
             {/* Drawn only when the account's own date was read — see
                 `memberSince` above. */}
@@ -1038,7 +1038,7 @@ export default function Profile() {
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Name</Text>
             <TextInput value={nameVal} onChangeText={setNameVal} placeholder="Your name" placeholderTextColor={t.ink3} autoCapitalize="words" style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.lg }} />
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Date of birth</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Date of Birth</Text>
             <Pressable onPress={() => setShowDob(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
               <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{dobLabel}</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{age != null ? `${age} yrs  ▾` : '▾'}</Text>
@@ -1070,7 +1070,7 @@ export default function Profile() {
             {lengthNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{lengthNote}</Text> : null}
 
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: weightNote ? sp.sm : sp.lg, alignItems: 'flex-end' }}>
-              <Field label="Current weight" hint={wu} a11y={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}>
+              <Field label="Current Weight" hint={wu} a11y={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}>
                 <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="decimal-pad"
                   style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
               </Field>
@@ -1080,7 +1080,7 @@ export default function Profile() {
             </View>
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{weightNote}</Text> : null}
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Body fat %</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Body Fat %</Text>
             <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="decimal-pad" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.sm }} />
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>From your latest scan, or type it in. Changes recalculate your plan.</Text>
 

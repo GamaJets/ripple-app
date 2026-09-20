@@ -671,10 +671,10 @@ export default function ClientBody() {
               full, because "3M" is read out as "three em". */}
           <Segmented style={{ marginTop: sp.lg }} value={range} onChange={setRange}
             options={[
-              { key: '1M', label: '1M', a11yLabel: 'Last month' },
-              { key: '3M', label: '3M', a11yLabel: 'Last 3 months' },
-              { key: '6M', label: '6M', a11yLabel: 'Last 6 months' },
-              { key: '1Y', label: '1Y', a11yLabel: 'Last year' },
+              { key: '1M', label: '1M', a11yLabel: 'Last Month' },
+              { key: '3M', label: '3M', a11yLabel: 'Last 3 Months' },
+              { key: '6M', label: '6M', a11yLabel: 'Last 6 Months' },
+              { key: '1Y', label: '1Y', a11yLabel: 'Last Year' },
             ] as const} />
         </Section>
 
@@ -941,14 +941,14 @@ export default function ClientBody() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="Scans belong to the client and live on the server, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have never been scanned." />
           </Section>
         ) : (
           <>
             {r.status === 'error' ? (
               <Section>
-                <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+                <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
                   note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
               </Section>
             ) : null}
@@ -999,7 +999,7 @@ export default function ClientBody() {
               <View>
                 <Rule />
                 <Section>
-                  <Notice kicker="No account" title={`${fullName || 'This client'} has no Repple account`}
+                  <Notice kicker="No Account" title={`${fullName || 'This Client'} Has No Repple Account`}
                     note={`You added ${who} to your book by hand, so there is no account for a scan, a weigh-in, a tape measurement or a night's sleep to belong to. Nothing of theirs was asked for and nothing was refused — this is not an empty body-composition record and it is not a failed read. Invite them from your client list and this screen fills in from the day they accept.`} />
                 </Section>
               </View>
@@ -1011,7 +1011,7 @@ export default function ClientBody() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their scans…</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their scans could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Scans Could Not Be Read"
                       note={`Nothing is shown below because nothing came back. It does not mean ${voice.they} ${voice.have} never been scanned — that is a different fact and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
@@ -1199,7 +1199,7 @@ export default function ClientBody() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their profile…</Text></Section>
                 ) : manualStatus === 'error' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their profile could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Profile Could Not Be Read"
                       note={`Whether ${voice.they} ${voice.have} typed a weight or body fat by hand is unknown rather than no. The scans above came from a different read and are unaffected either way.`} />
                   </Section>
                 ) : manual == null ? (
@@ -1269,7 +1269,7 @@ export default function ClientBody() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their tape measurements…</Text></Section>
                 ) : tape.state === 'unreadable' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their tape measurements could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Tape Measurements Could Not Be Read"
                       note={`Nothing is shown below because nothing came back. It does not mean ${voice.they} ${voice.have} never measured — everything above came from different reads and is unaffected either way.`} />
                   </Section>
                 ) : tape.state === 'none' ? (
@@ -1348,7 +1348,7 @@ export default function ClientBody() {
                     // Never "they have not shared" and never "nothing logged".
                     // Both would be facts about the member invented out of our
                     // own failed read.
-                    <Notice tone={t.warn} kicker="Unreadable" title="This could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="This Could Not Be Read"
                       note={unreadableLine(voice)} />
                   ) : wellnessView.kind === 'not-shared' ? (
                     // Says nothing whatever about whether there is anything to

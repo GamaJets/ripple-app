@@ -253,8 +253,8 @@ export function MuscleWorkPanel({
           {windows.map((d) => (
             <Pressable key={d} onPress={() => onWindowDays(d)}
               accessibilityRole="button" accessibilityState={{ selected: windowDays === d }}
-              accessibilityLabel={`Last ${d} days`} style={chip(windowDays === d)}>
-              <Text style={{ ...ty.micro, color: windowDays === d ? t.brandInk : t.ink2 }}>{d} days</Text>
+              accessibilityLabel={`Last ${d} Days`} style={chip(windowDays === d)}>
+              <Text style={{ ...ty.micro, color: windowDays === d ? t.brandInk : t.ink2 }}>{d} Days</Text>
             </Pressable>
           ))}
         </View>
@@ -398,7 +398,7 @@ export function MuscleWorkPanel({
           </>
         ) : (
           <>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Hardest worked first</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Hardest Worked First</Text>
             <View style={{ marginTop: sp.sm }}>
               {rankings.most.map((m, i) => rankRow(m.muscle, rankingLine(m), i))}
             </View>
@@ -413,7 +413,7 @@ export function MuscleWorkPanel({
                 + 'is it.', sp.md)
             ) : (
               <View style={{ marginTop: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>Least worked, of the muscles with work</Text>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Least Worked, of the Muscles with Work</Text>
                 {caption('Every muscle here was trained. A muscle with nothing against it is not in this '
                   + 'list — that is the sentence below, and it is a different kind of claim.', 4)}
                 <View style={{ marginTop: sp.sm }}>
@@ -432,7 +432,7 @@ export function MuscleWorkPanel({
                 could make and the one nothing here supports. */}
             {rankings.untrained && rankings.untrained.length ? (
               <View style={{ marginTop: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>No logged set in this window</Text>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>No Logged Set in This Window</Text>
                 <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>
                   {rankings.untrained.slice(0, 8).join(', ')}
                   {rankings.untrained.length > 8 ? `, and ${rankings.untrained.length - 8} more` : ''}.
@@ -470,7 +470,7 @@ export function MuscleWorkPanel({
           </Text>
         ) : (
           <>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Longest since a logged set first</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Longest Since a Logged Set First</Text>
             <View style={{ marginTop: sp.sm }}>
               {rest.slice(0, REST_ROWS).map(restRow)}
             </View>

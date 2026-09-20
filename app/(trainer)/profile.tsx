@@ -174,9 +174,9 @@ export default function CoachProfile() {
   /** Confirmed, because signing out of a coach account on a shared gym tablet
    *  by mis-tapping is a nuisance nobody can undo without the password. */
   const signOut = () => {
-    Alert.alert('Sign out of Repple Coach?', 'You will need your password to sign back in.', [
+    Alert.alert('Sign Out of Repple Coach?', 'You will need your password to sign back in.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
+      { text: 'Sign Out', style: 'destructive', onPress: () => { void leaveNow(() => router.replace('/welcome')); } },
     ]);
   };
   const p = useMyTrainerProfile();
@@ -361,7 +361,7 @@ export default function CoachProfile() {
   const copyPageUrl = async () => {
     if (!pageUrl) return;
     if (!(await copyToClipboard(pageUrl))) {
-      Alert.alert('Not copied', `Your page address could not be copied. It is ${pageUrl} — write it down.`, [{ text: 'OK' }]);
+      Alert.alert('Not Copied', `Your page address could not be copied. It is ${pageUrl} — write it down.`, [{ text: 'OK' }]);
       return;
     }
     Alert.alert('Copied', `${pageUrl} is on your clipboard. Paste it into your bio.`, [{ text: 'OK' }]);
@@ -384,7 +384,7 @@ export default function CoachProfile() {
     if (!up.url) {
       // Nothing is set. A photo the server never received must not sit on this
       // screen as though it had been — that is the whole defect being closed.
-      Alert.alert('Photo not saved', up.error ?? AVATAR_UPLOAD_FAILED_NOTE);
+      Alert.alert('Photo Not Saved', up.error ?? AVATAR_UPLOAD_FAILED_NOTE);
       return;
     }
     p.setPhoto(up.url);
@@ -438,7 +438,7 @@ export default function CoachProfile() {
           {/* Whole, never cut to a line: a name is the one thing on a profile
               that must not be truncated, and centred text wraps well. */}
           <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginTop: sp.lg, textAlign: 'center' }}>
-            {p.access === 'loading' ? 'Loading…' : (p.name || 'Your name')}
+            {p.access === 'loading' ? 'Loading…' : (p.name || 'Your Name')}
           </Text>
           <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.xs, textAlign: 'center' }}>
             {p.access === 'loading' ? 'Reading your profile' : (p.tagline || 'No tagline yet')}
@@ -563,7 +563,7 @@ export default function CoachProfile() {
           </Card>
         ) : (
         <Card style={{ marginTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>What a client sees</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>What a Client Sees</Text>
 
           {/* Three figures a client would count. The rate is the coach's own
               figure and is printed as it is; a dash where none is set, never
@@ -607,7 +607,7 @@ export default function CoachProfile() {
           )}
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-            <Text style={{ ...ty.caption, color: t.ink3 }}>Session rate</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Session Rate</Text>
             {/* Null is "not set", and 0 is a rate somebody may genuinely charge.
                 They used to be the same value, so an unset rate rendered as a
                 confident "$0 / session" on the coach's own profile — and on the
@@ -649,11 +649,11 @@ export default function CoachProfile() {
              tone. On a slow link a coach's public profile was announced as
              broken for as long as it took to load, and the coach stops typing
              and goes looking for support. */
-          <Notice tone={t.ink3} kicker="Profile" title="Reading your profile"
+          <Notice tone={t.ink3} kicker="Profile" title="Reading Your Profile"
             note="Nothing below is editable until it has arrived, so an edit cannot be made against fields that are not yours yet." />
         ) : p.access !== 'ok' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Profile" title="Your profile could not be opened for editing"
+            <Notice tone={t.warn} kicker="Profile" title="Your Profile Could Not Be Opened for Editing"
               note={p.accessNote ?? 'We could not confirm this is your own coaching profile, so nothing typed here would be stored.'} />
           </Section>
         ) : (
@@ -744,7 +744,7 @@ export default function CoachProfile() {
               "16,5" into "165" by deleting the comma and closing the gap, which
               is a tenfold error on the one figure a client is quoted. Read the
               same way every typed figure in the app is now read. */}
-          <Field t={t} label="Session Rate, per session"
+          <Field t={t} label="Session Rate, per Session"
             value={feeDraft ?? (p.sessionFee == null ? '' : String(p.sessionFee))}
             onChangeText={(v) => {
               setFeeDraft(v);
@@ -820,7 +820,7 @@ export default function CoachProfile() {
           {payTerms.status === 'loading' ? (
             <Text style={{ ...ty.caption, color: t.ink3 }}>Reading your pay terms…</Text>
           ) : payTerms.card.kind === 'unread' ? (
-            <Notice tone={t.warn} kicker="Pay" title="Your pay terms could not be read"
+            <Notice tone={t.warn} kicker="Pay" title="Your Pay Terms Could Not Be Read"
               note={PAY_TERMS_UNREAD_NOTE}>
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={payTerms.refresh} /></View>
             </Notice>
@@ -848,14 +848,14 @@ export default function CoachProfile() {
               {sessionRateLabel(payTerms.card) ? (
                 <View accessible accessibilityRole="text"
                   accessibilityLabel={`Your gym pays you ${sessionRateLabel(payTerms.card)} for a one-to-one session.`}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Per one-to-one session</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Per One-to-One Session</Text>
                   <Text style={{ ...value(20), color: t.ink, marginTop: 2 }}>{sessionRateLabel(payTerms.card)}</Text>
                 </View>
               ) : null}
               {classRateLabel(payTerms.card) ? (
                 <View style={{ marginTop: sp.md }} accessible accessibilityRole="text"
                   accessibilityLabel={`Your gym pays you ${classRateLabel(payTerms.card)} for a class. ${classPayLabel(payTerms.card) ?? ''}`}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>Per class taught</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Per Class Taught</Text>
                   <Text style={{ ...value(20), color: t.ink, marginTop: 2 }}>{classRateLabel(payTerms.card)}</Text>
                   {/* The counting rule, never dropped. "80 per class" and "8
                       per head" are the same digits and completely different
@@ -900,7 +900,7 @@ export default function CoachProfile() {
           {payTerms.status !== 'loading'
             && payTerms.card.kind !== 'unread' && payTerms.card.kind !== 'no_gym' ? (
             <View style={{ marginTop: sp.lg }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>What they pay for</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>What They Pay For</Text>
               {payTerms.policy.kind === 'stated' ? (
                 <Text style={{ ...ty.body, color: t.ink, marginTop: 2 }}>{payTerms.policy.label}</Text>
               ) : null}
@@ -931,7 +931,7 @@ export default function CoachProfile() {
         <Section>
           <SectionHead title="Late Cancellations" />
           {lc.status === 'error' ? (
-            <Notice tone={t.warn} kicker="Policy" title="We couldn’t read your cancellation policy"
+            <Notice tone={t.warn} kicker="Policy" title="We Couldn’t Read Your Cancellation Policy"
               note="Nothing typed here would be stored, so the controls are withheld rather than accepting an edit that goes nowhere. Your existing policy is unchanged — clients are still held to whatever it already says." />
           ) : lc.status === 'loading' ? (
             /* Withheld for the same reason the error branch is, and it used to
@@ -943,7 +943,7 @@ export default function CoachProfile() {
                until the read has landed, and the read then overwrote what they
                set. So they turned their own policy back on and watched it go
                off again. */
-            <Notice tone={t.ink3} kicker="Policy" title="Reading your cancellation policy"
+            <Notice tone={t.ink3} kicker="Policy" title="Reading Your Cancellation Policy"
               note="It is unchanged and still applies to your clients while this loads. The controls are withheld for a moment rather than showing a policy that is off before we know whether it is." />
           ) : (
           <>
@@ -961,7 +961,7 @@ export default function CoachProfile() {
               <Icon name="calendar" size={17} color={lc.applies ? t.brand : t.ink3} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Charge for late cancellations</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Charge for Late Cancellations</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {lc.applies
                   ? `Cancelling inside ${noticeLabel(lc.noticeHours)} records a fee against the client. Repple does not take it — you settle it with them.`
@@ -1064,7 +1064,7 @@ export default function CoachProfile() {
               <Icon name="search" size={17} color={p.listed ? t.brand : t.ink3} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>List me in Find a Trainer</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>List Me in Find a Trainer</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.listed ? 'Clients browsing Repple can see your name, tagline, bio, specialties and rate, and can request coaching.' : 'Off — you are not visible to clients browsing for a coach.'}</Text>
             </View>
             <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: p.listed ? t.brand : t.surface3, borderWidth: hairline, borderColor: p.listed ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
@@ -1093,7 +1093,7 @@ export default function CoachProfile() {
           <SectionHead title="Your Page on the Web" />
 
           <Card>
-            <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>A link for your bio</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>A Link for Your Bio</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
               A page anybody can open, with your name, what you do, what you are qualified in and a
               button that brings somebody into the app already attached to you.
@@ -1111,16 +1111,16 @@ export default function CoachProfile() {
             accessibilityLabel={pageOpen ? 'Hide what is on your page' : 'Show what is on your page'}
             style={{ marginTop: sp.md, paddingVertical: sp.sm }}>
             <Text style={{ ...ty.label, color: t.brandText }}>
-              {pageOpen ? 'Hide what goes on it' : 'What goes on it, and what never does'}
+              {pageOpen ? 'Hide What Goes on It' : 'What Goes on It, and What Never Does'}
             </Text>
           </Pressable>
           {pageOpen ? (
             <Card style={{ marginTop: sp.sm }}>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>On the page</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>On the Page</Text>
               {PUBLISHED_FIELDS.map((f) => (
                 <Flag key={f} tone={t.brand} style={{ marginBottom: sp.sm }}>{f}</Flag>
               ))}
-              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Never on it</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Never on It</Text>
               {WITHHELD_FIELDS.map((f) => (
                 <Flag key={f} tone={t.ink3} style={{ marginBottom: sp.sm }}>{f}</Flag>
               ))}
@@ -1131,7 +1131,7 @@ export default function CoachProfile() {
               they are actually claiming rather than being corrected after the
               press: "Jas Fitness" becomes "jas-fitness" under their thumb. */}
           <View style={{ marginTop: sp.lg }}>
-            <Field t={t} label="Your address" value={pageHandle}
+            <Field t={t} label="Your Address" value={pageHandle}
               onChangeText={(v) => setHandleDraft(normaliseHandle(v))}
               placeholder="jas-fitness" />
             {pageUrl ? (
@@ -1175,7 +1175,7 @@ export default function CoachProfile() {
                 press rather than flashed, because "that address is taken" is
                 the one a coach needs while they think of another. */}
             {pageSaid ? (
-              <Notice kicker="Your page" title={pageSaid.title} note={pageSaid.body} />
+              <Notice kicker="Your Page" title={pageSaid.title} note={pageSaid.body} />
             ) : null}
           </View>
         </Section>

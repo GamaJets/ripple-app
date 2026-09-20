@@ -530,7 +530,7 @@ export default function Membership() {
               {/* The standing itself is the card's figure now, and its
                   sentence the marked line under it — see the FigureCard. */}
               <Line t={t} label="Started" value={day(primary.startedOn)} />
-              {primary.endsOn ? <Line t={t} label="Runs to" value={day(primary.endsOn)} /> : null}
+              {primary.endsOn ? <Line t={t} label="Runs To" value={day(primary.endsOn)} /> : null}
 
               {/* The pause the status column has not caught up with — or has
                   got ahead of. Drawn only where the line above is not already
@@ -585,7 +585,7 @@ export default function Membership() {
                   that the client app does not select it. That answer is kept —
                   see the header of src/lib/membershipOrder.ts. */}
               <View style={{ marginTop: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>How this was bought</Text>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>How This Was Bought</Text>
                 {oStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Reading your purchases…</Text>
                 ) : order ? (
@@ -597,12 +597,12 @@ export default function Membership() {
                         stored integer rather than inventing a decimal point
                         when the currency was not recorded. */}
                     <Line t={t} label="Amount" value={orderAmount(order)} />
-                    {order.paidAt ? <Line t={t} label="Paid on" value={fmtFullDay(order.paidAt)} /> : null}
+                    {order.paidAt ? <Line t={t} label="Paid On" value={fmtFullDay(order.paidAt)} /> : null}
                     {/* The term the ORDER bought, which is not necessarily the
                         membership's dates above: a gym may have edited those
                         since, and showing the two is how a member notices. */}
                     {order.termStartsOn ? (
-                      <Line t={t} label="Term bought"
+                      <Line t={t} label="Term Bought"
                         value={order.termEndsOn
                           ? `${day(order.termStartsOn)} – ${day(order.termEndsOn)}`
                           : `${day(order.termStartsOn)} onwards`} />

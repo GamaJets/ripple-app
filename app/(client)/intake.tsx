@@ -275,7 +275,7 @@ export default function IntakeScreen() {
       // The draft is on the phone either way now, which is what lets the second
       // half of this be true rather than hopeful.
       Alert.alert(
-        'Not saved',
+        'Not Saved',
         `Your answers are kept on this phone and are not on the server, so your coach cannot see them yet. ${retryLine(reach)}`,
         [{ text: 'OK' }],
       );
@@ -357,7 +357,7 @@ export default function IntakeScreen() {
             withheld until they have. */}
         {choose && m.draft ? (
           <View style={{ marginTop: sp.md }}>
-            <Notice tone={t.warn} kicker="Two versions" title="You have answers on this phone that were never sent"
+            <Notice tone={t.warn} kicker="Two Versions" title="You have answers on this phone that were never sent"
               note="Your saved intake also has answers in it, and these were not typed on top of it. Nothing has been changed. Choose which one you want to carry on from.">
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}>
@@ -413,7 +413,7 @@ export default function IntakeScreen() {
               <Head t={t} id="readiness" done={sectionDone('readiness')} />
 
               <View style={{ marginTop: sp.md }}>
-                <Notice tone={t.s3} kicker="Not medical advice" title="These are screening questions"
+                <Notice tone={t.s3} kicker="Not Medical Advice" title="These are screening questions"
                   note={`${BRAND.label} does not score them and does not interpret them. Your coach sees what you answered, in your words.`} />
               </View>
 
@@ -459,7 +459,7 @@ export default function IntakeScreen() {
                   questionnaire has carried for forty years. */}
               {yeses.length > 0 ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Notice tone={t.s5} kicker="Worth a conversation" title="Speak to a doctor before you start"
+                  <Notice tone={t.s5} kicker="Worth a Conversation" title="Speak to a doctor before you start"
                     note={READINESS_SEE_A_DOCTOR} />
                 </View>
               ) : null}
@@ -539,7 +539,7 @@ export default function IntakeScreen() {
             <Rule />
             <Section>
               <Head t={t} id="availability" done={sectionDone('availability')} />
-              <Row t={t} label="Days a week you can train">
+              <Row t={t} label="Days a Week You Can Train">
                 {DAYS.map((n) => (
                   <Pill t={t} key={n} label={String(n)} on={draft.availability.daysPerWeek === n}
                     onPress={() => edit((d) => ({ ...d, availability: { ...d.availability, daysPerWeek: n } }))} />
@@ -604,9 +604,9 @@ export default function IntakeScreen() {
             <Rule />
             <Section>
               <Head t={t} id="emergency" done={sectionDone('emergency')} />
-              <Field t={t} label="Their name" value={draft.emergency.name} placeholder="Who to call"
+              <Field t={t} label="Their Name" value={draft.emergency.name} placeholder="Who to call"
                 onChangeText={(v) => edit((d) => ({ ...d, emergency: { ...d.emergency, name: v } }))} />
-              <Field t={t} label="Their number" value={draft.emergency.phone} placeholder="Phone number" keyboardType="phone-pad"
+              <Field t={t} label="Their Number" value={draft.emergency.phone} placeholder="Phone number" keyboardType="phone-pad"
                 onChangeText={(v) => edit((d) => ({ ...d, emergency: { ...d.emergency, phone: v } }))} />
               <Field t={t} label="How do you know them?" value={draft.emergency.relation} placeholder="e.g. partner, sister, flatmate"
                 onChangeText={(v) => edit((d) => ({ ...d, emergency: { ...d.emergency, relation: v } }))} />

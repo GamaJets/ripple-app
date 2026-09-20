@@ -105,7 +105,7 @@ export default function CoachReferrals() {
 
         {status === 'error' ? (
           <Section>
-            <Notice tone={t.crit} kicker="Not read" title="We couldn’t check who has been referring"
+            <Notice tone={t.crit} kicker="Not Read" title="We Couldn’t Check Who Has Been Referring"
               note="Nobody is listed below because the read did not come back. This is not a book on which nobody has referred anybody — pull down to try again.">
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void reload(); }} /></View>
             </Notice>

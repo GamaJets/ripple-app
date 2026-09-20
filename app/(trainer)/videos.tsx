@@ -117,9 +117,9 @@ import { USE_SUPABASE } from '../../src/lib/config';
  * say, because a truncated permission is worse than none.
  */
 const VIS: { key: Visibility; label: string; chip: string; note: string }[] = [
-  { key: 'private', label: 'Only Me', chip: 'Only me', note: 'Nobody else sees this clip. Useful for a take you are still working on.' },
-  { key: 'clients', label: 'My Clients', chip: 'My clients', note: 'Everyone you coach sees it in their program, on any device.' },
-  { key: 'gym', label: 'Everyone at the Gym', chip: 'The gym', note: 'Anyone training at your gym can watch it, whether or not you coach them.' },
+  { key: 'private', label: 'Only Me', chip: 'Only Me', note: 'Nobody else sees this clip. Useful for a take you are still working on.' },
+  { key: 'clients', label: 'My Clients', chip: 'My Clients', note: 'Everyone you coach sees it in their program, on any device.' },
+  { key: 'gym', label: 'Everyone at the Gym', chip: 'The Gym', note: 'Anyone training at your gym can watch it, whether or not you coach them.' },
   { key: 'public', label: 'Anyone on Repple', chip: 'Anyone', note: 'Anyone on Repple can watch it. Only choose this for a clip you are happy to publish.' },
 ];
 const visOf = (v: Visibility) => VIS.find((c) => c.key === v) ?? VIS[1];
@@ -338,7 +338,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
 
   return (
     <View style={{ marginTop: sp.lg }}>
-      <Text style={{ ...ty.micro, color: t.ink3 }}>Shared with</Text>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>Shared With</Text>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
         Anyone you name here can watch this clip whatever the setting above says — a name reaches even a clip set to “Only me”.
       </Text>
@@ -597,7 +597,7 @@ export default function TrainerVideos() {
     setGrantBusy(null);
     if (!ok) {
       Alert.alert(
-        on ? 'Not removed' : 'Not shared',
+        on ? 'Not Removed' : 'Not Shared',
         on
           ? `${person.name} can still watch “${v.name}”. The change did not reach the server — check your connection and try again.`
           : `“${v.name}” has not been shared with ${person.name}. The change did not reach the server — check your connection and try again.`,
@@ -644,7 +644,7 @@ export default function TrainerVideos() {
         // return on `!USE_SUPABASE || !uri`, which never calls the callback. It
         // deliberately no longer names the connection, because that branch is
         // not a network failure either.
-        Alert.alert('Clip not uploaded', why ?? 'Could not upload the clip right now. Try again in a moment, or add it as a link.');
+        Alert.alert('Clip Not Uploaded', why ?? 'Could not upload the clip right now. Try again in a moment, or add it as a link.');
         return;
       }
     }
@@ -658,7 +658,7 @@ export default function TrainerVideos() {
     // discarded rather than left in the bucket under their name for ever (see
     // `orphanedVideoObject` in src/lib/exerciseVideoUpload.ts), and the coach is
     // told that plainly instead of being told it was saved.
-    Alert.alert(where === 'remote' ? 'Clip added' : 'Clip not saved', where === 'remote'
+    Alert.alert(where === 'remote' ? 'Clip Added' : 'Clip Not Saved', where === 'remote'
       ? `Uploaded. ${visOf(chosen).note} You can change that any time from the clip's row.`
       : 'The name is in your library on this phone, but the clip itself did not reach the server and has not been kept. The video is still on your phone — add it again when you have a connection.');
   };
@@ -673,7 +673,7 @@ export default function TrainerVideos() {
   const saveLink = async () => {
     if (lBusy) return;
     const name = lName.trim();
-    if (!name) { Alert.alert('Name needed', 'Give the exercise a name.'); return; }
+    if (!name) { Alert.alert('Name Needed', 'Give the exercise a name.'); return; }
     // The link is checked the same way and in the same breath as the name, and
     // the write is REFUSED rather than made and then described. Without this
     // an empty box wrote a row with `url` null and `video_path` null — a clip
@@ -688,16 +688,16 @@ export default function TrainerVideos() {
     // record or upload a clip for that exercise. The screen shows them as the
     // empty placeholders they are, which is the truth about them.
     const why = linkProblem(lUrl);
-    if (why) { Alert.alert('Link needed', why); return; }
+    if (why) { Alert.alert('Link Needed', why); return; }
     setLBusy(true);
     const where = await addVideo({ name, group: lGroup, url: lUrl.trim() });
     setLBusy(false);
     if (where === 'none') {
-      Alert.alert('Not added', `“${name}” was not added to your library. Nothing was saved — check the name and try again.`);
+      Alert.alert('Not Added', `“${name}” was not added to your library. Nothing was saved — check the name and try again.`);
       return;
     }
     setLinkOpen(false);
-    Alert.alert(where === 'remote' ? 'Added' : 'Saved on this phone only', where === 'remote'
+    Alert.alert(where === 'remote' ? 'Added' : 'Saved on This Phone Only', where === 'remote'
       ? `${name} is in the exercise library. ${visOf('clients').note} You can change that any time from the clip's row.`
       : `${name} is in your library on this device only. It did not reach the server, so none of your clients can see it yet — remove it and add it again when you have a connection.`);
   };
@@ -708,7 +708,7 @@ export default function TrainerVideos() {
     if (v.uploaded) { setOpenId(openId === v.id ? null : v.id); return; }
     Alert.alert(v.name, 'No video yet for this exercise — add one now:', [
       { text: 'Record', onPress: () => upload(true, { name: v.name, group: v.group }) },
-      { text: 'Upload from library', onPress: () => upload(false, { name: v.name, group: v.group }) },
+      { text: 'Upload from Library', onPress: () => upload(false, { name: v.name, group: v.group }) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -721,7 +721,7 @@ export default function TrainerVideos() {
     const ok = await setVisibility(v.id, next);
     setVisBusy(null);
     if (!ok) {
-      Alert.alert('Not changed', `“${v.name}” is still set to “${visOf(v.visibility).label}”. The change did not reach the server — check your connection and try again.`);
+      Alert.alert('Not Changed', `“${v.name}” is still set to “${visOf(v.visibility).label}”. The change did not reach the server — check your connection and try again.`);
     }
   };
 
@@ -739,7 +739,7 @@ export default function TrainerVideos() {
         {
           text: 'Remove', style: 'destructive', onPress: async () => {
             const ok = await removeVideo(v.id);
-            if (!ok) { Alert.alert('Not removed', `“${v.name}” is still in your library — the delete did not reach the server. Anyone you shared it with can still watch it. Try again when you have a connection.`); return; }
+            if (!ok) { Alert.alert('Not Removed', `“${v.name}” is still in your library — the delete did not reach the server. Anyone you shared it with can still watch it. Try again when you have a connection.`); return; }
             if (openId === v.id) setOpenId(null);
           },
         },
@@ -1097,7 +1097,7 @@ export default function TrainerVideos() {
                     {v.uploaded ? <ExerciseVideo video={v} exerciseName={v.name} /> : null}
                     {mine ? (
                       <View style={{ marginTop: sp.md }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Who can see this</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Who Can See This</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>{vis.note}</Text>
                         <VisibilityChoice value={v.visibility} disabled={busy} subject={v.name} onChange={(next) => changeVisibility(v, next)} />
 
@@ -1168,7 +1168,7 @@ export default function TrainerVideos() {
 
             {/* Asked here rather than after the fact, because the upload is the
                 moment the clip becomes visible to somebody. */}
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>Who can see it</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>Who Can See It</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>{visOf(upVis).note}</Text>
             <View style={{ marginBottom: sp.lg }}>
               <VisibilityChoice value={upVis} disabled={upBusy} subject="this clip" onChange={setUpVis} />

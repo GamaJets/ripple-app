@@ -76,7 +76,7 @@ export function MonthCloseCard({ close }: { close: OwnerMonthClose }) {
         ) : view.kind === 'no_gym' ? (
           <Text style={{ ...ty.label, color: t.ink3 }}>{view.note}</Text>
         ) : (
-          <Notice tone={t.warn} kicker="Month end" title="Your gym could not be read" note={view.note}>
+          <Notice tone={t.warn} kicker="Month End" title="Your gym could not be read" note={view.note}>
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Try Again" onPress={close.refresh}
                 a11yLabel="Work out whether the month can be closed again" />

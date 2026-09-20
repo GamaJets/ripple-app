@@ -393,7 +393,7 @@ export default function Habits() {
               figure their coach can see. */}
           {unsentNote(h.unsent, 'tick') ? (
             <View style={{ marginTop: sp.md }}>
-              <Notice tone={t.warn} kicker="Checklist" title="Not sent yet"
+              <Notice tone={t.warn} kicker="Checklist" title="Not Sent Yet"
                 note={`${unsentNote(h.unsent, 'tick')} Until then your coach's records for today are short of them.`} />
             </View>
           ) : null}
@@ -427,12 +427,12 @@ export default function Habits() {
               run below carries its own floor and prints "or more". */}
           {historyUnread ? (
             <View style={{ marginTop: sp.md }}>
-              <Notice tone={t.warn} kicker="Your runs" title="We couldn’t read your history"
+              <Notice tone={t.warn} kicker="Your Runs" title="We couldn’t read your history"
                 note="The runs beside each line need your record from the last few weeks, and we could not fetch it just now. Nothing has been lost — we simply cannot count them from here." />
             </View>
           ) : historyPartial ? (
             <View style={{ marginTop: sp.md }}>
-              <Notice tone={t.warn} kicker="Your runs" title="Your record is longer than we can read at once"
+              <Notice tone={t.warn} kicker="Your Runs" title="Your record is longer than we can read at once"
                 note={`We read back ${h.historyDays} days and there is more on your record than fits in one go. A run that reaches the bottom of what we read is shown as "or more" — it has not been cut short, we just cannot see where it started.`} />
             </View>
           ) : null}
@@ -700,7 +700,7 @@ export default function Habits() {
               that. So the unit is in the label, not in a placeholder that a
               typed digit erases. */}
           <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
-            <Field label="Steps a day" hint={c.stepGoal != null ? `now ${c.stepGoal}` : unsetHint}>
+            <Field label="Steps a Day" hint={c.stepGoal != null ? `now ${c.stepGoal}` : unsetHint}>
             <TextInput
               value={stepDraft} onChangeText={setStepDraft} keyboardType="number-pad"
               placeholder={c.stepGoal != null ? String(c.stepGoal) : 'e.g. 8000'} placeholderTextColor={t.ink3}
@@ -720,7 +720,7 @@ export default function Habits() {
               const typed = readNumber(stepDraft);
               const n = typed == null ? NaN : Math.round(typed);
               if (!Number.isFinite(n) || n < STEP_MIN || n > STEP_MAX) {
-                Alert.alert('Check that number', `A step goal needs to be between ${STEP_MIN} and ${STEP_MAX}.`);
+                Alert.alert('Check That Number', `A step goal needs to be between ${STEP_MIN} and ${STEP_MAX}.`);
                 return;
               }
               c.setStepGoal(n); setStepDraft('');
@@ -734,7 +734,7 @@ export default function Habits() {
           </View>
 
           <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end', marginTop: sp.lg }}>
-            <Field label="Sleep a night" hint={c.sleepGoalHours != null ? `hours · now ${c.sleepGoalHours}h` : `hours · ${unsetHint}`}>
+            <Field label="Sleep a Night" hint={c.sleepGoalHours != null ? `hours · now ${c.sleepGoalHours}h` : `hours · ${unsetHint}`}>
             <TextInput
               value={sleepDraft} onChangeText={setSleepDraft} keyboardType="decimal-pad"
               placeholder={c.sleepGoalHours != null ? String(c.sleepGoalHours) : 'e.g. 7.5'} placeholderTextColor={t.ink3}
@@ -754,7 +754,7 @@ export default function Habits() {
               const typed = readNumber(sleepDraft);
               const n = typed == null ? NaN : Math.round(typed * 10) / 10;
               if (!Number.isFinite(n) || n < SLEEP_MIN || n > SLEEP_MAX) {
-                Alert.alert('Check that number', `A sleep goal needs to be between ${SLEEP_MIN} and ${SLEEP_MAX} hours. If you meant minutes, use hours here — 450 minutes is 7.5.`);
+                Alert.alert('Check That Number', `A sleep goal needs to be between ${SLEEP_MIN} and ${SLEEP_MAX} hours. If you meant minutes, use hours here — 450 minutes is 7.5.`);
                 return;
               }
               c.setSleepGoalHours(n); setSleepDraft('');
@@ -768,7 +768,7 @@ export default function Habits() {
           </View>
 
           <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end', marginTop: sp.lg }}>
-            <Field label="Water a day" hint={c.waterGoalGlasses != null ? `glasses · now ${c.waterGoalGlasses}` : `glasses · ${unsetHint}`}>
+            <Field label="Water a Day" hint={c.waterGoalGlasses != null ? `glasses · now ${c.waterGoalGlasses}` : `glasses · ${unsetHint}`}>
             <TextInput
               value={waterDraft} onChangeText={setWaterDraft} keyboardType="number-pad"
               placeholder={c.waterGoalGlasses != null ? String(c.waterGoalGlasses) : 'e.g. 8'} placeholderTextColor={t.ink3}
@@ -782,7 +782,7 @@ export default function Habits() {
               const typed = readNumber(waterDraft);
               const n = typed == null ? NaN : Math.round(typed);
               if (!Number.isFinite(n) || n < WATER_MIN || n > WATER_MAX) {
-                Alert.alert('Check that number', `A water goal needs to be between ${WATER_MIN} and ${WATER_MAX} glasses. If you meant millilitres, use glasses here — a glass is about 250 ml.`);
+                Alert.alert('Check That Number', `A water goal needs to be between ${WATER_MIN} and ${WATER_MAX} glasses. If you meant millilitres, use glasses here — a glass is about 250 ml.`);
                 return;
               }
               c.setWaterGoalGlasses(n); setWaterDraft('');

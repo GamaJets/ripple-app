@@ -254,11 +254,11 @@ function GridLegend({ t }: { t: Theme }) {
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <View style={{ width: 11, height: 11, borderRadius: 3, borderWidth: hairline, borderColor: t.ring }} />
-        <Text style={{ ...ty.caption, color: t.ink3 }}>Nothing logged</Text>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>Nothing Logged</Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <View style={{ width: 11, height: 11 }} />
-        <Text style={{ ...ty.caption, color: t.ink3 }}>Before you started</Text>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>Before You Started</Text>
       </View>
     </View>
   );
@@ -435,7 +435,7 @@ export default function History() {
   if (load.state === 'failed') {
     return frame(
       <><Section>
-        <SectionHead title="Could not read your history" />
+        <SectionHead title="Could Not Read Your History" />
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
           {load.reason} Nothing has been lost — this screen only failed to read what is there, so it
           cannot tell you what is in it either way.
@@ -537,7 +537,7 @@ export default function History() {
       <View style={{ marginTop: sp.lg }}>
         <Notice
           tone={t.warn}
-          kicker="Not your whole history"
+          kicker="Not Your Whole History"
           title={`Read back as far as ${monthLabel(partialBefore)}`}
           note={`You have trained for longer than this page can read in one go. Everything charted below is real and current, and anything before ${monthLabel(partialBefore)} is on record and not counted here — so the lifetime totals are left blank rather than added up short.`}
         />
@@ -594,7 +594,7 @@ export default function History() {
       // delta was the honest half, so it is now the figure.
       { label: 'Days Trained', tone: 'blue', value: whole ? fig(life.days) : fig(null), unit: whole ? undefined : 'not all read' },
       { label: best ? `Best Month · ${monthLabel(best.key)}` : 'Best Month', tone: 'orange', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined },
-      { label: 'Lifts With Weights', tone: 'purple', value: whole ? fig(life.lifts) : fig(null), unit: whole ? undefined : 'not all read' },
+      { label: 'Lifts with Weights', tone: 'purple', value: whole ? fig(life.lifts) : fig(null), unit: whole ? undefined : 'not all read' },
     ]} />
 
 
@@ -604,7 +604,7 @@ export default function History() {
         {/* A short history gets no year grid. Eleven blank months around one
             thin bar is a picture of failure drawn for somebody who has done
             nothing wrong — so this says what is actually true instead. */}
-        <SectionHead title="The start of your history" note={`Day ${span.days}`} />
+        <SectionHead title="The Start of Your History" note={`Day ${span.days}`} />
         {/* `life.days` is a lifetime count and is NOT gated on `whole` here,
             unlike the Days Trained column further down. That is deliberate
             rather than missed: this branch is `stage === 'starting'`, which
@@ -866,7 +866,7 @@ export default function History() {
 
     {/* ── personal bests over time, not just the current best ────────────── */}
     <Section>
-      <SectionHead title="Personal Bests Over Time" note={records.length ? 'Newest first' : undefined} />
+      <SectionHead title="Personal Bests over Time" note={records.length ? 'Newest first' : undefined} />
       {records.length === 0 ? (
         <Text style={{ ...ty.label, color: t.ink3 }}>
           No records set yet — the first weighted set you log becomes one.
@@ -1122,7 +1122,7 @@ function MuscleSection({ log, unit, weightSeries }: {
       <Segmented style={{ marginBottom: sp.md }}
         value={String(days) as '7' | '28'}
         onChange={(k) => setDays(Number(k) as 7 | 28)}
-        options={[{ key: '7', label: '7 Days', a11yLabel: 'Last 7 days' }, { key: '28', label: '28 Days', a11yLabel: 'Last 28 days' }] as const} />
+        options={[{ key: '7', label: '7 Days', a11yLabel: 'Last 7 Days' }, { key: '28', label: '28 Days', a11yLabel: 'Last 28 Days' }] as const} />
 
       {/* The catalogue read has three answers and only one of them is a board.
           "Nothing trained" off a failed read is the sentence that would send

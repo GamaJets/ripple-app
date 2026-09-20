@@ -210,7 +210,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
      bar buttons beside it are both labelled in kg, which makes a bare figure
      next to them read like a third one. Both now name the client's own unit. */}
  <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
- <Field label="Target total" hint={wu}>
+ <Field label="Target Total" hint={wu}>
  <TextInput value={target} onChangeText={setTarget} keyboardType="decimal-pad" style={inp} placeholder={wu} placeholderTextColor={t.ink3} />
  </Field>
  <Text style={{ ...ty.label, color: t.ink3, paddingBottom: 13 }}>bar</Text>
@@ -378,7 +378,7 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  from={`${FAT_G_PER_KG_BODYWEIGHT.low}–${FAT_G_PER_KG_BODYWEIGHT.high} g per kg of your ${fig(weightLabel(c.weightKg, 'kg'))} bodyweight`} />
  {m.proteinPerMeal ? (<>
  <Rule />
- <TargetRow t={t} name="Protein a meal" grams={rangeLabel(m.proteinPerMeal)}
+ <TargetRow t={t} name="Protein a Meal" grams={rangeLabel(m.proteinPerMeal)}
  from={`The day's protein across your ${c.mealsPerDay} meals`} />
  </>) : null}
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

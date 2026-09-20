@@ -478,7 +478,7 @@ export default function Bookings() {
         // whichever screen the member cancelled from. `onCancel` stays as the
         // release the helper itself performs, so a class row and a PT row still
         // share one shape.
-        out.push({ id: 'p' + s.id, kind: 'pt', title: coachName ? `PT with ${coachName}` : 'PT session', sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coachName ? `with ${coachName}` : undefined, onCancel: () => releaseSession(s.id), pt: s });
+        out.push({ id: 'p' + s.id, kind: 'pt', title: coachName ? `PT with ${coachName}` : 'PT Session', sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coachName ? `with ${coachName}` : undefined, onCancel: () => releaseSession(s.id), pt: s });
       }
     }
     return out.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
@@ -554,7 +554,7 @@ export default function Bookings() {
         if (!r.moved) {
           // Every refusal names the state of the world afterwards, because a
           // refusal is indistinguishable from a loss unless somebody says so.
-          Alert.alert('Not moved', rescheduleRefusalLine(r, timeLabel(from.startsAt)), [{ text: 'OK' }]);
+          Alert.alert('Not Moved', rescheduleRefusalLine(r, timeLabel(from.startsAt)), [{ text: 'OK' }]);
           return;
         }
         setMoveFor(null);
@@ -587,7 +587,7 @@ export default function Bookings() {
     // what sends them to ring the gym, which is the thing that actually saves
     // them the no-show fee. See src/lib/outbox.ts.
     const failed = () => Alert.alert(
-      it.waitlist ? 'Still on the waitlist' : 'Not cancelled',
+      it.waitlist ? 'Still on the Waitlist' : 'Not Cancelled',
       it.waitlist
         ? `You are still on the waitlist for ${it.title} — that did not save, so nothing has changed. ${retryLine(reach)}`
         : `${it.title} on ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)} is still booked — that did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
@@ -622,31 +622,31 @@ export default function Bookings() {
     const warn = it.pt ? cancelWarningFor(it.startsAt, cancelPolicy, asked) : null;
     if (warn?.late) {
       Alert.alert(
-        'Cancelling late',
+        'Cancelling Late',
         `${warn.line}\n\n${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}. Continue?`,
-        [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: () => { void doCancel(); } }],
+        [{ text: 'Keep It', style: 'cancel' }, { text: 'Cancel Anyway', style: 'destructive', onPress: () => { void doCancel(); } }],
       );
       return;
     }
     if (warn) {
-      Alert.alert('Cancel this booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}\n\n${warn.line}`, [
-        { text: 'Keep it', style: 'cancel' },
+      Alert.alert('Cancel This Booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}\n\n${warn.line}`, [
+        { text: 'Keep It', style: 'cancel' },
         { text: 'Cancel', style: 'destructive', onPress: () => { void doCancel(); } },
       ]);
       return;
     }
-    Alert.alert('Cancel this booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}`, [
-      { text: 'Keep it', style: 'cancel' },
+    Alert.alert('Cancel This Booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}`, [
+      { text: 'Keep It', style: 'cancel' },
       { text: 'Cancel', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);
   };
 
   const confirmLeave = (q: { sessionId: string; startsAt: string }) => {
     Alert.alert(
-      'Leave this waitlist?',
+      'Leave This Waitlist?',
       `You’ll lose your place in line for ${dayLabel(q.startsAt)} ${timeLabel(q.startsAt)}. If it frees up after that, it goes to whoever is in the queue instead of you.`,
       [
-        { text: 'Stay in line', style: 'cancel' },
+        { text: 'Stay in Line', style: 'cancel' },
         {
           text: 'Leave',
           style: 'destructive',
@@ -657,10 +657,10 @@ export default function Bookings() {
             // otherwise, a member walks away still in a queue that can book
             // them into a session they no longer want.
             if (!res.ok) {
-              Alert.alert('Still on the waitlist', `${res.error || 'That did not save.'} You are still in line for ${timeLabel(q.startsAt)}, so it could still be booked for you.`, [{ text: 'OK' }]);
+              Alert.alert('Still on the Waitlist', `${res.error || 'That did not save.'} You are still in line for ${timeLabel(q.startsAt)}, so it could still be booked for you.`, [{ text: 'OK' }]);
               return;
             }
-            Alert.alert('Left the waitlist', `You’re no longer in line for ${dayLabel(q.startsAt)} ${timeLabel(q.startsAt)}.`, [{ text: 'OK' }]);
+            Alert.alert('Left the Waitlist', `You’re no longer in line for ${dayLabel(q.startsAt)} ${timeLabel(q.startsAt)}.`, [{ text: 'OK' }]);
           },
         },
       ],
@@ -699,7 +699,7 @@ export default function Bookings() {
     const calledOff = items.filter((it) => it.cancelled).length;
     if (booked.length === 0) {
       Alert.alert(
-        'Nothing to add',
+        'Nothing to Add',
         queued > 0
           ? `You are in the queue for ${queued} ${queued === 1 ? 'class' : 'classes'} and have nothing booked. A place in a queue is not a booking, so it is not written into your calendar — if one comes to you, it appears here as a booking and you can add it then.`
           : calledOff > 0
@@ -716,13 +716,13 @@ export default function Bookings() {
       location: it.location,
       notes: it.sub,
     }));
-    await shareIcs(buildIcs(evts, `${appName} — My bookings`), 'my-bookings.ics', 'Add to calendar');
+    await shareIcs(buildIcs(evts, `${appName} — My Bookings`), 'my-bookings.ics', 'Add to Calendar');
     if (queued > 0 || calledOff > 0) {
       const left: string[] = [];
       if (queued > 0) left.push(`the ${queued} ${queued === 1 ? 'place' : 'places'} you are waiting for — a queue is not a booking, and a calendar entry saying otherwise would still be there long after the class had run`);
       if (calledOff > 0) left.push(`${calledOff === 1 ? 'the class the gym called off' : `the ${calledOff} classes the gym called off`} — ${calledOff === 1 ? 'it is' : 'they are'} not running`);
       Alert.alert(
-        'What went into the file',
+        'What Went into the File',
         `${booked.length} booked ${booked.length === 1 ? 'session is' : 'sessions are'} in it. Left out: ${left.join('; and ')}.`,
         [{ text: 'OK' }],
       );
@@ -1018,7 +1018,7 @@ export default function Bookings() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
           {moveFor ? (<>
-            <Text style={{ ...ty.title, color: t.ink }}>Move to another time</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Move to Another Time</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               {dayLabel(moveFor.startsAt)} at {timeLabel(moveFor.startsAt)} becomes whichever of these you pick. Nothing is charged and no session comes off your pack.
             </Text>

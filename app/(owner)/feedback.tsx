@@ -216,7 +216,7 @@ export default function OwnerFeedback() {
             <Pressable onPress={() => setShowErr((v) => !v)} accessibilityRole="button"
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
               <Icon name="wrench" size={15} color={t.crit} />
-              <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Recent errors ({errors?.length ?? 0})</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Recent Errors ({errors?.length ?? 0})</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{showErr ? 'Hide' : 'Show'}</Text>
             </Pressable>
             {showErr ? errors.map((e, i) => (

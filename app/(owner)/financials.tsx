@@ -188,7 +188,7 @@ const FIELDS: { key: keyof FinInputs; label: string; hint?: string }[] = [
   { key: 'members', label: 'Active Members', hint: 'count' },
   { key: 'newMembers', label: 'Joined This Month', hint: 'count' },
   { key: 'churnedMembers', label: 'Left This Month', hint: 'count' },
-  { key: 'ptRevenue', label: 'Personal-training Revenue' },
+  { key: 'ptRevenue', label: 'Personal-Training Revenue' },
   { key: 'classRevenue', label: 'Class Revenue' },
 ];
 
@@ -829,7 +829,7 @@ export default function Financials() {
     const cache = store.current;
     if (!mayWriteCache(cache)) {
       Alert.alert(
-        'Not saved on this phone',
+        'Not Saved on This Phone',
         'Your figures are on screen, but this could not confirm which account to file them '
         + 'under, so nothing has been written. They will not survive closing the app. '
         + 'Nothing has been sent anywhere, and nothing already saved has been changed.',
@@ -844,7 +844,7 @@ export default function Financials() {
     } catch (e) {
       reportError('financials.save', e);
       Alert.alert(
-        'Not saved on this phone',
+        'Not Saved on This Phone',
         'Your figures are on screen but could not be written to this phone\u2019s storage, so they will not survive closing the app. Nothing has been sent anywhere.',
       );
     }
@@ -941,18 +941,18 @@ export default function Financials() {
   // rate over nought members is not a low rate, it is no rate.
   const membersKnown = entered.has('members') && fin.members > 0;
   const kpis: [string, string][] = r ? [
-    ['Revenue / mo', money(fin.revenue)],
-    ['Net profit', money(r.netProfit)],
+    ['Revenue / Mo', money(fin.revenue)],
+    ['Net Profit', money(r.netProfit)],
     ['Margin', num(r.marginPct) + '%'],
     ['MRR', has('mrr') ? money(fin.mrr) : dash],
     ['Members', entered.has('members') ? fin.members.toLocaleString() : dash],
     ['Churn', membersKnown ? num1(r.churnPct) + '%' : dash],
     // A gym that neither grew nor shrank reads "No change", not "+0.0%". The
     // `>= 0` arm put a plus on a month in which nothing happened.
-    ['Net growth', membersKnown && has('newMembers', 'churnedMembers')
+    ['Net Growth', membersKnown && has('newMembers', 'churnedMembers')
       ? deltaLabel(r.growthPct, { since: null, unit: '%' })
       : dash],
-    ['PT + classes', has('ptRevenue', 'classRevenue')
+    ['PT + Classes', has('ptRevenue', 'classRevenue')
       ? money(fin.ptRevenue + fin.classRevenue)
       : dash],
   ] : [];
@@ -1097,8 +1097,8 @@ export default function Financials() {
           <Section>
             <Notice
               tone={t.warn}
-              kicker="Your monthly figures"
-              title={noAccount === 'signed-out' ? 'Not shown while you are signed out' : 'We could not check your account'}
+              kicker="Your Monthly Figures"
+              title={noAccount === 'signed-out' ? 'Not Shown While You Are Signed Out' : 'We Could Not Check Your Account'}
               note={noAccount === 'signed-out'
                 ? 'Your figures are saved on this phone under your own account, so they are not '
                   + 'shown while nobody is signed in. Nothing has been deleted. Sign in again and '
@@ -1318,8 +1318,8 @@ export default function Financials() {
             {[mrrCheck, memberCheck, revenueCheck, newCheck].some((c) => c.state === 'differs') ? (
               <Notice
                 tone={t.s3}
-                kicker="Worth a look"
-                title="Your figures and your records disagree"
+                kicker="Worth a Look"
+                title="Your Figures and Your Records Disagree"
                 note={[
                   mrrCheck.state === 'differs' ? reconcileNote(mrrCheck, 'MRR', money) : null,
                   memberCheck.state === 'differs' ? reconcileNote(memberCheck, 'member count', (n) => n.toLocaleString()) : null,

@@ -381,9 +381,9 @@ export default function CoachChecklists() {
   const add = async () => {
     if (!uid || !picked || busy) return;
     const label = draft.trim();
-    if (!label) { Alert.alert('Nothing to add', 'Type the line you want on their list.'); return; }
+    if (!label) { Alert.alert('Nothing to Add', 'Type the line you want on their list.'); return; }
     if (label.length > LABEL_MAX) {
-      Alert.alert('Too long', `That is ${label.length} characters. A checklist line has to fit on one row of a phone — ${LABEL_MAX} at most.`);
+      Alert.alert('Too Long', `That is ${label.length} characters. A checklist line has to fit on one row of a phone — ${LABEL_MAX} at most.`);
       return;
     }
     /* Appending needs the WHOLE list, and until now this took `items ?? []`.
@@ -400,7 +400,7 @@ export default function CoachChecklists() {
      * typed line is still in the field. */
     if (!isWhole(status)) {
       Alert.alert(
-        'Not added yet',
+        'Not Added Yet',
         status === 'error'
           ? `Their list could not be read, so there is no way to tell what a new line should sit after — it would go to the top of ${who}'s morning instead of the end. Pull down to read it again, then add the line.`
           : `Their list came back at the row limit, so this screen has not seen the end of it and a new line would land in the middle rather than at the bottom. Pull down to read it again, then add the line.`,
@@ -419,7 +419,7 @@ export default function CoachChecklists() {
     setBusy(false);
     if (error || !data) {
       reportError('coachChecklists.add', error);
-      Alert.alert('Not saved', 'That line is not on their list. Check your connection and try again.');
+      Alert.alert('Not Saved', 'That line is not on their list. Check your connection and try again.');
       return;
     }
     setItems((p) => [...(p ?? []), data as unknown as Item]);
@@ -436,7 +436,7 @@ export default function CoachChecklists() {
     // error, it is a success that changed nothing.
     if (error || !data || !data.length) {
       reportError('coachChecklists.setActive', error);
-      Alert.alert('Not saved', 'Their list is unchanged.');
+      Alert.alert('Not Saved', 'Their list is unchanged.');
       return;
     }
     setItems((p) => (p ?? []).map((x) => (x.id === it.id ? { ...x, active } : x)));
@@ -444,11 +444,11 @@ export default function CoachChecklists() {
 
   const remove = (it: Item) => {
     Alert.alert(
-      'Delete this line?',
+      'Delete This Line?',
       `"${it.label}" goes for good, and their past ticks for it stop being readable. Turning it off keeps the record.`,
       [
-        { text: 'Keep it', style: 'cancel' },
-        { text: 'Turn off', onPress: () => setActive(it, false) },
+        { text: 'Keep It', style: 'cancel' },
+        { text: 'Turn Off', onPress: () => setActive(it, false) },
         { text: 'Delete', style: 'destructive', onPress: async () => {
           setBusy(true);
           const { data, error } = await supabase
@@ -456,7 +456,7 @@ export default function CoachChecklists() {
           setBusy(false);
           if (error || !data || !data.length) {
             reportError('coachChecklists.remove', error);
-            Alert.alert('Not removed', 'It is still on their list.');
+            Alert.alert('Not Removed', 'It is still on their list.');
             return;
           }
           setItems((p) => (p ?? []).filter((x) => x.id !== it.id));
@@ -481,7 +481,7 @@ export default function CoachChecklists() {
       // One half may have landed. Re-reading is the only way to show what the
       // server holds rather than what this phone hoped it would.
       reportError('coachChecklists.move', a.error ?? b.error);
-      Alert.alert('Order not saved', 'Reloading their list so you can see what actually stored.');
+      Alert.alert('Order Not Saved', 'Reloading their list so you can see what actually stored.');
       if (uid && picked) void load(uid, picked);
       return;
     }
@@ -593,7 +593,7 @@ export default function CoachChecklists() {
   const runCopy = async () => {
     if (!uid || copying) return;
     if (!copyGuard.allowed) {
-      Alert.alert(copyGuard.label ?? 'Not copied', copyGuard.reason ?? 'Nothing was copied.');
+      Alert.alert(copyGuard.label ?? 'Not Copied', copyGuard.reason ?? 'Nothing was copied.');
       return;
     }
     const brief = copyBrief(plan, client?.name ?? 'this client');
@@ -638,7 +638,7 @@ export default function CoachChecklists() {
           Alert.alert(report.title, report.body);
         } catch (e) {
           reportError('coachChecklists.copy', e);
-          Alert.alert('Not copied', 'Nothing was written to anybody\u2019s list. Check your connection and try again.');
+          Alert.alert('Not Copied', 'Nothing was written to anybody\u2019s list. Check your connection and try again.');
         } finally { setCopying(false); }
       } },
     ]);
@@ -666,7 +666,7 @@ export default function CoachChecklists() {
 
         {r.status === 'error' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
               note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
           </Section>
         ) : null}
@@ -707,7 +707,7 @@ export default function CoachChecklists() {
              give somebody else a list that does not exist. */
           <View>
             <Section>
-              <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+              <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
                 note={`You added ${who} to your book by hand. A checklist is a list on somebody's phone and a tick is something they do on it, so there is nothing here to set and nothing to count — and none of that is a read that failed. Invite them from your client list; from the day they accept, this screen works like everybody else's.`} />
             </Section>
           </View>
@@ -729,7 +729,7 @@ export default function CoachChecklists() {
                   looks like second has already formed the thought, and the
                   second sentence is arguing with it. */}
               {tickStatus === 'error' ? (
-                <Notice tone={t.warn} kicker="Not loaded" title="Their ticks could not be read"
+                <Notice tone={t.warn} kicker="Not Loaded" title="Their Ticks Could Not Be Read"
                   note="Nothing below says how often anything was done, because none of it came back. That is a read that failed, not a record of somebody ticking nothing — and the two are indistinguishable unless somebody says which it was." />
               ) : tickStatus === 'partial' ? (
                 <PartialRead what="ticks in the last four weeks" onPress={() => { if (picked) void loadTicks(picked); }} />
@@ -746,12 +746,12 @@ export default function CoachChecklists() {
                     days are SET ASIDE, as the note says, not counted as
                     misses, which is why this is a bar of active days and not
                     of adherence. */}
-                <Meter label="Days With a Tick" tone="teal"
+                <Meter label="Days with a Tick" tone="teal"
                   val={summary.window.days - summary.silentDays} target={summary.window.days}
                   note={`${summary.window.days - summary.silentDays} of ${summary.window.days} days`} />
                 <View style={{ height: sp.md }} />
                 <Notice
-                  kicker={`Last ${summary.window.days} days, to ${dayLabel(summary.window.end)}`}
+                  kicker={`Last ${summary.window.days} Days, to ${dayLabel(summary.window.end)}`}
                   title={summary.silentDays === 0
                     ? `Something was logged on every one of the last ${summary.window.days} days`
                     : `Nothing at all was logged on ${summary.silentDays} of the last ${summary.window.days} days`}
@@ -760,7 +760,7 @@ export default function CoachChecklists() {
               </>) : null}
 
               {status === 'error' ? (
-                <Notice tone={t.warn} kicker="Not loaded" title="Their list could not be read"
+                <Notice tone={t.warn} kicker="Not Loaded" title="Their List Could Not Be Read"
                   note="Nothing is shown below because nothing came back — it does not mean you have set nothing for them." />
               ) : status === 'loading' ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>Reading their list…</Text>
@@ -845,7 +845,7 @@ export default function CoachChecklists() {
             {summary ? (
             <View>
               <Section>
-                <SectionHead title="From their own plan and targets" />
+                <SectionHead title="From Their Own Plan and Targets" />
                 <View>
                   {summary.deletedLineTicks > 0 ? (
                     <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
@@ -921,7 +921,7 @@ export default function CoachChecklists() {
             {status === 'ready' && sourceLines.length > 0 ? (
               <View>
                 <Section>
-                  <SectionHead title="Give These To Somebody Else"
+                  <SectionHead title="Give These to Somebody Else"
                     note={sourceLines.length === 1 ? '1 line' : `${sourceLines.length} lines`} />
 
                   {!copyOpen ? (<>
@@ -994,7 +994,7 @@ export default function CoachChecklists() {
                           and no undo the coach can reach without deleting the
                           line, which deletes their ticks for it. */}
                       {!copyGuard.allowed ? (
-                        <Notice tone={t.warn} kicker="Held" title={copyGuard.label ?? 'Not copied'}
+                        <Notice tone={t.warn} kicker="Held" title={copyGuard.label ?? 'Not Copied'}
                           note={copyGuard.reason ?? ''} />
                       ) : null}
 

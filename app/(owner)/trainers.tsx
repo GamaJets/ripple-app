@@ -133,7 +133,7 @@ export default function OwnerTrainers() {
   const revoke = async (id: string, email: string) => {
     const done = await revokeTrainerInvite(id);
     if (!done) {
-      Alert.alert('Not cancelled', `The invitation to ${email} is still open. Nothing changed — try again in a moment.`);
+      Alert.alert('Not Cancelled', `The invitation to ${email} is still open. Nothing changed — try again in a moment.`);
     }
   };
 
@@ -237,14 +237,14 @@ export default function OwnerTrainers() {
         <ScreenHeader
           eyebrow="Your Coaching Staff"
           title="Trainers"
-          actions={<Ghost icon="plus" a11yLabel="Invite a trainer by email" onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />}
+          actions={<Ghost icon="plus" a11yLabel="Invite a Trainer by Email" onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />}
         />
 
         {/* The whole screen is one list and the figures over it, so the reason
             they are all dashes is worth one sentence rather than seven. */}
         {trainersUnread ? (
-          <Notice tone={t.warn} kicker="Roster unread"
-            title="Your trainers could not be read"
+          <Notice tone={t.warn} kicker="Roster Unread"
+            title="Your Trainers Could Not Be Read"
             note="Nothing below is a statement about your staff — an empty roster here means the read failed, not that nobody works for you.">
             <View style={{ marginTop: sp.lg }}>
               <Cta label="Try Again" wide onPress={refresh} />
@@ -425,7 +425,7 @@ export default function OwnerTrainers() {
       <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }}>
           <View style={sheet}>
-            <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>Invite a trainer</Text>
+            <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>Invite a Trainer</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
               They join your gym when they accept in their own app.
             </Text>
@@ -461,7 +461,7 @@ export default function OwnerTrainers() {
                     no-shows and slots nobody had cancelled. */}
                 {current.unmarked30 > 0 ? (
                   <Notice
-                    kicker="Awaiting outcomes"
+                    kicker="Awaiting Outcomes"
                     title={`${current.unmarked30} session${current.unmarked30 === 1 ? '' : 's'} need marking before this can be valued.`}
                   />
                 ) : tenant?.sessionFee != null && cur ? (
@@ -473,9 +473,9 @@ export default function OwnerTrainers() {
                   // 75/session fee" invites the reader to supply their own
                   // money for it, which is the wrong-amount bug without even a
                   // wrong symbol to notice.
-                  <Notice kicker="No currency" title="Set your gym's currency in Ops to value these sessions." />
+                  <Notice kicker="No Currency" title="Set your gym's currency in Ops to value these sessions." />
                 ) : (
-                  <Notice kicker="No session fee" title="Set a session fee in Ops to value delivered sessions." />
+                  <Notice kicker="No Session Fee" title="Set a session fee in Ops to value delivered sessions." />
                 )}
                 <View style={{ marginTop: sp.xl }}><Ghost label="Close" onPress={() => setSel(null)} /></View>
               </>

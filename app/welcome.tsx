@@ -297,7 +297,7 @@ export default function Welcome() {
               // gets nothing sent to it, and signUp cannot tell us that without
               // telling anybody who asks which addresses are registered.
               note="No link to click, so nothing can use it before you do. If it has not arrived, check your junk folder — and if you already have an account at this address, go back and sign in instead."
-              changeLabel="Wrong address? Go back"
+              changeLabel="Wrong Address? Go Back"
               onChange={() => {
                 // Back to the form with the address still in the field. The
                 // account that was just created keeps that address — it is not
@@ -338,21 +338,21 @@ export default function Welcome() {
               has none of those failure modes. Email and password stay below,
               because an existing member has no phone on their account yet. */}
           <Pressable onPress={() => router.push('/phone-signin')} accessibilityRole="button"
-            accessibilityLabel="Continue with your phone number"
+            accessibilityLabel="Continue with Your Phone Number"
             style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
               backgroundColor: t.surface2, borderRadius: radius.md, minHeight: 52, paddingVertical: sp.md,
               marginBottom: sp.lg,
             }}>
-            <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>Continue with your phone number</Text>
+            <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>Continue with Your Phone Number</Text>
           </Pressable>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
             <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
             <Text style={{ ...ty.caption, color: t.ink3 }}>or</Text>
             <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
           </View>
-          <Text style={lab}>Full name</Text>
-              <TextInput value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={t.ink3} autoCapitalize="words" style={inp} accessibilityLabel="Full name" />
+          <Text style={lab}>Full Name</Text>
+              <TextInput value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={t.ink3} autoCapitalize="words" style={inp} accessibilityLabel="Full Name" />
             </>
           ) : null}
           {mode === 'up' ? (
@@ -376,13 +376,13 @@ export default function Welcome() {
           {mode === 'up' ? <PasswordRules value={pw} /> : null}
           {mode === 'up' ? (
             <>
-              <Text style={lab}>Referral code (optional)</Text>
-              <TextInput value={refCode} onChangeText={setRefCode} placeholder="Referral code (optional)" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={inp} accessibilityLabel="Referral code (optional)" />
+              <Text style={lab}>Referral Code (Optional)</Text>
+              <TextInput value={refCode} onChangeText={setRefCode} placeholder="Referral code (optional)" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={inp} accessibilityLabel="Referral Code (Optional)" />
             </>
           ) : null}
           {mode === 'in' ? (
-            <Pressable onPress={() => router.push('/forgot-password')} accessibilityRole="button" accessibilityLabel="Forgot password" hitSlop={8} style={{ alignSelf: 'flex-end', marginTop: -4, marginBottom: sp.sm }}>
-              <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>Forgot password?</Text>
+            <Pressable onPress={() => router.push('/forgot-password')} accessibilityRole="button" accessibilityLabel="Forgot Password" hitSlop={8} style={{ alignSelf: 'flex-end', marginTop: -4, marginBottom: sp.sm }}>
+              <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>Forgot Password?</Text>
             </Pressable>
           ) : null}
 

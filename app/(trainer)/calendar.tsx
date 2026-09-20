@@ -928,16 +928,16 @@ export default function TrainerSchedule() {
   const applyPhoneZone = () => {
     if (!phoneZone || !zoneless) return;
     Alert.alert(
-      'Record this timezone?',
+      'Record This Timezone?',
       selfHealConfirm(zoneless, phoneZone),
       [
-        { text: 'Not now', style: 'cancel' },
+        { text: 'Not Now', style: 'cancel' },
         {
-          text: 'Record it',
+          text: 'Record It',
           onPress: async () => {
             const asked = zoneless;
             const saved = await setZoneOnUnzoned();
-            Alert.alert(saved ? 'Timezone recorded' : 'Not saved', selfHealResult(saved, asked, phoneZone));
+            Alert.alert(saved ? 'Timezone Recorded' : 'Not Saved', selfHealResult(saved, asked, phoneZone));
           },
         },
       ],
@@ -955,13 +955,13 @@ export default function TrainerSchedule() {
     // server-side and reported as saved-on-this-phone-only.
     if (!availKnown) {
       Alert.alert(
-        'Can’t generate slots yet',
+        'Can’t Generate Slots Yet',
         'Your weekly availability could not be read, so Repple does not know which times you offer — and an empty list here does not mean you have none set.\n\nNothing has been changed and nothing has been lost. Pull down to refresh and try again once you are connected.',
         [{ text: 'OK' }],
       );
       return;
     }
-    if (!availSlots.length) { Alert.alert('No availability set', 'Add at least one weekly slot first.'); return; }
+    if (!availSlots.length) { Alert.alert('No Availability Set', 'Add at least one weekly slot first.'); return; }
     // Generating against a calendar we could not read would open slots on top of
     // sessions that are already there: `addSession`'s overlap check runs against
     // the list this screen holds, and under 'error' that list is empty for want
@@ -985,7 +985,7 @@ export default function TrainerSchedule() {
     // occupies the hour about to be opened.
     if (!isWhole(sessionsStatus)) {
       Alert.alert(
-        'Can’t generate slots yet',
+        'Can’t Generate Slots Yet',
         sessionsStatus === 'loading'
           ? 'Your calendar is still being read, so Repple does not yet know what you already have booked — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Give it a moment and try again.'
           : sessionsStatus === 'partial'
@@ -1053,7 +1053,7 @@ export default function TrainerSchedule() {
       if (caveat) lines.push(caveat);
     }
     if (lost) lines.push(lost + ' slot' + (lost === 1 ? '' : 's') + ' could not be saved to the server, so ' + (lost === 1 ? 'it is' : 'they are') + ' not open to anyone. Try generating again.');
-    Alert.alert(added ? 'Slots generated' : 'No slots opened', lines.join('\n\n'));
+    Alert.alert(added ? 'Slots Generated' : 'No Slots Opened', lines.join('\n\n'));
   };
 
   // ── the stretch, and what it would do ─────────────────────────────────────
@@ -1123,7 +1123,7 @@ export default function TrainerSchedule() {
       + 'Open slots already generated from them are NOT withdrawn — anything a client has booked stays booked, '
       + 'and anything still open stays open until it passes. This only stops new ones being generated.',
       [
-        { text: 'Keep them', style: 'cancel' },
+        { text: 'Keep Them', style: 'cancel' },
         {
           text: `Remove ${n}`,
           style: 'destructive',
@@ -1134,7 +1134,7 @@ export default function TrainerSchedule() {
             setAvBusy(false);
             if (gone < n) {
               Alert.alert(
-                'Some are still there',
+                'Some Are Still There',
                 `${gone} of ${n} were removed. The rest are still on your week and still generating open slots — try again when you have a connection.`,
                 [{ text: 'OK' }],
               );
@@ -1153,7 +1153,7 @@ export default function TrainerSchedule() {
       + 'Open slots already generated from them are NOT withdrawn — a client who has booked one keeps it, '
       + 'and anything still open stays open until it passes. This only stops new ones being generated.',
       [
-        { text: 'Keep them', style: 'cancel' },
+        { text: 'Keep Them', style: 'cancel' },
         {
           text: `Remove ${count}`,
           style: 'destructive',
@@ -1167,7 +1167,7 @@ export default function TrainerSchedule() {
             // server is bookable at an hour they think they closed.
             if (gone < mine.length) {
               Alert.alert(
-                'Some are still there',
+                'Some Are Still There',
                 `${gone} of ${mine.length} were removed. The rest are still on your week and still generating open slots — try again when you have a connection.`,
                 [{ text: 'OK' }],
               );
@@ -1182,7 +1182,7 @@ export default function TrainerSchedule() {
     if (rangeRefusal || avBusy) return;
     const { fresh, duplicates } = rangeSplit;
     if (fresh.length === 0) {
-      Alert.alert('Nothing to add', addOutcome(0, 0, duplicates), [{ text: 'OK' }]);
+      Alert.alert('Nothing to Add', addOutcome(0, 0, duplicates), [{ text: 'OK' }]);
       return;
     }
     setAvBusy(true);
@@ -1195,7 +1195,7 @@ export default function TrainerSchedule() {
       if (res === 'saved') saved++;
     }
     setAvBusy(false);
-    Alert.alert(saved ? 'Weekly hours added' : 'Not added', addOutcome(saved, fresh.length, duplicates), [{ text: 'OK' }]);
+    Alert.alert(saved ? 'Weekly Hours Added' : 'Not Added', addOutcome(saved, fresh.length, duplicates), [{ text: 'OK' }]);
   };
 
   const addWeekly = async () => {
@@ -1203,7 +1203,7 @@ export default function TrainerSchedule() {
     const res = await addAvail(avDow, avHour, avMinute, 60);
     if (res === 'saved') return;
     if (res === 'duplicate') {
-      Alert.alert('Already on your week', `You already offer ${when} every week, so nothing was added.`, [{ text: 'OK' }]);
+      Alert.alert('Already on Your Week', `You already offer ${when} every week, so nothing was added.`, [{ text: 'OK' }]);
       return;
     }
     // "Remove and re-add it" is the right advice for a slot the server never
@@ -1214,14 +1214,14 @@ export default function TrainerSchedule() {
     // them to remove it would delete a slot their clients can book.
     if (!availKnown) {
       Alert.alert(
-        'Not added',
+        'Not Added',
         `${when} was not added, and this may be because you already offer it — your weekly times could not be read, so Repple could not check first.\n\nNothing has been lost and nothing on your week has changed. Try again once you are connected, and do not remove anything on the strength of this.`,
         [{ text: 'OK' }],
       );
       return;
     }
     Alert.alert(
-      'Saved on this phone only',
+      'Saved on This Phone Only',
       `${when} is in your weekly list here, but it did not reach the server — so it is not on your other devices, and generating open slots from it may not work.\n\nIt has not been lost. Check your connection and remove and re-add it once you are back online.`,
       [{ text: 'OK' }],
     );
@@ -1273,7 +1273,7 @@ export default function TrainerSchedule() {
     if (seriesStatus === 'ready' && standing.some((s) => s.clientId === srClient
       && s.dow === srDow && s.hour === srHour && s.minute === srMinute)) {
       Alert.alert(
-        'Already standing',
+        'Already Standing',
         `${who} already has ${when.charAt(0).toLowerCase()}${when.slice(1)} with you, so nothing was changed.`,
         [{ text: 'OK' }],
       );
@@ -1286,7 +1286,7 @@ export default function TrainerSchedule() {
     setSrBusy(false);
     if (!res.ok) {
       Alert.alert(
-        'Not set up',
+        'Not Set Up',
         `${when} with ${who} was not created, so nothing has changed and ${who} has not been booked.\n\n${res.error}`,
         [{ text: 'OK' }],
       );
@@ -1312,7 +1312,7 @@ export default function TrainerSchedule() {
       lines.push('Those dates are yours to place by hand if you want them.');
     }
     Alert.alert(
-      rep.created ? 'Standing appointment set' : 'Saved, but nothing was booked',
+      rep.created ? 'Standing Appointment Set' : 'Saved, but Nothing Was Booked',
       lines.join('\n\n'),
       [{ text: 'Done' }],
     );
@@ -1356,7 +1356,7 @@ export default function TrainerSchedule() {
     setEndBusy(false);
     if (!res.ok) {
       Alert.alert(
-        'Still standing',
+        'Still Standing',
         `${seriesLabel(s)} with ${who} is still running — that did not save, so nothing has changed, no session has been removed and ${who} has not been told.\n\n${res.error}`,
         [{ text: 'OK' }],
       );
@@ -1368,7 +1368,7 @@ export default function TrainerSchedule() {
     await refresh();
     const r = res.report;
     Alert.alert(
-      'Standing appointment ended',
+      'Standing Appointment Ended',
       `${seriesLabel(s)} with ${who} will not repeat again.\n\n`
       + (r.removed
         ? `${r.removed} later session${r.removed === 1 ? '' : 's'} ${r.removed === 1 ? 'was' : 'were'} removed from your calendar and theirs.`
@@ -1526,7 +1526,7 @@ export default function TrainerSchedule() {
   const doBlock = async () => {
     const mins = blkAllDay ? 24 * 60 : (blkTo - blkFrom) * 60;
     if (mins <= 0) {
-      Alert.alert('Pick an end after the start', 'The finish time needs to be later than the start time.');
+      Alert.alert('Pick an End After the Start', 'The finish time needs to be later than the start time.');
       return;
     }
 
@@ -1540,7 +1540,7 @@ export default function TrainerSchedule() {
     // src/lib/blockRange.ts, which is run under three time zones.
     const dayList = blockDates({ from: selDay, days: blkDays, repeatWeeks: blkWeeks });
     if (dayList.length === 0) {
-      Alert.alert('Nothing to block', 'That range does not cover any days. Pick a length between one day and two months.');
+      Alert.alert('Nothing to Block', 'That range does not cover any days. Pick a length between one day and two months.');
       return;
     }
 
@@ -1618,7 +1618,7 @@ export default function TrainerSchedule() {
    */
   const reportBlock = (summary: BlockSummary, mins: number) => {
     const clashes = known ? sessionsBlocking(summary.booked, sessions) : [];
-    const title = summary.blocked === 0 ? 'Nothing blocked' : summary.needsAttention ? 'Partly blocked' : 'Time blocked';
+    const title = summary.blocked === 0 ? 'Nothing Blocked' : summary.needsAttention ? 'Partly Blocked' : 'Time Blocked';
     if (clashes.length === 0) {
       Alert.alert(title, blockSummaryLine(summary), [{ text: 'Done' }]);
       return;
@@ -1637,7 +1637,7 @@ export default function TrainerSchedule() {
   const confirmCancelAndBlock = async (clashes: TrainingSession[], days: string[], mins: number) => {
     const who = clashes.map((c) => `${nameOf(c.clientId)} ${timeLabel(c.startsAt)}`);
     const go = await new Promise<boolean>((resolve) => {
-      Alert.alert('Cancel these sessions?', cancelAndBlockBody(clashes.length, who), [
+      Alert.alert('Cancel These Sessions?', cancelAndBlockBody(clashes.length, who), [
         { text: 'Keep Them', style: 'cancel', onPress: () => resolve(false) },
         { text: cancelAndBlockLabel(clashes.length), style: 'destructive', onPress: () => resolve(true) },
       ], { cancelable: true, onDismiss: () => resolve(false) });
@@ -1671,7 +1671,7 @@ export default function TrainerSchedule() {
       ? ` ${stillBooked.length} did not save, so ${stillBooked.length === 1 ? 'that client is' : 'those clients are'} still booked: ${stillBooked.slice(0, 4).join(', ')}${stillBooked.length > 4 ? '…' : ''}.`
       : '';
     Alert.alert(
-      summary.blocked === 0 ? 'Nothing blocked' : summary.needsAttention ? 'Partly blocked' : 'Time blocked',
+      summary.blocked === 0 ? 'Nothing Blocked' : summary.needsAttention ? 'Partly Blocked' : 'Time Blocked',
       `${head}${tail} ${blockSummaryLine(summary)}`,
       [{ text: 'Done' }],
     );
@@ -1789,7 +1789,7 @@ export default function TrainerSchedule() {
       await connectGoogleCalendar(false);
       await refreshLink();
     } catch (e) {
-      Alert.alert('Not connected', e instanceof Error ? e.message : 'Google could not be connected.');
+      Alert.alert('Not Connected', e instanceof Error ? e.message : 'Google could not be connected.');
     }
     setSyncBusy(false);
   };
@@ -1809,7 +1809,7 @@ export default function TrainerSchedule() {
                 setSyncLink(NO_CALENDAR_LINK);
                 setRemoteRead({ status: 'ready', spans: [] });
               } catch (e) {
-                Alert.alert('Still connected', e instanceof Error ? e.message : 'The connection could not be removed.');
+                Alert.alert('Still Connected', e instanceof Error ? e.message : 'The connection could not be removed.');
               }
               setSyncBusy(false);
               await refreshLink();
@@ -1836,7 +1836,7 @@ export default function TrainerSchedule() {
       pushAgainSoon();
       await refreshLink();
     } catch (e) {
-      Alert.alert(enabled ? 'Not writing yet' : 'Still writing', e instanceof Error ? e.message : 'That could not be changed.');
+      Alert.alert(enabled ? 'Not Writing Yet' : 'Still Writing', e instanceof Error ? e.message : 'That could not be changed.');
     }
     setSyncBusy(false);
   };
@@ -1948,7 +1948,7 @@ export default function TrainerSchedule() {
     if (!sessionsCoverPush) {
       if (announce) {
         Alert.alert(
-          'Can’t send yet',
+          'Can’t Send Yet',
           'Your Repple calendar could not be read, so Repple does not know what you have booked — and sending now would remove sessions from Google that are still here.\n\nNothing has been changed. Pull down to refresh and try again.',
           [{ text: 'OK' }],
         );
@@ -1958,7 +1958,7 @@ export default function TrainerSchedule() {
     if (!isWhole(classStatus)) {
       if (announce) {
         Alert.alert(
-          'Can’t send yet',
+          'Can’t Send Yet',
           'Your class timetable could not be read in full, so Repple does not know which classes you teach — and sending now would remove the classes it has already written from your Google calendar, leaving those hours looking free to anybody reading it.\n\nNothing has been changed. Pull down to refresh and try again.',
           [{ text: 'OK' }],
         );
@@ -1989,7 +1989,7 @@ export default function TrainerSchedule() {
       // same false statement as a count that was never taken — see
       // `pushPartialLine`.
       const part = out.partial ? pushPartialLine(out.partial) : null;
-      Alert.alert('Not sent', [out.reason, part].filter(Boolean).join('\n\n'));
+      Alert.alert('Not Sent', [out.reason, part].filter(Boolean).join('\n\n'));
     } else {
       // A timetable that could not be read means the classes are missing from
       // what was just sent, and the coach has no way to tell from a count of
@@ -2099,7 +2099,7 @@ export default function TrainerSchedule() {
     setBusyOpen(false);
     await refresh();
     Alert.alert(
-      summary.blocked === 0 ? 'Nothing blocked' : summary.needsAttention ? 'Partly blocked' : 'Time blocked',
+      summary.blocked === 0 ? 'Nothing Blocked' : summary.needsAttention ? 'Partly Blocked' : 'Time Blocked',
       blockSummaryLine(summary),
       [{ text: 'Done' }],
     );
@@ -2159,14 +2159,14 @@ export default function TrainerSchedule() {
     // cannot see one.
     const clash = classClashes(s.startsAt, s.durationMin, gymClasses, coachId);
     if (clash.mine.length > 0) {
-      Alert.alert('You are teaching then',
+      Alert.alert('You Are Teaching Then',
         `${clash.mine[0].title} runs across ${timeLabel(s.startsAt)} on ${dateOfLabel(selDate)}, and you are the coach on it. Pick another time, or call the class off from the Classes screen first.`,
         [{ text: 'OK' }]);
       return;
     }
     const res = addSession(s);
     if (!res.ok) {
-      Alert.alert('Time not available', `You already have a session that overlaps ${timeLabel(s.startsAt)} on ${dateOfLabel(selDate)}. Pick another time.`, [{ text: 'OK' }]);
+      Alert.alert('Time Not Available', `You already have a session that overlaps ${timeLabel(s.startsAt)} on ${dateOfLabel(selDate)}. Pick another time.`, [{ text: 'OK' }]);
       return;
     }
     setAddOpen(false);
@@ -2177,7 +2177,7 @@ export default function TrainerSchedule() {
     // stacked dialogs is how the important half gets dismissed unread.
     const caveat = classCheckCaveat(classesKnown, clash.unattributed.length);
     if (!addClient) {
-      if (caveat) Alert.alert('Slot opened', caveat, [{ text: 'OK' }]);
+      if (caveat) Alert.alert('Slot Opened', caveat, [{ text: 'OK' }]);
       return;
     }
     const who = nameOf(addClient);
@@ -2188,7 +2188,7 @@ export default function TrainerSchedule() {
     const saved = await (res.saved ?? Promise.resolve(false));
     if (!saved) {
       Alert.alert(
-        'Not booked',
+        'Not Booked',
         `${timeLabel(s.startsAt)} with ${who} was not saved, so it is not on your calendar and ${who} has not been booked.\n\n` +
           'Either the save failed, or somebody booked that time while this screen was open — your diary now allows only one session at a time. Pull down to refresh and check before trying again.',
         [{ text: 'OK' }],
@@ -2197,7 +2197,7 @@ export default function TrainerSchedule() {
     }
     const push = await sendPushChecked([addClient], 'Session booked', `Your session on ${DOW[selDate.getDay()]} at ${timeLabel(s.startsAt)} is confirmed.`, { route: '/(client)/calendar' });
     Alert.alert(
-      'Session booked',
+      'Session Booked',
       `${timeLabel(s.startsAt)} with ${who} is confirmed, and it is now on their calendar in the Repple app.\n\n` +
         (push.ok
           ? `${who} was sent a notification — they will see it if they have notifications on.`
@@ -2357,7 +2357,7 @@ export default function TrainerSchedule() {
     const r = await cancelOne(s);
     if (!r.freed) {
       Alert.alert(
-        'Not cancelled',
+        'Not Cancelled',
         `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} is still booked — that did not save, so nothing has changed and nobody has been told. Try again.`,
         [{ text: 'OK' }],
       );
@@ -2366,7 +2366,7 @@ export default function TrainerSchedule() {
     const { toldClient, promoted, promotedTold, queueUnknown, offer, rosterWhole } = r;
     const when = `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]}`;
     Alert.alert(
-      'Session cancelled',
+      'Session Cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
       (toldClient
         ? `${nameOf(s.clientId)} was sent a notification. `
@@ -2414,23 +2414,23 @@ export default function TrainerSchedule() {
     const unit = c.amount == null ? '' : unstatedCurrencyCoach(c.currency);
     const who = nameOf(c.clientId);
     if (c.waivedAt) {
-      Alert.alert('Reinstate this fee?', `${sum} against ${who} would go back to outstanding.${unit}`, [
-        { text: 'Leave waived', style: 'cancel' },
+      Alert.alert('Reinstate This Fee?', `${sum} against ${who} would go back to outstanding.${unit}`, [
+        { text: 'Leave Waived', style: 'cancel' },
         { text: 'Reinstate', onPress: async () => {
           const ok = await unwaiveFee(c.id);
-          if (!ok) Alert.alert('Not reinstated', 'That did not save, so the fee is still waived. Try again.', [{ text: 'OK' }]);
+          if (!ok) Alert.alert('Not Reinstated', 'That did not save, so the fee is still waived. Try again.', [{ text: 'OK' }]);
         } },
       ]);
       return;
     }
-    Alert.alert('Waive this fee?', `${sum} against ${who} would be marked as forgiven. The record stays — it shows as waived rather than disappearing — and neither of you owes anything on it.${unit}`, [
-      { text: 'Keep it', style: 'cancel' },
+    Alert.alert('Waive This Fee?', `${sum} against ${who} would be marked as forgiven. The record stays — it shows as waived rather than disappearing — and neither of you owes anything on it.${unit}`, [
+      { text: 'Keep It', style: 'cancel' },
       { text: 'Waive', onPress: async () => {
         // A zero-row update is a success in PostgREST. `waiveFee` counts the
         // rows it changed, so a coach is never told they forgave a fee that
         // is still standing against their client.
         const ok = await waiveFee(c.id);
-        if (!ok) Alert.alert('Not waived', `That did not save, so ${sum} is still outstanding against ${who}. Try again.${unit}`, [{ text: 'OK' }]);
+        if (!ok) Alert.alert('Not Waived', `That did not save, so ${sum} is still outstanding against ${who}. Try again.${unit}`, [{ text: 'OK' }]);
       } },
     ]);
   }
@@ -2536,13 +2536,13 @@ export default function TrainerSchedule() {
     const fromLabel = `${dateLabel(from.startsAt)} at ${timeLabel(from.startsAt)}`;
     const toLabel = `${dateLabel(to.startsAt)} at ${timeLabel(to.startsAt)}`;
     Alert.alert(
-      'Move this session?',
+      'Move This Session?',
       `${who} moves from ${fromLabel} to ${toLabel}.\n\n`
       + 'Nothing is charged and no session comes off their pack — it is the same session at a different time. '
       + `${fromLabel} goes back on your calendar, or straight to whoever is first in line for it. `
       + 'They are notified once it has moved.',
       [
-        { text: 'Leave it', style: 'cancel' },
+        { text: 'Leave It', style: 'cancel' },
         { text: 'Move', onPress: () => { void doMove(from, to); } },
       ],
     );
@@ -2557,7 +2557,7 @@ export default function TrainerSchedule() {
     try {
       const r = await rescheduleClientSession(from.id, to.id);
       if (!r.moved) {
-        Alert.alert('Not moved', coachMoveRefusalLine(r, who, fromLabel), [{ text: 'OK' }]);
+        Alert.alert('Not Moved', coachMoveRefusalLine(r, who, fromLabel), [{ text: 'OK' }]);
         return;
       }
       closeMove();
@@ -2570,7 +2570,7 @@ export default function TrainerSchedule() {
           { route: '/(client)/calendar' })
         : { ok: false };
       await reloadWaits();
-      Alert.alert('Session moved', coachMovedLine(r, who, fromLabel, toLabel, told.ok), [{ text: 'Done' }]);
+      Alert.alert('Session Moved', coachMovedLine(r, who, fromLabel, toLabel, told.ok), [{ text: 'Done' }]);
     } finally { setMoveBusy(false); }
   }
 
@@ -2588,10 +2588,10 @@ export default function TrainerSchedule() {
     const fromLabel = `${dateLabel(from.startsAt)} at ${timeLabel(from.startsAt)}`;
     const toLabel = `${dateLabel(to.startsAt)} at ${timeLabel(to.startsAt)}`;
     Alert.alert(
-      'Move this session?',
+      'Move This Session?',
       moveAtConfirmBody(who, fromLabel, toLabel, to.inHours),
       [
-        { text: 'Leave it', style: 'cancel' },
+        { text: 'Leave It', style: 'cancel' },
         { text: 'Move', onPress: () => { void doMoveAt(from, to); } },
       ],
     );
@@ -2621,7 +2621,7 @@ export default function TrainerSchedule() {
     try {
       const r = await moveSessionToTime(from.id, to.startsAt);
       if (!r.moved) {
-        Alert.alert('Not moved', moveAtRefusalLine(r, who, fromLabel, toLabel), [{ text: 'OK' }]);
+        Alert.alert('Not Moved', moveAtRefusalLine(r, who, fromLabel, toLabel), [{ text: 'OK' }]);
         return;
       }
       closeMove();
@@ -2645,7 +2645,7 @@ export default function TrainerSchedule() {
       // straight on would end this alert with "nobody was waiting for it" over
       // an unknown, and the coach would offer the hour to somebody else. Null is
       // the honest value and `coachMovedLine` now has an arm for it.
-      Alert.alert('Session moved', coachMovedLine(
+      Alert.alert('Session Moved', coachMovedLine(
         {
           moved: true, reason: null, clientId: r.clientId, promoted: r.promoted,
           waiting: r.waitingKnown ? r.waiting : null,
@@ -2660,9 +2660,9 @@ export default function TrainerSchedule() {
     // end `${d.getDate()}/${d.getMonth() + 1}` — two readings three months
     // apart, under a weekday that makes it look unambiguous enough to tap
     // through.
-    Alert.alert('Cancel this session?', `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} on ${dateOfLabel(d)}.`, [
+    Alert.alert('Cancel This Session?', `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} on ${dateOfLabel(d)}.`, [
       { text: 'Keep', style: 'cancel' },
-      { text: 'Cancel session', style: 'destructive', onPress: () => doCancel(s) },
+      { text: 'Cancel Session', style: 'destructive', onPress: () => doCancel(s) },
     ]);
   }
   /**
@@ -2703,15 +2703,15 @@ export default function TrainerSchedule() {
   function removeOpen(s: TrainingSession) {
     if (s.status === 'blocked') {
       Alert.alert(
-        'Free this time up?',
+        'Free This Time Up?',
         `${timeLabel(s.startsAt)} on ${dateOfLabel(new Date(s.startsAt))} is blocked, so nobody can book it. Freeing it lifts the block.\n\nAny open slots the block withdrew do not come back — put them up again with Generate Open Slots in Weekly Availability.`,
         [
-          { text: 'Keep it blocked', style: 'cancel' },
-          { text: 'Free it up', style: 'destructive', onPress: async () => {
+          { text: 'Keep It Blocked', style: 'cancel' },
+          { text: 'Free It Up', style: 'destructive', onPress: async () => {
             const ok = await removeSession(s.id);
             if (!ok) {
               Alert.alert(
-                'Still blocked',
+                'Still Blocked',
                 `That did not save, so ${timeLabel(s.startsAt)} on ${dateOfLabel(new Date(s.startsAt))} is still blocked and nobody can book it. It is back on your calendar. Try again.`,
                 [{ text: 'OK' }],
               );
@@ -2721,13 +2721,13 @@ export default function TrainerSchedule() {
       );
       return;
     }
-    Alert.alert('Remove open slot?', `${timeLabel(s.startsAt)} is currently open. Remove it from your availability?`, [
+    Alert.alert('Remove Open Slot?', `${timeLabel(s.startsAt)} is currently open. Remove it from your availability?`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         const ok = await removeSession(s.id);
         if (!ok) {
           Alert.alert(
-            'Still open',
+            'Still Open',
             `That did not save, so ${timeLabel(s.startsAt)} is still on your availability and a client can still book it. It is back on your calendar. Try again.`,
             [{ text: 'OK' }],
           );
@@ -2745,7 +2745,7 @@ export default function TrainerSchedule() {
     const push = await sendPushChecked(ids, 'A slot just opened', `${when} is available — first to book it gets it.`, { route: '/(client)/calendar' });
     if (!push.ok) {
       Alert.alert(
-        'Nobody was told',
+        'Nobody Was Told',
         `${when} is still open on your calendar, but the notification did not go out${push.error ? ` (${push.error})` : ''} — so none of your clients has been asked about it. Message them yourself, or try again.`,
         [{ text: 'OK' }],
       );
@@ -2765,7 +2765,7 @@ export default function TrainerSchedule() {
     // send-push saying it could only part-read the handsets, so however many
     // phones lit up is a floor.
     Alert.alert(
-      'Slot re-offered',
+      'Slot Re-offered',
       reofferConfirmation({
         offered: ids.length,
         recorded: push.recorded,
@@ -2788,7 +2788,7 @@ export default function TrainerSchedule() {
   function reoffer(s: TrainingSession) {
     if (rosterStatus !== 'ready') {
       Alert.alert(
-        'Can’t offer it round yet',
+        'Can’t Offer It Round Yet',
         (rosterStatus === 'loading'
           ? 'Your clients are still loading, so Repple does not yet know who to offer this to.'
           : rosterStatus === 'error'
@@ -2814,14 +2814,14 @@ export default function TrainerSchedule() {
     const ids = roster.filter((c) => c.handAdded !== true).map((c) => c.id);
     const handAdded = roster.length - ids.length;
     if (!ids.length) {
-      Alert.alert('Nobody to offer it to',
+      Alert.alert('Nobody to Offer It To',
         handAdded > 0
           ? `${timeLabel(s.startsAt)} stays open on your calendar. Everybody on your book was added by hand, so none of them has the app this offer goes to and none of them could book the hour. Invite them from the Clients tab and they can take slots like this one.`
           : `${timeLabel(s.startsAt)} stays open on your calendar, but you have no clients on your roster to tell about it. Add one from the Clients tab.`,
         [{ text: 'OK' }]);
       return;
     }
-    Alert.alert('Offer this slot round?',
+    Alert.alert('Offer This Slot Round?',
       `Push all ${ids.length} of your clients that ${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is open to book.`
       + (handAdded > 0
         ? `\n\n${handAdded} ${handAdded === 1 ? 'client is' : 'clients are'} not in that: you added them by hand, so they have no app to be told in and could not book the hour.`
@@ -2934,7 +2934,7 @@ export default function TrainerSchedule() {
       // 'unsent' here would be reported as "kept on this phone" while nothing
       // was kept. A sign-in still being restored is not a signed-out coach, and
       // this says which without sending anybody to sign in again.
-      Alert.alert('Not checked in',
+      Alert.alert('Not Checked In',
         `${who} was not marked present. Your sign-in has not come back yet, so there is nothing to record this against — try again in a moment.`);
       return;
     }
@@ -2964,7 +2964,7 @@ export default function TrainerSchedule() {
       kind: 'session-outcome', sessionId: s.id, clientName: who, outcome: 'completed', rateCents,
     });
     if (out === 'refused') {
-      Alert.alert('Not checked in', refusedLine(`${who}’s session`, 'Nothing has been recorded against it.'));
+      Alert.alert('Not Checked In', refusedLine(`${who}’s session`, 'Nothing has been recorded against it.'));
       return;
     }
     // Nothing was kept and nothing is coming, so the record does not open. The
@@ -2972,11 +2972,11 @@ export default function TrainerSchedule() {
     // Sessions queue, which is where this can be made again once the phone has
     // emptied.
     if (out === 'full') {
-      Alert.alert('Not checked in', floorFullLine(`${who}’s session`));
+      Alert.alert('Not Checked In', floorFullLine(`${who}’s session`));
       return;
     }
     if (out === 'unsent') {
-      Alert.alert('Kept on this phone', keptOfflineLine('This check-in'), [
+      Alert.alert('Kept on This Phone', keptOfflineLine('This check-in'), [
         { text: 'Open Their Record', onPress: openRecord },
       ]);
       return;
@@ -2986,7 +2986,7 @@ export default function TrainerSchedule() {
 
   const exportSchedule = async () => {
     const evts = booked.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title: `Session · ${nameOf(s.clientId)}` }));
-    await shareIcs(buildIcs(evts, 'Repple — Coaching schedule'), 'repple-schedule.ics', 'Export your schedule');
+    await shareIcs(buildIcs(evts, 'Repple — Coaching schedule'), 'repple-schedule.ics', 'Export Your Schedule');
   };
 
   return (
@@ -3001,15 +3001,15 @@ export default function TrainerSchedule() {
             viewport. `leading={null}` because a tab root has nowhere to go
             back to. */}
         <PageHead title="Calendar" leading={null}
-          trailing={<Ghost icon="plus" a11yLabel="Add a session" onPress={() => { setAddClient(null); setAddOpen(true); }} />} />
+          trailing={<Ghost icon="plus" a11yLabel="Add a Session" onPress={() => { setAddClient(null); setAddOpen(true); }} />} />
         <View style={{ height: sp.md }} />
 
         {/* ── month grid ─────────────────────────────────────────────────── */}
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.sm, marginBottom: sp.md }}>
-            <MonthStep t={t} icon={BACK_ICON} label="Previous month" onPress={() => shiftMonth(-1)} />
+            <MonthStep t={t} icon={BACK_ICON} label="Previous Month" onPress={() => shiftMonth(-1)} />
             <Text accessibilityRole="header" style={{ ...ty.page, ...font('700', 'display'), color: t.ink, flex: 1, textAlign: 'center' }}>{MON[viewMonth]} {viewYear}</Text>
-            <MonthStep t={t} icon={FORWARD_ICON} label="Next month" onPress={() => shiftMonth(1)} />
+            <MonthStep t={t} icon={FORWARD_ICON} label="Next Month" onPress={() => shiftMonth(1)} />
           </View>
 
           <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>
@@ -3622,7 +3622,7 @@ export default function TrainerSchedule() {
                 avatar={<IconPlate icon="check" tone="amber" />}
                 tone={t.data.amber}
                 name={unknown
-                  ? 'Sessions waiting on an outcome'
+                  ? 'Sessions Waiting on an Outcome'
                   : `${waiting.length} ${waiting.length === 1 ? 'session has' : 'sessions have'} ended with no outcome`}
                 reason={unknown
                   ? (sessionsStatus === 'error'
@@ -3693,7 +3693,7 @@ export default function TrainerSchedule() {
             out — and nobody presses Generate to keep them coming. */}
         <Section>
           <SectionHead title="Standing Appointments"
-            note={seriesStatus === 'error' ? 'Not read' : 'Set one up'}
+            note={seriesStatus === 'error' ? 'Not read' : 'Set One Up'}
             onPress={seriesStatus === 'error' ? undefined : () => { setSrClient(null); setSeriesOpen(true); }} />
 
           {/* An empty list under 'error' means the arrangements could not be
@@ -4006,9 +4006,9 @@ export default function TrainerSchedule() {
         {slotLine ? (
           <View style={{ paddingTop: sp.md }}>
             <Notice tone={t.warn} kicker="Bookings"
-              title={slotWindow.state === 'never-set' ? 'Your clients cannot book you'
-                : slotWindow.state === 'empty' ? 'Nobody can book you'
-                  : 'Your open slots are running out'}
+              title={slotWindow.state === 'never-set' ? 'Your Clients Cannot Book You'
+                : slotWindow.state === 'empty' ? 'Nobody Can Book You'
+                  : 'Your Open Slots Are Running Out'}
               note={slotLine}>
               <View style={{ marginTop: sp.md }}>
                 {/* Same sheet, different label, and the label is the fix. A
@@ -4156,7 +4156,7 @@ export default function TrainerSchedule() {
                           if (await removeAvail(sl.id)) return;
                           await reloadAvail();
                           Alert.alert(
-                            'Still on your week',
+                            'Still on Your Week',
                             `${DOW[sl.dow]} ${avTime(sl.hour, sl.minute)} was not removed, so it is still there and still generating open slots. Try again when you have a connection.`,
                             [{ text: 'OK' }],
                           );
@@ -4175,7 +4175,7 @@ export default function TrainerSchedule() {
               </View>
             ))}
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.md }}>Add weekly hours</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.md }}>Add Weekly Hours</Text>
             {/* ── a stretch, or one slot ────────────────────────────────────
                 This sheet could only ever add ONE slot: a day, a time, a
                 length, add. To offer 07:00–19:00 in quarter-hours a coach
@@ -4191,8 +4191,8 @@ export default function TrainerSchedule() {
                 So the unit a coach thinks in — a stretch of the day — is now
                 the unit they enter, and it is the default. */}
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-              <Chip t={t} label="A stretch of the day" on={avRange} onPress={() => setAvRange(true)} />
-              <Chip t={t} label="One slot" on={!avRange} onPress={() => setAvRange(false)} />
+              <Chip t={t} label="A Stretch of the Day" on={avRange} onPress={() => setAvRange(true)} />
+              <Chip t={t} label="One Slot" on={!avRange} onPress={() => setAvRange(false)} />
             </View>
 
             {avRange ? (<>
@@ -4239,7 +4239,7 @@ export default function TrainerSchedule() {
                 ))}
               </ScrollView>
 
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Each session</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Each Session</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
                 {[15, 30, 45, 60, 90].map((d) => (
                   <Chip key={'ad' + d} t={t} label={`${d} min`} on={avDur === d} onPress={() => setAvDur(d)} />
@@ -4311,7 +4311,7 @@ export default function TrainerSchedule() {
           {avRange && availKnown ? (
             <>
               <Cta
-                label={avBusy ? 'Working…' : rangeRefusal ? 'Check the times above' : addButtonLabel(rangeSplit.fresh.length, rangeSplit.duplicates)}
+                label={avBusy ? 'Working…' : rangeRefusal ? 'Check the Times Above' : addButtonLabel(rangeSplit.fresh.length, rangeSplit.duplicates)}
                 wide
                 onPress={() => { void addRange(); }}
               />
@@ -4324,7 +4324,7 @@ export default function TrainerSchedule() {
                 <>
                   <View style={{ height: sp.sm }} />
                   <Ghost
-                    label={`Remove the ${rangeExisting.length} already in this range`}
+                    label={`Remove the ${rangeExisting.length} Already in This Range`}
                     onPress={removeRange}
                   />
                 </>
@@ -4363,8 +4363,8 @@ export default function TrainerSchedule() {
           </Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             <View style={{ flexDirection: 'row', gap: sp.sm, paddingBottom: sp.md }}>
-              <Chip t={t} label="All day" on={blkAllDay} onPress={() => setBlkAllDay(true)} />
-              <Chip t={t} label="Part of the day" on={!blkAllDay} onPress={() => setBlkAllDay(false)} />
+              <Chip t={t} label="All Day" on={blkAllDay} onPress={() => setBlkAllDay(true)} />
+              <Chip t={t} label="Part of the Day" on={!blkAllDay} onPress={() => setBlkAllDay(false)} />
             </View>
             {!blkAllDay ? (<>
               {/* Same correction as the availability sheet above: the chosen
@@ -4395,18 +4395,18 @@ export default function TrainerSchedule() {
                 is not a dependency, so it is a new native module and a new
                 binary. The fourteen sheets were the actual pain and they need
                 nothing new. */}
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm, marginBottom: sp.sm }}>How many days</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm, marginBottom: sp.sm }}>How Many Days</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
               {[1, 2, 3, 5, 7, 10, 14, 21, 28].map((d) => (
-                <Chip key={'bd' + d} t={t} label={d === 1 ? 'Just this day' : `${d} days`} on={blkDays === d}
+                <Chip key={'bd' + d} t={t} label={d === 1 ? 'Just This Day' : `${d} Days`} on={blkDays === d}
                   onPress={() => setBlkDays(d)} />
               ))}
             </ScrollView>
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Repeat weekly</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Repeat Weekly</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
               {[1, 2, 4, 6, 8, 12].map((w) => (
-                <Chip key={'bw' + w} t={t} label={w === 1 ? 'No repeat' : `${w} weeks`} on={blkWeeks === w}
+                <Chip key={'bw' + w} t={t} label={w === 1 ? 'No Repeat' : `${w} Weeks`} on={blkWeeks === w}
                   onPress={() => setBlkWeeks(w)} />
               ))}
             </ScrollView>
@@ -4458,7 +4458,7 @@ export default function TrainerSchedule() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBusyOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Block Time From Your Calendar</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>Block Time from Your Calendar</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
             {`From ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}, for the next ${busyDays} days.`}
           </Text>
@@ -4501,10 +4501,10 @@ export default function TrainerSchedule() {
                     a calendar missing from it is the one that misleads. */}
                 {missNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{missNote}</Flag> : null}
 
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How far ahead</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How Far Ahead</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
                   {[7, 14, 30].map((d) => (
-                    <Chip key={'bz' + d} t={t} label={`${d} days`} on={busyDays === d}
+                    <Chip key={'bz' + d} t={t} label={`${d} Days`} on={busyDays === d}
                       onPress={() => { setBusyDays(d); if (busyAsked) void loadBusy(d); }} />
                   ))}
                 </ScrollView>
@@ -4641,11 +4641,11 @@ export default function TrainerSchedule() {
                   : <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{LINK_NOTES[state]}</Text>}
 
                 <Rule />
-                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>What Repple reads</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>What Repple Reads</Text>
                 <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{REMOTE_SCOPE_NOTE}</Text>
 
                 <Rule />
-                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>What Repple writes</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>What Repple Writes</Text>
                 <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{WRITE_PRIVACY_NOTE}</Text>
 
                 {/* The toggle is only offered once there is a live connection
@@ -4654,9 +4654,9 @@ export default function TrainerSchedule() {
                     working within the hour. */}
                 {state === 'connected' || state === 'two-way' ? (<>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-                    <Chip t={t} label="Read only" on={!syncLink.writeEnabled}
+                    <Chip t={t} label="Read Only" on={!syncLink.writeEnabled}
                       onPress={() => { if (syncLink.writeEnabled && !syncBusy) void doSetWrite(false); }} />
-                    <Chip t={t} label="Read and write" on={syncLink.writeEnabled}
+                    <Chip t={t} label="Read and Write" on={syncLink.writeEnabled}
                       onPress={() => { if (!syncLink.writeEnabled && !syncBusy) void doSetWrite(true); }} />
                   </ScrollView>
                   {syncLink.writeEnabled && !syncLink.hasWriteCalendar ? (
@@ -4815,7 +4815,7 @@ export default function TrainerSchedule() {
                     // no hours for the day, because there is nothing to be
                     // outside of and the sentence would be about a working day
                     // this screen invented.
-                    [moveWork.length ? 'Outside your working hours' : '', moveGroups.outside],
+                    [moveWork.length ? 'Outside Your Working Hours' : '', moveGroups.outside],
                   ] as const).map(([heading, list], gi) => (
                     list.length === 0 ? null : (
                       <View key={`g${gi}`}>
@@ -4903,7 +4903,7 @@ export default function TrainerSchedule() {
               ) : (
                 <>
                   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>
-                    Already on this day · {selDaySessions.length}
+                    Already on This Day · {selDaySessions.length}
                   </Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
                     {selDaySessions.map((s2) => (
@@ -4981,7 +4981,7 @@ export default function TrainerSchedule() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSeriesOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Standing appointment</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>Standing Appointment</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
             The same client at the same time every week. Repple books it {Math.round(SERIES_HORIZON_DAYS / 7)} weeks ahead and keeps going from there on its own.
           </Text>
@@ -5088,7 +5088,7 @@ export default function TrainerSchedule() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           {endFor ? (<>
-            <Text style={{ ...ty.head, color: t.ink }}>One session, or the arrangement?</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>One Session, or the Arrangement?</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               {seriesLabel(endFor)} with {seriesWho(endFor)}. These are two different things and they do two different things.
             </Text>

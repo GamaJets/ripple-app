@@ -300,7 +300,7 @@ export default function MyTraining() {
   const logByText = async () => {
     const lifts = parseWorkoutText(text, wu);
     if (!lifts.length) {
-      Alert.alert('Could not read that', wu === 'lb'
+      Alert.alert('Could Not Read That', wu === 'lb'
         ? 'Try e.g. "bench 3x8 135lb, squat 225lb 5 5 5".'
         : 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".');
       return;
@@ -329,14 +329,14 @@ export default function MyTraining() {
       // counted, and sent on the next launch that reaches a server. They are
       // still not IN the log, so no exercise is minted: the library is shared,
       // and its rows are earned by a workout the server has accepted.
-      Alert.alert('Saved on this phone',
+      Alert.alert('Saved on This Phone',
         `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet — nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and go up on their own the next time you have signal.`);
     } else {
       // The server read this and declined it, so it is not recorded and it is
       // not waiting either. Saying "logged" here would be the same event as a
       // real save; saying "it will be gone at the next launch" would be the
       // same event as the one above.
-      Alert.alert('Not saved',
+      Alert.alert('Not Saved',
         'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box — sending it again as it is will be rejected again.');
     }
   };
@@ -471,7 +471,7 @@ export default function MyTraining() {
       // same set gets logged twice. No mint: the library's rows are earned by a
       // workout the server has accepted.
       setExercise(''); setSetCount(''); setLadder([]);
-      Alert.alert('Saved on this phone',
+      Alert.alert('Saved on This Phone',
         `No connection, so ${name} has not reached your training log yet — nothing is lost. It is saved here and goes up on its own the next time you have signal.`);
     } else {
       // The boxes are deliberately NOT cleared. What was typed is the only copy
@@ -490,11 +490,11 @@ export default function MyTraining() {
    * rather than letting a row vanish and reappear at the next launch.
    */
   const remove = (e: WorkoutEntry) => {
-    Alert.alert('Remove this entry?', `${e.exercise} will be taken out of your own training log.`, [
+    Alert.alert('Remove This Entry?', `${e.exercise} will be taken out of your own training log.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         if (!(await removeWorkout(e))) {
-          Alert.alert('Not removed', `${e.exercise} is still in your log — we could not reach the server to take it out.`);
+          Alert.alert('Not Removed', `${e.exercise} is still in your log — we could not reach the server to take it out.`);
         }
       } },
     ]);
@@ -594,7 +594,7 @@ export default function MyTraining() {
           {/* ── can what follows be trusted? ─────────────────────────────── */}
           {status === 'error' ? (
             <Section>
-              <Notice tone={t.warn} kicker="Your training" title="We couldn’t read your training log"
+              <Notice tone={t.warn} kicker="Your Training" title="We Couldn’t Read Your Training Log"
                 note="Your own sessions are safe — this screen cannot see them right now. Nothing has been reset, and an empty list below means unknown rather than none.">
                 <View style={{ marginTop: sp.lg }}><Cta label="Try Again" wide onPress={reload} /></View>
               </Notice>
@@ -748,7 +748,7 @@ export default function MyTraining() {
                   hitSlop={8}
                   style={{ paddingVertical: 11, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
                   <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>
-                    {ladderDone(ladder) < ladder.length ? 'All done' : 'Clear ticks'}
+                    {ladderDone(ladder) < ladder.length ? 'All Done' : 'Clear Ticks'}
                   </Text>
                 </Pressable>
               ) : null}

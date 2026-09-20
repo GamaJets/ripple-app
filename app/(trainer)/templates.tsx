@@ -468,7 +468,7 @@ export default function Templates() {
               not come back sees a working library with somebody else's
               programmes in it and concludes their work is gone. */}
           {tplStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Library" title="Your saved templates could not be read"
+            <Notice tone={t.warn} kicker="Library" title="Your Saved Templates Could Not Be Read"
               note="Only the built-in starters are listed below. That is not a statement that you have saved nothing — your own programmes are on the server and did not come back. Reopen this screen once you have signal." />
           ) : tplStatus === 'partial' ? (
             <PartialRead what="templates in your library" shown={templates.length} />
@@ -557,7 +557,7 @@ export default function Templates() {
                       // still there when they look at the template that stayed.
                       const why = deleteRefusedLine(tpl.name, gone.why);
                       setDelFailed({ id: tpl.id, why });
-                      Alert.alert('That template was not deleted', why);
+                      Alert.alert('That Template Was Not Deleted', why);
                     } }])}
                     hitSlop={8} accessibilityRole="button" accessibilityLabel={'Delete ' + tpl.name} style={{ padding: 8 }}>
                     <Icon name="minus" size={17} color={t.ink3} />
@@ -566,7 +566,7 @@ export default function Templates() {
               </View>
               {/* On the row, not at the top of the list. See `delFailed`. */}
               {delFailed && delFailed.id === tpl.id ? (
-                <Notice tone={t.crit} kicker="Delete" title="That template was not deleted" note={delFailed.why} />
+                <Notice tone={t.crit} kicker="Delete" title="That Template Was Not Deleted" note={delFailed.why} />
               ) : null}
             </View>
           ))}
@@ -611,7 +611,7 @@ export default function Templates() {
                     withheld rather than annotated. */}
                 {!assignGuard.allowed ? (
                   <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programmes'}
-                    title={programStatus === 'loading' ? 'Reading what these clients are on' : 'What these clients are on could not be read'}
+                    title={programStatus === 'loading' ? 'Reading What These Clients Are On' : 'What These Clients Are On Could Not Be Read'}
                     note={assignGuard.reason ?? undefined} />
                 ) : null}
 
@@ -622,7 +622,7 @@ export default function Templates() {
                   <Notice tone={t.warn} kicker="Injuries" title={plan.label ?? 'Held'} note={plan.reason} />
                 ) : null}
                 {plan.allowed && plan.heldNote ? (
-                  <Notice tone={t.warn} kicker="Not everybody" title="Some of these are held" note={plan.heldNote} />
+                  <Notice tone={t.warn} kicker="Not Everybody" title="Some of These Are Held" note={plan.heldNote} />
                 ) : null}
 
                 {/* The third fact, which has no gate of its own and must not
@@ -632,15 +632,15 @@ export default function Templates() {
                     them is an absence, not an answer, and the coach is told so
                     before the tap as well as during it. */}
                 {neverAskedLine ? (
-                  <Notice tone={t.warn} kicker="Never asked"
-                    title="Some of these have never been asked about injuries"
+                  <Notice tone={t.warn} kicker="Never Asked"
+                    title="Some of These Have Never Been Asked About Injuries"
                     note={neverAskedLine} />
                 ) : null}
 
                 {/* An unread roster is not an empty one, and a short one is not
                     the whole book — "Select all" over it selects part of it. */}
                 {rosterStatus === 'error' ? (
-                  <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+                  <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
                     note="Nobody is listed below because the roster did not come back — it does not mean you have no clients." />
                 ) : rosterStatus === 'partial' ? (
                   <PartialRead what="clients on your book" shown={roster.length} />
@@ -669,7 +669,7 @@ export default function Templates() {
                 {isBlock(assignTpl.program) ? (
                   <View style={{ marginTop: sp.lg }}>
                     <Text style={{ ...ty.micro, color: t.ink3 }}>
-                      Starts on · {weekCount(assignTpl.program)} week block
+                      Starts On · {weekCount(assignTpl.program)} Week Block
                     </Text>
                     {/* ── the field IS the button ───────────────────────────
                         This was a `TextInput` with a small calendar button
@@ -956,10 +956,10 @@ function PlatformProgrammes() {
       {status === 'loading' ? (
         <Text style={{ ...ty.label, color: t.ink3 }}>Reading the platform programmes…</Text>
       ) : status === 'error' ? (
-        <Notice tone={t.warn} kicker="Platform" title="The platform programmes could not be read"
+        <Notice tone={t.warn} kicker="Platform" title="The Platform Programmes Could Not Be Read"
           note="This is our end. Nothing has been removed and none of your own templates above are affected — pull down to try again." />
       ) : signedOut ? (
-        <Notice tone={t.warn} kicker="Platform" title="Sign in to see the platform programmes"
+        <Notice tone={t.warn} kicker="Platform" title="Sign In to See the Platform Programmes"
           note="These are only readable once you are signed in, so this section was not allowed to look them up." />
       ) : (
         <>

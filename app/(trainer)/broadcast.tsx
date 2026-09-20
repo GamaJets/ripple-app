@@ -488,7 +488,7 @@ export default function Broadcast() {
     // Anything the button should not have allowed goes straight to `deliver`,
     // which already refuses with the guard's own sentence.
     if (!body.trim() || !ids.length || busy || !claim.allowed) { void deliver(ids); return; }
-    const audience = sel.kind === 'tag' ? `“${sel.tag}”` : def ? def.title : 'All clients';
+    const audience = sel.kind === 'tag' ? `“${sel.tag}”` : def ? def.title : 'All Clients';
     Alert.alert(
       ids.length === 1 ? 'Send to 1 Client?' : `Send to ${ids.length} Clients?`,
       `Audience: ${audience}. Your words go into ${ids.length === 1 ? 'their own thread' : `${ids.length} separate threads, one each`}, exactly as typed, and cannot be taken back once they have gone.`,
@@ -551,7 +551,7 @@ export default function Broadcast() {
         <FigureCard title="Going To"
           figure={countable ? String(recipients.length) : null}
           unit={countable ? (recipients.length === 1 ? 'client' : 'clients') : undefined}
-          period={sel.kind === 'all' ? 'All clients' : sel.kind === 'tag' ? `Tag: ${sel.tag}` : def?.title}
+          period={sel.kind === 'all' ? 'All Clients' : sel.kind === 'tag' ? `Tag: ${sel.tag}` : def?.title}
           detail={countable ? undefined : claim.reason ?? 'Not counted until your client list has loaded in full.'}>
           <Meter label="Of Your Book" tone="blue" target={roster.length}
             val={countable ? recipients.length : null}
@@ -569,7 +569,7 @@ export default function Broadcast() {
         <Section>
           <SectionHead title="Send To" />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
-            {chip('All clients', sel.kind === 'all', () => setSel({ kind: 'all' }))}
+            {chip('All Clients', sel.kind === 'all', () => setSel({ kind: 'all' }))}
             {allTags.map((tg) => chip(tg, sel.kind === 'tag' && sel.tag === tg,
               () => setSel(sel.kind === 'tag' && sel.tag === tg ? { kind: 'all' } : { kind: 'tag', tag: tg })))}
           </ScrollView>
@@ -592,14 +592,14 @@ export default function Broadcast() {
               a send to two thirds of a segment look complete. */}
           <SectionHead title="Recipients" note={countable && recipients.length ? `${recipients.length}` : undefined} />
           {bookUnread ? (
-            <Notice tone={t.warn} kicker="Roster" title="Your client list could not be read"
+            <Notice tone={t.warn} kicker="Roster" title="Your Client List Could Not Be Read"
               note="Nobody is listed below because the roster did not come back. This is not an empty book, and nothing can be sent until it loads." />
           ) : bookShort ? (
-            <Notice tone={t.warn} kicker="Roster" title="This is part of your book"
+            <Notice tone={t.warn} kicker="Roster" title="This Is Part of Your Book"
               note="Your roster came back at its row limit, so anyone past the point it stopped is not in this list and would not receive the message. The send is held rather than going to the part that loaded — a message cannot be taken back, and nothing afterwards would say who had been left out." />
           ) : segUnreliable ? (
             <Notice tone={t.warn} kicker={sel.kind === 'tag' ? 'Tags' : 'Segment'}
-              title="This segment could not be read in full"
+              title="This Segment Could Not Be Read in Full"
               note={sel.kind === 'tag'
                 ? 'Your client tags did not all come back, so somebody in this segment may be missing from the list below and the send is held until they load.'
                 : `What decides ${segmentLabel} did not all come back, so this list is the size of the read rather than the size of the segment — and there is nothing on it to say which. The send is held until it loads.`} />
@@ -684,7 +684,7 @@ export default function Broadcast() {
               been the app claiming knowledge of a handset in the one place it
               has none. See src/lib/broadcastOutcome.ts. */}
           {failed.length ? (
-            <Notice tone={t.warn} kicker="Not written" title={`${failed.length} did not get the last one`}
+            <Notice tone={t.warn} kicker="Not Written" title={`${failed.length} Did Not Get the Last One`}
               note={`${listNames(failed.map(nameOf))} — nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
           ) : null}
         </Section>
@@ -743,7 +743,7 @@ export default function Broadcast() {
             <View style={{ marginTop: sp.lg }}>
               <Notice
                 tone={outcome.addressed > 0 && outcome.written === outcome.addressed ? t.good : t.warn}
-                kicker="Your last send" title={outcomeTitle(outcome)}
+                kicker="Your Last Send" title={outcomeTitle(outcome)}
                 note={outcomeLines(outcome).join('\n\n')} />
               <Text style={{ ...ty.caption, color: t.ink3 }}>{WHERE_THE_RECORD_IS}</Text>
             </View>

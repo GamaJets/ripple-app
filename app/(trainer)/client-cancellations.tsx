@@ -313,7 +313,7 @@ export default function ClientCancellationsScreen() {
         {/* ── who ──────────────────────────────────────────────────────────── */}
         {r.status === 'error' ? (
           <Section>
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+            <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
               note="This is not an empty book. Nobody is listed below because the list did not come back — go back and open this again once you are connected." />
           </Section>
         ) : null}
@@ -348,7 +348,7 @@ export default function ClientCancellationsScreen() {
           <>
             <Rule />
             <Section>
-              <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+              <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
                 note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to book an hour against and nothing of theirs has ever been in your calendar. This is not a clean cancellation record and it is not a failed read — there is nothing here to have a record of. Invite them from your client list and this screen starts from the day they join.`} />
             </Section>
             {client ? (
@@ -369,14 +369,14 @@ export default function ClientCancellationsScreen() {
                 and an empty list would be a claim nobody can stand behind. */}
             {!uid ? (
               <Section>
-                <Notice tone={t.warn} kicker="Not read" title="We could not tell which account you are signed in as"
+                <Notice tone={t.warn} kicker="Not Read" title="We Could Not Tell Which Account You Are Signed in As"
                   note="This record is read against your own coach account, so without it there is nothing below — that is a gap in what we could ask for, not a client with nothing on record." />
               </Section>
             ) : null}
 
             {c.status === 'error' ? (
               <Section>
-                <Notice tone={t.crit} kicker="Not read" title="Their cancellations could not be read"
+                <Notice tone={t.crit} kicker="Not Read" title="Their Cancellations Could Not Be Read"
                   note={c.rows.length
                     ? 'What is below is what we had before the read failed. It is not confirmed current, and there may be more that is missing from it.'
                     : 'This is NOT a record of them never cancelling — it is a record we could not open.'}>
@@ -500,7 +500,7 @@ export default function ClientCancellationsScreen() {
             {/* ── the record itself ───────────────────────────────────────── */}
             <Section>
               <SectionHead
-                title={client ? `${client.name} · every cancellation` : 'Every cancellation'}
+                title={client ? `${client.name} · Every Cancellation` : 'Every Cancellation'}
                 note={countable && c.actions.length ? num(c.actions.length) : undefined}
               />
 

@@ -413,7 +413,7 @@ export default function ClientPackages() {
     // The screen's copy of the rule, so a client is not sent to Stripe to be
     // told no. connect-checkout runs the same one from the same module.
     const problem = codeProblem(p);
-    if (problem) { Alert.alert('That code cannot be used here', problem); return; }
+    if (problem) { Alert.alert('That Code Cannot Be Used Here', problem); return; }
     const typed = codeFor === p.id ? normaliseCode(code) : '';
     setBusy(p.id);
     // Both kinds take one now. On a subscription Repple's cut is a percentage
@@ -425,7 +425,7 @@ export default function ClientPackages() {
     // run where the coupon is, which is the server.
     const r = p.billing_interval ? await subscribeToPackage(p.id, typed) : await buyPackage(p.id, typed);
     setBusy(null);
-    if (!r.ok) { Alert.alert('Could not start checkout', r.error || 'Try again in a moment.'); return; }
+    if (!r.ok) { Alert.alert('Could Not Start Checkout', r.error || 'Try again in a moment.'); return; }
     // Cleared only once the payment page has actually opened. `ok` used to mean
     // "a URL came back", not "a browser opened" — `openUrl` in
     // src/lib/connect.ts swallowed the failure — so a member whose browser
@@ -447,7 +447,7 @@ export default function ClientPackages() {
     // does not parse, where this printed the literal words "Invalid Date"
     // into a sentence about money.
     const ends = s.current_period_end ? fmtFullDay(s.current_period_end) : null;
-    Alert.alert('Cancel this subscription?',
+    Alert.alert('Cancel This Subscription?',
       ends
         ? `You keep it until ${ends} — you have already paid for this period — and you will not be charged again.`
         : 'You keep it until the end of the period you have already paid for, and you will not be charged again.',
@@ -457,7 +457,7 @@ export default function ClientPackages() {
         setBusy(null);
         // Stripe's answer, not ours. Saying "cancelled" on a failure would stop
         // the client trying again, and they would be charged next month.
-        if (!r.ok) { Alert.alert('Not cancelled', (r.error || 'The change did not go through.') + ' Your subscription is still running — try again in a moment.'); return; }
+        if (!r.ok) { Alert.alert('Not Cancelled', (r.error || 'The change did not go through.') + ' Your subscription is still running — try again in a moment.'); return; }
         load();
       } }]);
   };
@@ -466,7 +466,7 @@ export default function ClientPackages() {
     setBusy(s.id);
     const r = await resumeSubscription(s.stripe_subscription_id);
     setBusy(null);
-    if (!r.ok) { Alert.alert('Not restarted', (r.error || 'The change did not go through.') + ' It is still set to end.'); return; }
+    if (!r.ok) { Alert.alert('Not Restarted', (r.error || 'The change did not go through.') + ' It is still set to end.'); return; }
     load();
   };
 
@@ -618,7 +618,7 @@ export default function ClientPackages() {
               {(subs === null ? [] : liveSubs).map((s, i) => (
                 <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>Coaching subscription</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>Coaching Subscription</Text>
                     {/* The amount Stripe bills, in the currency Stripe bills it
                         in. Unknown is a dash — never a zero, and never a figure
                         with a currency guessed onto it. */}
@@ -745,7 +745,7 @@ export default function ClientPackages() {
             ) : (rows ?? []).length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
                 <Icon name="trophy" size={30} color={t.ink3} />
-                <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>No purchases yet</Text>
+                <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>No Purchases Yet</Text>
                 <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 4, maxWidth: 300 }}>When your coach offers memberships or session packs, buy them from their profile and they'll show up here.</Text>
                 <View style={{ marginTop: sp.lg }}>
                   <Ghost label="Browse Coaches" onPress={() => router.push('/(client)/trainers')} />
@@ -907,7 +907,7 @@ export default function ClientPackages() {
                       negotiable. */}
                   {codeFor === p.id ? (
                     <View style={{ marginTop: sp.md }}>
-                      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Discount code</Text>
+                      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Discount Code</Text>
                       {/* Normalised as it is typed, so what the client sees is
                           what is actually sent — Stripe upper-cases these and
                           drops everything that is not a letter or a digit, and
@@ -916,7 +916,7 @@ export default function ClientPackages() {
                       <TextInput value={code} onChangeText={(v) => setCode(normaliseCode(v))}
                         autoCapitalize="characters" autoCorrect={false}
                         placeholder="The code your coach gave you" placeholderTextColor={t.ink3}
-                        accessibilityLabel="Discount code"
+                        accessibilityLabel="Discount Code"
                         style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
                       {codeProblem(p) ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{codeProblem(p)}</Flag> : null}
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -925,7 +925,7 @@ export default function ClientPackages() {
                     </View>
                   ) : (
                     <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
-                      <Ghost label="Have A Code" onPress={() => { setCodeFor(p.id); setCode(''); }} />
+                      <Ghost label="Have a Code" onPress={() => { setCodeFor(p.id); setCode(''); }} />
                     </View>
                   )}
                   {p.billing_interval && subsUnknown ? (

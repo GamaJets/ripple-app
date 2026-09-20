@@ -129,8 +129,8 @@ export default function TrainerAdSpend() {
     setBusy(`connect:${c}`);
     const r = await connectAdChannel(c);
     setBusy(null);
-    if (!r.ok) { Alert.alert('Not connected', r.reason); return; }
-    if (r.warning) Alert.alert('Connected, with a catch', r.warning);
+    if (!r.ok) { Alert.alert('Not Connected', r.reason); return; }
+    if (r.warning) Alert.alert('Connected, with a Catch', r.warning);
     setChoices(r.chosen ? null : { channel: c, accounts: r.accounts });
     await load();
   };
@@ -139,7 +139,7 @@ export default function TrainerAdSpend() {
     setBusy(`choose:${id}`);
     const r = await chooseAdAccount(c, id);
     setBusy(null);
-    if (!r.ok) { Alert.alert('Not saved', r.reason); return; }
+    if (!r.ok) { Alert.alert('Not Saved', r.reason); return; }
     setChoices(null);
     await load();
   };
@@ -150,7 +150,7 @@ export default function TrainerAdSpend() {
     setBusy(null);
     // The failure is recorded server-side as a failed run, so the screen below
     // shows "last check failed" rather than the previous success's date.
-    if (!r.ok) Alert.alert(`Could not check your ${channelLabel(c)} spend`, r.reason);
+    if (!r.ok) Alert.alert(`Could Not Check Your ${channelLabel(c)} Spend`, r.reason);
     await load();
   };
 
@@ -158,7 +158,7 @@ export default function TrainerAdSpend() {
     setBusy(`disconnect:${c}`);
     const r = await disconnectAdChannel(c);
     setBusy(null);
-    if (!r.ok) Alert.alert('Still connected', r.reason);
+    if (!r.ok) Alert.alert('Still Connected', r.reason);
     await load();
   };
 
@@ -166,7 +166,7 @@ export default function TrainerAdSpend() {
     setBusy(`use:${codeId ?? 'default'}`);
     const r = await useSyncedSpend(codeId);
     setBusy(null);
-    if (!r.ok) Alert.alert(`${label} is unchanged`, r.reason);
+    if (!r.ok) Alert.alert(`${label} Is Unchanged`, r.reason);
     await load();
   };
 
@@ -251,7 +251,7 @@ export default function TrainerAdSpend() {
         {settled ? (
           <Section>
             <SectionHead
-              title="Spent, by code"
+              title="Spent, by Code"
               note={combined.ok ? `${num(combined.codes.length)} ${combined.codes.length === 1 ? 'code' : 'codes'}` : undefined}
             />
 
@@ -419,7 +419,7 @@ export default function TrainerAdSpend() {
             successful sign-in must know why before it happens to them. It names
             Meta, because the other two are not waiting on it. */}
         <View style={{ marginTop: sp.xl }}>
-          <Notice tone={t.warn} kicker="Meta only" title="Meta has to approve this first" note={APP_REVIEW_NOTE} />
+          <Notice tone={t.warn} kicker="Meta Only" title="Meta Has to Approve This First" note={APP_REVIEW_NOTE} />
         </View>
 
         {/* The three words on this screen a coach reads as the same thing and
@@ -430,7 +430,7 @@ export default function TrainerAdSpend() {
         {/* ── The connections, one card each ─────────────────────────────── */}
         <Section>
           <SectionHead
-            title="Your ad accounts"
+            title="Your Ad Accounts"
             note={!settled
               ? undefined
               : anyChannelSetUp
@@ -480,7 +480,7 @@ export default function TrainerAdSpend() {
         {choices && choices.accounts.length > 0 ? (
           <Section>
             <SectionHead
-              title={choices.accounts.length > 1 ? 'Which ad account?' : 'Confirm your ad account'}
+              title={choices.accounts.length > 1 ? 'Which Ad Account?' : 'Confirm Your Ad Account'}
               note={choices.accounts.length > 1
                 ? `This ${channelLabel(choices.channel)} login can see more than one`
                 : `This ${channelLabel(choices.channel)} login found one, and it was not saved`} />
@@ -515,7 +515,7 @@ export default function TrainerAdSpend() {
         {settled && read.channels.some((s) => s.run?.status === 'ok') ? (
           <Section>
             <SectionHead
-              title="Not matched to any code"
+              title="Not Matched to Any Code"
               note={unmatched.n
                 ? `${unmatched.exact ? '' : 'At least '}${num(unmatched.n)} ${unmatched.n === 1 ? 'ad' : 'ads'}`
                 : undefined}
@@ -564,7 +564,7 @@ export default function TrainerAdSpend() {
                     {s.unmatched.map((u, i) => (
                       <View key={`${u.adId ?? 'ad'}-${i}`} style={{ marginTop: sp.md }}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
-                          <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{u.adName || 'Unnamed ad'}</Text>
+                          <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{u.adName || 'Unnamed Ad'}</Text>
                           <Text style={{ ...ty.body, color: t.ink }}>
                             {u.cents != null && u.currency ? (money(u.cents, u.currency) ?? DASH) : DASH}
                           </Text>
@@ -584,7 +584,7 @@ export default function TrainerAdSpend() {
 
         {/* ── Typing it in yourself, which never stops working ────────────── */}
         <Section>
-          <SectionHead title="Entering it yourself" />
+          <SectionHead title="Entering It Yourself" />
           <Text style={{ ...ty.body, color: t.ink2 }}>
             Every code’s spend field is on the Clients screen, beside the figures it feeds, and it works whether or not an ad
             account is connected. A figure you type there is never replaced by a collected one — it wins, and this screen
@@ -611,7 +611,7 @@ export default function TrainerAdSpend() {
             read as a coach with no codes. */}
         {returns.status === 'ready' && returns.rows.length > 0 ? (
           <Section>
-            <SectionHead title="Codes that cost you nothing" />
+            <SectionHead title="Codes That Cost You Nothing" />
             <Text style={{ ...ty.body, color: t.ink2 }}>
               A code you read out in a class, put in a caption or printed on a card you had anyway is free, and that is a
               real answer rather than a gap. Marked codes stop being reported as unpriced, so what is left in that list is
@@ -662,7 +662,7 @@ export default function TrainerAdSpend() {
             reads here as a total failure, and it is not one: it is an
             onboarding problem, and the two need opposite responses. */}
         <Section>
-          <SectionHead title="Who asked and did not join" />
+          <SectionHead title="Who Asked and Did Not Join" />
           <Text style={{ ...ty.body, color: t.ink2 }}>
             These figures count clients. Somebody who clicked a join link and left their details without making an account
             is not among them and never will be, so a code with real interest behind it and nobody through the door looks

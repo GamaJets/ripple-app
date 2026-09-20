@@ -251,9 +251,9 @@ export default function RequestSessionScreen() {
   const blocker = askBlocker(startsAt, length, nowMs, { myBusy, live });
 
   async function ask() {
-    if (blocker) { Alert.alert('Not sent', blocker); return; }
+    if (blocker) { Alert.alert('Not Sent', blocker); return; }
     const when = whenLabel(startsAt);
-    if (!when) { Alert.alert('Not sent', 'That time could not be read. Pick the day and the time again.'); return; }
+    if (!when) { Alert.alert('Not Sent', 'That time could not be read. Pick the day and the time again.'); return; }
     setBusy(true);
     const words = note.trim() || null;
     const res = await askForSession(startsAt, length, words);
@@ -263,8 +263,8 @@ export default function RequestSessionScreen() {
       // A refusal the server actually made is final: the same bytes get the
       // same answer, so it is not queued and the sentence does not pretend
       // otherwise. Only an unanswered write is kept.
-      if (res.reason) { Alert.alert('Not sent', askRefusalNote(res.reason)); await load(); return; }
-      if (!outbox) { Alert.alert('Not sent', notKeptNote('request', 'unavailable')); return; }
+      if (res.reason) { Alert.alert('Not Sent', askRefusalNote(res.reason)); await load(); return; }
+      if (!outbox) { Alert.alert('Not Sent', notKeptNote('request', 'unavailable')); return; }
       const { result } = await outbox.enqueue(
         'session-request',
         { startsAt, durationMin: length, note: words },
@@ -273,13 +273,13 @@ export default function RequestSessionScreen() {
         { expiresAt: sessionRequestExpiry(startsAt) },
       );
       if (result !== 'queued') {
-        Alert.alert('Not sent', notKeptNote('request', result === 'full' ? 'full' : 'unavailable'));
+        Alert.alert('Not Sent', notKeptNote('request', result === 'full' ? 'full' : 'unavailable'));
         return;
       }
       // Deliberately NOT followed by a reload that would draw it in the list
       // below. That list is the server's answer, and a row there says the coach
       // has been asked — which is exactly what has not happened.
-      Alert.alert('Saved on this phone', keptOnPhoneNote('request'));
+      Alert.alert('Saved on This Phone', keptOnPhoneNote('request'));
       return;
     }
 
@@ -301,14 +301,14 @@ export default function RequestSessionScreen() {
     if (!push.ok) {
       lines.push('We couldn’t send them a notification, so they may not see it until they open the app. Message them if it’s soon.');
     }
-    Alert.alert('Request sent', lines.join('\n\n'), [{ text: 'OK' }]);
+    Alert.alert('Request Sent', lines.join('\n\n'), [{ text: 'OK' }]);
   }
 
   function takeBack(r: MySessionRequest) {
     const when = whenLabel(r.startsAt);
     if (!when) return;
     Alert.alert(
-      'Take back this request?',
+      'Take Back This Request?',
       `Your coach will no longer be asked about ${when}. Nothing was booked, so nothing is being cancelled and no session comes off your account.`,
       [
         { text: 'Leave It', style: 'cancel' },
@@ -320,7 +320,7 @@ export default function RequestSessionScreen() {
             await load();
             if (!res.ok) {
               Alert.alert(
-                'Not taken back',
+                'Not Taken Back',
                 res.reason === 'gone'
                   ? 'That isn’t a live request any more — your coach may have just answered it. The list has been refreshed.'
                   : 'That could not be taken back just now, so your coach is still being asked. Try again in a moment.',
@@ -377,7 +377,7 @@ export default function RequestSessionScreen() {
              this screen is the one whose reads are failing. */
           <>
             <Section>
-              <Notice kicker="BEFORE YOU CAN ASK" title="You don’t have a coach yet" note={NO_COACH_TO_ASK} />
+              <Notice kicker="BEFORE YOU CAN ASK" title="You Don’t Have a Coach Yet" note={NO_COACH_TO_ASK} />
             </Section>
             <Section>
               <Cta label="Find a Coach" onPress={() => router.push('/(client)/trainers')} wide
@@ -400,7 +400,7 @@ export default function RequestSessionScreen() {
             ]} />
 
             <Section>
-              <Notice kicker="WHAT THIS DOES" title="It asks — it doesn’t book" note={NOT_A_BOOKING} />
+              <Notice kicker="WHAT THIS DOES" title="It Asks — It Doesn’t Book" note={NOT_A_BOOKING} />
             </Section>
 
             {/* ── the day ─────────────────────────────────────────────── */}

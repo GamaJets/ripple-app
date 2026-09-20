@@ -121,7 +121,7 @@ export function CoachLogReviewStrip({ t, entry, movement, review, query, onQuery
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9 }}
           >
             <Icon name="info" size={13} color={t.warn} />
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>This is not right</Text>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>This Is Not Right</Text>
           </Pressable>
         ) : null}
         {review.actions.withdraw ? (
@@ -135,7 +135,7 @@ export function CoachLogReviewStrip({ t, entry, movement, review, query, onQuery
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, opacity: busy ? 0.5 : 1 }}
           >
             <Icon name="check" size={13} color={t.good} />
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{busy ? 'Withdrawing…' : 'Withdraw query'}</Text>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{busy ? 'Withdrawing…' : 'Withdraw Query'}</Text>
           </Pressable>
         ) : null}
         {review.actions.amend ? (
@@ -147,7 +147,7 @@ export function CoachLogReviewStrip({ t, entry, movement, review, query, onQuery
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9 }}
           >
             <Icon name="pencil" size={13} color={t.ink2} />
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Correct the figures</Text>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Correct the Figures</Text>
           </Pressable>
         ) : null}
       </View>
@@ -197,7 +197,7 @@ export function CoachLogReviewStrip({ t, entry, movement, review, query, onQuery
                 accessibilityLabel={'Send your query on the ' + movement + ' your coach logged'}
                 style={{ flex: 1, alignItems: 'center', backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, opacity: busy ? 0.5 : 1 }}
               >
-                <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>{busy ? 'Sending…' : 'Send query'}</Text>
+                <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>{busy ? 'Sending…' : 'Send Query'}</Text>
               </Pressable>
             </View>
           </View>

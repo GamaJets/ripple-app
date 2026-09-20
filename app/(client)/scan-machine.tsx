@@ -116,10 +116,10 @@ export default function ScanMachine() {
     const gate = mayAnalyzePhoto(photoAI.consent, visionAvailable());
     if (!gate.allowed) {
       if (gate.block === 'off') {
-        Alert.alert('Photo identifying is off', 'This build has no machine reader. Scan the code, or pick the machine from the list below.');
+        Alert.alert('Photo Identifying Is Off', 'This build has no machine reader. Scan the code, or pick the machine from the list below.');
       } else if (gate.block === 'unknown') {
         // Still reading the stored answer. Not a refusal, and not a yes.
-        Alert.alert('One moment', 'Still checking your answer about photos. Try that again in a moment.');
+        Alert.alert('One Moment', 'Still checking your answer about photos. Try that again in a moment.');
       } else {
         // 'unasked' and 'refused' both land here: the question gets put, and
         // somebody who said no can change their mind in the same place.
@@ -149,7 +149,7 @@ export default function ScanMachine() {
     const v = (visionAvailable() && b64) ? await analyzeMachine(b64, 'image/jpeg') : null;
     setReading(false);
     setScanned('photo'); setRawCode(''); setRecalled(false); // photo id — no serial to remember
-    if (!v) { setExercise(''); setGroup(''); setCardio(false); setNeedsPick(true); Alert.alert('Could not identify', 'I could not read the machine from that photo — pick it from the list below.'); return; }
+    if (!v) { setExercise(''); setGroup(''); setCardio(false); setNeedsPick(true); Alert.alert('Could Not Identify', 'I could not read the machine from that photo — pick it from the list below.'); return; }
     const d = identifyMachine(v.name);
     if (d) { applyDef(d); }
     else { setExercise(v.name); setGroup(v.muscleGroup || ''); setCardio(v.isCardio); setNeedsPick(true); tapLight(); }
@@ -209,7 +209,7 @@ export default function ScanMachine() {
     // a quarter of somebody's plank in the record with nothing to say so. It
     // also accepts 1:30, because that is how a clock is read.
     const first = timedSet ? readHold(reps) : null;
-    if (timedSet && first && !first.ok) { Alert.alert('Check that hold', first.reason); return; }
+    if (timedSet && first && !first.ok) { Alert.alert('Check That Hold', first.reason); return; }
     const r = timedSet ? (first as { ok: true; secs: number }).secs : (parseInt(reps, 10) || 0);
     // Said, not swallowed. This was a bare `return`: the member taps Add Set,
     // the button does visibly nothing, and there is no way to tell "the app is
@@ -219,7 +219,7 @@ export default function ScanMachine() {
     // "Check that load" since it was written.
     if (!r) {
       Alert.alert(
-        timedSet ? 'Add the hold' : 'Add the reps',
+        timedSet ? 'Add the Hold' : 'Add the Reps',
         timedSet
           ? 'Type how long you held it — 45, or 1:30 — then tap Add Set.'
           : 'Type how many repetitions you did, then tap Add Set. Nothing has been added yet.',
@@ -227,7 +227,7 @@ export default function ScanMachine() {
       return;
     }
     const load = readLift(kg, wu);
-    if (!load.ok) { Alert.alert('Check that load', load.reason); return; }
+    if (!load.ok) { Alert.alert('Check That Load', load.reason); return; }
     setSets((p) => [...p, { reps: r, kg: load.kg ?? 0, bw: bwSet, timed: timedSet }]);
     setReps(''); tapLight();
   };
@@ -258,15 +258,15 @@ export default function ScanMachine() {
 
   const save = async () => {
     if (saving) return;
-    if (!exercise.trim()) { Alert.alert('Name the exercise', 'Pick or type the machine/exercise first.'); return; }
+    if (!exercise.trim()) { Alert.alert('Name the Exercise', 'Pick or type the machine/exercise first.'); return; }
     let entry;
     if (cardio) {
       const m = parseFloat(mins) || 0;
-      if (m <= 0) { Alert.alert('Add your time', 'Enter how many minutes you did.'); return; }
+      if (m <= 0) { Alert.alert('Add Your Time', 'Enter how many minutes you did.'); return; }
       const w = parseFloat(watts) || 0;
       entry = { t: new Date().toISOString(), exercise: exercise.trim(), cardio: { mins: m, dist: readNumber(dist) ?? 0, unit, watts: w || undefined }, kcal: estKcal() };
     } else {
-      if (!sets.length) { Alert.alert('Log a set first', 'Enter reps (and weight) and tap Add set.'); return; }
+      if (!sets.length) { Alert.alert('Log a Set First', 'Enter reps (and weight) and tap Add Set.'); return; }
       // The same `strengthKcalOf` the caption above renders, so the log and
       // the screen cannot state different figures — and `undefined` rather than
       // a fabricated one when there was no load to estimate from.
@@ -302,15 +302,15 @@ export default function ScanMachine() {
     // Remember this machine's setup so the next scan of the same code auto-fills.
     if (rawCode) rememberMachine(rawCode, { name: exercise.trim(), group, cardio, unit });
     if (out === 'unsent') {
-      Alert.alert('Saved on this phone', exercise.trim() + ' has not reached your workout log yet — there is no connection here. Nothing is lost: it is saved on this phone and goes up on its own the next time you have signal.', [{ text: 'OK' }]);
+      Alert.alert('Saved on This Phone', exercise.trim() + ' has not reached your workout log yet — there is no connection here. Nothing is lost: it is saved on this phone and goes up on its own the next time you have signal.', [{ text: 'OK' }]);
       return;
     }
     if (out === 'refused') {
-      Alert.alert('Not saved', exercise.trim() + ' was rejected by your workout log, so it is not recorded and it is not waiting to send. Logging it again as it is will be rejected again.', [{ text: 'OK' }]);
+      Alert.alert('Not Saved', exercise.trim() + ' was rejected by your workout log, so it is not recorded and it is not waiting to send. Logging it again as it is will be rejected again.', [{ text: 'OK' }]);
       return;
     }
     Alert.alert('Logged', exercise.trim() + ' saved to your workout log.', [
-      { text: 'View history', onPress: () => router.replace('/(client)/activity') },
+      { text: 'View History', onPress: () => router.replace('/(client)/activity') },
       { text: 'Done', onPress: () => router.back() },
     ]);
   };
@@ -350,7 +350,7 @@ export default function ScanMachine() {
                 <Text style={{ ...ty.label, color: t.ink3 }}>Preparing camera…</Text>
               </Section>
             ) : !permission.granted ? (
-              <Notice kicker="Camera" title="Camera access"
+              <Notice kicker="Camera" title="Camera Access"
                 note={`${BRAND.label} reads the code on a machine, then names the exercise and muscle group for you.`}>
                 {/* Three-way, not two. `permission.canAskAgain` false means
                     iOS has recorded a refusal and will never show the sheet
@@ -387,15 +387,15 @@ export default function ScanMachine() {
                 /* The question, put before the camera opens. Rendered from the
                    arrays in src/lib/photoAI.ts rather than typed here, so what
                    somebody agrees to cannot drift from what is actually sent. */
-                <Notice kicker="Before you photograph it" title="The photo goes to a language model"
+                <Notice kicker="Before You Photograph It" title="The Photo Goes to a Language Model"
                   note={PHOTO_DESTINATION}>
                   <View style={{ marginTop: sp.md, gap: sp.xs }}>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>What is sent</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>What Is Sent</Text>
                     {PHOTO_SENT.map((line) => (
                       <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>• {line}</Text>
                     ))}
                     <View style={{ height: sp.sm }} />
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>What is not</Text>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>What Is Not</Text>
                     {PHOTO_NOT_SENT.map((line) => (
                       <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>• {line}</Text>
                     ))}
@@ -425,7 +425,7 @@ export default function ScanMachine() {
             <Section style={{ paddingTop: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: recalled || !needsPick ? t.brand : t.ink3 }} />
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{recalled ? 'Remembered' : needsPick ? 'Pick the machine' : 'Machine identified'}</Text>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>{recalled ? 'Remembered' : needsPick ? 'Pick the Machine' : 'Machine Identified'}</Text>
               </View>
               {recalled ? (
                 <Text style={{ ...ty.caption, color: t.ink3 }}>You set this machine up before — recalled automatically. Edit if you like.</Text>
@@ -502,7 +502,7 @@ export default function ScanMachine() {
                   </Field>
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                  <Field label="Avg watts" hint="optional">
+                  <Field label="Avg Watts" hint="optional">
                     <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" style={inp} />
                   </Field>
                   <Field label="Calories" hint="kcal · optional">
@@ -540,7 +540,7 @@ export default function ScanMachine() {
                     hitSlop={hitSlopFor(36)}
                     onPress={() => { setBwSet((v) => !v); tapLight(); }}
                     style={{ minHeight: 36, justifyContent: 'center', backgroundColor: bwSet ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md }}>
-                    <Text style={{ ...ty.caption, fontWeight: bwSet ? '600' : '500', color: bwSet ? t.brandInk : t.ink2 }}>My own bodyweight</Text>
+                    <Text style={{ ...ty.caption, fontWeight: bwSet ? '600' : '500', color: bwSet ? t.brandInk : t.ink2 }}>My Own Bodyweight</Text>
                   </Pressable>
                   <Pressable
                     accessibilityRole="switch"
@@ -549,7 +549,7 @@ export default function ScanMachine() {
                     hitSlop={hitSlopFor(36)}
                     onPress={() => { setTimedSet((v) => !v); setReps(''); tapLight(); }}
                     style={{ minHeight: 36, justifyContent: 'center', backgroundColor: timedSet ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md }}>
-                    <Text style={{ ...ty.caption, fontWeight: timedSet ? '600' : '500', color: timedSet ? t.brandInk : t.ink2 }}>Held, not repeated</Text>
+                    <Text style={{ ...ty.caption, fontWeight: timedSet ? '600' : '500', color: timedSet ? t.brandInk : t.ink2 }}>Held, Not Repeated</Text>
                   </Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>

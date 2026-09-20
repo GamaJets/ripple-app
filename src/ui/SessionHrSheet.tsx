@@ -76,7 +76,7 @@ export function SessionHrSheet({ visible, onClose, title, startISO, durationMin,
           <View style={{ paddingVertical: 40, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
         ) : (
           <>
-            <HrZoneChart samples={state.samples} age={age} title="Heart-rate Zones" subtitle={state.live ? 'From your Apple Watch' : 'No heart rate recorded for this session'} />
+            <HrZoneChart samples={state.samples} age={age} title="Heart-Rate Zones" subtitle={state.live ? 'From your Apple Watch' : 'No heart rate recorded for this session'} />
           </>
         )}
       </View>

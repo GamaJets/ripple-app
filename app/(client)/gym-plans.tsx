@@ -225,8 +225,8 @@ export default function GymPlans() {
     setBusy(label);
     const r = await startGymCheckout(supabase as any, req);
     setBusy(null);
-    if (!r.ok) { Alert.alert('Could not start checkout', r.error || 'Nothing has been charged. Try again in a moment.'); return; }
-    try { await Linking.openURL(r.url); } catch { Alert.alert('Could not open Stripe', 'Nothing has been charged. Try again in a moment.'); }
+    if (!r.ok) { Alert.alert('Could Not Start Checkout', r.error || 'Nothing has been charged. Try again in a moment.'); return; }
+    try { await Linking.openURL(r.url); } catch { Alert.alert('Could Not Open Stripe', 'Nothing has been charged. Try again in a moment.'); }
   };
 
   return (
@@ -468,7 +468,7 @@ export default function GymPlans() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="Waiting On Stripe" note={orderStatus === 'ready' ? String(waiting.length) : undefined} />
+              <SectionHead title="Waiting on Stripe" note={orderStatus === 'ready' ? String(waiting.length) : undefined} />
               {orderStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   We couldn’t read your purchases, so we can’t say whether any are still with Stripe. This is not a statement that none are. If you have paid for something that has not appeared, show your card statement to reception and they can put it right.

@@ -224,12 +224,12 @@ export default function Receipts() {
   const onRecord = async () => {
     const d = draft();
     const problems = receiptBlockers(d);
-    if (problems.length) { Alert.alert('Not yet', problems.join('\n\n')); return; }
+    if (problems.length) { Alert.alert('Not Yet', problems.join('\n\n')); return; }
     setBusy(true);
     const res = await recordReceipt(d);
     setBusy(false);
     if (!res.ok) {
-      Alert.alert('That payment was not recorded', res.error || 'Nothing was written. Try again in a moment.');
+      Alert.alert('That Payment Was Not Recorded', res.error || 'Nothing was written. Try again in a moment.');
       return;
     }
     setOpen(false);
@@ -239,7 +239,7 @@ export default function Receipts() {
 
   const onRemove = (r: CoachReceipt) => {
     Alert.alert(
-      'Remove this line?',
+      'Remove This Line?',
       // The honest framing. There is no document to cancel and nobody was told,
       // so this is a private ledger line being corrected rather than a record
       // being destroyed — but it does leave the Money screen smaller, and the
@@ -254,7 +254,7 @@ export default function Receipts() {
             void (async () => {
               const gone = await deleteReceipt(r.id);
               if (!gone) {
-                Alert.alert('Still there', 'That line was not removed and it is still in your figures. Try again in a moment.');
+                Alert.alert('Still There', 'That line was not removed and it is still in your figures. Try again in a moment.');
                 return;
               }
               await load();
@@ -335,13 +335,13 @@ export default function Receipts() {
         <PageHead title="Cash and Transfers" />
 
         {status === 'error' ? (
-          <Notice tone={t.crit} kicker="Not read" title="Your recorded payments could not be read"
+          <Notice tone={t.crit} kicker="Not Read" title="Your Recorded Payments Could Not Be Read"
             note="This list is empty because the read failed, not because you have recorded none. Nothing below is a statement about your records." />
         ) : null}
         {status === 'partial' ? <PartialRead what="recorded payments" shown={rows.length} onPress={() => { void load(); }} /> : null}
 
         {currencyBlocker ? (
-          <Notice tone={t.crit} kicker="Nothing can be recorded yet" title="No currency" note={currencyBlocker} />
+          <Notice tone={t.crit} kicker="Nothing Can Be Recorded Yet" title="No Currency" note={currencyBlocker} />
         ) : null}
 
 
@@ -449,7 +449,7 @@ export default function Receipts() {
               `{rows: [], status: 'error'}` for a refused read, and "Nothing
               recorded yet" over that is a sentence about somebody's income that
               this app cannot support. */}
-          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} recorded` : 'Nothing recorded yet') : 'What is on record'} />
+          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} Recorded` : 'Nothing Recorded Yet') : 'What Is on Record'} />
           {rows.map((r) => (
             <View key={r.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
@@ -498,12 +498,12 @@ export default function Receipts() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={{ ...ty.title, color: t.ink }}>A payment you took</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>A Payment You Took</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                 Only what did not go through this app. Anything Stripe took is already counted for you.
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Who paid you</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Who Paid You</Text>
               <TextInput value={paidBy} onChangeText={(v) => { setPaidBy(v); setClientId(null); }}
                 placeholder="Their name" placeholderTextColor={t.ink3}
                 accessibilityLabel="Who paid you" style={inp} />
@@ -535,7 +535,7 @@ export default function Receipts() {
                 placeholder="200" placeholderTextColor={t.ink3}
                 accessibilityLabel="Amount" style={inp} />
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>How it reached you</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>How It Reached You</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
                 {RECEIPT_METHODS.map((m) => (
                   <Pressable key={m.id} onPress={() => setMethod(m.id)} accessibilityRole="button"
@@ -549,12 +549,12 @@ export default function Receipts() {
                 {RECEIPT_METHODS.find((m) => m.id === method)?.note}
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day you were paid</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The Day You Were Paid</Text>
               <TextInput value={dayText} onChangeText={setDayText} autoCapitalize="none" autoCorrect={false}
                 placeholder={`${today}, or leave it for today`} placeholderTextColor={t.ink3}
                 accessibilityLabel="The day you were paid" style={inp} />
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                {([['Today', 0], ['Yesterday', -1], ['A week ago', -7]] as [string, number][]).map(([label, n]) => {
+                {([['Today', 0], ['Yesterday', -1], ['A Week Ago', -7]] as [string, number][]).map(([label, n]) => {
                   const when = plusDays(today, n);
                   return (
                     <Pressable key={label} onPress={() => setDayText(dayText === when ? '' : when)}
@@ -570,7 +570,7 @@ export default function Receipts() {
                 The day the money arrived, not today. A month of cash written up in one evening belongs in the months it was taken in.
               </Text>
 
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A note, if you want one (optional)</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A Note, If You Want One (Optional)</Text>
               <TextInput value={note} onChangeText={setNote} multiline
                 placeholder="Second half of the ten pack" placeholderTextColor={t.ink3}
                 accessibilityLabel="Note" style={[inp, { minHeight: 70, textAlignVertical: 'top' }]} />

@@ -607,14 +607,14 @@ export default function ClientGoals() {
 
         {!USE_SUPABASE ? (
           <Section>
-            <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
+            <Notice tone={t.warn} kicker="Not Loaded" title="This Build Is Running Without the Server"
               note="Goals live on the server and belong to the client, so there is no local copy of somebody else's to fall back on. Nothing below is a claim that they have not set any." />
           </Section>
         ) : (
           <>
             {r.status === 'error' ? (
               <Section>
-                <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+                <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
                   note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
               </Section>
             ) : null}
@@ -636,7 +636,7 @@ export default function ClientGoals() {
               <View>
                 <Rule />
                 <Section>
-                  <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                  <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
                     note={`You added ${who} to your book by hand, so there is nothing of theirs on the server to read — no goals, no scans, no weigh-ins and no tape. That is not an empty record and not a failed read: goals are set in the app, and ${who} does not have it. Invite them from your client list and this screen fills in from the day they accept.`} />
                 </Section>
               </View>
@@ -650,7 +650,7 @@ export default function ClientGoals() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their goals…</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their goals could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Goals Could Not Be Read"
                       note={`Nothing is shown below because nothing came back. It does not mean ${who} has set none — that is a different screen and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
@@ -803,7 +803,7 @@ export default function ClientGoals() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their measurements…</Text></Section>
                 ) : tape.state === 'unreadable' ? (
                   <Section>
-                    <Notice tone={t.warn} kicker="Unreadable" title="Their measurements could not be read"
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their Measurements Could Not Be Read"
                       note={`Nothing is shown below because nothing came back. It does not mean ${who} has never measured — the goals above came from a different read and are unaffected either way.`} />
                   </Section>
                 ) : tape.state === 'none' ? (

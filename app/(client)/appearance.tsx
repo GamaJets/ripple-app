@@ -167,7 +167,7 @@ export default function Appearance() {
             t={t} first
             title="Higher Contrast"
             note="Quiet text, the captions and units and section titles, is drawn in the strongest ink this palette has instead of its faintest."
-            right={<Toggle t={t} on={contrast} onPress={() => setContrast(!contrast)} label="Higher contrast" />}
+            right={<Toggle t={t} on={contrast} onPress={() => setContrast(!contrast)} label="Higher Contrast" />}
           />
 
           {/* Text size is REPORTED. The phone owns it, this app follows it, and

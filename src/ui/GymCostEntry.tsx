@@ -301,7 +301,7 @@ export function GymCostEntry({ costs, currency, closesUnread }: {
       <DateSheet
         visible={picking}
         value={draft.paidOn}
-        heading="The day the money went out"
+        heading="The Day the Money Went Out"
         note="A cost is filed under the month this day falls in, and a month that has been signed off will refuse it."
         onCancel={() => setPicking(false)}
         onPick={(iso) => { setPicking(false); set({ paidOn: iso }); }}

@@ -167,7 +167,7 @@ export default function ClientCoachDocumentsScreen() {
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(d.path, SIGNED_TTL_S);
     if (error || !data?.signedUrl) {
       reportError('clientCoachDocs.sign', error, { path: d.path });
-      Alert.alert('Couldn’t open it', 'The link to that document could not be created just now. Try again in a moment.');
+      Alert.alert('Couldn’t Open It', 'The link to that document could not be created just now. Try again in a moment.');
       return;
     }
     // Recorded AFTER the browser has actually opened it, not before.
@@ -185,7 +185,7 @@ export default function ClientCoachDocumentsScreen() {
       setOpened((p) => (p.includes(d.id) ? p : [...p, d.id]));
     } catch (e) {
       reportError('clientCoachDocs.open', e);
-      Alert.alert('Couldn’t open it', 'This device would not open that document, so it is not marked as read. Try again, or open it on another device.');
+      Alert.alert('Couldn’t Open It', 'This device would not open that document, so it is not marked as read. Try again, or open it on another device.');
     }
   }
 
@@ -200,16 +200,16 @@ export default function ClientCoachDocumentsScreen() {
    * only place it can be true.
    */
   function accept(d: CoachDoc) {
-    if (!uid) { Alert.alert('Not signed in', 'Sign in again and this will be here.'); return; }
+    if (!uid) { Alert.alert('Not Signed In', 'Sign in again and this will be here.'); return; }
     if (!opened.includes(d.id)) {
-      Alert.alert('Read it first', 'Open the document and read it — then you can accept it.');
+      Alert.alert('Read It First', 'Open the document and read it — then you can accept it.');
       return;
     }
     Alert.alert(
       `Accept “${d.title}”?`,
       COACH_DOC_ACCEPT_RULE,
       [
-        { text: 'Not yet', style: 'cancel' },
+        { text: 'Not Yet', style: 'cancel' },
         {
           text: 'Accept',
           onPress: async () => {
@@ -243,26 +243,26 @@ export default function ClientCoachDocumentsScreen() {
               // the sentence does not pretend otherwise.
               if (out === 'refused') {
                 Alert.alert(
-                  'Not recorded',
+                  'Not Recorded',
                   'That acceptance was not saved, so as far as your coach can see you have not accepted it yet. Try again.',
                 );
                 return;
               }
               // Nobody answered. The acceptance is kept rather than dropped.
               if (!outbox) {
-                Alert.alert('Not recorded', notKeptNote('acceptance', 'unavailable'));
+                Alert.alert('Not Recorded', notKeptNote('acceptance', 'unavailable'));
                 return;
               }
               const { result } = await outbox.enqueue('coach-doc-accept', { documentId: d.id, title: d.title });
               if (result !== 'queued') {
-                Alert.alert('Not recorded', notKeptNote('acceptance', result === 'full' ? 'full' : 'unavailable'));
+                Alert.alert('Not Recorded', notKeptNote('acceptance', result === 'full' ? 'full' : 'unavailable'));
                 return;
               }
               // Deliberately NOT followed by a reload that would mark it
               // accepted. The tick on this list comes from the server's own
               // row, and drawing one now would tell somebody their coach has
               // their signature while it is still on the phone.
-              Alert.alert('Saved on this phone', keptOnPhoneNote('acceptance'));
+              Alert.alert('Saved on This Phone', keptOnPhoneNote('acceptance'));
             } finally { setBusyId(null); }
           },
         },

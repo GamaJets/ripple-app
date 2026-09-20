@@ -60,7 +60,7 @@ const KIND_TAB: { kind: GoalKind; label: string }[] = [
   { kind: 'custom', label: 'Something Else' },
 ];
 
-const DATE_CHIPS: [string, number | null][] = [['4 wks', 28], ['8 wks', 56], ['12 wks', 84], ['No date', null]];
+const DATE_CHIPS: [string, number | null][] = [['4 wks', 28], ['8 wks', 56], ['12 wks', 84], ['No Date', null]];
 
 // `appLocale()`, not `undefined` — the resolver in src/lib/locale.ts is what
 // every date in this app is written through, and `undefined` asks the device
@@ -266,7 +266,7 @@ export default function Goal() {
     setSaving(true);
     let ok: GoalSaved = false;
     if (kind === 'custom') {
-      if (!title.trim()) { setSaving(false); Alert.alert('Say what the goal is', 'Type what you’re working toward.'); return; }
+      if (!title.trim()) { setSaving(false); Alert.alert('Say What the Goal Is', 'Type what you’re working toward.'); return; }
       ok = await g.addCustomGoal(title, targetDateISO);
     } else {
       const mk = kind as MeasuredKind;
@@ -276,7 +276,7 @@ export default function Goal() {
       const n = readNumber(amount);
       if (n == null || n <= 0) {
         setSaving(false);
-        Alert.alert('Enter a number', `Type your ${GOAL_METRIC[mk].label.toLowerCase()} in ${goalUnit(mk, wu)}.`);
+        Alert.alert('Enter a Number', `Type your ${GOAL_METRIC[mk].label.toLowerCase()} in ${goalUnit(mk, wu)}.`);
         return;
       }
       // The stored target has to be in the same unit as the series it will be
@@ -301,7 +301,7 @@ export default function Goal() {
       // constraint, a row that is not theirs — and offering the same bytes
       // again gets the same answer. `retryLine` says which of the two it was;
       // see src/lib/reachability.ts.
-      Alert.alert('Not saved', `Your goal could not be saved just now, so it isn’t stored. ${retryLine(reach)}`);
+      Alert.alert('Not Saved', `Your goal could not be saved just now, so it isn’t stored. ${retryLine(reach)}`);
       return;
     }
     setAmount(''); setTitle('');
@@ -311,7 +311,7 @@ export default function Goal() {
       // in the list below already. Same reasoning as the queued scan on
       // app/(client)/scans.tsx.
       Alert.alert(
-        'Saved on this phone',
+        'Saved on This Phone',
         'Your goal is saved on this phone and has not reached your record yet — it goes up on its own next time you have signal. It is in your list in the meantime, and until it has gone up it can’t be removed or marked done.',
       );
     }
@@ -322,15 +322,15 @@ export default function Goal() {
     // this device's — and the screen used to blame the connection for it.
     if (isPending(x.id)) {
       Alert.alert(
-        'Not sent yet',
+        'Not Sent Yet',
         'This goal is still saved on this phone and has not gone up, so there is nothing to remove yet. It goes up on its own next time you have signal, and you can remove it then. Setting a new goal for the same thing replaces it.',
       );
       return;
     }
-    Alert.alert('Remove this goal?', goalLabel(x), [
-      { text: 'Keep it', style: 'cancel' },
+    Alert.alert('Remove This Goal?', goalLabel(x), [
+      { text: 'Keep It', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
-        if (!(await g.removeGoal(x.id))) Alert.alert('Not removed', 'That goal is still there — it could not be removed just now.');
+        if (!(await g.removeGoal(x.id))) Alert.alert('Not Removed', 'That goal is still there — it could not be removed just now.');
       } },
     ]);
   };
@@ -338,13 +338,13 @@ export default function Goal() {
   const toggleAchieved = async (x: GoalTarget) => {
     if (isPending(x.id)) {
       Alert.alert(
-        'Not sent yet',
+        'Not Sent Yet',
         'This goal is still saved on this phone and has not gone up, so it can’t be marked done yet. It goes up on its own next time you have signal.',
       );
       return;
     }
     if (!(await g.setAchieved(x.id, !x.achievedAtISO))) {
-      Alert.alert('Not saved', 'That change was not stored, so it will be back as it was.');
+      Alert.alert('Not Saved', 'That change was not stored, so it will be back as it was.');
     }
   };
 
@@ -370,7 +370,7 @@ export default function Goal() {
                 and the one banner whose whole job is to be noticed lost its
                 mark. It was the only tone= string literal in the tree; every
                 other call passes a theme token. */}
-            <Notice tone={t.warn} kicker="Not loaded" title="Your goals could not be read"
+            <Notice tone={t.warn} kicker="Not Loaded" title="Your goals could not be read"
               note="This is an unread list, not an empty one. Pull down to try again." />
           </Section>
         ) : g.status === 'loading' ? (
@@ -470,7 +470,7 @@ export default function Goal() {
                             state, so it stays a quiet line. */}
                         <View style={{ marginTop: sp.xs }}>
                           {x.achievedAtISO ? <TonedChip tone="brand" icon="check" label={`Done ${shortDate(x.achievedAtISO)}`} />
-                            : x.targetDateISO && overdue ? <TonedChip tone="amber" label={`Target date passed (${shortDate(x.targetDateISO)})`} />
+                            : x.targetDateISO && overdue ? <TonedChip tone="amber" label={`Target Date Passed (${shortDate(x.targetDateISO)})`} />
                             : <Text style={{ ...ty.caption, color: t.ink3 }}>{x.targetDateISO ? `By ${shortDate(x.targetDateISO)}` : 'No target date'}</Text>}
                         </View>
                         {waiting ? (
@@ -538,7 +538,7 @@ export default function Goal() {
                 </View>
               )}
 
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Target date</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Target Date</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 {DATE_CHIPS.map(([label, d]) => (
                   <Pressable key={label} onPress={() => setDays(d)} accessibilityRole="button"

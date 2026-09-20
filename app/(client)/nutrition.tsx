@@ -423,12 +423,12 @@ export default function Nutrition() {
     };
     const out = await fl.logFood(food);
     if (out === 'refused') {
-      Alert.alert('Not logged', `${m.n} could not be saved, so it is not on today's record.`);
+      Alert.alert('Not Logged', `${m.n} could not be saved, so it is not on today's record.`);
       return;
     }
     notifySuccess();
     if (out === 'unsent') {
-      Alert.alert('Logged — waiting to send', `${m.n} is counted toward today and kept on this phone. It goes up when you have signal.`);
+      Alert.alert('Logged — Waiting to Send', `${m.n} is counted toward today and kept on this phone. It goes up when you have signal.`);
     }
   };
   const [showGrocery, setShowGrocery] = useState(false);
@@ -580,7 +580,7 @@ export default function Nutrition() {
   const removeMeal = async (id: string, name: string) => {
     const gone = await fl.removeFood(id);
     if (!gone) {
-      Alert.alert('Still on today’s record',
+      Alert.alert('Still on Today’s Record',
         `${name} could not be removed just now, so it is still counted toward today. Try again in a moment.`);
     }
   };
@@ -633,7 +633,7 @@ export default function Nutrition() {
   const photoLog = async () => {
     const gate = mayAnalyzePhoto(photoAI.consent, visionAvailable());
     if (gate.block === 'unknown') {
-      Alert.alert('One moment', 'Still checking your answer about photos. Try that again in a moment.');
+      Alert.alert('One Moment', 'Still checking your answer about photos. Try that again in a moment.');
       return;
     }
     if (gate.block === 'unasked' || gate.block === 'refused') { setAskPhoto(true); return; }
@@ -688,7 +688,7 @@ export default function Nutrition() {
         setLogBusy(false);
         setPendingVia('photo');
         setPendingPhoto(asset.uri);
-        setPendingTitle('Check And Log');
+        setPendingTitle('Check and Log');
         setPendingNote('Read from your photo — check every figure before logging it. The picture itself is not kept: it is here to read the meal from and to check against, and the numbers are what go into your log.');
         setPending({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, basis: null });
         return;
@@ -754,14 +754,14 @@ export default function Nutrition() {
       const refused = outs.filter((o) => o === 'refused').length;
       const unsent = outs.filter((o) => o === 'unsent').length;
       if (refused === outs.length) {
-        Alert.alert('Not logged', `Nothing you described could be saved, so none of it is on today's record. Your text is still in the box.`);
+        Alert.alert('Not Logged', `Nothing you described could be saved, so none of it is on today's record. Your text is still in the box.`);
         return;
       }
       setNl(''); notifySuccess();
       if (refused > 0) {
-        Alert.alert('Partly logged', `${outs.length - refused} of ${outs.length} went on today's record. ${refused} could not be saved and ${refused === 1 ? 'is' : 'are'} not counted.`);
+        Alert.alert('Partly Logged', `${outs.length - refused} of ${outs.length} went on today's record. ${refused} could not be saved and ${refused === 1 ? 'is' : 'are'} not counted.`);
       } else if (unsent > 0) {
-        Alert.alert('Logged — waiting to send', `${unsent === outs.length ? 'They are' : `${unsent} of them are`} counted toward today and kept on this phone until you have signal.`);
+        Alert.alert('Logged — Waiting to Send', `${unsent === outs.length ? 'They are' : `${unsent} of them are`} counted toward today and kept on this phone until you have signal.`);
       }
     }
     else if (!gaps.length) {
@@ -770,7 +770,7 @@ export default function Nutrition() {
       // its own sentence and is deliberately outside the four — saying "the
       // reader did not answer" about a reader nobody asked would be a fifth
       // wrong claim in place of the one this change removes.
-      if (read === null) Alert.alert('Nothing was read', foodAIAvailable() ? 'Try e.g. "2 eggs, toast and a coffee".' : 'AI logging turns on with the AI backend.');
+      if (read === null) Alert.alert('Nothing Was Read', foodAIAvailable() ? 'Try e.g. "2 eggs, toast and a coffee".' : 'AI logging turns on with the AI backend.');
       else { const say = foodReadSay(read); Alert.alert(say.title, say.body); }
     }
   };
@@ -1060,7 +1060,7 @@ export default function Nutrition() {
     const rows = plan.map((m) => ({ slot: m.slot, name: m.n, K: m.K, P: m.P, C: m.C, F: m.F }));
     const labels = c.avoid.map((a) => (ALLERGENS.find((x) => x.id === a)?.label ?? a));
     const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels, appName, t.brand);
-    await shareDoc(html, text, 'Meal plan');
+    await shareDoc(html, text, 'Meal Plan');
   };
   // `idx + d` was a synthetic week — the same meal shifted along the catalogue
   // one place per day, which is a pattern rather than a plan. Where the coach
@@ -1234,7 +1234,7 @@ export default function Nutrition() {
     // is as old as the read.
     const inIt = real ? recipeAllergens(real, c.avoid) : mealAllergens(m, c.avoid);
     const planned = inToday || slotMeals.some((x) => sameDish(x, m));
-    const whose = real ? 'Your recipe' : coachPick(m.pos) ? 'Coach’s pick' : null;
+    const whose = real ? 'Your Recipe' : coachPick(m.pos) ? 'Coach’s Pick' : null;
     const plate = t.data[`${SLOT_TONE[m.slot]}Soft`];
     return (
       <View key={`${m.pos}-${dishKey(m)}`} style={dim ? { opacity: 0.5 } : undefined}>
@@ -1274,7 +1274,7 @@ export default function Nutrition() {
             {/* Which row is the plan's, said in words: the list is
                 the whole catalogue now, and one of them is today's. */}
             {planned && (whose || !inToday) ? (
-              <Text style={{ ...ty.caption, ...font('600'), color: t.brandText, marginTop: 2 }}>{[inToday ? null : 'In your plan', whose].filter(Boolean).join(' · ')}</Text>
+              <Text style={{ ...ty.caption, ...font('600'), color: t.brandText, marginTop: 2 }}>{[inToday ? null : 'In Your Plan', whose].filter(Boolean).join(' · ')}</Text>
             ) : null}
             {/* On the row somebody is about to cook, not only at the
                 top of the screen. A warning about the plan does not
@@ -1330,7 +1330,7 @@ export default function Nutrition() {
             trailing one is the info control the help row became. */}
         <PageHead title="Nutrition"
           subtitle={`Today · ${new Date().toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}`}
-          leading={<Ghost icon="share" a11yLabel="Share plan" onPress={sharePlan} />}
+          leading={<Ghost icon="share" a11yLabel="Share Plan" onPress={sharePlan} />}
           trailing={<Ghost icon="info" a11yLabel={SCREEN_HELP.meals.title} onPress={() => setHelpOpen(true)} />} />
 
         {/* Plan, Targets and Recipes as the board draws them. Targets is the
@@ -1451,8 +1451,8 @@ export default function Nutrition() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
             <Text accessibilityRole="header" style={{ ...ty.caption, ...font('700'), color: t.ink }}>Water</Text>
             {hydration.offerGoal ? (
-              <Pressable onPress={() => router.push('/(client)/habits')} accessibilityRole="button" accessibilityLabel="Set a water goal" hitSlop={hitSlopFor(24)}>
-                <Text style={{ ...ty.caption, ...font('700'), color: t.data.tealInk }}>Set a water goal</Text>
+              <Pressable onPress={() => router.push('/(client)/habits')} accessibilityRole="button" accessibilityLabel="Set a Water Goal" hitSlop={hitSlopFor(24)}>
+                <Text style={{ ...ty.caption, ...font('700'), color: t.data.tealInk }}>Set a Water Goal</Text>
               </Pressable>
             ) : (
               <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flexShrink: 1 }}>
@@ -1487,7 +1487,7 @@ export default function Nutrition() {
               writes 1 over a morning's 5 — app/(client)/recovery.tsx carries
               the long form of this, and the same gate. */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
-            <Ghost icon="minus" a11yLabel="Remove a glass" onPress={habits.removeWater} disabled={!hydration.showCount} />
+            <Ghost icon="minus" a11yLabel="Remove a Glass" onPress={habits.removeWater} disabled={!hydration.showCount} />
             <View style={{ flex: 1 }}>
               <Ghost label="Add a Glass" icon="plus" onPress={habits.addWater} disabled={!hydration.showCount} />
             </View>
@@ -1564,7 +1564,7 @@ export default function Nutrition() {
             read every time and a swap is made now and then. */}
         {view === 'today' ? (
         <Section>
-              <SectionHead title="Swap Or Search" note={`${num(plan.length)} meals a day`} />
+              <SectionHead title="Swap or Search" note={`${num(plan.length)} meals a day`} />
               {/* One slot at a time, the way the board lists meals. The slots
                   come from the plan itself, so a 4- or 5-meal day shows its
                   snacks as a segment rather than losing them. */}
@@ -1707,7 +1707,7 @@ export default function Nutrition() {
                   4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
                   plan and the macro split immediately. */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.lg }}>
-                <Text style={{ ...ty.label, color: t.ink3, marginEnd: 2 }}>Meals per day</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginEnd: 2 }}>Meals per Day</Text>
                 {([3, 4, 5] as const).map((n) => {
                   const on = c.mealsPerDay === n;
                   return (
@@ -1827,7 +1827,7 @@ export default function Nutrition() {
 
         {coachAdjust?.note ? (<>
           <Section>
-            <SectionHead title="Note From Your Coach" />
+            <SectionHead title="Note from Your Coach" />
             <Text style={{ ...ty.body, color: t.ink2 }}>{coachAdjust.note}</Text>
           </Section>
         </>) : null}
@@ -1954,14 +1954,14 @@ export default function Nutrition() {
           <Pressable onPress={() => setShowAvoid((v) => !v)} accessibilityRole="button" accessibilityLabel="Toggle diet and dietary filters"
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ ...ty.head, color: t.ink }}>Diet And Exclusions</Text>
+              <Text style={{ ...ty.head, color: t.ink }}>Diet and Exclusions</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{DIET_LABEL[diet]}{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to change'}</Text>
             </View>
             <View style={{ transform: [{ rotate: turn(showAvoid ? 90 : 0) }] }}><Icon name={FORWARD_ICON} size={14} color={t.ink3} /></View>
           </Pressable>
           {showAvoid ? (
             <View style={{ marginTop: sp.lg }}>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet style</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet Style</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
                 {DIETS.map((d) => { const on = diet === d; return (
                   <Pressable key={d} onPress={() => c.setDiet(d)}
@@ -1971,7 +1971,7 @@ export default function Nutrition() {
                   </Pressable>
                 ); })}
               </View>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Anything to avoid</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Anything to Avoid</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {ALLERGENS.map((al) => { const on = c.avoid.includes(al.id); return (
                 <Pressable key={al.id} onPress={() => c.setAvoid(on ? c.avoid.filter((x) => x !== al.id) : [...c.avoid, al.id])}
@@ -2331,12 +2331,12 @@ export default function Nutrition() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{PHOTO_ASK_TITLE.meal}</Text>
             <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{PHOTO_DESTINATION_BY_SUBJECT.meal}</Text>
             <View style={{ marginTop: sp.lg, gap: sp.xs }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>What is sent</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>What Is Sent</Text>
               {PHOTO_SENT_BY_SUBJECT.meal.map((line) => (
                 <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>&bull; {line}</Text>
               ))}
               <View style={{ height: sp.sm }} />
-              <Text style={{ ...ty.micro, color: t.ink3 }}>What is not</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>What Is Not</Text>
               {PHOTO_NOT_SENT_BY_SUBJECT.meal.map((line) => (
                 <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>&bull; {line}</Text>
               ))}
@@ -2454,9 +2454,9 @@ export default function Nutrition() {
           // refuses is not on the record, and the sheet closing is not an
           // answer.
           const out = await fl.logFood({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, via: pendingVia });
-          if (out === 'refused') { Alert.alert('Not logged', `${f.name} could not be saved, so it is not on today's record.`); return false; }
+          if (out === 'refused') { Alert.alert('Not Logged', `${f.name} could not be saved, so it is not on today's record.`); return false; }
           notifySuccess();
-          if (out === 'unsent') Alert.alert('Logged — waiting to send', `${f.name} is counted toward today and kept on this phone until you have signal.`);
+          if (out === 'unsent') Alert.alert('Logged — Waiting to Send', `${f.name} is counted toward today and kept on this phone until you have signal.`);
           return true;
         }} />
     </SafeAreaView>
