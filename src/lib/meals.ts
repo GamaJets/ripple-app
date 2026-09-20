@@ -729,6 +729,32 @@ export function variantStep(diet: Diet, slot: Slot, avoid: Allergen[] = []): num
   return sizes.reduce((sum, _, i) => sum + sizes.slice(i + 1).reduce((a, b) => a * b, 1), 0);
 }
 
+/**
+ * After how many days the synthetic horizon comes back to a meal this slot has
+ * already served.
+ *
+ * Day `d` of the horizon is `idx + d * variantStep` modulo the catalogue, so
+ * the days repeat with period `size / gcd(size, step)` and nothing before it.
+ * Measured across every diet, slot and exclusion set: with no exclusions
+ * nothing repeats inside 31 days anywhere. 24 of the 1,280 combinations do —
+ * all of them keto with several exclusions, the tightest being keto snacks
+ * without dairy or nuts, which has 100 meals and a stride of 25 and so serves
+ * its fourth snack again on day four.
+ *
+ * A horizon that reaches this number is showing a member the same food twice,
+ * and the screen says which day it starts rather than serving it in silence.
+ */
+export function catalogRepeatDay(diet: Diet, slot: Slot, avoid: Allergen[] = []): number {
+  const size = catalogSize(diet, slot, avoid);
+  const step = variantStep(diet, slot, avoid) % size;
+  // A stride that is a whole number of catalogues over is no stride at all:
+  // every day is day zero, and the repeat is on day one.
+  let a = size;
+  let b = step || size;
+  while (b) { const r = a % b; a = b; b = r; }
+  return Math.max(1, Math.round(size / a));
+}
+
 /** Next meal in the catalog for a slot (the "swap" action). */
 export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = []): number {
   const size = catalogSize(diet, slot, avoid);
@@ -832,14 +858,27 @@ export const PLAN_WEEK_DAYS = 7;
 export function planWeek(
   c: PlanInput,
   coachDay?: (d: number) => Record<number, number> | null,
+  days: number = PLAN_WEEK_DAYS,
 ): PlannedMeal[][] {
   // Day zero of the synthetic week is the plan as it stands, overrides and
   // swaps included — the week steps from what is on screen rather than from a
   // seed nobody can see.
   const today = buildPlan(c).plan;
   const out: PlannedMeal[][] = [];
-  for (let d = 0; d < PLAN_WEEK_DAYS; d++) {
-    const written = coachDay ? coachDay(d) : null;
+  // `days` is how far ahead the member is looking — one day, a week, a month
+  // (src/lib/mealHorizon.ts). It was seven and only seven, and a horizon longer
+  // than the week it was hard-coded to would have drawn the same seven days
+  // over and over. The synthetic step below is taken by `d`, so day 30 is 30
+  // steps along the catalogue and not day 2 again — but the catalogue is
+  // finite and DOES wrap: see `catalogRepeatDay`, which is what says so on
+  // screen rather than letting the same dinner arrive twice unannounced.
+  //
+  // The coach's week is a REPEATING week, so its day is asked for modulo the
+  // week — here rather than in each caller, because a caller that forgot would
+  // ask `planDayOverride` for a day nobody has written.
+  const span = Number.isInteger(days) && days > 0 ? days : PLAN_WEEK_DAYS;
+  for (let d = 0; d < span; d++) {
+    const written = coachDay ? coachDay(d % PLAN_WEEK_DAYS) : null;
     if (written) { out.push(buildPlan({ ...c, mealOverride: written }).plan); continue; }
     const ov: Record<number, number> = {};
     // `variantStep`, not `+ d` — see its comment. Day 3 is a different protein,

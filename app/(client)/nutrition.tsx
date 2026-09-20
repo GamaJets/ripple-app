@@ -14,13 +14,13 @@
 // number up.
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { num, numUpTo } from '../../src/lib/format';
-import { fmtFullDay } from '../../src/lib/format';
+import { fmtDay, fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
-  buildPlan, snackIdeas, SNACK_SHARE, swapIndex, searchMeals, mealAt, catalogSize, groceryFromWeek, planWeek, slotsFor,
+  buildPlan, snackIdeas, SNACK_SHARE, swapIndex, searchMeals, mealAt, catalogSize, groceryFromWeek, planWeek, slotsFor, catalogRepeatDay,
   planGaps, mealAllergens, allergenGapNote, allergenLabel, mealRowSpoken,
   DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen, type Slot,
 } from '../../src/lib/meals';
@@ -30,7 +30,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useToday } from '../../src/ui/today';
-import { startOfWeek } from '../../src/lib/weekStart';
+import { startOfWeek, WEEK_DAY_NAMES } from '../../src/lib/weekStart';
 import { dayKeyOfDate } from '../../src/lib/entryEdit';
 import { groceryTicksKey, readGroceryTicks } from '../../src/lib/groceryTicks';
 // The member's own meal swaps, under a key with their account in it. They lived
@@ -47,13 +47,17 @@ import { LEGACY_MEAL_SWAPS_KEY, mealSwapsKey, readMealSwaps, writeMealSwaps } fr
 // `mealOverride` map — those are catalogue-index machinery.
 import {
   RECIPE_ATTRIBUTION, RECIPE_DISCLAIMER, isRecipeMeal, portionRecipe, recipeAllergens,
-  type RecipeMeal, type PlannedRecipe, type RecipeRef, type RecipeDetailResult, type RecipeContext,
+  type RecipeMeal, type PlannedRecipe, type RecipeDetailResult, type RecipeContext,
 } from '../../src/lib/recipes';
 import { recipePlanKey, readRecipePlan, writeRecipePlan, recipePlanAt, withRecipeAt, withoutRecipeAt, type RecipePlan } from '../../src/lib/recipePlan';
-// The coach's own pinned recipes, read at the same two numbers the member's
-// are. The column and its four-key CHECK are src/lib/coachRecipeRefs.ts's job;
-// this screen only asks it what is pinned where.
-import { coachRecipeRefAt } from '../../src/lib/coachRecipeRefs';
+// How far ahead the member is looking, and the recipes they planned for a DATE
+// rather than for a weekday. The resolution order at a slot — the date, then
+// the weekday, then the coach's pin — is `plannedRecipeAt` and is not restated
+// here: every surface on this screen reads through that one function.
+import {
+  horizonDays, plannedRecipeAt, recipeDatePlanKey, readDatedRecipePlan, writeDatedRecipePlan,
+  withDatedRecipeAt, withoutDatedRecipeAt, type DatedRecipePlan, type Horizon, type HorizonDay,
+} from '../../src/lib/mealHorizon';
 import { useRecipeSearch, useRecipeDetail } from '../../src/ui/useRecipeSearch';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { reportError } from '../../src/lib/reportError';
@@ -385,6 +389,10 @@ export default function Nutrition() {
   const [override, setOverride] = useState<Record<number, number>>({});
   const [ovHydrated, setOvHydrated] = useState(false);
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
+  // Which day of the horizon the open sheet belongs to. A row in the list for
+  // Thursday the 25th plans FOR Thursday the 25th; without this the sheet
+  // planned everything for today, whichever row opened it.
+  const [sheetDay, setSheetDay] = useState<HorizonDay | null>(null);
   // ── real recipes ───────────────────────────────────────────────────────
   //
   // `recipeSearchOpen` is the deliberate act. Every search is about two
@@ -397,6 +405,12 @@ export default function Nutrition() {
   // with their account in it: see src/lib/recipePlan.ts for both halves.
   const [recipePlan, setRecipePlan] = useState<RecipePlan>({});
   const [rpHydrated, setRpHydrated] = useState(false);
+  // The same, for a recipe planned on a DATE — "Thursday the 25th" rather than
+  // "every Thursday". Two maps and two stores on purpose: see the header of
+  // src/lib/mealHorizon.ts. Neither overwrites the other; the date one is read
+  // first.
+  const [datePlan, setDatePlan] = useState<DatedRecipePlan>({});
+  const [dpHydrated, setDpHydrated] = useState(false);
   // Dishes in hand for planned recipes, by `sourceId`: the one the member just
   // chose out of a search (so choosing costs no second read), and the reads
   // `PlannedRecipeRead` reports. React state, and only that — it dies with the
@@ -545,7 +559,27 @@ export default function Nutrition() {
     if (!rpHydrated || !recipesKey) return;
     AsyncStorage.setItem(recipesKey, writeRecipePlan(recipePlan)).catch(() => {});
   }, [recipePlan, rpHydrated, recipesKey]);
-  const [view, setView] = useState<'today' | 'week'>('today');
+  // The date layer, stored exactly as the weekday one is and for the same
+  // reasons: account in the key, disarmed before the read, an unreadable store
+  // is nothing planned rather than something wrong planned.
+  const datesKey = recipeDatePlanKey(c.id);
+  useEffect(() => {
+    if (!datesKey) { setDatePlan({}); setDpHydrated(false); return; }
+    let live = true;
+    setDpHydrated(false);
+    AsyncStorage.getItem(datesKey)
+      .then((r) => { if (live) { setDatePlan(readDatedRecipePlan(r)); setDpHydrated(true); } })
+      .catch(() => { if (live) setDatePlan({}); });
+    return () => { live = false; };
+  }, [datesKey]);
+  useEffect(() => {
+    if (!dpHydrated || !datesKey) return;
+    AsyncStorage.setItem(datesKey, writeDatedRecipePlan(datePlan)).catch(() => {});
+  }, [datePlan, dpHydrated, datesKey]);
+  // How far ahead the member is looking AND planning: one day, a week, a month.
+  // The meal list, the shopping list and the recipe reads all follow it, so
+  // "this month" is not a longer list drawn over a week's worth of shopping.
+  const [view, setView] = useState<Horizon>('today');
   // The board's meal list is one slot at a time — Breakfast, Lunch, Dinner
   // segments over the rows. null is "the first slot of the plan", so a plan
   // rebuilt with fewer meals never points at a slot it no longer has.
@@ -913,20 +947,41 @@ export default function Nutrition() {
   // YYYY-MM-DD; the fallback is the week's first day rather than "no day", so a
   // choice is never silently dropped on the floor.
   const todayIdx = coachDay ?? 0;
+  // ── the days on screen ─────────────────────────────────────────────────
+  //
+  // `view` says how far ahead the member is looking — a day, a week, a month —
+  // and this is that span as real days, today first. Each one carries its own
+  // DATE, which is what a recipe planned for Thursday the 25th is keyed by, and
+  // its WEEKDAY, which is what "every Thursday" and the coach's repeating week
+  // are keyed by. Everything below counts in offsets from today rather than
+  // from the start of the week, so the first row is always the day the member
+  // is standing in and planning further ahead never pushes it down the list.
+  const days = useMemo(() => horizonDays(todayKeyNow, view), [todayKeyNow, view]);
+  // Never empty — `horizonDays` returns at least one day, with an empty date
+  // for a clock it could not read, which matches nothing in the date layer.
+  const today: HorizonDay = days[0] ?? { key: todayKeyNow, weekday: todayIdx, offset: 0 };
   // The coach's pinned recipes, keyed by the same two numbers the member's own
   // are. Only while the coach's written week is the CURRENT one: a stale plan's
   // day indices name meals this member is no longer served, and `coachOverride`
   // has already fallen off it. A coach read that FAILED is `coachAdjust ===
   // null` above — no refs, which is not the same as none pinned, and is why
   // `adjustUnknown` still stops the board drawing.
-  const coachRefs = (coachPlanCurrent ? coachAdjust?.recipeRefs : null) ?? {};
-  /** The recipe planned for a day and slot: the member's own first, the coach's
-   *  pin behind it — exactly as `override` sits over `coachOverride`. */
-  const refAt = (day: number, pos: number): RecipeRef | null =>
-    recipePlanAt(recipePlan, day, pos) ?? coachRecipeRefAt(coachRefs, day, pos);
+  // Memoised because `?? {}` is a new object every render, and what hangs off
+  // it is now a month of days rather than a week: an identity that changes for
+  // nothing recomposed thirty days and their shopping list on every keystroke.
+  const coachRefs = useMemo(() => (coachPlanCurrent ? coachAdjust?.recipeRefs : null) ?? {},
+    [coachPlanCurrent, coachAdjust]);
+  /** The three sources a slot's recipe can come from, in the order they win:
+   *  this date, then this weekday, then the coach's pin. `plannedRecipeAt` is
+   *  where that order is decided, and it is decided once. */
+  const plannedSrc = useMemo(() => ({ dates: datePlan, weekdays: recipePlan, coach: coachRefs }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [datePlan, recipePlan, coachRefs]);
+  /** The recipe planned for a day and slot, and WHICH of the three said so. */
+  const refAt = (day: HorizonDay, pos: number) => plannedRecipeAt(plannedSrc, day, pos);
   /** A built day with its planned recipes standing in. */
-  const withRecipes = (day: readonly PlannedMeal[], d: number): PlannedMeal[] => day.map((m) => {
-    const ref = refAt(d, m.pos);
+  const withRecipes = (day: readonly PlannedMeal[], d: HorizonDay): PlannedMeal[] => day.map((m) => {
+    const ref = refAt(d, m.pos)?.ref ?? null;
     const dish = ref ? recipeDish(ref.sourceId) : null;
     // The slot is the PLAN's, not the one the recipe was searched under: a
     // change of meals-per-day moves which slot a position is, and a row filed
@@ -935,12 +990,12 @@ export default function Nutrition() {
   });
   /** The rows of a built day whose planned recipe is NOT in hand — still being
    *  read, or the read failed. The generated meal is standing in for each. */
-  const waitingIn = (day: readonly PlannedMeal[], d: number) =>
-    day.filter((m) => { const ref = refAt(d, m.pos); return !!ref && !recipeDish(ref.sourceId); });
+  const waitingIn = (day: readonly PlannedMeal[], d: HorizonDay) =>
+    day.filter((m) => { const hit = refAt(d, m.pos); return !!hit && !recipeDish(hit.ref.sourceId); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const todayPlan = useMemo(() => withRecipes(plan, todayIdx), [plan, todayIdx, recipePlan, coachRefs, recipeLive, recipeReads]);
+  const todayPlan = useMemo(() => withRecipes(plan, today), [plan, today, plannedSrc, recipeLive, recipeReads]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const todayWaiting = useMemo(() => waitingIn(plan, todayIdx), [plan, todayIdx, recipePlan, coachRefs, recipeLive, recipeReads]);
+  const todayWaiting = useMemo(() => waitingIn(plan, today), [plan, today, plannedSrc, recipeLive, recipeReads]);
   const slotMeals = todayPlan.filter((m) => m.slot === slotSel);
   // The slot's rows as the ENGINE composed them. Everything that does catalogue
   // arithmetic below — the stride, `mealAt`, the "not the lead again" filter —
@@ -958,23 +1013,37 @@ export default function Nutrition() {
     if (!Number.isInteger(idx) || idx < 0) return;
     setOverride({ ...override, [pos]: idx });
   };
-  /** Plan a real recipe at its slot, FOR TODAY. The REF is what is kept
-   *  (`withRecipeAt` goes through `recipeRef`); the dish is held in state so
-   *  the row can be drawn now without paying for a second read of something
-   *  already in hand.
+  /** The day the open sheet plans for. The member's horizon can change under an
+   *  open sheet, and a day that is no longer on screen is not one to plan on. */
+  /** Open the meal sheet on a row, remembering WHICH day of the horizon it came
+   *  from. Everything the sheet plans, it plans for that day. */
+  const openMeal = (m: PlannedMeal, day: HorizonDay) => { setSheetDay(day); setRecipe(m); };
+  const planDay: HorizonDay = sheetDay && days.some((d) => d.offset === sheetDay.offset && d.key === sheetDay.key)
+    ? sheetDay : today;
+  /** Plan a real recipe at its slot — on ONE DATE, or on every such weekday.
+   *  The REF is what is kept (both writers go through `recipeRef`); the dish is
+   *  held in state so the row can be drawn now without paying for a second read
+   *  of something already in hand.
    *
-   *  The day is the reason this signature changed. Without one, choosing a
-   *  chicken tikka for breakfast made it breakfast every day for ever — see
-   *  the header of src/lib/recipePlan.ts. */
-  const planRecipe = (m: PlannedRecipe) => {
+   *  Two scopes because a member means two different things. "Thursday the
+   *  25th" is a meal they intend to cook once; "every Thursday" is a standing
+   *  preference, and it is the one src/lib/recipePlan.ts holds. Neither writes
+   *  over the other: the date is simply read first. */
+  const planRecipe = (m: PlannedRecipe, scope: 'date' | 'weekday') => {
     if (m.pos < 0) return;
     setRecipeLive((prev) => ({ ...prev, [m.sourceId]: m }));
-    setRecipePlan((prev) => withRecipeAt(prev, todayIdx, m.pos, m));
+    if (scope === 'weekday') setRecipePlan((prev) => withRecipeAt(prev, planDay.weekday, m.pos, m));
+    else setDatePlan((prev) => withDatedRecipeAt(prev, planDay.key, m.pos, m));
   };
-  /** Hand today's slot back to the plan's own meal. It takes out the MEMBER's
-   *  own choice; a recipe their coach pinned is the coach's pick and stays,
-   *  the way a coach's meal override does. */
-  const unplanRecipe = (pos: number) => setRecipePlan((prev) => withoutRecipeAt(prev, todayIdx, pos));
+  /** Hand a slot back to whatever is behind it. It takes out the MEMBER's own
+   *  choice, and only the one named: clearing the 25th leaves every Thursday
+   *  standing, and clearing every Thursday leaves the 25th. A recipe their
+   *  coach pinned is the coach's pick and stays, the way a coach's meal
+   *  override does. */
+  const unplanRecipe = (pos: number, scope: 'date' | 'weekday') => {
+    if (scope === 'weekday') setRecipePlan((prev) => withoutRecipeAt(prev, planDay.weekday, pos));
+    else setDatePlan((prev) => withoutDatedRecipeAt(prev, planDay.key, pos));
+  };
   // The rest of the slot's catalogue, portioned like the planned meal so the
   // calories on the rows are the calories the plan would carry. The planned
   // meal leads and is not repeated. Real search over real rows; an empty
@@ -1055,8 +1124,8 @@ export default function Nutrition() {
   // the read failed. The generated row is standing in for each of them. `mine`
   // decides whether "Back to Plan's Meal" is offered — it takes out the
   // member's own choice, and a recipe the COACH pinned is not one.
-  const recipesWaiting = waitingIn(genSlotMeals, todayIdx)
-    .map((m) => ({ pos: m.pos, ref: refAt(todayIdx, m.pos)!, mine: !!recipePlanAt(recipePlan, todayIdx, m.pos) }));
+  const recipesWaiting = waitingIn(genSlotMeals, today)
+    .map((m) => { const hit = refAt(today, m.pos)!; return { pos: m.pos, ref: hit.ref, from: hit.from, mine: hit.from !== 'coach' }; });
   // Whether any recipe stands in today's list. It decides the one caption that
   // says how far a planned recipe reaches, and the attribution that must go
   // wherever one is shown.
@@ -1067,9 +1136,17 @@ export default function Nutrition() {
   // rule `planWeek` follows day by day. Before this the list was built from a
   // private `planForDay` that read neither the coach's week nor the member's
   // own swaps, so a member shopped for meals nobody had shown them.
+  //
+  // `d` is an offset from TODAY, and the coach's week is a repeating week, so
+  // the offset is rotated onto it: day 0 is the coach's day for today, not the
+  // coach's Monday. Before the horizon this list started at the top of the
+  // week, which meant a member on a Friday shopped for Monday to Thursday —
+  // four days that had already happened.
   const coachWeekDay = (d: number): Record<number, number> | null =>
-    (coachPlanCurrent ? planDayOverride(coachPlan!, d) : null);
-  const week = useMemo(() => planWeek(input, coachWeekDay), [input, coachPlanCurrent, coachPlan]);
+    (coachPlanCurrent ? planDayOverride(coachPlan!, (todayIdx + d) % PLAN_WEEKDAYS.length) : null);
+  const week = useMemo(() => planWeek(input, coachWeekDay, days.length),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [input, coachPlanCurrent, coachPlan, days, todayIdx]);
   // The same seven days with the planned recipes standing in — ONE composition,
   // so This Week, the shopping list and today's list cannot describe three
   // different dinners. `groceryFromWeek` needs nothing new to shop a recipe: a
@@ -1077,19 +1154,39 @@ export default function Nutrition() {
   // Repple department already (`deptForAisle`), and its `unmeasured` — "salt,
   // to taste" — comes back on its own heading rather than as a quantity.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const weekPlan = useMemo(() => week.map(withRecipes), [week, recipePlan, coachRefs, recipeLive, recipeReads]);
+  const weekPlan = useMemo(() => week.map((p, d) => withRecipes(p, days[d] ?? today)), [week, days, today, plannedSrc, recipeLive, recipeReads]);
   // How many rows of each day are standing in for a recipe that could not be
   // read. A day with any is a day whose total and whose shopping are INCOMPLETE
   // — the recipe's figures and ingredients are not stored, so there is nothing
   // honest to print — and both places say so rather than quietly totalling the
   // generated stand-in as though it were the meal.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const weekWaiting = useMemo(() => week.map((day, d) => waitingIn(day, d).length), [week, recipePlan, coachRefs, recipeLive, recipeReads]);
+  const weekWaiting = useMemo(() => week.map((day, d) => waitingIn(day, days[d] ?? today).length), [week, days, today, plannedSrc, recipeLive, recipeReads]);
   const weekUnread = weekWaiting.reduce((a, n) => a + n, 0);
   // Whether a real recipe is anywhere in the week. The shopping list is drawn
   // from those ingredients, so it owes the credit and the backlink too.
   const recipeWeek = weekPlan.some((day) => day.some(isRecipeMeal));
   const groc = useMemo(() => groceryFromWeek(weekPlan), [weekPlan]);
+  // The dates this horizon covers, named wherever its food is shown. A month as
+  // one flat shopping list is useless — nobody buys thirty days of fresh food
+  // at once — so the list follows the selector and SAYS which days it is for,
+  // on the sheet, on the row that opens it and in the shared document. "to"
+  // rather than a dash: this is read aloud as often as it is read.
+  const rangeLabel = days.length > 1
+    ? `${fmtDay(days[0]?.key ?? '')} to ${fmtDay(days[days.length - 1]?.key ?? '')}`
+    : fmtDay(today.key);
+  const spanLabel = `${num(days.length)} ${days.length === 1 ? 'day' : 'days'}`;
+  // The catalogue is finite and the horizon steps through it, so a long enough
+  // horizon comes back round to a meal it has already served. `catalogRepeatDay`
+  // is that arithmetic; this is the day it happens on for the tightest slot in
+  // this member's plan. Measured: nothing repeats inside 31 days for a member
+  // with no exclusions, in any diet. A keto member avoiding dairy and nuts has
+  // 100 snacks and a stride of 25, so their snacks come round on day four — and
+  // they are told so rather than served the same week twice in silence. It is
+  // the GENERATED meals that repeat; a day a recipe stands on is that recipe.
+  const repeatsOn = useMemo(() => Math.min(...planSlots.map((s) => catalogRepeatDay(diet, s, c.avoid))),
+    [planSlots, diet, c.avoid]);
+  const horizonRepeats = days.length > repeatsOn ? repeatsOn : 0;
   // ── the exclusions that could not be honoured, computed once ────────────
   //
   // It used to be computed inside the Today arm and rendered only there, so
@@ -1138,8 +1235,17 @@ export default function Nutrition() {
       // somebody shops from and comes home missing a dinner.
       weekUnread ? UNREAD_SHOPPING_WARNING : null,
     ].filter(Boolean) as string[];
-    const lines: string[] = ['Grocery List', ...(warn.length ? ['', ...warn] : []), ''];
-    let html = '<h2>Grocery List</h2>' + warn.map((w) => `<p><strong>${w}</strong></p>`).join('');
+    // The DATES this list is for, at the top of it. A month of shopping with no
+    // range on it is a list nobody can use: it is read in a supermarket, days
+    // after it was sent, with none of this screen around it, and thirty days of
+    // fresh food is not one trip.
+    const range = `${days.length === 1 ? 'For' : 'For the'} ${spanLabel} ${days.length === 1 ? 'of' : 'from'} ${rangeLabel}.`;
+    const spread = days.length > 7
+      ? 'That is more than a week of food, so buy the fresh things a few days at a time.'
+      : null;
+    const head = [range, spread].filter(Boolean) as string[];
+    const lines: string[] = ['Grocery List', ...head, ...(warn.length ? ['', ...warn] : []), ''];
+    let html = '<h2>Grocery List</h2>' + head.map((h) => `<p>${h}</p>`).join('') + warn.map((w) => `<p><strong>${w}</strong></p>`).join('');
     DEPTS.filter((d) => groc.byDept[d]?.length).forEach((d) => {
       lines.push(d.toUpperCase());
       html += '<h3>' + d + '</h3><ul>';
@@ -1157,11 +1263,11 @@ export default function Nutrition() {
     if (recipeWeek) { lines.push(RECIPE_DISCLAIMER, `${RECIPE_ATTRIBUTION.text} — ${RECIPE_ATTRIBUTION.url}`); html += `<p>${RECIPE_DISCLAIMER}</p><p><a href="${RECIPE_ATTRIBUTION.url}">${RECIPE_ATTRIBUTION.text}</a></p>`; }
     await shareDoc(html, lines.join('\n'), 'Grocery List');
   };
-  // The labels for the seven rows below are the plan's OWN day order, not a
-  // second week written out here: `weekPlans[d]` is `planDayOverride(plan, d)`,
-  // so a strip that disagreed by one would name every day of a coach's written
-  // week wrongly. See PLAN_WEEKDAYS, which src/lib/weekStart.ts decides.
-  const WEEKD = PLAN_WEEKDAYS;
+  // The rows below are labelled by DATE (`fmtDay`), because they are days
+  // ahead of today rather than the seven weekdays of one week — "Thu" on a
+  // month of rows names four different Thursdays. `WEEK_DAY_NAMES` is still
+  // what a WEEKDAY choice is called ("every Thursday"), and `PLAN_WEEKDAYS` is
+  // still the order the coach's repeating week is written in.
   const sharePlan = async () => {
     // `todayPlan`, not `plan`. This mapped the composed catalogue day, so a
     // member who sent their plan to somebody sent the meals they had replaced.
@@ -1185,8 +1291,8 @@ export default function Nutrition() {
   // A day standing in for a recipe it could not read has NO total: the figures
   // belong to the recipe and are not stored, and the generated stand-in's `K`
   // summed under the recipe's name is a number for a plate nobody is serving.
-  const weekPlans = view === 'week'
-    ? weekPlan.map((p, d) => ({ plan: p, waiting: weekWaiting[d], tot: { K: weekWaiting[d] ? null : p.reduce((a, m) => a + m.K, 0) } }))
+  const weekPlans = view !== 'today'
+    ? weekPlan.map((p, d) => ({ day: days[d] ?? today, plan: p, waiting: weekWaiting[d], tot: { K: weekWaiting[d] ? null : p.reduce((a, m) => a + m.K, 0) } }))
     : [];
 
   const G = layout.gutter;
@@ -1359,7 +1465,7 @@ export default function Nutrition() {
     return (
       <View key={`${m.pos}-${dishKey(m)}`} style={dim ? { opacity: 0.5 } : undefined}>
         {ruled ? <Rule /> : null}
-        <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
+        <Pressable onPress={() => openMeal(m, today)} accessibilityRole="button"
           // Not `m.n`. A Pressable is one accessibility element, so a
           // label on it REPLACES the lines below rather than adding
           // to them — and the line it was replacing hardest is the
@@ -1420,6 +1526,19 @@ export default function Nutrition() {
   // photograph, the credit, the unmeasured ingredients, the disclaimer, and
   // WHICH of the two "Use This Meal" paths a tap takes — hangs off this.
   const sheetRecipe = recipe && isRecipeMeal(recipe) ? recipe : null;
+  // What is planned at the open sheet's slot ON ITS OWN DAY, and which of the
+  // three sources said so. The two `sourceId`s below are asked of each layer
+  // separately rather than of the winner, because the sheet offers both
+  // buttons and each must say what IT holds: a member can have planned this
+  // dish for the 25th and for every Thursday, and taking it off one of them is
+  // not taking it off the other.
+  const sheetHit = recipe && recipe.pos >= 0 ? refAt(planDay, recipe.pos) : null;
+  const sheetOnDate = recipe && recipe.pos >= 0 && planDay.key ? datePlan[planDay.key]?.[recipe.pos]?.sourceId ?? null : null;
+  const sheetOnWeekday = recipe && recipe.pos >= 0 ? recipePlanAt(recipePlan, planDay.weekday, recipe.pos)?.sourceId ?? null : null;
+  const sheetWeekdayName = WEEK_DAY_NAMES[planDay.weekday] ?? '';
+  /** Which of the member's OWN two choices holds this slot, if either. A
+   *  coach's pin is not one, and is not taken out from this sheet. */
+  const sheetMine: 'date' | 'weekday' | null = sheetHit && sheetHit.from !== 'coach' ? sheetHit.from : null;
   const sheetAllergens = !recipe ? [] : sheetRecipe ? recipeAllergens(sheetRecipe, c.avoid) : mealAllergens(recipe, c.avoid);
   // One reader per DISTINCT planned recipe whose dish is not already in hand —
   // by `sourceId`, so the same recipe in two slots, or on three days, is one
@@ -1434,14 +1553,34 @@ export default function Nutrition() {
   // ponytail: one read per planned recipe, no cross-screen cache. If a member
   // planning seven recipes a week turns out to be common, cache the replies by
   // sourceId in src/ui/useRecipeSearch.ts, where the gate already lives.
-  const recipesToRead = [{ d: todayIdx, meals: plan }, ...week.map((day, d) => ({ d, meals: day }))]
-    .reduce<{ sourceId: number; slot: Slot }[]>((acc, { d, meals }) => {
-      for (const m of meals) {
-        const ref = refAt(d, m.pos);
-        if (ref && !recipeLive[ref.sourceId] && !acc.some((x) => x.sourceId === ref.sourceId)) acc.push({ sourceId: ref.sourceId, slot: m.slot });
-      }
-      return acc;
-    }, []);
+  // ── what a horizon costs, and the bound on it ──────────────────────────
+  //
+  // Every planned recipe whose dish is not already in hand is one detail read,
+  // and a detail is 1.1 Spoonacular points. This account is on the Cook plan,
+  // which BILLS an overrun at half a cent a point rather than refusing it, so a
+  // month of planned dinners is real money on a screen somebody opens daily.
+  //
+  // Two rules, and together they are why this is no longer a map over a fixed
+  // week. Only the days ACTUALLY ON SCREEN are read, so drawing today does not
+  // pay for a month. And the number is BOUNDED: the days are walked
+  // nearest-first, so the bound falls on the far end of the horizon and
+  // planning further ahead never takes today's recipes away. What the bound
+  // left out is said on screen rather than quietly not loaded.
+  //
+  // Still one read per distinct `sourceId` and never one per row: the same
+  // dinner on four days is one read, which is what the `seenRefs` set is for.
+  const RECIPE_READ_BUDGET = 12;
+  const seenRefs = new Set<number>();
+  const recipesToRead: { sourceId: number; slot: Slot }[] = [];
+  for (const { day, meals } of [{ day: today, meals: plan }, ...week.map((meals, d) => ({ day: days[d] ?? today, meals }))]) {
+    for (const m of meals) {
+      const hit = refAt(day, m.pos);
+      if (!hit || recipeLive[hit.ref.sourceId] || seenRefs.has(hit.ref.sourceId)) continue;
+      seenRefs.add(hit.ref.sourceId);
+      if (recipesToRead.length < RECIPE_READ_BUDGET) recipesToRead.push({ sourceId: hit.ref.sourceId, slot: m.slot });
+    }
+  }
+  const recipesUnread = seenRefs.size - recipesToRead.length;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -1476,7 +1615,7 @@ export default function Nutrition() {
           options={[
             { key: 'plan', label: 'Plan' },
             { key: 'targets', label: 'Targets', onPress: () => router.push('/(client)/goal') },
-            { key: 'recipes', label: 'Recipes', disabled: plan.length === 0, onPress: () => { if (todayPlan[0]) setRecipe(todayPlan[0]); } },
+            { key: 'recipes', label: 'Recipes', disabled: plan.length === 0, onPress: () => { if (todayPlan[0]) openMeal(todayPlan[0], today); } },
           ]} />
 
         {/* ── the hero: what is left to eat today ──────────────────────────
@@ -1632,9 +1771,18 @@ export default function Nutrition() {
         <Section>
           {/* The mockup's "Today’s Meals" with its trailing link; the link is
               the week, which is what "See all" of a day's plan is. */}
-          <SectionHead title={view === 'today' ? 'Today’s Meals' : 'This Week'}
-            note={view === 'today' ? 'This Week' : 'Today'}
-            onPress={() => setView((v) => (v === 'today' ? 'week' : 'today'))} />
+          <SectionHead title={view === 'today' ? 'Today’s Meals' : view === 'week' ? 'This Week' : 'This Month'}
+            note={view === 'today' ? fmtDay(today.key) : rangeLabel} />
+          {/* How far ahead the member is looking AND planning. It was a link
+              that flipped between today and the week; a month is a third
+              thing, and the shopping list and the recipe reads below both
+              follow whichever is chosen rather than a week nobody asked for. */}
+          <Segmented style={{ marginBottom: sp.md }} value={view} onChange={(v) => setView(v)}
+            options={[
+              { key: 'today', label: 'Today' },
+              { key: 'week', label: 'This Week' },
+              { key: 'month', label: 'This Month' },
+            ]} />
 
           {/* An exclusion the engine could not honour, said before the plan
               rather than buried in it. `poolFilter` falls back to the
@@ -1652,13 +1800,38 @@ export default function Nutrition() {
               <Flag tone={t.crit}>{gapNote}</Flag>
             </View>
           ) : null}
+          {/* The catalogue wraps. Said here rather than letting the same dinner
+              arrive twice unannounced — see `horizonRepeats`. */}
+          {horizonRepeats ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Flag tone={t.warn}>
+                Your plan has enough meals for {num(horizonRepeats)} days, so from day {num(horizonRepeats + 1)} this list starts again from the first one. Planning your own recipes, or excluding fewer ingredients, gives you more to choose from.
+              </Flag>
+            </View>
+          ) : null}
+          {/* What the read budget left out. A recipe nobody read is a row
+              standing in for a meal the member chose, and a member who is not
+              told that reads the stand-in as their plan. */}
+          {recipesUnread ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Flag tone={t.warn}>
+                {recipesUnread === 1 ? 'One recipe' : `${num(recipesUnread)} recipes`} you planned further ahead {recipesUnread === 1 ? 'is' : 'are'} not loaded yet, so your plan’s own meal is shown on {recipesUnread === 1 ? 'that day' : 'those days'}. Choose Today or This Week to see {recipesUnread === 1 ? 'it' : 'them'}.
+              </Flag>
+            </View>
+          ) : null}
           {/* The day as the plan composed it, every slot, with the member's
               planned recipes standing in where their dish is in hand. */}
           {view === 'today' ? todayPlan.map((m, i) => mealRow(m, i > 0, false, true)) : null}
-          {view === 'week' ? weekPlans.map((wp, d) => (
+          {view !== 'today' ? weekPlans.map((wp, d) => (
               <View key={d} style={{ marginBottom: sp.xl }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.sm }}>
-                  <Text accessibilityRole="header" style={{ ...ty.caption, ...font('700'), color: t.ink }}>{WEEKD[d]}</Text>
+                  {/* The DATE, not the weekday. These rows are days ahead of
+                      today now, so "Thu" on a month of rows would name four
+                      different Thursdays identically and a member could not
+                      tell which one they were planning. */}
+                  <Text accessibilityRole="header" style={{ ...ty.caption, ...font('700'), color: t.ink }}>
+                    {wp.day.offset === 0 ? `Today · ${fmtDay(wp.day.key)}` : fmtDay(wp.day.key)}
+                  </Text>
                   {/* A dash, not a sum, on a day standing in for a recipe it
                       could not read. See `weekPlans`. */}
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}
@@ -1679,7 +1852,7 @@ export default function Nutrition() {
                   // of the ingredient list, unmeasured ones included.
                   const inIt = isRecipeMeal(m) ? recipeAllergens(m, c.avoid) : mealAllergens(m, c.avoid);
                   return (
-                  <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button"
+                  <Pressable key={m.pos} onPress={() => openMeal(m, wp.day)} accessibilityRole="button"
                     // The mark this arm was given is on the row and in the
                     // sentence. See `mealRowSpoken`.
                     accessibilityLabel={mealRowSpoken({
@@ -1763,7 +1936,7 @@ export default function Nutrition() {
                   below is standing in for it — a failed read is not an empty
                   slot, and a ref has no figures to draw — and this says which
                   recipe, and whether it is still being read or could not be. */}
-              {recipesWaiting.map(({ pos, ref, mine }) => {
+              {recipesWaiting.map(({ pos, ref, from, mine }) => {
                 const read = recipeReads[ref.sourceId];
                 const failed = read && !read.loading && read.result && read.result.status !== 'ready' ? read.result : null;
                 return (
@@ -1784,7 +1957,9 @@ export default function Nutrition() {
                               COACH pinned is the coach's pick and is not taken
                               out from here, the same as a coach's meal. */}
                           {mine ? (
-                            <Ghost label="Back to Plan’s Meal" a11yLabel={`Take ${ref.title} out of today’s plan`} onPress={() => unplanRecipe(pos)} />
+                            <Ghost label="Back to Plan’s Meal"
+                              a11yLabel={from === 'date' ? `Take ${ref.title} off ${fmtDay(today.key)}` : `Take ${ref.title} off every ${WEEK_DAY_NAMES[today.weekday] ?? ''}`}
+                              onPress={() => unplanRecipe(pos, from === 'date' ? 'date' : 'weekday')} />
                           ) : null}
                         </View>
                       </>
@@ -1851,7 +2026,7 @@ export default function Nutrition() {
                   this says is which day, and that the shopping followed it. */}
               {recipeInPlan ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  Planned for {WEEKD[todayIdx] ?? 'today'} — This Week, the Grocery List and the shared plan are built from it. Another day keeps your plan’s own meal until you choose one there.
+                  Planned for {fmtDay(today.key)} — the days ahead, the Grocery List and the shared plan are built from it. Another day keeps your plan’s own meal until you choose one there, and a recipe you planned for every {WEEK_DAY_NAMES[today.weekday] ?? 'week'} stands behind it.
                 </Text>
               ) : null}
               {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
@@ -2047,7 +2222,7 @@ export default function Nutrition() {
                 return (
                 <View key={m.pos}>
                   {i > 0 ? <Rule /> : null}
-                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
+                  <Pressable onPress={() => openMeal(m, today)} accessibilityRole="button"
                     // The same sentence the other two meal lists say, so the
                     // three cannot drift apart again. See `mealRowSpoken`.
                     accessibilityLabel={mealRowSpoken({ name: m.n, allergens: inIt, kcal: num(m.K) })}
@@ -2080,7 +2255,7 @@ export default function Nutrition() {
         {/* A row, not a second green bar: Log Meal is this screen's one
             action, and a full-width Cta at the foot of it read as a rival. */}
         <Section>
-          <ListRow icon="check" tone="brand" title="Grocery List" note={`${grocCount} ${grocCount === 1 ? 'item' : 'items'} · this week’s plan`} onPress={() => setShowGrocery(true)} />
+          <ListRow icon="check" tone="brand" title="Grocery List" note={`${grocCount} ${grocCount === 1 ? 'item' : 'items'} · ${rangeLabel}`} onPress={() => setShowGrocery(true)} />
         </Section>
 
         {/* ── how you eat, and what to leave out (collapsible) ────────────
@@ -2298,13 +2473,35 @@ export default function Nutrition() {
                     takes the recipe out — and it only writes a swap when it is
                     a DIFFERENT dish from the one the plan composed, so a
                     coach's pick handed back stays the coach's pick. */}
-                {sheetRecipe ? (
-                  recipePlanAt(recipePlan, todayIdx, recipe.pos)?.sourceId === sheetRecipe.sourceId
-                    ? <Ghost label="Back to Plan’s Meal" icon="swap" onPress={() => { unplanRecipe(recipe.pos); setRecipe(null); }} />
-                    : <Ghost label="Use This Meal" icon="check" onPress={() => { planRecipe(sheetRecipe); setRecipe(null); }} />
-                ) : recipePlanAt(recipePlan, todayIdx, recipe.pos) ? (
+                {/* A recipe is planned for a DAY or for a WEEKDAY, and both
+                    are offered because a member means both: "Thursday the
+                    25th" is one dinner, "every Thursday" is a preference.
+                    Neither button writes over the other — the date is simply
+                    read first — so each one says what it takes out. */}
+                {sheetRecipe ? (<>
+                  {planDay.key ? (
+                    sheetOnDate === sheetRecipe.sourceId
+                      ? <Ghost label={`Remove From ${fmtDay(planDay.key)}`} icon="swap"
+                          a11yLabel={`Take ${sheetRecipe.n} off ${fmtDay(planDay.key)}`}
+                          onPress={() => { unplanRecipe(recipe.pos, 'date'); setRecipe(null); }} />
+                      : <Ghost label={`Plan for ${fmtDay(planDay.key)}`} icon="check"
+                          a11yLabel={`Plan ${sheetRecipe.n} for ${fmtDay(planDay.key)} only`}
+                          onPress={() => { planRecipe(sheetRecipe, 'date'); setRecipe(null); }} />
+                  ) : null}
+                  {sheetOnWeekday === sheetRecipe.sourceId
+                    ? <Ghost label={`Remove From Every ${sheetWeekdayName}`} icon="swap"
+                        a11yLabel={`Take ${sheetRecipe.n} off every ${sheetWeekdayName}`}
+                        onPress={() => { unplanRecipe(recipe.pos, 'weekday'); setRecipe(null); }} />
+                    : <Ghost label={`Every ${sheetWeekdayName}`} icon="check"
+                        a11yLabel={`Plan ${sheetRecipe.n} for every ${sheetWeekdayName}`}
+                        onPress={() => { planRecipe(sheetRecipe, 'weekday'); setRecipe(null); }} />}
+                </>) : sheetMine ? (
+                  /* A generated dish in a slot one of the member's own choices
+                     holds. Using it takes out the one that is WINNING there and
+                     leaves the other standing: clearing the 25th falls back to
+                     every Thursday, which is what the member still said. */
                   <Ghost label="Use This Meal" icon="check" onPress={() => {
-                    unplanRecipe(recipe.pos);
+                    unplanRecipe(recipe.pos, sheetMine);
                     if (plan[recipe.pos]?.idx !== recipe.idx) choose(recipe.pos, recipe.idx);
                     setRecipe(null);
                   }} />
@@ -2312,6 +2509,19 @@ export default function Nutrition() {
                   ? <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
                   : <Ghost label="Use This Meal" icon="check" onPress={() => { choose(recipe.pos, recipe.idx); setRecipe(null); }} />}
               </>)}
+              {/* Which of the two choices this row came from, said where the
+                  buttons that clear them are. A member who cannot tell "every
+                  Thursday" from "Thursday the 25th" cannot clear either one
+                  with any confidence. */}
+              {sheetHit ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  {sheetHit.from === 'date'
+                    ? `Planned for ${fmtDay(planDay.key)} only.`
+                    : sheetHit.from === 'weekday'
+                      ? `Planned for every ${sheetWeekdayName}.`
+                      : `Your coach planned this for every ${sheetWeekdayName}.`}
+                </Text>
+              ) : null}
               {sheetAllergens.length ? (
                 <View style={{ marginTop: sp.md }}>
                   {/* Two different reasons a dish contains what was excluded,
@@ -2411,7 +2621,17 @@ export default function Nutrition() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>Grocery List</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
+            {/* The range, never just "this week": the list follows the
+                selector now, so which days it covers is the one fact that
+                changes under it. */}
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>{rangeLabel} · {DIET_LABEL[diet]} · sorted by aisle</Text>
+            {/* Nobody buys thirty days of fresh food at once. Said on the sheet
+                somebody actually shops from, with the way to shorten it. */}
+            {days.length > 7 ? (
+              <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                This is {spanLabel} of food. Buy the fresh things a few days at a time — choose This Week above the meals for one week’s list.
+              </Flag>
+            ) : null}
             {/* The list is built from the week, and the week can contain the
                 thing the member excluded — `poolFilter` falls back to the
                 unfiltered pool rather than leaving a slot empty. This sheet

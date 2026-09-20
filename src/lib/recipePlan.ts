@@ -93,8 +93,10 @@ const isPos = (pos: number) => Number.isInteger(pos) && pos >= 0;
 /** A day the week actually has. A stored 9 is not a day and never was one. */
 const isDay = (d: number) => Number.isInteger(d) && d >= 0 && d < PLAN_WEEK_DAYS;
 
-/** One day's refs, rebuilt from whatever was handed in. */
-function dayRefsOf(v: unknown): Record<number, RecipeRef> {
+/** One day's refs, rebuilt from whatever was handed in. Exported for
+ *  src/lib/mealHorizon.ts, whose date-keyed layer keeps a day's refs the same
+ *  way: one reader, so the two layers cannot come to store different things. */
+export function dayRefsOf(v: unknown): Record<number, RecipeRef> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
   const out: Record<number, RecipeRef> = {};
   for (const [k, stored] of Object.entries(v as Record<string, unknown>)) {

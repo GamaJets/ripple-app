@@ -19,8 +19,8 @@ is paid again on every turn of the session that opened it.
 | 3,313 | 50k | `app/(trainer)/client.tsx` |
 | 3,298 | 45k | `studio-web/app/close/page.tsx` |
 | 3,101 | 50k | `app/(client)/scans.tsx` |
+| 2,867 | 48k | `app/(client)/nutrition.tsx` |
 | 2,806 | 37k | `studio-web/app/door/page.tsx` |
-| 2,647 | 44k | `app/(client)/nutrition.tsx` |
 | 2,595 | 35k | `studio-web/app/payroll/page.tsx` |
 | 2,574 | 38k | `app/(trainer)/log-session.tsx` |
 | 2,554 | 32k | `src/lib/gymExport.ts` |
@@ -56,7 +56,7 @@ is paid again on every turn of the session that opened it.
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 
-Total: 46 files, 115,932 lines, ~1673k tokens if every one were read whole.
+Total: 46 files, 116,152 lines, ~1677k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -1232,6 +1232,101 @@ Total: 46 files, 115,932 lines, ~1673k tokens if every one were read whole.
 2495-3101     fn               series
 ```
 
+## `app/(client)/nutrition.tsx`
+
+2,867 lines · ~48k tokens · 88 anchors
+
+```
+147-181       §        where the calorie target came from (TF-29)
+182-186       fn       rateIn
+187-196       fn       onDate
+197-200       fn       targetBasis
+201-244       fn         w
+245-250       §        real recipes in the list
+251-253       fn       sameDish
+254-258       fn       dishKey
+259-274       fn       openLink
+275-289       type     PlannedRead
+290-298       fn       PlannedRecipeRead
+299-395       default  Nutrition
+396-419       §        real recipes
+420-443       fn         onRecipeRead
+444-464       fn         logPlanned
+465-479       §        whose shop, and which week
+480-492       fn         grocWeekKey
+493-540       §        whose swaps
+541-614       §        and whose planned recipes
+615-628       fn         pull
+629-681       fn         removeMeal
+682-706       fn         photoLog
+707-758       fn         runPhotoLog
+759-759       fn         barcodeLog
+760-778       fn         describeLog
+779-800       fn           whole
+801-802       fn             outs
+803-803       fn             refused
+804-833       fn             unsent
+834-835       fn         adjustFor
+836-844       fn         cyclingAdjust
+845-845       fn         openWeightGoal
+846-861       §        and why every one of these is memoised
+862-879       fn         energyPlan
+880-900       §        which day of the coach's week the member is standing in
+901-903       fn         coachOverride
+904-909       fn         input
+910-910       fn         snacks
+911-911       fn         planHasSnacks
+912-913       fn         planSlots
+914-937       §        the plan, with the planned recipes in it
+938-949       fn         recipeDish
+950-958       §        the days on screen
+959-971       fn         days
+972-976       fn         coachRefs
+977-980       fn         plannedSrc
+981-982       fn         refAt
+983-992       fn         withRecipes
+993-995       fn         waitingIn
+996-997       fn         todayPlan
+998-998       fn         todayWaiting
+999-1003      fn         slotMeals
+1004-1011     fn         genSlotMeals
+1012-1019     fn         choose
+1020-1031     fn         openMeal
+1032-1042     fn         planRecipe
+1043-1050     fn         unplanRecipe
+1051-1073     fn         slotOptions
+1074-1075     fn         coachPick
+1076-1090     fn         swap
+1091-1131     §        the recipe search, and only when asked
+1132-1144     fn         recipeInPlan
+1145-1146     fn         coachWeekDay
+1147-1156     fn         week
+1157-1163     fn         weekPlan
+1164-1164     fn         weekWaiting
+1165-1167     fn         weekUnread
+1168-1168     fn         recipeWeek
+1169-1186     fn         groc
+1187-1189     fn         repeatsOn
+1190-1196     §        the exclusions that could not be honoured, computed once
+1197-1207     fn         gapNote
+1208-1214     fn         weekAllergens
+1215-1215     fn         grocCount
+1216-1216     fn         grocKeys
+1217-1217     fn         grocChecked
+1218-1225     fn         toggleGroc
+1226-1270     fn         shareGrocery
+1271-1273     fn         sharePlan
+1274-1274     fn           rows
+1275-1320     fn           labels
+1321-1353     §        and whether that burn is a CURRENT reading
+1354-1431     §        water
+1432-1439     §        today's list: the rows, and how one is drawn
+1440-1451     fn         matchesQuery
+1452-1461     fn         mealRow
+1462-1555     fn           planned
+1556-2867     §        what a horizon costs, and the bound on it
+```
+
 ## `studio-web/app/door/page.tsx`
 
 2,806 lines · ~37k tokens · 54 anchors
@@ -1291,95 +1386,6 @@ Total: 46 files, 115,932 lines, ~1673k tokens if every one were read whole.
 2538-2777     fn         activeMembers
 2778-2794     fn       Section
 2795-2806     fn       Banner
-```
-
-## `app/(client)/nutrition.tsx`
-
-2,647 lines · ~44k tokens · 82 anchors
-
-```
-143-177       §        where the calorie target came from (TF-29)
-178-182       fn       rateIn
-183-192       fn       onDate
-193-196       fn       targetBasis
-197-240       fn         w
-241-246       §        real recipes in the list
-247-249       fn       sameDish
-250-254       fn       dishKey
-255-270       fn       openLink
-271-285       type     PlannedRead
-286-294       fn       PlannedRecipeRead
-295-387       default  Nutrition
-388-405       §        real recipes
-406-429       fn         onRecipeRead
-430-450       fn         logPlanned
-451-465       §        whose shop, and which week
-466-478       fn         grocWeekKey
-479-526       §        whose swaps
-527-580       §        and whose planned recipes
-581-594       fn         pull
-595-647       fn         removeMeal
-648-672       fn         photoLog
-673-724       fn         runPhotoLog
-725-725       fn         barcodeLog
-726-744       fn         describeLog
-745-766       fn           whole
-767-768       fn             outs
-769-769       fn             refused
-770-799       fn             unsent
-800-801       fn         adjustFor
-802-810       fn         cyclingAdjust
-811-811       fn         openWeightGoal
-812-827       §        and why every one of these is memoised
-828-845       fn         energyPlan
-846-866       §        which day of the coach's week the member is standing in
-867-869       fn         coachOverride
-870-875       fn         input
-876-876       fn         snacks
-877-877       fn         planHasSnacks
-878-879       fn         planSlots
-880-903       §        the plan, with the planned recipes in it
-904-924       fn         recipeDish
-925-927       fn         refAt
-928-937       fn         withRecipes
-938-940       fn         waitingIn
-941-942       fn         todayPlan
-943-943       fn         todayWaiting
-944-948       fn         slotMeals
-949-956       fn         genSlotMeals
-957-968       fn         choose
-969-976       fn         planRecipe
-977-981       fn         unplanRecipe
-982-1004      fn         slotOptions
-1005-1006     fn         coachPick
-1007-1021     fn         swap
-1022-1062     §        the recipe search, and only when asked
-1063-1069     fn         recipeInPlan
-1070-1071     fn         coachWeekDay
-1072-1079     fn         week
-1080-1086     fn         weekPlan
-1087-1087     fn         weekWaiting
-1088-1090     fn         weekUnread
-1091-1091     fn         recipeWeek
-1092-1092     fn         groc
-1093-1099     §        the exclusions that could not be honoured, computed once
-1100-1110     fn         gapNote
-1111-1117     fn         weekAllergens
-1118-1118     fn         grocCount
-1119-1119     fn         grocKeys
-1120-1120     fn         grocChecked
-1121-1128     fn         toggleGroc
-1129-1164     fn         shareGrocery
-1165-1167     fn         sharePlan
-1168-1168     fn           rows
-1169-1214     fn           labels
-1215-1247     §        and whether that burn is a CURRENT reading
-1248-1325     §        water
-1326-1333     §        today's list: the rows, and how one is drawn
-1334-1345     fn         matchesQuery
-1346-1355     fn         mealRow
-1356-1436     fn           planned
-1437-2647     fn         recipesToRead
 ```
 
 ## `studio-web/app/payroll/page.tsx`
