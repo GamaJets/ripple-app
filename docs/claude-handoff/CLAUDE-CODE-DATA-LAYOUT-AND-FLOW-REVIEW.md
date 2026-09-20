@@ -474,7 +474,7 @@ The builder is a large, capable surface with client selection, template operatio
 - Use progressive disclosure for advanced prescription fields.
 - Keep exercise rows compact and reorderable; editing one exercise must not visually expand every exercise.
 - Place injury disclosures before assignment, with existing acknowledgement behavior intact.
-- Keep `Programme Checks` immediately before final assignment.
+- Keep `Program Checks` immediately before final assignment.
 - Distinguish Save Draft, Save Template, Save Program, and Assign; do not label different writes as the same action.
 - Preserve held/unassignable client logic and partial assignment results.
 

@@ -306,7 +306,7 @@ writeFileSync(sqlPath,
 // exercises.json: a translated name and description for each of the 601
 // records. Staged as its own file, because it lands in a different table and
 // because a translation set is the thing somebody is most likely to want to
-// read before applying — a wrong movement name in a programme is a person doing
+// read before applying — a wrong movement name in a program is a person doing
 // the wrong exercise.
 //
 // Keyed by RepDB's OWN id, which is why planTranslations() joins through the

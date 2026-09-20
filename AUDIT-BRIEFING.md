@@ -94,7 +94,7 @@ edge-function sites). Tools built and tested: `src/lib/authReadFate.ts`, `authed
 
 A hand-added client lives in `coach_clients`, has no Repple account, and has **never been asked** about
 injuries — so the roster leaves that list `undefined` deliberately. Three screens flattened it with `?? []`
-and `guardInjuries` returned `ALLOWED`. A person nobody had asked opened the programme gate as though they
+and `guardInjuries` returned `ALLOWED`. A person nobody had asked opened the program gate as though they
 had disclosed none. Fixed via `src/lib/disclosureFact.ts` (4 states, including a row that *arrived* with no
 injury list — distinct from a failed read).
 
@@ -148,7 +148,7 @@ and not the `readFileSync` over the list the walk produced. Both now fixed and c
 | 2 | **iOS build** | `eas build --platform ios --profile production-owner`. Needs a real terminal for the Apple prompts. The lockfile desync that killed the last one is fixed and gated. ⚠️ *"Synced capabilities: No updates"* appeared for both targets last time — removing HealthKit from Studio was the whole reason that build had to be interactive, and Apple reported no capability change. Treat that config comment as **unverified**. |
 | 3 | **Part 2940** — AI-coach health consent | The only schema drift left. Written and reviewed; needs your call on what the consent covers. ~2 h after. |
 | 4 | **Four decisions about recording a member's sex** | `clients.sex` is read by the heart-rate calorie estimate and **written by nothing, anywhere**. Needed: what to call it · whether a third option exists (the column is nullable, so "prefer not to say" is expressible — but the member must then be told the figure stays blank) · which vocabulary is canonical (`'f'\|'m'` in the DB vs `'male'\|'female'` in the estimate) · what the field says about itself. A wrong set of options is worse than a missing field, which is why nothing was invented. |
-| 5 | **Group programme visibility** | Needs a column **and** reverses an access decision recorded in part 134. Product call. |
+| 5 | **Group program visibility** | Needs a column **and** reverses an access decision recorded in part 134. Product call. |
 | 6 | **Four stale git worktrees** | 1.5 GB. All four checked — one held a finished contrast fix that had already reached main by another route. Deleting was blocked by a permission prompt. |
 
 ```bash

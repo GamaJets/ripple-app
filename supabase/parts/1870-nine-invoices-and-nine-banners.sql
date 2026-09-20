@@ -164,7 +164,7 @@ comment on function public.notification_digest_body(text, integer) is
 --
 -- '/(client)/injuries' for the same reason, and it is 'admin' for the reason
 -- '/(client)/intake' already is: both are a form the coach needs before they
--- may write a programme, which is what that switch's label means by paperwork.
+-- may write a program, which is what that switch's label means by paperwork.
 --
 -- Everything else in this function is byte for byte part 900's. Mirrored by
 -- CHANNEL_BY_ROUTE in src/lib/notifyDispatch.ts, whose test now checks

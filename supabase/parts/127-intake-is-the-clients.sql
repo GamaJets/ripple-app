@@ -6,7 +6,7 @@
 -- training history, no account of what they have already tried and abandoned,
 -- no idea which days of the week they can actually be in a gym. Every coach in
 -- the trade takes this on paper on day one; Repple asked a coach to start
--- without it and then gated their programme on injuries the client had thought
+-- without it and then gated their program on injuries the client had thought
 -- to volunteer.
 --
 -- It lands on `clients` rather than in a table of its own, and that is a

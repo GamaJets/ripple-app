@@ -228,7 +228,7 @@
 //     asserting an absence. app/(trainer)/client-training.tsx had exactly that
 //     — `assigned.status === 'loading' ? … : assigned.status === 'error' ? … :
 //     !program ? "The read came back and they are on no coach-assigned
-//     programme"` — where under 'partial' a client whose row fell off a page
+//     program"` — where under 'partial' a client whose row fell off a page
 //     ordered by `client_id` produced that sentence about a client who had one.
 //     It was found by reading, not by this rule, and it is fixed; the rule still
 //     cannot reach its shape. See "what this cannot catch", below.
@@ -263,7 +263,7 @@
 // The first is that the sentences did the work. They were written by reading
 // each site and arguing, in its own terms, why 'partial' is admissible there —
 // and two of the thirteen turned out not to be admissible at all. `planVsActual`
-// said "on no coach-assigned programme" off a truncated assignment read, on both
+// said "on no coach-assigned program" off a truncated assignment read, on both
 // the coach's screen and the member's; `publishConsentOf` said a client had not
 // agreed to a photo when the row proving they had was on the other side of a
 // page. Both are fixed. A survey that had trusted the sites and skipped the

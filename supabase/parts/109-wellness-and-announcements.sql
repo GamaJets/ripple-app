@@ -315,7 +315,7 @@ create index if not exists idx_announcements_coach_created
 -- clears. So a client who leaves a coach stops seeing that coach's
 -- announcements with no extra bookkeeping — which is the right answer for a
 -- broadcast, and deliberately NOT the answer part 69 reached for a training
--- programme. A plan somebody is following stays theirs when they change coach;
+-- program. A plan somebody is following stays theirs when they change coach;
 -- "the 6pm class is cancelled tonight" from a coach they no longer train with
 -- is not news addressed to them.
 create or replace function public.is_my_coach(c uuid)

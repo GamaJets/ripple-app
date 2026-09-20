@@ -1,26 +1,26 @@
--- ── A coach writes the bootcamp programme once ─────────────────────────────
+-- ── A coach writes the bootcamp program once ─────────────────────────────
 --
--- A coach running a bootcamp of eight people was writing the same programme
+-- A coach running a bootcamp of eight people was writing the same program
 -- eight times, because `assigned_programs` is keyed one row per client and the
 -- builder assigns to exactly one of them. The library's bulk assign (the sheet
 -- in app/(trainer)/templates.tsx) sends one template to a tick-list, which is
 -- the same eight writes with fewer taps, and then forgets who was in the list —
--- so "who is on the bootcamp programme" is a question nothing could answer the
+-- so "who is on the bootcamp program" is a question nothing could answer the
 -- next morning.
 --
 -- ── What this stores, and the thing it deliberately does NOT store ─────────
 --
 -- A group owns the LIST. It does not own the PLAN any client is training.
 --
--- The obvious alternative was a group that owns the programme, with clients
+-- The obvious alternative was a group that owns the program, with clients
 -- pointing at it — one row of content for eight people, no duplication, an
 -- edit that reaches everybody at once. It was rejected, and the reason is the
 -- read path rather than the write path:
 --
---   · Everything downstream of a training programme is per-client and already
+--   · Everything downstream of a training program is per-client and already
 --     keyed that way — the client's Train tab, logged sets, adherence, the
 --     progression maths, the injury acknowledgement of a specific movement for
---     a specific person. A group-owned programme would have to be reconciled
+--     a specific person. A group-owned program would have to be reconciled
 --     against those on every read, in the client app as well as the coach's,
 --     and a reconciliation that runs on every read is a reconciliation that
 --     will be wrong somewhere.
@@ -36,14 +36,14 @@
 --     that owned the plan would need the client app taught about groups to
 --     show anybody anything, and this goes out over the air tonight.
 --
--- So assignment stays a fan-out: one programme, written into each member's own
+-- So assignment stays a fan-out: one program, written into each member's own
 -- `assigned_programs` row, exactly as if the coach had typed it eight times.
 -- Nothing downstream changes, one client's copy can be edited in the builder
 -- without touching anybody else's, and "who has it" is answered by comparing
--- each member's actual row against the group's programme rather than by
+-- each member's actual row against the group's program rather than by
 -- bookkeeping that can drift away from the truth it describes.
 --
--- The cost is honest and is worth naming: editing the group's programme does
+-- The cost is honest and is worth naming: editing the group's program does
 -- NOT retroactively change what anybody is on. It changes what the next assign
 -- sends, and the group screen then shows the members as being on something
 -- different — which is a true statement about their training, and the coach
@@ -68,7 +68,7 @@
 --
 -- The coach owns both tables and is the only party to either. A group is the
 -- coach's own filing, not content addressed to a client: the client sees their
--- programme on their Train tab exactly as before and has nothing to gain from
+-- program on their Train tab exactly as before and has nothing to gain from
 -- learning they were in a list of eight. So there is no client-read policy
 -- here, unlike `injury_acknowledgements` (part 79) where the client is
 -- entitled to see that what they disclosed was read.
@@ -82,9 +82,9 @@ create table if not exists public.program_groups (
   id         uuid        primary key default gen_random_uuid(),
   coach_id   uuid        not null references public.profiles(id) on delete cascade,
   name       text        not null,
-  -- The programme AS THE GROUP DEFINES IT, and not as anybody is training it.
-  -- Nullable: a coach names the group and picks its programme in either order,
-  -- and a group with no programme yet is a real state the screen has to hold
+  -- The program AS THE GROUP DEFINES IT, and not as anybody is training it.
+  -- Nullable: a coach names the group and picks its program in either order,
+  -- and a group with no program yet is a real state the screen has to hold
   -- rather than a half-written row.
   --
   -- A snapshot rather than a reference to `program_templates`: a template the

@@ -7,7 +7,7 @@
 -- `ProgramExercise.note` (src/lib/programs.ts) is the only place in Repple a
 -- coach can write anything against a movement, and its own header says what it
 -- is for: "machine by the window, seat on 4" — a fact about THIS client on
--- THIS day, in THIS programme. It is stored inside the `exercises` JSONB of a
+-- THIS day, in THIS program. It is stored inside the `exercises` JSONB of a
 -- single `assigned_programs` row.
 --
 -- But most of what a coach writes there is not about that client at all. It is
@@ -20,7 +20,7 @@
 -- anywhere able to say which one they meant.
 --
 -- TrueCoach and Everfit both attach the cue to the EXERCISE, once, and it
--- rides into every programme from there. Repple had no table it could go in.
+-- rides into every program from there. Repple had no table it could go in.
 --
 -- ── A cue and a note are two different facts ──────────────────────────────
 --
@@ -29,9 +29,9 @@
 --
 --   the CUE     belongs to (coach, movement). It is the coach's default and it
 --               is the same for everybody they train. One row here.
---   the NOTE    belongs to (programme, day, exercise). It is about one person
+--   the NOTE    belongs to (program, day, exercise). It is about one person
 --               on one day — "go easy, right shoulder still sore" — and it
---               stays exactly where it is, in the programme JSONB, untouched
+--               stays exactly where it is, in the program JSONB, untouched
 --               by this part.
 --
 -- Nothing in this file reads, writes or references `assigned_programs`,
@@ -46,7 +46,7 @@
 -- note is not even a correction.
 --
 -- The same rule is why removing a cue leaves every note already prefilled from
--- it exactly as it is. Those notes are in programmes; they are what the coach
+-- it exactly as it is. Those notes are in programs; they are what the coach
 -- actually told those people; and a delete that reached into them would be
 -- rewriting coaching that has already happened.
 --
@@ -62,7 +62,7 @@
 -- dated act by a person and the sequence is the point. A cue is a current
 -- preference — the sentence you say today — and the record of what you told a
 -- particular client on a particular day already exists, in that client's
--- programme, written at the moment it was said. The history is in the notes.
+-- program, written at the moment it was said. The history is in the notes.
 --
 -- `exercise_id` is `text` and references `public.exercises(id)`, verified
 -- against the live schema rather than assumed: `exercises.id` is `text primary
@@ -106,7 +106,7 @@
 -- ── Applying this ─────────────────────────────────────────────────────────
 --
 -- Additive. One new table, its policies, its grants, one index. Nothing
--- existing is altered, no trigger is added or widened anywhere, no programme
+-- existing is altered, no trigger is added or widened anywhere, no program
 -- or note is touched, and there is no backfill: mining the notes already
 -- written for sentences that look repeated and promoting them to cues would be
 -- Repple deciding which of a coach's words were meant generally.
@@ -160,7 +160,7 @@ create table if not exists public.coach_exercise_cues (
 );
 
 comment on table public.coach_exercise_cues is
-  'A coach''s own standing cue for one movement: the sentence they say to everybody they train, written once and carried into every programme. One row per (coach, movement) by primary key. This is NOT the per-exercise note inside a programme day — that note is about one client on one day, lives in assigned_programs.exercises, and is never touched by anything here. The app PREFILLS an empty note from a cue and never overwrites a written one (prefillNote in src/lib/coachCues.ts is the only implementation of that rule), and deleting a cue leaves every note already written exactly as it is. See supabase/parts/3150.';
+  'A coach''s own standing cue for one movement: the sentence they say to everybody they train, written once and carried into every program. One row per (coach, movement) by primary key. This is NOT the per-exercise note inside a program day — that note is about one client on one day, lives in assigned_programs.exercises, and is never touched by anything here. The app PREFILLS an empty note from a cue and never overwrites a written one (prefillNote in src/lib/coachCues.ts is the only implementation of that rule), and deleting a cue leaves every note already written exactly as it is. See supabase/parts/3150.';
 
 comment on column public.coach_exercise_cues.coach_id is
   'Whose cue. Defaults to auth.uid() and is never sent by the app: a caller able to name the owner is a caller able to write into another coach''s book. References profiles(id), which is the same identity trainers(id) references and the same one is_my_client() compares against.';
@@ -172,7 +172,7 @@ comment on column public.coach_exercise_cues.cue is
   'The coach''s words. Never NULL and never blank — a row storing an empty string would prefill nothing while making every reader answer with a string that means "no cue", so clearing a cue is a DELETE and not an empty save. Bounded at 500 characters, mirrored by CUE_MAX in src/lib/coachCues.ts so the refusal is a sentence in the app rather than a 23514.';
 
 comment on column public.coach_exercise_cues.updated_at is
-  'When this cue was last written. Defaulted, and set again by the upsert. It is NOT a history: what a coach told a particular client on a particular day is recorded in that client''s programme note, written at the moment it was said, and nothing here supersedes it.';
+  'When this cue was last written. Defaulted, and set again by the upsert. It is NOT a history: what a coach told a particular client on a particular day is recorded in that client''s program note, written at the moment it was said, and nothing here supersedes it.';
 
 -- The client's read: "what does MY coach say about this movement". Filtered on
 -- the movement, scoped to a coach by the policy. `coach_id` leads because the
@@ -181,7 +181,7 @@ comment on column public.coach_exercise_cues.updated_at is
 create index if not exists coach_exercise_cues_exercise_idx
   on public.coach_exercise_cues (exercise_id, coach_id);
 
--- ── 2. nothing about a programme changes ────────────────────────────────────
+-- ── 2. nothing about a program changes ────────────────────────────────────
 --
 -- Said as a comment rather than as code, because the correct implementation of
 -- "no note is touched" is the absence of every statement that would touch one.
@@ -251,7 +251,7 @@ grant all on public.coach_exercise_cues to service_role;
 
 -- ── 5. what this part deliberately does NOT do ──────────────────────────────
 --
---   · It writes into no programme and no note. Not one row of
+--   · It writes into no program and no note. Not one row of
 --     assigned_programs or program_templates is read or altered, and there is
 --     no trigger anywhere that reaches one. The prefill is an app-side
 --     default applied to an EMPTY note; a written note is never touched.
@@ -260,7 +260,7 @@ grant all on public.coach_exercise_cues to service_role;
 --     deciding which of somebody's words were meant generally, and would put
 --     a sentence written about one client's shoulder in front of forty more.
 --   · It keeps no history. A cue is a current preference. The dated record of
---     what a coach told a particular person is that person's programme note,
+--     what a coach told a particular person is that person's program note,
 --     and it already exists.
 --   · It adds no unique constraint beyond the primary key, and needs none:
 --     (coach_id, exercise_id) IS the key, so a second cue for the same

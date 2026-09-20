@@ -2,7 +2,7 @@
 -- A movement has ONE identity and several names.
 --
 -- The catalogue is 619 movements and it is English. A member whose phone is in
--- German reads "Bent-Over Barbell Row" in a programme their coach wrote for
+-- German reads "Bent-Over Barbell Row" in a program their coach wrote for
 -- them, and a member whose phone is in Spanish reads the same. This part is
 -- where the other two names live.
 --
@@ -149,7 +149,7 @@ comment on table public.exercise_translations is
 comment on column public.exercise_translations.locale is
   'Language subtag only: de, es. English is not a translation and is refused — it is exercises.name.';
 comment on column public.exercise_translations.name is
-  'The movement as lifters in that language say it, not a literal rendering. Null where nobody was sure; the screen then shows English and says it is English, which is safe. A wrong movement name in a programme is a person doing the wrong exercise.';
+  'The movement as lifters in that language say it, not a literal rendering. Null where nobody was sure; the screen then shows English and says it is English, which is safe. A wrong movement name in a program is a person doing the wrong exercise.';
 
 alter table public.exercise_translations enable row level security;
 

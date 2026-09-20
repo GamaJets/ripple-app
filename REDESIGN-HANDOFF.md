@@ -96,7 +96,7 @@ Ported, file by file, re-applying audit fixes on every collision — never a who
 - **Kit:** `ScreenHeader`; `SectionHead` stacks at large text; **`Section` is now a card** (the single
   largest visible gap to the board), 324 between-section `<Rule />`s removed, gutter/section 16, title 22,
   `Card` carries a hairline so a card inside a section stays a box, `QuickRow` tiles are white cards.
-- **Client:** Home (goal card + tiles, snapshot), Train (programme card off the RepDB demo, Current/Past,
+- **Client:** Home (goal card + tiles, snapshot), Train (program card off the RepDB demo, Current/Past,
   mode pills), Progress (metric tabs, range chart, grouped grids), Meals (calorie card, Plan/Targets/Recipes),
   Me (card header, stats, rows), Classes, the welcome door.
 - **Coach:** Clients (strip, Today, Needs Attention, compact roster), Client Detail, Builder (strip, day pills,
@@ -299,7 +299,7 @@ are ink at head weight. Open kit asks: `Expandable` cannot persist its state or 
 session; a tick can be taken back before save (AFTER save needs a coach UPDATE policy on `workouts` and a
 floor-queue act — not built); roster is names + one status line; Invite/Import at the top of Clients;
 Coaching Tools and Roster Actions fold away (remembered per device); stronger section heads; a client's
-programme opens as collapsed days; "Your Programmes" shortcuts in the builder and templates; RepDB stills
+program opens as collapsed days; "Your Programs" shortcuts in the builder and templates; RepDB stills
 on builder, picker and log-session rows; "can't see the updated body scan" had four causes (the sheet
 picked the newest scan WITH a metrics breakdown, no re-read on focus, same-day order by random id, and
 newest-first rows handed to a last-wins picker) — all fixed.
@@ -338,8 +338,8 @@ the contrast gate rejects the mark as text); kit parts `HeroCard`, `HeroRing`, `
 all 12 palettes and 216 tenant accents.
 
 **Fifteen screen lanes** (`da6a652` … `5468804`), every screen in all three apps, each picture on real,
-gated reads. Owner bug fixed on the way: Train's hero mixed the PROGRAMME's name with the DAY's picture and
-chips — the hero is now about the selected day; the programme is only the eyebrow.
+gated reads. Owner bug fixed on the way: Train's hero mixed the PROGRAM's name with the DAY's picture and
+chips — the hero is now about the selected day; the program is only the eyebrow.
 
 **Open kit asks from the lanes:** a `HeroCard` figure variant (44pt figure, whole-card press, no-wrap
 money); night-surface `Spark`; export `toneOf`; a bare `Meter` (no label row); `AttentionRow` trailing
@@ -444,7 +444,7 @@ comparison and currently fails only on part 2940, which is held.
 | 2 | **iOS build**, interactively. ⚠️ *"Synced capabilities: No updates"* last time means the HealthKit removal did **not** register — that config comment is unverified. |
 | 3 | **Part 2940** — AI-coach health consent. The only schema drift left. |
 | 4 | **Four decisions on recording a member's sex** — `clients.sex` is read by the calorie estimate and written by nothing. Name · whether a third option exists · canonical vocabulary (`'f'\|'m'` vs `'male'\|'female'`) · what the field says about itself. |
-| 5 | **Group programme visibility** — needs a column *and* reverses part 134's recorded access decision. |
+| 5 | **Group program visibility** — needs a column *and* reverses part 134's recorded access decision. |
 | 6 | **The logo.** The board's wordmark has a geometric green mark standing in for the double P. It cannot be resolved from a raster board. **Ask for the SVG.** |
 | 7 | **Four stale git worktrees** under `.claude/worktrees/` — 1.5 GB, all checked, safe to delete. |
 

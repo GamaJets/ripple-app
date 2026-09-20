@@ -3,7 +3,7 @@
 -- ── Why a new table and not program_templates ──────────────────────────────
 --
 -- `program_templates.coach_id` is NOT NULL: that table is a coach's own saved
--- programmes, private to them. These fifteen belong to nobody and are read by
+-- programs, private to them. These fifteen belong to nobody and are read by
 -- everybody, so filing them there would have meant inventing an owner and
 -- handing one coach the platform's catalogue.
 --
@@ -30,7 +30,7 @@
 -- bodyweight-squat all exist. It was resolved by READING each template rather
 -- than by picking a favourite. In powerlifting-peaking-4-day it appears in the
 -- same day as `front-squat`, which settles that it is not that; in stronglifts
--- and the two beginner strength programmes it sits beside bench-press,
+-- and the two beginner strength programs it sits beside bench-press,
 -- barbell-row and deadlift at 5x5. Those seven are back-squat. The eighth is in
 -- home-bodyweight-beginner, at 3x15-20, in a day whose every other movement is
 -- bodyweight — that one is bodyweight-squat.
@@ -45,7 +45,7 @@ create table if not exists public.workout_templates (
   difficulty         text not null,
   frequency_per_week smallint,
   tags               text[] not null default '{}',
-  -- The programme itself: [{name_en, exercises:[{exercise_id, sets, reps, ...}]}]
+  -- The program itself: [{name_en, exercises:[{exercise_id, sets, reps, ...}]}]
   days               jsonb not null,
   name_en            text not null,
   description_en     text,
@@ -70,7 +70,7 @@ grant select on public.workout_templates to authenticated;
 -- ── The guard ──────────────────────────────────────────────────────────────
 --
 -- A template naming a movement we do not have renders as a blank row in
--- somebody's programme, and the nine ids above prove that is not hypothetical:
+-- somebody's program, and the nine ids above prove that is not hypothetical:
 -- it is what the vendor shipped. A CHECK constraint cannot ask another table,
 -- so this is a trigger. It fires on every insert and update, names the first
 -- id it cannot find, and refuses the write.

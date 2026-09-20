@@ -601,7 +601,7 @@ end $$;
 -- ── SUPERSEDED by 69-coach-content-scope.sql ───────────────────────────────
 -- The three policies below are dropped and replaced later in the build. Their
 -- WITH CHECK constrains `coach_id` and says nothing about `client_id`, so any
--- signed-in account could write a programme, a nutrition plan or feedback for
+-- signed-in account could write a program, a nutrition plan or feedback for
 -- ANY client with no coaching link at all — and the receiving client's app
 -- renders it as their own. They also outlived the relationship, because they
 -- are not gated on is_my_client(). Left in place so this file still describes
@@ -7231,7 +7231,7 @@ grant execute on function public.my_coach() to authenticated;
 -- former coach kept read and write on the feedback, macro adjustments and
 -- assigned programs they wrote for this client. Those are their own words about
 -- their own work, which is arguable either way, but the WRITE half was not: a
--- coach who had been let go could still assign a programme.
+-- coach who had been let go could still assign a program.
 --
 -- 69-coach-content-scope.sql — which sorts and runs immediately after this file
 -- — closed it. It drops `prog_rw` / `nutri_rw` / `feedback_rw` and replaces each
@@ -7515,7 +7515,7 @@ comment on function public.end_coaching(uuid) is
 -- ▶ coach-content-scope.sql
 
 -- ─────────────────────────────────────────────────────────────────────────
--- Who may write a training programme, a nutrition plan, or coach feedback.
+-- Who may write a training program, a nutrition plan, or coach feedback.
 --
 -- Three tables carry content a coach produces FOR one named client:
 -- `assigned_programs`, `coach_nutrition` and `coach_feedback`. All three were
@@ -7530,7 +7530,7 @@ comment on function public.end_coaching(uuid) is
 -- any signed-in account could insert a row naming ANY client, provided it put
 -- its own id in `coach_id`. The receiving client's app reads these by
 -- `client_id = auth.uid()` and renders them as their plan — so a stranger could
--- put a training programme in somebody's Train tab, and a `carb_delta` in
+-- put a training program in somebody's Train tab, and a `carb_delta` in
 -- `coach_nutrition` shifts the calorie and macro targets the client eats to.
 -- No coaching link was required at any point.
 --
@@ -7544,7 +7544,7 @@ comment on function public.end_coaching(uuid) is
 -- ending a relationship revokes a coach's access to workouts, measurements,
 -- check-ins, habit logs, goals and the checklist. These three tables were not
 -- gated on it, so a FORMER coach kept read and write and could still assign a
--- programme to somebody who had left them.
+-- program to somebody who had left them.
 --
 -- ── The shape now ──────────────────────────────────────────────────────────
 --
@@ -7558,7 +7558,7 @@ comment on function public.end_coaching(uuid) is
 -- The client READS, always, and cannot write. Their access is deliberately NOT
 -- conditioned on the relationship: a plan somebody is following does not stop
 -- being theirs because they changed coach, and a client who leaves keeps the
--- programme they were given. Dropping the write is a real narrowing — the old
+-- program they were given. Dropping the write is a real narrowing — the old
 -- policy let a client DELETE feedback written about them, which is a coach's
 -- record of the working relationship and not the client's to remove.
 --
@@ -8766,7 +8766,7 @@ create index if not exists exercises_animation_path_idx
 -- just as part 71 does. Anybody skimming headings would have concluded that
 -- re-running this file renames catalogue rows — and src/lib/machines.ts,
 -- src/lib/focus.ts and `buildProgram()` all resolve exercises BY NAME, so that
--- belief is the one that gets a programme silently repointed.
+-- belief is the one that gets a program silently repointed.
 --
 -- Part 71 refused to update name or muscle_group, because programs and logs
 -- reference a row by the name it has. That still holds for OUR original rows.
@@ -11236,7 +11236,7 @@ create trigger clients_injuries_guard
 
 -- ── And a record when the coach loads one on purpose ───────────────────────
 --
--- A coach may put a movement that loads a disclosed injury into a programme
+-- A coach may put a movement that loads a disclosed injury into a program
 -- deliberately — training around a knee is their judgement and their client,
 -- and a squat is sometimes exactly the rehabilitation. What they may not do is
 -- do it without saying so.
@@ -13818,7 +13818,7 @@ create index if not exists idx_announcements_coach_created
 -- clears. So a client who leaves a coach stops seeing that coach's
 -- announcements with no extra bookkeeping — which is the right answer for a
 -- broadcast, and deliberately NOT the answer part 69 reached for a training
--- programme. A plan somebody is following stays theirs when they change coach;
+-- program. A plan somebody is following stays theirs when they change coach;
 -- "the 6pm class is cancelled tonight" from a coach they no longer train with
 -- is not news addressed to them.
 create or replace function public.is_my_coach(c uuid)
@@ -16051,7 +16051,7 @@ grant execute on function public.my_cancellation_policy() to authenticated;
 -- training history, no account of what they have already tried and abandoned,
 -- no idea which days of the week they can actually be in a gym. Every coach in
 -- the trade takes this on paper on day one; Repple asked a coach to start
--- without it and then gated their programme on injuries the client had thought
+-- without it and then gated their program on injuries the client had thought
 -- to volunteer.
 --
 -- It lands on `clients` rather than in a table of its own, and that is a
@@ -17754,29 +17754,29 @@ grant all on public.coach_nutrition to service_role;
 
 -- ▶ a-programme-written-once.sql
 
--- ── A coach writes the bootcamp programme once ─────────────────────────────
+-- ── A coach writes the bootcamp program once ─────────────────────────────
 --
--- A coach running a bootcamp of eight people was writing the same programme
+-- A coach running a bootcamp of eight people was writing the same program
 -- eight times, because `assigned_programs` is keyed one row per client and the
 -- builder assigns to exactly one of them. The library's bulk assign (the sheet
 -- in app/(trainer)/templates.tsx) sends one template to a tick-list, which is
 -- the same eight writes with fewer taps, and then forgets who was in the list —
--- so "who is on the bootcamp programme" is a question nothing could answer the
+-- so "who is on the bootcamp program" is a question nothing could answer the
 -- next morning.
 --
 -- ── What this stores, and the thing it deliberately does NOT store ─────────
 --
 -- A group owns the LIST. It does not own the PLAN any client is training.
 --
--- The obvious alternative was a group that owns the programme, with clients
+-- The obvious alternative was a group that owns the program, with clients
 -- pointing at it — one row of content for eight people, no duplication, an
 -- edit that reaches everybody at once. It was rejected, and the reason is the
 -- read path rather than the write path:
 --
---   · Everything downstream of a training programme is per-client and already
+--   · Everything downstream of a training program is per-client and already
 --     keyed that way — the client's Train tab, logged sets, adherence, the
 --     progression maths, the injury acknowledgement of a specific movement for
---     a specific person. A group-owned programme would have to be reconciled
+--     a specific person. A group-owned program would have to be reconciled
 --     against those on every read, in the client app as well as the coach's,
 --     and a reconciliation that runs on every read is a reconciliation that
 --     will be wrong somewhere.
@@ -17792,14 +17792,14 @@ grant all on public.coach_nutrition to service_role;
 --     that owned the plan would need the client app taught about groups to
 --     show anybody anything, and this goes out over the air tonight.
 --
--- So assignment stays a fan-out: one programme, written into each member's own
+-- So assignment stays a fan-out: one program, written into each member's own
 -- `assigned_programs` row, exactly as if the coach had typed it eight times.
 -- Nothing downstream changes, one client's copy can be edited in the builder
 -- without touching anybody else's, and "who has it" is answered by comparing
--- each member's actual row against the group's programme rather than by
+-- each member's actual row against the group's program rather than by
 -- bookkeeping that can drift away from the truth it describes.
 --
--- The cost is honest and is worth naming: editing the group's programme does
+-- The cost is honest and is worth naming: editing the group's program does
 -- NOT retroactively change what anybody is on. It changes what the next assign
 -- sends, and the group screen then shows the members as being on something
 -- different — which is a true statement about their training, and the coach
@@ -17824,7 +17824,7 @@ grant all on public.coach_nutrition to service_role;
 --
 -- The coach owns both tables and is the only party to either. A group is the
 -- coach's own filing, not content addressed to a client: the client sees their
--- programme on their Train tab exactly as before and has nothing to gain from
+-- program on their Train tab exactly as before and has nothing to gain from
 -- learning they were in a list of eight. So there is no client-read policy
 -- here, unlike `injury_acknowledgements` (part 79) where the client is
 -- entitled to see that what they disclosed was read.
@@ -17838,9 +17838,9 @@ create table if not exists public.program_groups (
   id         uuid        primary key default gen_random_uuid(),
   coach_id   uuid        not null references public.profiles(id) on delete cascade,
   name       text        not null,
-  -- The programme AS THE GROUP DEFINES IT, and not as anybody is training it.
-  -- Nullable: a coach names the group and picks its programme in either order,
-  -- and a group with no programme yet is a real state the screen has to hold
+  -- The program AS THE GROUP DEFINES IT, and not as anybody is training it.
+  -- Nullable: a coach names the group and picks its program in either order,
+  -- and a group with no program yet is a real state the screen has to hold
   -- rather than a half-written row.
   --
   -- A snapshot rather than a reference to `program_templates`: a template the
@@ -20829,7 +20829,7 @@ end $$;
 -- database built from this repo — a new white-label tenant, a staging copy, a
 -- local stack — gets three tables with row level security on and not one
 -- policy, which denies everybody everything. Not a subtle failure: no client
--- can read a programme, no coach can write one, and nobody can see a charge.
+-- can read a program, no coach can write one, and nobody can see a charge.
 -- Production is fine only because production was never built from these files.
 --
 -- The remaining NINETEEN are on tables that do have declared policies (26 minus
@@ -25126,7 +25126,7 @@ revoke all on function public.class_promotion_notify() from authenticated;
 -- screen, which reads `intakeProgress()` and says "4 of 7 parts answered" from
 -- the one place that rule lives. A client who saves half, comes back and
 -- finishes gets ONE notification, at the start rather than the end, which is
--- the right end of the process for a coach who is waiting to write a programme.
+-- the right end of the process for a coach who is waiting to write a program.
 --
 -- ── Fires on INSERT too, and why that is not dead code ───────────────────
 --
@@ -26638,14 +26638,14 @@ create index if not exists idx_gym_payments_import_run
 --
 -- One nullable column. `starts_on` is the day the COACH said the block begins.
 --
--- It does not hold the programme back, and nothing in this part pretends
+-- It does not hold the program back, and nothing in this part pretends
 -- otherwise. What a client trains today is decided in the CLIENT app —
 -- `app/(client)/workouts.tsx` picks the day by a modulo over `program.days`,
 -- `app/(client)/week.tsx` matches the exact weekday — and neither reads this
 -- column, because neither has been taught to and that app is already on
 -- people's phones. A trigger here that refused to serve a future assignment
 -- would not fix that; it would empty a client's Train tab, because the client
--- app has no branch for "your programme exists and is not due yet" and would
+-- app has no branch for "your program exists and is not due yet" and would
 -- fall through to the generic auto plan, silently, mid-block.
 --
 -- So the column is a RECORD, the coach's screens do the arithmetic
@@ -26698,7 +26698,7 @@ comment on column public.assigned_programs.starts_on is
 
 -- ── How long the block is, so the week number has a denominator ───────────
 --
--- Deliberately NOT a column. A programme's length is a fact about the
+-- Deliberately NOT a column. A program's length is a fact about the
 -- `program` jsonb — `weeks` on it, resolved by `weekCount` in
 -- src/lib/programBlock.ts — and duplicating it here would create two answers to
 -- "how many weeks is this", one of which would be stale the moment a coach
@@ -26710,7 +26710,7 @@ comment on column public.assigned_programs.starts_on is
 -- ▶ the-programme-that-was-there-before.sql
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- Reassigning a programme destroyed the one before it, and nothing anywhere
+-- Reassigning a program destroyed the one before it, and nothing anywhere
 -- remembered.
 --
 -- `assigned_programs` has ONE row per client — `client_id` is the primary key —
@@ -26741,7 +26741,7 @@ comment on column public.assigned_programs.starts_on is
 --     make one.
 --
 --   · An accidental overwrite is unrecoverable. `guardOverwrite` withholds the
---     Assign control until the current programme has been READ, which stops the
+--     Assign control until the current program has been READ, which stops the
 --     coach writing over something they never saw — it cannot undo the write
 --     they did see and meant differently.
 --
@@ -26754,7 +26754,7 @@ comment on column public.assigned_programs.starts_on is
 -- history that depended on five call sites each remembering to snapshot first
 -- is a history with holes in it exactly where somebody was in a hurry — and a
 -- history with holes is worse than none, because a screen reading it says "no
--- earlier programme" about a client who had six.
+-- earlier program" about a client who had six.
 --
 -- A BEFORE trigger on UPDATE and DELETE catches every one of them, including
 -- the SQL editor, and cannot be forgotten by a screen written next year.
@@ -26777,14 +26777,14 @@ comment on column public.assigned_programs.starts_on is
 --
 -- ── Why the snapshot is conditional ───────────────────────────────────────
 --
--- Only when the PROGRAMME or the START DATE actually changed. Every assign
+-- Only when the PROGRAM or the START DATE actually changed. Every assign
 -- writes the whole row, and a bulk re-assign of an unchanged template would
 -- otherwise write a history row per client per tap — a timeline full of
 -- identical entries an hour apart, which a coach reading it would take as their
--- client having been moved between six programmes.
+-- client having been moved between six programs.
 --
 -- `is distinct from` rather than `<>`: a jsonb `<>` null is null, which is not
--- true, so a programme going from NULL to something would not be recorded. That
+-- true, so a program going from NULL to something would not be recorded. That
 -- cannot happen today (`program` is NOT NULL) and the operator is written for
 -- when it can.
 --
@@ -26792,7 +26792,7 @@ comment on column public.assigned_programs.starts_on is
 --
 -- `updated_at` is `default now()` and the upsert never sends it, so a DEFAULT
 -- only applies on INSERT: every overwrite left the timestamp at the moment the
--- client's FIRST programme was assigned. Every screen that has printed "updated
+-- client's FIRST program was assigned. Every screen that has printed "updated
 -- 3 March" over an assignment rewritten in August was reading that. The history
 -- rows below are stamped from it, so a lie there would become a lie in the
 -- timeline; a trigger sets it, which is where a server-side truth belongs
@@ -26803,7 +26803,7 @@ comment on column public.assigned_programs.starts_on is
 
 create table if not exists public.assigned_program_history (
   id          uuid        primary key default gen_random_uuid(),
-  -- The person whose programme this WAS. Cascades with them: a deleted profile
+  -- The person whose program this WAS. Cascades with them: a deleted profile
   -- takes their own training history with it, exactly as `assigned_programs`
   -- and `workouts` already do.
   client_id   uuid        not null references public.profiles(id) on delete cascade,
@@ -26811,7 +26811,7 @@ create table if not exists public.assigned_program_history (
   -- `assigned_programs.coach_id`: a coach leaving the platform must not delete
   -- the record of what their former clients were training.
   coach_id    uuid        references public.profiles(id) on delete set null,
-  -- The programme, in full, exactly as it was. Not a diff and not a summary —
+  -- The program, in full, exactly as it was. Not a diff and not a summary —
   -- the whole point is that a coach can look at what they actually wrote, and a
   -- diff is only readable against a version that itself has to exist.
   program     jsonb       not null,
@@ -26820,7 +26820,7 @@ create table if not exists public.assigned_program_history (
   -- column existed, which is what null there has always meant.
   starts_on   date,
   -- When the row being replaced was last written. Taken from the OLD row, so it
-  -- is when this programme was ASSIGNED rather than when it was replaced.
+  -- is when this program was ASSIGNED rather than when it was replaced.
   assigned_at timestamptz,
   -- When it stopped being what they were on.
   replaced_at timestamptz not null default now(),
@@ -26830,9 +26830,9 @@ create table if not exists public.assigned_program_history (
   -- an admin's repair is a false statement about a person.
   replaced_by uuid,
   -- 'replaced' or 'removed'. A DELETE is a coach taking somebody OFF a
-  -- programme (builder's Revert, the roster's unassign) and it is a different
+  -- program (builder's Revert, the roster's unassign) and it is a different
   -- event from swapping one block for another — a timeline that could not tell
-  -- them apart would show a gap as a programme change.
+  -- them apart would show a gap as a program change.
   reason      text        not null check (reason in ('replaced', 'removed'))
 );
 
@@ -26889,7 +26889,7 @@ grant select on public.assigned_program_history to authenticated;
 -- but the trigger is dropped and recreated too, so re-running this file is a
 -- no-op rather than a second trigger firing twice on every assign — which
 -- would write two history rows per overwrite and make every timeline read as
--- double the programmes.
+-- double the programs.
 create or replace function public.snapshot_assigned_program()
 returns trigger
 language plpgsql
@@ -26925,7 +26925,7 @@ begin
   -- The stale-timestamp fix, stated in the header. `default now()` fires on
   -- INSERT only, and no writer in this app sends the column, so before this
   -- line every overwritten assignment still carried the date of the client's
-  -- FIRST programme.
+  -- FIRST program.
   new.updated_at := now();
   return new;
 end $$;
@@ -26939,19 +26939,19 @@ create trigger snapshot_assigned_program_trg
 
 -- ── What is deliberately NOT here ─────────────────────────────────────────
 --
--- No "restore this block" function. Putting an old programme back is an ASSIGN
+-- No "restore this block" function. Putting an old program back is an ASSIGN
 -- — it writes over what somebody is training this evening — and every refusal
 -- that guards an assign belongs in front of it: the overwrite guard, the
 -- per-client injury gate (a client's shoulder in September is not the shoulder
--- they had in March, and a programme written before a disclosure must not go
+-- they had in March, and a program written before a disclosure must not go
 -- back out without it being read), and the acknowledgement record. All three
 -- are coach-facing decisions made against what the coach has read, so restoring
 -- goes through the same `assignProgramTo` path as any other assign, from a
--- screen, with the programme loaded into the builder first. A `restore(id)` RPC
+-- screen, with the program loaded into the builder first. A `restore(id)` RPC
 -- would be a way around all of them and it would look like the convenient
 -- option.
 --
--- No retention limit and no pruning. A programme is a few kilobytes of jsonb
+-- No retention limit and no pruning. A program is a few kilobytes of jsonb
 -- and a coach with a five-year client accumulates a few dozen rows; a cap would
 -- delete the oldest block, which is the one somebody is asking about when they
 -- ask what they did two years ago.
@@ -26961,13 +26961,13 @@ create trigger snapshot_assigned_program_trg
 -- ═══════════════════════════════════════════════════════════════════════════
 -- A coach fixes week three of the bootcamp and cannot tell who has the fix.
 --
--- `program_groups.program` holds ONE programme and no memory of the ones before
+-- `program_groups.program` holds ONE program and no memory of the ones before
 -- it. Assigning to a group is a fan-out into each member's own
 -- `assigned_programs` row — part 134 argues that at length and none of it has
 -- changed — and `memberState` in src/lib/groupProgram.ts tells the coach who is
--- on the group's programme by comparing fingerprints.
+-- on the group's program by comparing fingerprints.
 --
--- With one stored programme that comparison has exactly two answers: on it, or
+-- With one stored program that comparison has exactly two answers: on it, or
 -- not on it. So a member still training last month's version of the bootcamp
 -- and a member whose Thursday was rewritten around their shoulder both read
 -- 'diverged'. That is true and it is useless, because those two need OPPOSITE
@@ -26978,7 +26978,7 @@ create trigger snapshot_assigned_program_trg
 -- It does not make the group own the plan. Part 134 gives three reasons and
 -- every one of them still holds:
 --
---   · everything downstream of a programme is keyed per client already — the
+--   · everything downstream of a program is keyed per client already — the
 --     Train tab, logged sets, adherence, the injury acknowledgement of a
 --     specific movement for a specific person — so a group-owned plan must be
 --     reconciled on every read, in a CLIENT APP THAT IS ALREADY ON PHONES and
@@ -26994,13 +26994,13 @@ create trigger snapshot_assigned_program_trg
 -- builder lets a coach edit ONE client's copy afterwards, and the stamp would go
 -- on claiming version 3 for somebody now on something bespoke. Part 134 chose
 -- derivation over bookkeeping for precisely this reason — "who has it" is
--- answered by comparing each member's actual row against the group's programme
+-- answered by comparing each member's actual row against the group's program
 -- rather than by a record that can drift away from the truth it describes.
 --
 -- ── What it does ──────────────────────────────────────────────────────────
 --
--- Keeps the group's PAST programmes, so there is something to compare against.
--- One table, append-only, written when the coach changes the group's programme.
+-- Keeps the group's PAST programs, so there is something to compare against.
+-- One table, append-only, written when the coach changes the group's program.
 -- `versionOf` then reports which stored version a member's actual assignment
 -- fingerprints as, recomputed from the truth every time, and a member who is on
 -- none of them is bespoke rather than out of date.
@@ -27026,7 +27026,7 @@ create table if not exists public.program_group_versions (
   -- 1-based and allocated under a lock. Unique per group, which is what makes
   -- "they are on version 2" a sentence with one meaning.
   version    integer     not null check (version >= 1),
-  -- The programme AS IT WAS at that version, in full. Not a diff: a diff is
+  -- The program AS IT WAS at that version, in full. Not a diff: a diff is
   -- only readable against a version that itself exists, and the whole reason
   -- this table is here is that the previous version did not.
   program    jsonb       not null,
@@ -27039,7 +27039,7 @@ create index if not exists program_group_versions_group_idx
   on public.program_group_versions (group_id, version desc);
 
 comment on table public.program_group_versions is
-  'Every programme a group has been given, kept so "which version is this member on" can be DERIVED from their actual assignment rather than stamped on them at fan-out time and left to go stale.';
+  'Every program a group has been given, kept so "which version is this member on" can be DERIVED from their actual assignment rather than stamped on them at fan-out time and left to go stale.';
 
 alter table public.program_group_versions enable row level security;
 
@@ -27076,7 +27076,7 @@ grant select on public.program_group_versions to authenticated;
 --
 -- Dropped before it is recreated. `create or replace` with a different argument
 -- list makes an OVERLOAD, and PostgREST resolving one name against two
--- candidates is a 300 at the moment a coach taps Change Programme.
+-- candidates is a 300 at the moment a coach taps Change Program.
 drop function if exists public.snapshot_group_program(uuid, jsonb);
 
 create or replace function public.snapshot_group_program(p_group_id uuid, p_program jsonb)
@@ -27095,7 +27095,7 @@ begin
     raise exception 'not signed in';
   end if;
   if p_program is null then
-    raise exception 'a version has to carry a programme';
+    raise exception 'a version has to carry a program';
   end if;
 
   -- Ownership checked HERE rather than left to RLS, because this function is
@@ -27121,13 +27121,13 @@ begin
   order by v.version desc
   limit 1;
 
-  -- An unchanged programme writes no version. A coach who opens the picker and
+  -- An unchanged program writes no version. A coach who opens the picker and
   -- chooses the same template again would otherwise mint version 4 identical to
   -- version 3, and every member reading as "behind" until it was re-fanned to
   -- them — a screenful of people needing an action that would change nothing.
   --
   -- `is not distinct from` rather than `=`: jsonb `=` null is null, so a group
-  -- whose first programme this is would fall through the comparison and be
+  -- whose first program this is would fall through the comparison and be
   -- silently skipped.
   if last_program is not distinct from p_program then
     select * into out_row
@@ -27146,7 +27146,7 @@ begin
   values (p_group_id, n, p_program)
   returning * into out_row;
 
-  -- The group's live programme and its newest version are one fact, so they are
+  -- The group's live program and its newest version are one fact, so they are
   -- written together. Doing it here rather than in a second round trip from the
   -- app is what stops a version existing that the group is not on — which would
   -- make every member read as behind a version nobody was ever sent.
@@ -27162,7 +27162,7 @@ grant execute on function public.snapshot_group_program(uuid, jsonb) to authenti
 
 -- ── Backfilling the version a group is already on ─────────────────────────
 --
--- Every group that already has a programme becomes version 1 of itself, so the
+-- Every group that already has a program becomes version 1 of itself, so the
 -- screens have something to compare against from the moment this runs rather
 -- than reporting every member of every existing group as bespoke until the
 -- coach next edits the plan.
@@ -31942,7 +31942,7 @@ alter table public.goal_targets
 -- ── Two things the app could not record, and one it recorded nowhere ────────
 --
 -- 1. `workouts.timed`   which sets were HELD rather than repeated
--- 2. `client_plan_edits` the changes a member makes to their own programme
+-- 2. `client_plan_edits` the changes a member makes to their own program
 --
 -- Additive only. No existing column, constraint or policy is altered.
 --
@@ -31962,7 +31962,7 @@ alter table public.goal_targets
 -- reps box — a claim that they performed forty-five plank repetitions, counted
 -- into the rep totals on History and eligible to be read as a rep record. The
 -- alternative was not logging the movement at all, which is what most people
--- did: the one exercise in a beginner's programme they could reliably complete
+-- did: the one exercise in a beginner's program they could reliably complete
 -- was the one their log never mentioned.
 --
 -- ── Why a column and not a third number in the pair ────────────────────────
@@ -32013,7 +32013,7 @@ comment on column workouts.timed is
 -- ── What was wrong ─────────────────────────────────────────────────────────
 --
 -- Four pieces of React state on app/(client)/workouts.tsx held every change a
--- member can make to the programme they were given: a movement swapped for one
+-- member can make to the program they were given: a movement swapped for one
 -- their gym actually has, a load corrected at the rack, an exercise taken off
 -- because a shoulder will not do it, an exercise added because they did it
 -- anyway. All four were plain `useState`. The screen persisted exactly two
@@ -32021,7 +32021,7 @@ comment on column workouts.timed is
 --
 -- So a swap made on Tuesday was gone on Wednesday, and none of it ever reached
 -- the coach. A coach writing Bench Press for somebody whose gym has no bench
--- sees a programme being followed; the member sees a lift they substitute every
+-- sees a program being followed; the member sees a lift they substitute every
 -- session. The one fact that would settle it — "they have swapped this four
 -- weeks running" — was being typed into a React state and thrown away.
 --
@@ -32049,7 +32049,7 @@ comment on column workouts.timed is
 -- clean up.
 --
 -- The coach may READ and may not WRITE. This table is the member's account of
--- their own plan; the coach already owns the programme itself, in
+-- their own plan; the coach already owns the program itself, in
 -- `program_templates` and on the assignment, and a coach who could edit this
 -- could silently withdraw a change their client made and told them about.
 
@@ -32073,7 +32073,7 @@ create policy client_plan_edits_coach_r on client_plan_edits
   using (is_my_client(client_id));
 
 comment on table client_plan_edits is
-  'What a member has changed about the programme they were given: swapped '
+  'What a member has changed about the program they were given: swapped '
   'movements, corrected sets/reps/loads, removals, and movements they added. '
   'One row per member holding all four together, because they are one answer '
   'to one question. The member writes it; their coach may read it and may not '
@@ -39730,7 +39730,7 @@ revoke all on function public.coach_lead_notify() from authenticated;
 -- and copies drift, which is why it is the smallest possible one: a single
 -- CASE over `jsonb_array_length`, with no notion of what a week contains. The
 -- alternative — a `weeks` column on the table — would be a second opinion about
--- a programme that the builder would have to remember to keep in step, which is
+-- a program that the builder would have to remember to keep in step, which is
 -- worse.
 --
 -- ── The guards ───────────────────────────────────────────────────────────
@@ -39741,7 +39741,7 @@ revoke all on function public.coach_lead_notify() from authenticated;
 -- profiles(id)`:
 --
 --   `assigned_programs.coach_id`  NULLABLE (on delete set null) — GUARDED. A
---                                 programme whose coach deleted their account
+--                                 program whose coach deleted their account
 --                                 has nobody to tell.
 --   `assigned_programs.client_id`  the primary key, `not null`. Used only as a
 --                                 NAME, and a missing profile falls back to
@@ -39770,7 +39770,7 @@ revoke all on function public.coach_lead_notify() from authenticated;
 --
 -- Part 160's test: the recipient must be able to act AND have no other way to
 -- learn. A client fails the first half completely — they cannot write
--- themselves a block, and a notification saying "your programme ran out" with
+-- themselves a block, and a notification saying "your program ran out" with
 -- nothing they can do about it is an anxious message about somebody else's
 -- work. When the coach writes the next block the client's Train tab changes,
 -- which is the notification that means something.
@@ -45721,7 +45721,7 @@ comment on function public.session_request_live_cap is
 -- A movement has ONE identity and several names.
 --
 -- The catalogue is 619 movements and it is English. A member whose phone is in
--- German reads "Bent-Over Barbell Row" in a programme their coach wrote for
+-- German reads "Bent-Over Barbell Row" in a program their coach wrote for
 -- them, and a member whose phone is in Spanish reads the same. This part is
 -- where the other two names live.
 --
@@ -45868,7 +45868,7 @@ comment on table public.exercise_translations is
 comment on column public.exercise_translations.locale is
   'Language subtag only: de, es. English is not a translation and is refused — it is exercises.name.';
 comment on column public.exercise_translations.name is
-  'The movement as lifters in that language say it, not a literal rendering. Null where nobody was sure; the screen then shows English and says it is English, which is safe. A wrong movement name in a programme is a person doing the wrong exercise.';
+  'The movement as lifters in that language say it, not a literal rendering. Null where nobody was sure; the screen then shows English and says it is English, which is safe. A wrong movement name in a program is a person doing the wrong exercise.';
 
 alter table public.exercise_translations enable row level security;
 
@@ -45975,7 +45975,7 @@ grant all on public.exercise_translations to service_role;
 -- is itself ambiguous about what the movement is (Cable Kickback is a glute
 -- kickback on some machines and a triceps one on others) or there is no
 -- settled German term and inventing one would be guessing. A guessed movement
--- name in a programme is a person doing the wrong exercise under load, and the
+-- name in a program is a person doing the wrong exercise under load, and the
 -- fallback — English, marked as English — costs nothing but a badge.
 --
 -- ── Re-running this file ──────────────────────────────────────────────────
@@ -48054,7 +48054,7 @@ begin
     when '/(trainer)/invoices'        then 'book'
     when '/(trainer)/nudges'          then 'book'
     -- A training block that ran out under a client (471). The coach's own
-    -- programme going stale, and what a coach does about it is write the next
+    -- program going stale, and what a coach does about it is write the next
     -- block — which is this switch's question, not `clients`'.
     when '/(trainer)/builder'         then 'book'
     else null
@@ -49358,7 +49358,7 @@ grant  execute on function public.my_gym_name() to authenticated;
 -- consent at all, and this codebase has refused that shape everywhere it has
 -- come up. Part 79 stores WHICH disclosures a coach acknowledged rather than a
 -- bare timestamp, because a timestamp is satisfied forever by one tap. Part 96
--- makes the programme acknowledgement immutable, so neither party can revise
+-- makes the program acknowledgement immutable, so neither party can revise
 -- what they knew on the day. Part 84's waiver is a record of a signature, not a
 -- boolean on a profile.
 --
@@ -54728,7 +54728,7 @@ comment on function public.notification_digest_body(text, integer) is
 --
 -- '/(client)/injuries' for the same reason, and it is 'admin' for the reason
 -- '/(client)/intake' already is: both are a form the coach needs before they
--- may write a programme, which is what that switch's label means by paperwork.
+-- may write a program, which is what that switch's label means by paperwork.
 --
 -- Everything else in this function is byte for byte part 900's. Mirrored by
 -- CHANNEL_BY_ROUTE in src/lib/notifyDispatch.ts, whose test now checks
@@ -62594,7 +62594,7 @@ revoke all on public.gym_agreement_signatures from anon;
 -- ── Why a new table and not program_templates ──────────────────────────────
 --
 -- `program_templates.coach_id` is NOT NULL: that table is a coach's own saved
--- programmes, private to them. These fifteen belong to nobody and are read by
+-- programs, private to them. These fifteen belong to nobody and are read by
 -- everybody, so filing them there would have meant inventing an owner and
 -- handing one coach the platform's catalogue.
 --
@@ -62621,7 +62621,7 @@ revoke all on public.gym_agreement_signatures from anon;
 -- bodyweight-squat all exist. It was resolved by READING each template rather
 -- than by picking a favourite. In powerlifting-peaking-4-day it appears in the
 -- same day as `front-squat`, which settles that it is not that; in stronglifts
--- and the two beginner strength programmes it sits beside bench-press,
+-- and the two beginner strength programs it sits beside bench-press,
 -- barbell-row and deadlift at 5x5. Those seven are back-squat. The eighth is in
 -- home-bodyweight-beginner, at 3x15-20, in a day whose every other movement is
 -- bodyweight — that one is bodyweight-squat.
@@ -62636,7 +62636,7 @@ create table if not exists public.workout_templates (
   difficulty         text not null,
   frequency_per_week smallint,
   tags               text[] not null default '{}',
-  -- The programme itself: [{name_en, exercises:[{exercise_id, sets, reps, ...}]}]
+  -- The program itself: [{name_en, exercises:[{exercise_id, sets, reps, ...}]}]
   days               jsonb not null,
   name_en            text not null,
   description_en     text,
@@ -62661,7 +62661,7 @@ grant select on public.workout_templates to authenticated;
 -- ── The guard ──────────────────────────────────────────────────────────────
 --
 -- A template naming a movement we do not have renders as a blank row in
--- somebody's programme, and the nine ids above prove that is not hypothetical:
+-- somebody's program, and the nine ids above prove that is not hypothetical:
 -- it is what the vendor shipped. A CHECK constraint cannot ask another table,
 -- so this is a trigger. It fires on every insert and update, names the first
 -- id it cannot find, and refuses the write.
@@ -70191,7 +70191,7 @@ comment on column public.food_logs.meal is
 -- `ProgramExercise.note` (src/lib/programs.ts) is the only place in Repple a
 -- coach can write anything against a movement, and its own header says what it
 -- is for: "machine by the window, seat on 4" — a fact about THIS client on
--- THIS day, in THIS programme. It is stored inside the `exercises` JSONB of a
+-- THIS day, in THIS program. It is stored inside the `exercises` JSONB of a
 -- single `assigned_programs` row.
 --
 -- But most of what a coach writes there is not about that client at all. It is
@@ -70204,7 +70204,7 @@ comment on column public.food_logs.meal is
 -- anywhere able to say which one they meant.
 --
 -- TrueCoach and Everfit both attach the cue to the EXERCISE, once, and it
--- rides into every programme from there. Repple had no table it could go in.
+-- rides into every program from there. Repple had no table it could go in.
 --
 -- ── A cue and a note are two different facts ──────────────────────────────
 --
@@ -70213,9 +70213,9 @@ comment on column public.food_logs.meal is
 --
 --   the CUE     belongs to (coach, movement). It is the coach's default and it
 --               is the same for everybody they train. One row here.
---   the NOTE    belongs to (programme, day, exercise). It is about one person
+--   the NOTE    belongs to (program, day, exercise). It is about one person
 --               on one day — "go easy, right shoulder still sore" — and it
---               stays exactly where it is, in the programme JSONB, untouched
+--               stays exactly where it is, in the program JSONB, untouched
 --               by this part.
 --
 -- Nothing in this file reads, writes or references `assigned_programs`,
@@ -70230,7 +70230,7 @@ comment on column public.food_logs.meal is
 -- note is not even a correction.
 --
 -- The same rule is why removing a cue leaves every note already prefilled from
--- it exactly as it is. Those notes are in programmes; they are what the coach
+-- it exactly as it is. Those notes are in programs; they are what the coach
 -- actually told those people; and a delete that reached into them would be
 -- rewriting coaching that has already happened.
 --
@@ -70246,7 +70246,7 @@ comment on column public.food_logs.meal is
 -- dated act by a person and the sequence is the point. A cue is a current
 -- preference — the sentence you say today — and the record of what you told a
 -- particular client on a particular day already exists, in that client's
--- programme, written at the moment it was said. The history is in the notes.
+-- program, written at the moment it was said. The history is in the notes.
 --
 -- `exercise_id` is `text` and references `public.exercises(id)`, verified
 -- against the live schema rather than assumed: `exercises.id` is `text primary
@@ -70290,7 +70290,7 @@ comment on column public.food_logs.meal is
 -- ── Applying this ─────────────────────────────────────────────────────────
 --
 -- Additive. One new table, its policies, its grants, one index. Nothing
--- existing is altered, no trigger is added or widened anywhere, no programme
+-- existing is altered, no trigger is added or widened anywhere, no program
 -- or note is touched, and there is no backfill: mining the notes already
 -- written for sentences that look repeated and promoting them to cues would be
 -- Repple deciding which of a coach's words were meant generally.
@@ -70344,7 +70344,7 @@ create table if not exists public.coach_exercise_cues (
 );
 
 comment on table public.coach_exercise_cues is
-  'A coach''s own standing cue for one movement: the sentence they say to everybody they train, written once and carried into every programme. One row per (coach, movement) by primary key. This is NOT the per-exercise note inside a programme day — that note is about one client on one day, lives in assigned_programs.exercises, and is never touched by anything here. The app PREFILLS an empty note from a cue and never overwrites a written one (prefillNote in src/lib/coachCues.ts is the only implementation of that rule), and deleting a cue leaves every note already written exactly as it is. See supabase/parts/3150.';
+  'A coach''s own standing cue for one movement: the sentence they say to everybody they train, written once and carried into every program. One row per (coach, movement) by primary key. This is NOT the per-exercise note inside a program day — that note is about one client on one day, lives in assigned_programs.exercises, and is never touched by anything here. The app PREFILLS an empty note from a cue and never overwrites a written one (prefillNote in src/lib/coachCues.ts is the only implementation of that rule), and deleting a cue leaves every note already written exactly as it is. See supabase/parts/3150.';
 
 comment on column public.coach_exercise_cues.coach_id is
   'Whose cue. Defaults to auth.uid() and is never sent by the app: a caller able to name the owner is a caller able to write into another coach''s book. References profiles(id), which is the same identity trainers(id) references and the same one is_my_client() compares against.';
@@ -70356,7 +70356,7 @@ comment on column public.coach_exercise_cues.cue is
   'The coach''s words. Never NULL and never blank — a row storing an empty string would prefill nothing while making every reader answer with a string that means "no cue", so clearing a cue is a DELETE and not an empty save. Bounded at 500 characters, mirrored by CUE_MAX in src/lib/coachCues.ts so the refusal is a sentence in the app rather than a 23514.';
 
 comment on column public.coach_exercise_cues.updated_at is
-  'When this cue was last written. Defaulted, and set again by the upsert. It is NOT a history: what a coach told a particular client on a particular day is recorded in that client''s programme note, written at the moment it was said, and nothing here supersedes it.';
+  'When this cue was last written. Defaulted, and set again by the upsert. It is NOT a history: what a coach told a particular client on a particular day is recorded in that client''s program note, written at the moment it was said, and nothing here supersedes it.';
 
 -- The client's read: "what does MY coach say about this movement". Filtered on
 -- the movement, scoped to a coach by the policy. `coach_id` leads because the
@@ -70365,7 +70365,7 @@ comment on column public.coach_exercise_cues.updated_at is
 create index if not exists coach_exercise_cues_exercise_idx
   on public.coach_exercise_cues (exercise_id, coach_id);
 
--- ── 2. nothing about a programme changes ────────────────────────────────────
+-- ── 2. nothing about a program changes ────────────────────────────────────
 --
 -- Said as a comment rather than as code, because the correct implementation of
 -- "no note is touched" is the absence of every statement that would touch one.
@@ -70435,7 +70435,7 @@ grant all on public.coach_exercise_cues to service_role;
 
 -- ── 5. what this part deliberately does NOT do ──────────────────────────────
 --
---   · It writes into no programme and no note. Not one row of
+--   · It writes into no program and no note. Not one row of
 --     assigned_programs or program_templates is read or altered, and there is
 --     no trigger anywhere that reaches one. The prefill is an app-side
 --     default applied to an EMPTY note; a written note is never touched.
@@ -70444,7 +70444,7 @@ grant all on public.coach_exercise_cues to service_role;
 --     deciding which of somebody's words were meant generally, and would put
 --     a sentence written about one client's shoulder in front of forty more.
 --   · It keeps no history. A cue is a current preference. The dated record of
---     what a coach told a particular person is that person's programme note,
+--     what a coach told a particular person is that person's program note,
 --     and it already exists.
 --   · It adds no unique constraint beyond the primary key, and needs none:
 --     (coach_id, exercise_id) IS the key, so a second cue for the same

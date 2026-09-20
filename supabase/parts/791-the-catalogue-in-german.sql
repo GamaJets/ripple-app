@@ -86,7 +86,7 @@
 -- is itself ambiguous about what the movement is (Cable Kickback is a glute
 -- kickback on some machines and a triceps one on others) or there is no
 -- settled German term and inventing one would be guessing. A guessed movement
--- name in a programme is a person doing the wrong exercise under load, and the
+-- name in a program is a person doing the wrong exercise under load, and the
 -- fallback — English, marked as English — costs nothing but a badge.
 --
 -- ── Re-running this file ──────────────────────────────────────────────────

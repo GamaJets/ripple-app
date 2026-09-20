@@ -247,7 +247,7 @@ end $$;
 -- ── SUPERSEDED by 69-coach-content-scope.sql ───────────────────────────────
 -- The three policies below are dropped and replaced later in the build. Their
 -- WITH CHECK constrains `coach_id` and says nothing about `client_id`, so any
--- signed-in account could write a programme, a nutrition plan or feedback for
+-- signed-in account could write a program, a nutrition plan or feedback for
 -- ANY client with no coaching link at all — and the receiving client's app
 -- renders it as their own. They also outlived the relationship, because they
 -- are not gated on is_my_client(). Left in place so this file still describes

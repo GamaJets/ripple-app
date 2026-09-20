@@ -5,13 +5,13 @@
 // the stored `ProgramExercise`, twice, and BOTH conversions enumerate fields BY
 // HAND:
 //
-//   loadFrom        stored programme  ->  BEx   (opening a template)
-//   composeProgram  BEx  ->  stored programme   (saving or assigning one)
+//   loadFrom        stored program  ->  BEx   (opening a template)
+//   composeProgram  BEx  ->  stored program   (saving or assigning one)
 //
 // A field added to `BEx` and to only one of them — or to neither — compiles,
 // passes every test, and looks correct on screen for exactly as long as the
 // screen stays open. The loss happens on the round trip, in silence, to a
-// programme somebody spent twenty minutes writing.
+// program somebody spent twenty minutes writing.
 //
 // This has now happened FOUR times:
 //
@@ -26,7 +26,7 @@
 // ordinary ungrouped week back, with nothing on screen to say so.
 //
 // Nothing else in this repo can see it. TypeScript is happy — every field is
-// optional, because a programme written by an older build genuinely may not
+// optional, because a program written by an older build genuinely may not
 // have it. The tests exercise the pure modules, not this screen's two mappers.
 // So it is checked here, by name, against the type itself.
 //
@@ -51,7 +51,7 @@ const EDIT_ONLY = {};
 //
 // `key` is the only one. `loadFrom` mints it with nextKey() for React's list
 // identity, and `composeProgram` writes a positional `day-index` so the stored
-// programme has something stable to name a row by. Carrying one into the other
+// program has something stable to name a row by. Carrying one into the other
 // would drag a session's identity into the next.
 const DERIVED = {
   key: 'minted by nextKey() on load and positionally on save; identity, not content',
@@ -98,7 +98,7 @@ const intoEditorSpread = allLiterals.find((lit) => spread(lit) && /\bkey:\s*next
 
 if (!intoEditorSpread) {
   fail(`${FILE}: could not find loadFrom — the mapper that mints \`key: nextKey()\` when a saved `
-     + `programme is opened. It must stay a top-level spread (\`{ ...e, key: nextKey(), … }\`) so that `
+     + `program is opened. It must stay a top-level spread (\`{ ...e, key: nextKey(), … }\`) so that `
      + `every field on BEx survives being opened, including ones added after it was written. `
      + `If it has been expanded into a list of named fields, this check can no longer tell whether it drops any.`);
 }
@@ -133,7 +133,7 @@ if (problems.length) {
   console.error(problems.join('\n'));
   console.error(`
 A field on BEx that either mapper does not name is edited on screen, looks
-correct, and disappears the moment the programme is saved and opened again.
+correct, and disappears the moment the program is saved and opened again.
 Nothing else catches it: every field is optional, so TypeScript is satisfied.
 
 Add it to composeProgram in ${FILE}, or — if it genuinely must not be stored —

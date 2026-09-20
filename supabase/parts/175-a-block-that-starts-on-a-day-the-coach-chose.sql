@@ -15,14 +15,14 @@
 --
 -- One nullable column. `starts_on` is the day the COACH said the block begins.
 --
--- It does not hold the programme back, and nothing in this part pretends
+-- It does not hold the program back, and nothing in this part pretends
 -- otherwise. What a client trains today is decided in the CLIENT app —
 -- `app/(client)/workouts.tsx` picks the day by a modulo over `program.days`,
 -- `app/(client)/week.tsx` matches the exact weekday — and neither reads this
 -- column, because neither has been taught to and that app is already on
 -- people's phones. A trigger here that refused to serve a future assignment
 -- would not fix that; it would empty a client's Train tab, because the client
--- app has no branch for "your programme exists and is not due yet" and would
+-- app has no branch for "your program exists and is not due yet" and would
 -- fall through to the generic auto plan, silently, mid-block.
 --
 -- So the column is a RECORD, the coach's screens do the arithmetic
@@ -75,7 +75,7 @@ comment on column public.assigned_programs.starts_on is
 
 -- ── How long the block is, so the week number has a denominator ───────────
 --
--- Deliberately NOT a column. A programme's length is a fact about the
+-- Deliberately NOT a column. A program's length is a fact about the
 -- `program` jsonb — `weeks` on it, resolved by `weekCount` in
 -- src/lib/programBlock.ts — and duplicating it here would create two answers to
 -- "how many weeks is this", one of which would be stale the moment a coach

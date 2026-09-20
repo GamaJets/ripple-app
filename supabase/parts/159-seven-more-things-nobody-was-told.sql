@@ -562,7 +562,7 @@ revoke all on function public.class_promotion_notify() from authenticated;
 -- screen, which reads `intakeProgress()` and says "4 of 7 parts answered" from
 -- the one place that rule lives. A client who saves half, comes back and
 -- finishes gets ONE notification, at the start rather than the end, which is
--- the right end of the process for a coach who is waiting to write a programme.
+-- the right end of the process for a coach who is waiting to write a program.
 --
 -- ── Fires on INSERT too, and why that is not dead code ───────────────────
 --

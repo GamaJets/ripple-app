@@ -25,7 +25,7 @@
 -- consent at all, and this codebase has refused that shape everywhere it has
 -- come up. Part 79 stores WHICH disclosures a coach acknowledged rather than a
 -- bare timestamp, because a timestamp is satisfied forever by one tap. Part 96
--- makes the programme acknowledgement immutable, so neither party can revise
+-- makes the program acknowledgement immutable, so neither party can revise
 -- what they knew on the day. Part 84's waiver is a record of a signature, not a
 -- boolean on a profile.
 --

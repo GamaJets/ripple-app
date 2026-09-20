@@ -72,7 +72,7 @@
 // was told "Harissa halloumi, button" and nothing else. The same shape on
 // app/(client)/trainers.tsx dropped the price, the credentials and "Request
 // pending" from every row of the coach directory; on app/(trainer)/templates.tsx
-// and builder.tsx it dropped "replaces the programme they are on" from the
+// and builder.tsx it dropped "replaces the program they are on" from the
 // control that overwrites somebody's training.
 //
 // So: an `accessibilityLabel` whose whole expression is a PROPERTY ACCESS —

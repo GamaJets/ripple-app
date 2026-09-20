@@ -1,7 +1,7 @@
 -- ── Two things the app could not record, and one it recorded nowhere ────────
 --
 -- 1. `workouts.timed`   which sets were HELD rather than repeated
--- 2. `client_plan_edits` the changes a member makes to their own programme
+-- 2. `client_plan_edits` the changes a member makes to their own program
 --
 -- Additive only. No existing column, constraint or policy is altered.
 --
@@ -21,7 +21,7 @@
 -- reps box — a claim that they performed forty-five plank repetitions, counted
 -- into the rep totals on History and eligible to be read as a rep record. The
 -- alternative was not logging the movement at all, which is what most people
--- did: the one exercise in a beginner's programme they could reliably complete
+-- did: the one exercise in a beginner's program they could reliably complete
 -- was the one their log never mentioned.
 --
 -- ── Why a column and not a third number in the pair ────────────────────────
@@ -72,7 +72,7 @@ comment on column workouts.timed is
 -- ── What was wrong ─────────────────────────────────────────────────────────
 --
 -- Four pieces of React state on app/(client)/workouts.tsx held every change a
--- member can make to the programme they were given: a movement swapped for one
+-- member can make to the program they were given: a movement swapped for one
 -- their gym actually has, a load corrected at the rack, an exercise taken off
 -- because a shoulder will not do it, an exercise added because they did it
 -- anyway. All four were plain `useState`. The screen persisted exactly two
@@ -80,7 +80,7 @@ comment on column workouts.timed is
 --
 -- So a swap made on Tuesday was gone on Wednesday, and none of it ever reached
 -- the coach. A coach writing Bench Press for somebody whose gym has no bench
--- sees a programme being followed; the member sees a lift they substitute every
+-- sees a program being followed; the member sees a lift they substitute every
 -- session. The one fact that would settle it — "they have swapped this four
 -- weeks running" — was being typed into a React state and thrown away.
 --
@@ -108,7 +108,7 @@ comment on column workouts.timed is
 -- clean up.
 --
 -- The coach may READ and may not WRITE. This table is the member's account of
--- their own plan; the coach already owns the programme itself, in
+-- their own plan; the coach already owns the program itself, in
 -- `program_templates` and on the assignment, and a coach who could edit this
 -- could silently withdraw a change their client made and told them about.
 
@@ -132,7 +132,7 @@ create policy client_plan_edits_coach_r on client_plan_edits
   using (is_my_client(client_id));
 
 comment on table client_plan_edits is
-  'What a member has changed about the programme they were given: swapped '
+  'What a member has changed about the program they were given: swapped '
   'movements, corrected sets/reps/loads, removals, and movements they added. '
   'One row per member holding all four together, because they are one answer '
   'to one question. The member writes it; their coach may read it and may not '

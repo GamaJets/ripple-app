@@ -354,7 +354,7 @@ begin
     when '/(trainer)/invoices'        then 'book'
     when '/(trainer)/nudges'          then 'book'
     -- A training block that ran out under a client (471). The coach's own
-    -- programme going stale, and what a coach does about it is write the next
+    -- program going stale, and what a coach does about it is write the next
     -- block — which is this switch's question, not `clients`'.
     when '/(trainer)/builder'         then 'book'
     else null
