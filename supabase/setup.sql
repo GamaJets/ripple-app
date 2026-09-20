@@ -71654,3 +71654,114 @@ end $$;
 --     merge of two codes' redemptions. Every one of those is Repple deciding
 --     which of a gym's offers was the real one, and which of its members were
 --     given a discount, from evidence it does not have.
+
+-- ▶ a-coach-can-take-back-a-set-they-logged.sql
+
+-- A COACH CAN TAKE BACK A SET THEY LOGGED, AND ONLY ONE THEY LOGGED
+--
+-- A coach logging a client's session on the gym floor taps a tick per set. The
+-- tester's words: "Can't untick a log if accidentally press". Before the
+-- session is saved that is local state, and the screen already lets them tap
+-- again. After it is saved there was nothing: `workouts` carried
+-- `workouts_coach_insert` and no UPDATE or DELETE for a coach at all, so a
+-- mistyped 80 kg stood in the member's record for good and the only way back
+-- was to ask the member to query it.
+--
+-- Two policies, both narrowed the same way:
+--
+--   `logged_by = auth.uid()`  — the coach may amend the row THEY wrote and
+--   nothing else. A row the member logged themselves is theirs; a coach
+--   quietly rewriting it is the one thing this table must never allow, and
+--   `workouts_own` already gives the member full control of their own rows.
+--
+--   `is_my_client(user_id)`  — and only while the coaching relationship
+--   stands. When it ends the coach loses the row, as they lose the rest.
+--
+-- USING and WITH CHECK are the same expression on the update, so a coach
+-- cannot move a row onto another member or re-attribute it to somebody else on
+-- the way past: the row must satisfy the test before the write and after it.
+--
+-- What this does NOT do is hide the change. `amended_at` is the member's
+-- record that a figure moved after it was filed; `entryEdit.ts` stamps it and
+-- src/lib/coachLogReview.ts draws it, so the member still sees that the
+-- session was touched and can still query it. A delete is for the row that
+-- should never have existed — the exercise nobody did — and the member's
+-- feed says a coach-logged session changed.
+drop policy if exists workouts_coach_amend on public.workouts;
+create policy workouts_coach_amend on public.workouts
+  for update
+  to authenticated
+  using      (logged_by = (select auth.uid()) and is_my_client(user_id))
+  with check (logged_by = (select auth.uid()) and is_my_client(user_id));
+
+drop policy if exists workouts_coach_withdraw on public.workouts;
+create policy workouts_coach_withdraw on public.workouts
+  for delete
+  to authenticated
+  using (logged_by = (select auth.uid()) and is_my_client(user_id));
+
+-- ▶ a-coach-can-put-a-real-recipe-in-a-clients-plan.sql
+
+-- A COACH CAN PUT A REAL RECIPE IN A CLIENT'S PLAN
+--
+-- `coach_nutrition.plan` holds the week the coach writes, and every meal in it
+-- is an INDEX into the generated catalogue — `idx` plus the diet, exclusions
+-- and meals-a-day that define what that index means (src/lib/mealPlan.ts). A
+-- Spoonacular recipe has no index: it is somebody else's dish, fetched by id.
+-- The member's own app already plans one for today and keeps it in
+-- `src/lib/recipePlan.ts` on the handset; the coach had nowhere to put one at
+-- all, which is why "Use This Meal" is a member-only action today.
+--
+-- `recipe_refs` is that place. Shape, and the reason it is this shape:
+--
+--   { "<day>": { "<pos>": { "source", "sourceId", "title", "image" } } }
+--
+-- day is the index into `plan.days`, pos the slot within the day — the same
+-- two numbers `plan` is already keyed by, so a ref lines up with the meal it
+-- replaces and a plan read back without the refs is still a whole plan.
+--
+-- FOUR KEYS AND NO MORE, and the CHECK holds it to them. Spoonacular's terms
+-- let a product keep the id, the title and the image address and nothing else:
+-- not the ingredients, not the method, not the macros, which are re-fetched
+-- each time through the `recipes` function (docs/RECIPES-SPOONACULAR.md). A
+-- column that accepted the whole payload would be a cache nobody agreed to,
+-- and web/privacy.html already promises the member these four and no more.
+--
+-- No policy work: `coach_nutrition_coach_rw` and `coach_nutrition_client_read`
+-- cover the row, so the coach writes the refs and the member reads them under
+-- the rules that already govern the plan they belong to.
+alter table public.coach_nutrition
+  add column if not exists recipe_refs jsonb not null default '{}'::jsonb;
+
+comment on column public.coach_nutrition.recipe_refs is
+  'Recipes the coach has pinned into the written plan, keyed day → position. Each value holds source, sourceId, title and image and nothing else: the licence lets us keep the reference, never the recipe, so ingredients, method and macros are fetched again each time. A position with no entry is the generated meal in `plan`.';
+
+-- The shape test lives in a function because Postgres will not take a subquery
+-- in a CHECK, and walking a two-level object needs one. IMMUTABLE and reading
+-- nothing but its argument, which is what a CHECK is allowed to call.
+create or replace function public.coach_recipe_refs_ok(refs jsonb)
+returns boolean
+language sql
+immutable
+set search_path to 'pg_catalog', 'pg_temp'
+as $fn$
+  select jsonb_typeof(refs) = 'object'
+     and not exists (
+       select 1
+       from jsonb_each(refs) as day(dk, dv)
+       where jsonb_typeof(dv) <> 'object'
+          or exists (
+            select 1
+            from jsonb_each(dv) as slot(sk, sv)
+            where jsonb_typeof(sv) <> 'object'
+               or exists (select 1 from jsonb_object_keys(sv) k
+                          where k not in ('source', 'sourceId', 'title', 'image'))
+               or sv->>'source' is null
+               or sv->>'sourceId' is null
+          )
+     );
+$fn$;
+
+alter table public.coach_nutrition drop constraint if exists coach_nutrition_recipe_refs_shape_ck;
+alter table public.coach_nutrition add constraint coach_nutrition_recipe_refs_shape_ck
+  check (public.coach_recipe_refs_ok(recipe_refs));
