@@ -111,7 +111,7 @@ const edits = (p: Partial<PlanEdits> = {}): PlanEdits => ({ ...EMPTY_PLAN_EDITS,
   ok(!/haven’t changed anything/.test(unreadable), 'and are never reported as an untouched plan');
 
   eq(coachSeesPlanNote('ready', 0, true, null),
-    'You haven’t changed anything in the programme you were given, so there is nothing of yours here for your coach to look at.',
+    'You haven’t changed anything in the program you were given, so there is nothing of yours here for your coach to look at.',
     'a landed read over an empty row may say so — that is the one state where empty is a fact');
 
   eq(coachSeesPlanNote('ready', 1, true, '1 September'),

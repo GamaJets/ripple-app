@@ -3,8 +3,8 @@
 // This module had no test file, which is how the alias gap below survived: the
 // screen matched a movement's name EXACTLY against the eight activities its own
 // picker offers and the seven cardio machines in the catalogue — the names THIS
-// app writes. A programme written by a coach, or imported from a catalogue,
-// calls the same movements other things, so a member cycling inside a programme
+// app writes. A program written by a coach, or imported from a catalogue,
+// calls the same movements other things, so a member cycling inside a program
 // was offered no distance box and no way to record the ride they had just done.
 //
 // Exactness is not the defect and is not being loosened here. 380e71b
@@ -42,11 +42,11 @@ eq(workoutKind({ exercise: 'Back Squat', sets: [[5, 100]] }), 'strength',
 
 const aliases = new Set(CARDIO_MOVEMENT_ALIASES.map((a) => a.trim().toLowerCase()));
 
-// Every name a gym or a programme puts on a bike. 'Cycling' was already in the
+// Every name a gym or a program puts on a bike. 'Cycling' was already in the
 // screen's own list; not one of these was, and each is a real thing to be
 // riding while wanting to write down how far you went.
 for (const n of ['bike', 'stationary bike', 'exercise bike', 'indoor cycling', 'spin bike', 'assault bike', 'wattbike']) {
-  ok(aliases.has(n), `a programme calling it "${n}" is still a bike`);
+  ok(aliases.has(n), `a program calling it "${n}" is still a bike`);
 }
 
 // Rowers, under the words printed on the machine rather than in our picker.
@@ -55,7 +55,7 @@ for (const n of ['rower', 'erg', 'concept2', 'rowerg']) {
 }
 
 // 'Treadmill / Run' was ONE entry in the old set, so neither word matched on
-// its own — a programme saying "Run" got nothing.
+// its own — a program saying "Run" got nothing.
 for (const n of ['run', 'running', 'jog', 'sprint']) {
   ok(aliases.has(n), `"${n}" is something you do on your feet, at speed`);
 }
@@ -71,7 +71,7 @@ for (const n of ['row', 'barbell row', 'seated row', 'upright row', 'step', 'ste
 
 // Nor may an alias be a bare fragment that a strength movement contains. This
 // is the property that keeps the exact match safe: if 'row' were ever added
-// here, every barbell row in every programme would grow a distance box.
+// here, every barbell row in every program would grow a distance box.
 for (const a of aliases) {
   ok(a.length >= 3, `"${a}" is too short to be a movement name`);
   ok(a === a.trim(), `"${a}" has no stray whitespace`);

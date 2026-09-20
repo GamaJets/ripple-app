@@ -105,7 +105,7 @@ import { liftLabel } from './units';
  *  keyboard — and `reps` is reps, never seconds: a held set never reaches
  *  here, because a hold is excluded from the branch that calls this. */
 export interface PrSet {
-  /** The movement's name, in the words the programme uses. */
+  /** The movement's name, in the words the program uses. */
   movement: string;
   /** The load lifted, in kilograms. Always above zero: a bodyweight set is
    *  excluded upstream and never arrives. */

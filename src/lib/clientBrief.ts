@@ -142,9 +142,9 @@ export function weekLine(status: LoadStatus, week: CoachWeek, who: string): stri
       : `${n} day${s(n)} marked from today on.`;
   const c = week.conflicts.length;
   // A conflict is only ever claimed by `planConflict`, and only where the
-  // programme is actually known — a programme that did not come back produces
+  // program is actually known — a program that did not come back produces
   // no conflict rather than a silent agreement. See coachWeek.ts.
-  return c ? `${head} ${c} disagree${c === 1 ? 's' : ''} with the programme you set.` : head;
+  return c ? `${head} ${c} disagree${c === 1 ? 's' : ''} with the program you set.` : head;
 }
 
 /**
@@ -203,10 +203,10 @@ export function listLine(
 }
 
 /**
- * The programme a coach assigned, or why there is no name to print.
+ * The program a coach assigned, or why there is no name to print.
  *
- * A null programme is three situations — none assigned, the read failed, and a
- * programme somebody else assigned, which `assigned_programs_coach_rw` will not
+ * A null program is three situations — none assigned, the read failed, and a
+ * program somebody else assigned, which `assigned_programs_coach_rw` will not
  * show this coach — and only the middle one is about the connection. The status
  * separates the first two; the third is why the "none" branch does not claim
  * the client is training to nothing.
@@ -219,7 +219,7 @@ export function programmeLine(
 ): string {
   if (status === 'loading') return 'Reading what you have assigned them…';
   if (status === 'error') return 'What you have assigned them could not be read.';
-  if (!title) return `No programme of yours is assigned to ${who} that this app can read.`;
+  if (!title) return `No program of yours is assigned to ${who} that this app can read.`;
   return days == null ? title : `${title} · ${days} day${s(days)} a week.`;
 }
 
@@ -324,7 +324,7 @@ export function attention(i: AttentionInput): Attention {
   else if (i.weekStatus === 'partial') missed.push('the rest of the days they have marked');
   else if (i.week.conflicts.length) {
     const c = i.week.conflicts.length;
-    items.push(`${c} day${s(c)} they have marked ahead disagree${c === 1 ? 's' : ''} with your programme.`);
+    items.push(`${c} day${s(c)} they have marked ahead disagree${c === 1 ? 's' : ''} with your program.`);
   }
 
   // The intake. 'unknown' is a read that did not land, and it is the only one

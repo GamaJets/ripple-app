@@ -55,7 +55,9 @@ import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { exerciseSlug } from '../../src/lib/exerciseId';
+import { canonicalExerciseName } from '../../src/lib/exerciseName';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
+import { MuscleGroupPicker, MUSCLE_GROUP_WHY } from '../../src/ui/MuscleGroupPicker';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -310,20 +312,32 @@ export default function MyTraining() {
     // No `kcal`. A strength session records reps and weight; nobody measured
     // the energy, and an absent figure reads as a dash rather than as a number
     // this screen made up.
-    const out = await logWorkouts(lifts.map((l) => ({ t: at, exercise: l.exercise, sets: l.sets })));
+    // The catalogue's own spelling wins over the parser's. "shoulder press"
+    // typed into a sentence slugs to a row the library spells "Shoulder
+    // Press", and ten rows in `workouts` held the typed version — so the same
+    // lift read two ways in the history depending on which box it came from.
+    // Re-casing cannot change the slug, so this is safe with no catalogue too.
+    const named = lifts.map((l) => ({ ...l, exercise: canonicalExerciseName(l.exercise, cat.rows) }));
+    const out = await logWorkouts(named.map((l) => ({ t: at, exercise: l.exercise, sets: l.sets })));
     setBusy(false);
     // Cleared for the two outcomes that KEPT what was typed. A refusal throws
     // the entries away, and the text box is then the only copy of them.
     if (out !== 'refused') setText('');
     if (out === 'stored') {
       notifySuccess();
-      // Only AFTER the log landed. Minting a catalogue row for a movement whose
-      // workout was refused would put a name in the library that nothing
-      // references — the library is shared, so its rows should be earned.
-      const minted = await mintAll(lifts.map((l) => l.exercise));
+      // Nothing is minted from a sentence any more. A catalogue row needs a
+      // muscle group — without one it is invisible on the body map, in Muscle
+      // Focus and in a day's chips while looking fine in a list — and a
+      // sentence holding four lifts cannot be asked for four groups without
+      // becoming the form below. So the movements are named honestly instead,
+      // and only when a WHOLE read of the catalogue can say they are missing:
+      // a short or failed read is not evidence that a movement is not there.
+      const unknown = catReady
+        ? [...new Set(named.map((l) => l.exercise).filter((n) => !catRow(n)))]
+        : [];
       Alert.alert('Logged',
         `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to your own training for today.`
-        + (minted.length ? `\n\n${listNames(minted)} ${minted.length === 1 ? 'was' : 'were'} not in the exercise library, so ${minted.length === 1 ? 'it has' : 'they have'} been added to it.` : ''));
+        + (unknown.length ? `\n\n${listNames(unknown)} ${unknown.length === 1 ? 'is' : 'are'} not in the exercise library. Add ${unknown.length === 1 ? 'it' : 'them'} under Log One Lift, where you can say which muscle group ${unknown.length === 1 ? 'it trains' : 'they train'}.` : ''));
     } else if (out === 'unsent') {
       // Nobody answered, so the entries were kept — on this phone, in the log,
       // counted, and sent on the next launch that reaches a server. They are
@@ -383,6 +397,17 @@ export default function MyTraining() {
   const [problem, setProblem] = useState<string | null>(null);
 
   /**
+   * The muscle group for a lift the catalogue has never heard of.
+   *
+   * Null until the coach taps one, and no default — a pre-selected chip is a
+   * group nobody chose, and a coach-minted row with no group at all is exactly
+   * what left four movements off the body map, out of Muscle Focus and out of
+   * the day's chips with nothing on screen to say why. See `oneLift` below for
+   * when it is asked for and when it is not.
+   */
+  const [oneGroup, setOneGroup] = useState<string | null>(null);
+
+  /**
    * Retype the set count, and grow or shrink the table under it.
    *
    * The box keeps whatever was typed — including something that is not a count
@@ -411,25 +436,31 @@ export default function MyTraining() {
    * bodyweight set, not a load of nothing.
    */
   /**
-   * Put any of these movements the catalogue does not have into it, and return
-   * the ones that were genuinely new.
+   * Put one movement the catalogue does not have into it, and say whether it
+   * was genuinely new.
    *
    * Asked for: a coach saving an exercise the library does not list should see
    * it added. Until now a typed name stayed a string on one workout row, so
    * the same movement logged twice was two unrelated records and never gained
    * a search entry, an illustration or a history.
    *
-   * Sequential rather than parallel, and deliberately: two of the same new
-   * name in one typed session would otherwise race each other to insert the
-   * same id.
+   * ── why this is one name and not a list any more ────────────────────────
+   *
+   * It used to be `mintAll(names)`, called from Log by Text as well, and it
+   * passed NO muscle group — which is how rows reached a 615-row catalogue
+   * with `muscle_group` null, and from there a programme and two templates
+   * with a blank `group` that `groupsOf` then dropped. A group is now required
+   * (src/ui/customExercise.ts), and a free-text sentence cannot be asked for
+   * one per lift without becoming a form. So Log by Text mints nothing and
+   * says so; this is the form that CAN ask, and does.
+   *
+   * A blank group resolves false rather than writing a row without one. The
+   * workout is already logged by the time this runs and stands either way.
    */
-  const mintAll = async (names: string[]): Promise<string[]> => {
-    const made: string[] = [];
-    for (const n of [...new Set(names.map((x) => x.trim()).filter(Boolean))]) {
-      const { created } = await ensureCatalogueRow(n);
-      if (created) made.push(n);
-    }
-    return made;
+  const mintOne = async (name: string, group: string): Promise<boolean> => {
+    if (!name.trim() || !group.trim()) return false;
+    const { created } = await ensureCatalogueRow(name.trim(), { group });
+    return created;
   };
 
   /** "Zercher squat", or "A, B and C" — a list a person reads, not an array. */
@@ -451,9 +482,15 @@ export default function MyTraining() {
     // and the other two are absent rather than zero.
     const read = readLadder(ladder, wu);
     if (!read.ok) { setProblem(read.reason); return; }
+    // What gets WRITTEN DOWN is the catalogue's own spelling when the typed
+    // name resolves to a row — by slug or by an exact synonym, never by a
+    // near-miss — and the typed name in Title Case when nothing does. See
+    // src/lib/exerciseName.ts; `oneLift` below is the same resolution, asked
+    // of the form while it is still on screen.
+    const { name: stored, group } = oneLift;
     const entry: WorkoutEntry = {
       t: new Date().toISOString(),
-      exercise: name,
+      exercise: stored,
       sets: read.sets,
     };
     setBusy(true);
@@ -461,18 +498,18 @@ export default function MyTraining() {
     setBusy(false);
     if (out === 'stored') {
       notifySuccess();
-      setExercise(''); setSetCount(''); setLadder([]);
-      const minted = await mintAll([name]);
-      Alert.alert('Logged', `${name} added to your own training for today.`
-        + (minted.length ? '\n\nIt was not in the exercise library, so it has been added to it.' : ''));
+      setExercise(''); setSetCount(''); setLadder([]); setOneGroup(null);
+      const minted = await mintOne(stored, group);
+      Alert.alert('Logged', `${stored} added to your own training for today.`
+        + (minted ? `\n\nIt was not in the exercise library, so it has been added to it under ${group}.` : ''));
     } else if (out === 'unsent') {
       // Kept. The boxes are cleared here and not below, because the lift is on
       // this phone and in the list — leaving it in the form as well is how the
       // same set gets logged twice. No mint: the library's rows are earned by a
       // workout the server has accepted.
-      setExercise(''); setSetCount(''); setLadder([]);
+      setExercise(''); setSetCount(''); setLadder([]); setOneGroup(null);
       Alert.alert('Saved on This Phone',
-        `No connection, so ${name} has not reached your training log yet — nothing is lost. It is saved here and goes up on its own the next time you have signal.`);
+        `No connection, so ${stored} has not reached your training log yet — nothing is lost. It is saved here and goes up on its own the next time you have signal.`);
     } else {
       // The boxes are deliberately NOT cleared. What was typed is the only copy
       // of it that exists, and emptying the form would take that away on the
@@ -513,6 +550,47 @@ export default function MyTraining() {
   // been taken, and leaving it there just covers the form.
 
   const cat = useExerciseCatalogue();
+  /**
+   * Whether the catalogue read can be QUOTED about what is and is not in it.
+   *
+   * `signedOut` is folded in for the reason the Muscle Focus card below gives:
+   * a signed-out read comes back as zero rows with no error, and a whole read
+   * of an empty catalogue would otherwise be treated as proof that no movement
+   * exists. Nothing on this screen says "not in the exercise library" without
+   * this being true.
+   */
+  const catReady = cat.status === 'ready' && !cat.signedOut;
+  /** The catalogue row a name resolves to, or null. Exact slug and nothing
+   *  else — the rule in src/lib/exerciseId.ts, for the reason it gives. */
+  const catRow = (name: string): CatalogueRow | null => {
+    if (!catReady) return null;
+    const id = exerciseSlug(name);
+    return id ? (cat.rows.find((r) => r.id === id) ?? null) : null;
+  };
+  /**
+   * What Log One Lift would write down, and whether it may yet.
+   *
+   * `name` is the catalogue's own spelling when the typed text resolves to a
+   * row, and the typed text in Title Case when it does not — the owner's "make
+   * sure you global and title capitalize it to match the existing workouts in
+   * the database", applied at the one place the string is decided.
+   *
+   * `needsGroup` is the owner's second ask, and it is deliberately narrow. It
+   * is true only when a WHOLE catalogue read says this movement is not there
+   * and no group has been picked: that is the one case where saving mints a
+   * new library row, and a row with no muscle group is invisible on the body
+   * map, in Muscle Focus and in a day's chips. A movement the library already
+   * holds needs nothing — it has its own group — and an unread catalogue is
+   * never used to hold up a coach logging their own training, because a failed
+   * read is not evidence that a movement is new.
+   */
+  const oneLift = (() => {
+    const typed = exercise.trim();
+    const name = canonicalExerciseName(typed, cat.rows);
+    const known = !!catRow(name);
+    const group = (oneGroup ?? '').trim();
+    return { typed, name, group, needsGroup: !!typed && catReady && !known && !group };
+  })();
   // The coach's OWN logged rows carry the English name — the same identity a
   // client's log carries. Read in their language, written in the catalogue's.
   const { textOf: movement } = useMovementName();
@@ -702,7 +780,12 @@ export default function MyTraining() {
                 training includes movements the catalogue has never heard of,
                 and refusing those would make this screen useless for exactly
                 the people most likely to invent one. */}
-            <TextInput value={exercise} onChangeText={setExercise} placeholder="Exercise" placeholderTextColor={t.ink3}
+            {/* The chosen group goes with the name it was chosen for. Carrying
+                it onto a different movement would file one lift under another
+                lift's muscles, which is the fact-nobody-stated this whole
+                change exists to stop. */}
+            <TextInput value={exercise} onChangeText={(v) => { setExercise(v); setOneGroup(null); }}
+              placeholder="Exercise" placeholderTextColor={t.ink3}
               accessibilityLabel="Exercise name" style={[inp, { marginBottom: sp.sm }]} />
             {exSuggestions.length ? (
               <View style={{ marginBottom: sp.sm, backgroundColor: t.surface, borderRadius: radius.sm, overflow: 'hidden' }}>
@@ -721,6 +804,19 @@ export default function MyTraining() {
                     {r.group ? <Text style={{ ...ty.caption, color: t.ink3 }}>{r.group}</Text> : null}
                   </Pressable>
                 ))}
+              </View>
+            ) : null}
+            {/* ── the muscle group, when the lift is one the library lacks ──
+                Shown only for a movement a whole catalogue read says is not
+                there, because saving that one MINTS a library row — and a row
+                with no muscle group is missing from the body map, from Muscle
+                Focus and from the day's chips while looking perfectly fine in
+                a list. A movement the catalogue already holds brings its own
+                group and is never asked about. */}
+            {oneLift.needsGroup ? (
+              <View style={{ marginBottom: sp.md }}>
+                <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.sm }}>{MUSCLE_GROUP_WHY}</Text>
+                <MuscleGroupPicker value={oneGroup} onChange={setOneGroup} />
               </View>
             ) : null}
             {/* ── how many sets, and then a row for each of them ───────────
@@ -774,7 +870,7 @@ export default function MyTraining() {
               </View>
             ) : null}
             <View style={{ marginTop: sp.md }}>
-              <Cta wide label={busy ? 'Saving…' : 'Add to My Log'} onPress={logOneLift} disabled={busy} />
+              <Cta wide label={busy ? 'Saving…' : 'Add to My Log'} onPress={logOneLift} disabled={busy || oneLift.needsGroup} />
             </View>
             <View style={{ marginTop: sp.sm }}>
               <Ghost label="Browse the Exercise Library" icon="grid"

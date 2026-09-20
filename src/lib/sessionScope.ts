@@ -34,7 +34,7 @@
 // So the row lands in `workouts` with `user_id = B`. Not refused: it is a
 // well-formed insert of B's own id, made by B's session, so RLS is satisfied
 // and `classifyWrite` reports 'stored'. A's lifts become B's training history —
-// the history B's coach reads, programmes the next block from, and shows B as
+// the history B's coach reads, programs the next block from, and shows B as
 // their progress. There is no error anywhere, and nothing afterwards can tell
 // the two apart: the sets are indistinguishable from sets B performed.
 //

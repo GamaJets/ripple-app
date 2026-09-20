@@ -125,7 +125,7 @@ export interface RosterExerciseClient {
 const RANK: Record<StalledLevel, number> = {
   // Somebody who has stopped doing a movement entirely is the first thing a
   // coach wants to see, ahead of somebody merely not adding weight — the
-  // programme is not being followed, which is a different and larger problem.
+  // program is not being followed, which is a different and larger problem.
   unseen: 0,
   dropping: 1,
   holding: 2,

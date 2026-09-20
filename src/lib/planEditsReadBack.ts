@@ -37,7 +37,7 @@
 //
 // `swaps` and `exEdits` are keyed `dayIdx:exerciseKey`, and the key is a slug
 // ('bench', 'ohp', 'rdl' — see src/lib/programs.ts). It is not a name, and the
-// programme that would turn it into one is not on every screen that wants to
+// program that would turn it into one is not on every screen that wants to
 // say what changed. So the sentences below name a movement only where the
 // STORED VALUE is itself a name — the movement swapped TO, and a movement the
 // member added — and otherwise say which day it was on and what kind of change
@@ -176,7 +176,7 @@ export function coachSeesPlanNote(
         return 'Your plan changes are stored and your coach can see them, but this app could not read them back to list them here. Nothing has been lost — open your plan to see what you have changed.';
       }
       if (count <= 0) {
-        return 'You haven’t changed anything in the programme you were given, so there is nothing of yours here for your coach to look at.';
+        return 'You haven’t changed anything in the program you were given, so there is nothing of yours here for your coach to look at.';
       }
       return whenUpdated
         ? `${count} change${count === 1 ? '' : 's'} of yours reached your coach, last sent on ${whenUpdated}.`

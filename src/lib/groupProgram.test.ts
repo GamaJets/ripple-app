@@ -31,7 +31,7 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   if (JSON.stringify(a) !== JSON.stringify(b)) errors.push(`${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 };
 
-const SUBJECT = 'the programmes these clients are currently on';
+const SUBJECT = 'the programs these clients are currently on';
 const UNSOUND: LoadStatus[] = ['loading', 'partial', 'error'];
 
 const shoulder: Injury = { id: 'i1', area: 'shoulder', severity: 'severe', status: 'active', note: '', at: '' };
@@ -70,36 +70,36 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
     note: 'different prose',
     days: [{ ...a.days[0], exercises: [{ ...a.days[0].exercises[0], key: 'x9', alternatives: ['Goblet Squat'] }] }],
   };
-  eq(programSignature(a), programSignature(b), 'focus, note, key and alternatives must not change a programme fingerprint');
+  eq(programSignature(a), programSignature(b), 'focus, note, key and alternatives must not change a program fingerprint');
 
-  ok(programSignature(a) !== programSignature(P('Bootcamp', 'Back Squat', 5, '8-10')), 'a different set count is a different programme');
-  ok(programSignature(a) !== programSignature(P('Bootcamp', 'Back Squat', 4, '5-6')), 'a different rep range is a different programme');
-  ok(programSignature(a) !== programSignature(P('Bootcamp', 'Front Squat', 4, '8-10')), 'a different movement is a different programme');
-  ok(programSignature(a) !== programSignature(P('Bootcamp 2', 'Back Squat', 4, '8-10')), 'a different title is a different programme');
-  eq(programSignature(null), null, 'a group with no programme has no fingerprint, not the fingerprint of an empty one');
-  eq(programSignature(undefined), null, 'an absent programme has no fingerprint');
+  ok(programSignature(a) !== programSignature(P('Bootcamp', 'Back Squat', 5, '8-10')), 'a different set count is a different program');
+  ok(programSignature(a) !== programSignature(P('Bootcamp', 'Back Squat', 4, '5-6')), 'a different rep range is a different program');
+  ok(programSignature(a) !== programSignature(P('Bootcamp', 'Front Squat', 4, '8-10')), 'a different movement is a different program');
+  ok(programSignature(a) !== programSignature(P('Bootcamp 2', 'Back Squat', 4, '8-10')), 'a different title is a different program');
+  eq(programSignature(null), null, 'a group with no program has no fingerprint, not the fingerprint of an empty one');
+  eq(programSignature(undefined), null, 'an absent program has no fingerprint');
 }
 
 // ══ memberState ════════════════════════════════════════════════════════════
 //
 // The negative assertion is the whole of it: under anything but a whole read
-// of assigned_programs, a member with no programme must be 'unknown' and not
+// of assigned_programs, a member with no program must be 'unknown' and not
 // 'none'. 'none' renders as "not assigned yet", which is how a coach comes to
-// assign over a programme nobody saw.
+// assign over a program nobody saw.
 {
   const group = P('Bootcamp', 'Back Squat', 4, '8-10');
   const sig = programSignature(group);
-  eq(memberState('ready', sig, group), 'on', 'a client on the group programme is on it');
+  eq(memberState('ready', sig, group), 'on', 'a client on the group program is on it');
   eq(memberState('ready', sig, null), 'none', 'a whole read with no row is genuinely nobody assigned');
   eq(memberState('ready', sig, P('Shoulder-safe', 'Leg Press', 4, '8-10')), 'diverged', 'a client on something else has diverged');
   for (const s of UNSOUND) {
     eq(memberState(s, sig, null), 'unknown', `'${s}' must not be reported as "not assigned yet"`);
-    eq(memberState(s, sig, group), 'unknown', `'${s}' must not be reported as on the programme either`);
+    eq(memberState(s, sig, group), 'unknown', `'${s}' must not be reported as on the program either`);
   }
-  // A group with no programme yet: a member on something is on something that
+  // A group with no program yet: a member on something is on something that
   // is not the group's, which is true and is the sentence the screen shows.
-  eq(memberState('ready', null, group), 'diverged', 'with no group programme, a client on one is on something else');
-  eq(memberState('ready', null, null), 'none', 'with no group programme and no row, nobody is on anything');
+  eq(memberState('ready', null, group), 'diverged', 'with no group program, a client on one is on something else');
+  eq(memberState('ready', null, null), 'none', 'with no group program and no row, nobody is on anything');
 }
 
 // ══ groupCoverage ══════════════════════════════════════════════════════════
@@ -113,7 +113,7 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
   ok(c.countable, 'two whole reads make the tally showable');
   for (const s of UNSOUND) {
     ok(!groupCoverage(states, s, 'ready').countable, `a '${s}' membership read must not license a headline count`);
-    ok(!groupCoverage(states, 'ready', s).countable, `a '${s}' programme read must not license a headline count`);
+    ok(!groupCoverage(states, 'ready', s).countable, `a '${s}' program read must not license a headline count`);
   }
   eq(groupCoverage([], 'ready', 'ready').total, 0, 'an empty group under a whole read is genuinely empty');
 }
@@ -122,7 +122,7 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
 //
 // A group whose membership could not be read must never render as an empty
 // group, and must never be assigned to. Four names arriving out of eight leaves
-// four people on last month's programme with nothing anywhere saying so.
+// four people on last month's program with nothing anywhere saying so.
 {
   const members = [clear('a', 'Priya'), clear('b', 'Sam')];
   for (const s of UNSOUND) {
@@ -143,7 +143,7 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
 //
 // MUTATION CHECK. Delete the guardOverwrite call from planFanOut and this
 // block goes red: an unread assigned_programs would otherwise let one tap
-// replace every member's training with the group's programme, having never
+// replace every member's training with the group's program, having never
 // seen what it replaced.
 {
   const members = [clear('a', 'Priya'), clear('b', 'Sam')];
@@ -163,34 +163,34 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
 // ══ planFanOut — nothing to send, nobody to send it to ═════════════════════
 {
   const p = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT);
-  ok(!p.allowed, 'a group with no programme must not assign one');
-  eq(p.send, [], 'a group with no programme must write to nobody');
+  ok(!p.allowed, 'a group with no program must not assign one');
+  eq(p.send, [], 'a group with no program must write to nobody');
   const e = planFanOut('ready', 'ready', [], true, SUBJECT);
   ok(!e.allowed, 'an empty group must not assign to nobody and call it done');
   ok(typeof e.reason === 'string' && e.reason.length > 0, 'an empty group must say so');
 }
 
-// ══ planFanOut — the words, when the coach is WRITING the programme ════════
+// ══ planFanOut — the words, when the coach is WRITING the program ════════
 //
 // `planFanOut` is shared by three screens, and two of its refusals are about
-// the programme rather than about a person. Both were written for a group, and
+// the program rather than about a person. Both were written for a group, and
 // app/(trainer)/builder.tsx is not a group: it is one coach writing one block.
 // Seen on an iPhone, with an empty draft open in the builder — "HELD · Pick a
-// Programme First · This group has no programme yet. Choose one from your
+// Program First · This group has no program yet. Choose one from your
 // library and it can go out to everybody in the group at once." There was no
-// group. And telling somebody who is halfway through writing a programme to go
+// group. And telling somebody who is halfway through writing a program to go
 // and pick an existing one is the opposite of what they are doing.
 {
   const noProgGroup = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT);
   const noProgBuild = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT, 'written');
-  ok(!noProgGroup.allowed && !noProgBuild.allowed, 'neither may assign a programme that does not exist');
+  ok(!noProgGroup.allowed && !noProgBuild.allowed, 'neither may assign a program that does not exist');
   eq(noProgGroup.code, 'no-program', 'the refusal is named so a screen can branch on it rather than match its sentence');
   eq(noProgBuild.code, 'no-program', 'and it is the same refusal whichever screen asked');
   ok(/group/i.test(noProgGroup.reason as string), 'the group screen still talks about a group');
   ok(!/group/i.test(noProgBuild.reason as string) && !/group/i.test(noProgBuild.label as string),
     'and the builder never mentions a group, because there is not one on that screen');
   ok(!/library/i.test(noProgBuild.reason as string),
-    'nor sends a coach who is writing a programme off to pick one from their library');
+    'nor sends a coach who is writing a program off to pick one from their library');
   ok(/exercise/i.test(noProgBuild.reason as string),
     'it names what is actually missing, which is exercises');
 
@@ -209,7 +209,7 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
 {
   const a = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT);
   const b = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT, 'chosen');
-  eq(a.reason, b.reason, 'omitting the origin is the same as asking for the chosen-programme wording');
+  eq(a.reason, b.reason, 'omitting the origin is the same as asking for the chosen-program wording');
   eq(a.label, b.label, 'in the label too');
 }
 
@@ -245,7 +245,7 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
   const blockedFirst = planFanOut('ready', 'ready', [undisclosed('a', 'Priya'), clear('b', 'Sam')], true, SUBJECT);
   eq(blockedFirst.send, ['b'], 'a client with unread disclosures must not be assigned to, even when they are first in the list');
   eq(blockedFirst.blocked.map((x) => x.clientId), ['a'], 'the held client must be named');
-  ok(blockedFirst.allowed, 'one held client must not stop the other ten getting their programme');
+  ok(blockedFirst.allowed, 'one held client must not stop the other ten getting their program');
 
   const blockedLast = planFanOut('ready', 'ready', [clear('a', 'Priya'), undisclosed('b', 'Sam')], true, SUBJECT);
   eq(blockedLast.send, ['a'], 'a client with unread disclosures must not be assigned to when they are last in the list either');
@@ -322,7 +322,7 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
   eq(listNames(['Priya', 'Sam']), 'Priya and Sam', 'two names are joined with "and", not a comma');
   eq(listNames(['Priya', 'Sam', 'Alex']), 'Priya, Sam and Alex', 'three names read as a list a person would say aloud');
   ok(fanOutSubject(1) !== fanOutSubject(4), 'one client and several must not be described with the same sentence');
-  ok(/programme this client/.test(fanOutSubject(1)), 'a single client must be spoken about in the singular');
+  ok(/program this client/.test(fanOutSubject(1)), 'a single client must be spoken about in the singular');
 }
 
 if (errors.length) {

@@ -85,7 +85,7 @@ export interface HistoryVoice {
 const LIST_CAP = 20;
 
 /** Outings drawn for one movement. Same kind of limit, said the same way: a
- *  lifter four years into a programme has done bench press three hundred times
+ *  lifter four years into a program has done bench press three hundred times
  *  and nobody scrolls that, but nothing may imply they have not. */
 const TRAIL_CAP = 30;
 

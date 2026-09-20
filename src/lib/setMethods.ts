@@ -34,7 +34,7 @@
  */
 
 export type SetMethod = {
-  /** Stored value. Stable — programmes on people's phones hold these. */
+  /** Stored value. Stable — programs on people's phones hold these. */
   id: string;
   /** What the coach and client read. Sentence case, per the house rule. */
   label: string;
@@ -124,7 +124,7 @@ export const DEFAULT_METHOD = 'normal';
 const BY_ID = new Map(SET_METHODS.map((m) => [m.id, m]));
 
 /**
- * The method for a stored id. An id this build does not know — a programme
+ * The method for a stored id. An id this build does not know — a program
  * written by a NEWER app and opened on an older one — falls back to `normal`
  * rather than to nothing, because "we do not recognise this" must not become a
  * set the client cannot see. `known` says which happened, so a caller can
@@ -187,7 +187,7 @@ export function restAfter(id: string | null | undefined, exerciseRestSec: number
 
 /**
  * The badge for a set row, or null for an ordinary set. Null rather than "·"
- * so a programme of plain sets is not covered in markers that all say the same
+ * so a program of plain sets is not covered in markers that all say the same
  * thing — the badge should mean "this one is different".
  */
 export function badgeFor(id: string | null | undefined): { short: string; label: string } | null {

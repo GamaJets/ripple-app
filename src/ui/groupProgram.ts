@@ -1,7 +1,7 @@
-// A coach's programme groups — the named list of people a bootcamp programme
+// A coach's program groups — the named list of people a bootcamp program
 // goes out to, and the writes that keep it.
 //
-// Tables in supabase/parts/134-a-programme-written-once.sql; the arithmetic
+// Tables in supabase/parts/134-a-program-written-once.sql; the arithmetic
 // that decides who may be written to is in src/lib/groupProgram.ts. This file
 // is only the reads and the writes, and the honesty about both.
 //
@@ -20,9 +20,9 @@
 // THREE reads: the groups, their version history, and their membership. A
 // failure in ANY of them degrades the whole thing, because a group whose
 // membership could not be read must never render as an empty group. Eight
-// people with a bootcamp programme and a refused membership read look exactly
+// people with a bootcamp program and a refused membership read look exactly
 // like a group nobody is in, and the screen would then offer to assign the
-// programme to nought of them and report it done. `worstStatus` is what says
+// program to nought of them and report it done. `worstStatus` is what says
 // so.
 //
 // The version read was the one that did not say. Its error was reported and its
@@ -54,7 +54,7 @@ import { serverSaid } from '../lib/serverSaid';
 export interface ProgramGroup {
   id: string;
   name: string;
-  /** The programme the group is defined by, or null when the coach has named
+  /** The program the group is defined by, or null when the coach has named
    *  the group and not yet chosen one. Null is a real state, not a missing
    *  read — the read's own status says whether it was read at all. */
   program: Program | null;
@@ -62,12 +62,12 @@ export interface ProgramGroup {
    *  anything else an empty array means the membership did not come back. */
   memberIds: string[];
   /**
-   * Every programme this group has been given, oldest first.
+   * Every program this group has been given, oldest first.
    *
    * The group still does NOT own the plan — assigning is a fan-out into each
    * member's own `assigned_programs` row, and part 134 gives three reasons that
    * have not changed. What this adds is something to compare against: with one
-   * stored programme, a member on last month's version and a member whose
+   * stored program, a member on last month's version and a member whose
    * Thursday was rewritten around their shoulder both read 'diverged', which is
    * true and useless because the two need opposite actions.
    *
@@ -228,7 +228,7 @@ export function useProgramGroups() {
          * reads had earned on their own.
          *
          * What a coach saw: a group with eight recorded versions read "This
-         * programme has not been recorded as a version yet, so nobody can be
+         * program has not been recorded as a version yet, so nobody can be
          * placed against it" — because `currentVersion` is the highest version
          * whose signature matches, and there were no versions to match. Every
          * member then fell into the bespoke column and was labelled as having
@@ -352,13 +352,13 @@ export function useProgramGroups() {
     if (!USE_SUPABASE) { LOCAL = LOCAL.map((g) => (g.id === id ? { ...g, program } : g)); return true; }
     try {
       // Through the RPC rather than a bare UPDATE, and the reason is that the
-      // group's live programme and the newest recorded version are ONE FACT.
+      // group's live program and the newest recorded version are ONE FACT.
       // Two round trips would let a version exist that the group is not on —
       // after which every member reads as behind a version nobody was ever
       // sent — or the group move onto something with no version recorded, after
       // which everybody reads as bespoke. `snapshot_group_program` allocates
       // the number under a lock and writes both inside one statement, and it
-      // returns the existing row unchanged when the programme has not actually
+      // returns the existing row unchanged when the program has not actually
       // changed, so re-picking the same template mints nothing.
       const { data, error } = await supabase.rpc('snapshot_group_program', {
         p_group_id: id, p_program: program,
@@ -367,7 +367,7 @@ export function useProgramGroups() {
       // A null row is not success. The function raises for a group that is not
       // this coach's, and PostgREST turns that into `error` — but a definer
       // function returning nothing at all would arrive here as a quiet null,
-      // and the screen above announces the programme has changed.
+      // and the screen above announces the program has changed.
       if (!data) {
         reportError('programGroups.setProgram', new Error('snapshot_group_program returned no row'), { id });
         return false;
@@ -430,7 +430,7 @@ export function useProgramGroups() {
       // client the policy refused — not this coach's, or a hand-added client
       // with no account for the foreign key to find — is a silent no-op in
       // PostgREST, and telling the coach "added" for them is how somebody ends
-      // up believing eight people are on a programme when six are.
+      // up believing eight people are on a program when six are.
       //
       // Chunked, because `wanted` is whatever the picker handed over and "add
       // everyone" is a button. Past roughly two hundred uuids the `in.(…)` list

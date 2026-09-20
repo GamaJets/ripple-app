@@ -1,8 +1,8 @@
-// The fifteen RepDB programmes, as arithmetic on rows rather than as a screen.
+// The fifteen RepDB programs, as arithmetic on rows rather than as a screen.
 //
 // ── What this table is, and what it deliberately is not ───────────────────
 //
-// `public.workout_templates` is the platform's own programme catalogue: fifteen
+// `public.workout_templates` is the platform's own program catalogue: fifteen
 // rows, source 'repdb', readable by every signed-in member and coach, writable
 // through the API by nobody. It is NOT `program_templates`, which is a coach's
 // own saved work, keyed by a NOT NULL `coach_id` and private to them. The
@@ -27,7 +27,7 @@
 //    core finisher are performed back-to-back, and zero says so. `rest || null`
 //    would erase exactly the rows where the rest matters most, so zero is
 //    distinguished from absent everywhere in this file: absent means the
-//    programme does not say, and that is not the same sentence as "do not
+//    program does not say, and that is not the same sentence as "do not
 //    rest".
 //
 // ── What is NOT computed here, and will not be ────────────────────────────
@@ -61,14 +61,14 @@ export interface Localised {
   es: string | null;
 }
 
-/** One movement inside one day of a programme. */
+/** One movement inside one day of a program. */
 export interface TemplateExercise {
   /** `exercises.id`. A database trigger refuses a write naming an id the
    *  catalogue does not have (supabase/parts/2600), so this resolves — but the
    *  READ of `exercises` can still fail or come back short, and a screen has to
    *  survive holding an id it has no name for. */
   exerciseId: string;
-  /** Null where the programme does not say. Never invented, never defaulted to
+  /** Null where the program does not say. Never invented, never defaulted to
    *  one: a movement with no set count is a gap in the row. */
   sets: number | null;
   /** The coaching instruction, verbatim. "6-8", "AMRAP" and "30s" are all
@@ -80,7 +80,7 @@ export interface TemplateExercise {
   notes: Localised;
 }
 
-/** One day of a programme — "Workout A", "Push", "Full Body". */
+/** One day of a program — "Workout A", "Push", "Full Body". */
 export interface TemplateDay {
   name: Localised;
   exercises: TemplateExercise[];
@@ -90,7 +90,7 @@ export interface TemplateDay {
 export interface WorkoutTemplate {
   id: string;
   /** 'repdb' on all fifteen today. Kept because the screens say whose
-   *  programmes these are, and that sentence must come off the row rather than
+   *  programs these are, and that sentence must come off the row rather than
    *  out of a constant that a second source would quietly falsify. */
   source: string | null;
   goal: string;
@@ -106,8 +106,8 @@ export interface WorkoutTemplate {
    * Exercise entries in `days` that carried no usable exercise id and were
    * dropped by `parseDays`.
    *
-   * Carried rather than swallowed. A programme silently one movement short is
-   * a programme somebody trains wrong, and the difference between "this day has
+   * Carried rather than swallowed. A program silently one movement short is
+   * a program somebody trains wrong, and the difference between "this day has
    * four exercises" and "this day has five and we could only read four" is the
    * whole of what a member needs to know before they follow it.
    */
@@ -127,7 +127,7 @@ const str = (v: unknown): string | null => {
  *
  * `Number(null)` is 0 and `Number('')` is 0, which is why this does not go
  * through Number() at all: a missing set count arriving as zero would render as
- * "0 sets", a sentence about a programme that nobody wrote.
+ * "0 sets", a sentence about a program that nobody wrote.
  */
 const count = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : null;
@@ -138,7 +138,7 @@ const localised = (o: Record<string, unknown>, prefix: string): Localised => ({
   es: str(o[`${prefix}_es`]),
 });
 
-/** A programme's days, and how many exercise entries had to be thrown away. */
+/** A program's days, and how many exercise entries had to be thrown away. */
 export interface ParsedDays {
   days: TemplateDay[];
   /** Entries with no readable `exercise_id`. See `WorkoutTemplate.unreadableEntries`. */
@@ -158,7 +158,7 @@ export interface ParsedDays {
  * it; this one drops what it cannot read and counts what it dropped.
  *
  * A day with no readable exercises is KEPT, not dropped. "Day 3 — Legs" with
- * nothing under it is a true statement about a programme that has a third day,
+ * nothing under it is a true statement about a program that has a third day,
  * and deleting the day would renumber every one after it.
  */
 export function parseDays(value: unknown): ParsedDays {
@@ -202,7 +202,7 @@ export function parseDays(value: unknown): ParsedDays {
  * param, and `name_en` is the identity every fallback lands on. Both are NOT
  * NULL in the table; this is what happens if that ever stops being true, and
  * "one row is missing from the list" is a far better outcome than a screen that
- * renders a programme with no name.
+ * renders a program with no name.
  */
 export function parseTemplateRow(raw: unknown): WorkoutTemplate | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -257,10 +257,10 @@ export function localisedText(s: Localised, want: TranslationLocale | null): Dis
 }
 
 /**
- * The sentence a programme shows when its own words did not translate.
+ * The sentence a program shows when its own words did not translate.
  *
  * A sentence rather than the two-letter badge `fallbackTag` gives a list row,
- * because this appears once at the top of a programme a member is about to
+ * because this appears once at the top of a program a member is about to
  * follow and there is room to say what actually happened. Null when nothing
  * fell back — an apology on a screen where nothing is wrong is a nag.
  *
@@ -281,7 +281,7 @@ export function templateFallbackNote(
   const list = parts.length === 1
     ? parts[0]
     : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-  return `This programme has not been fully translated, so ${list} ${parts.length === 1 ? 'is' : 'are'} shown in English.`;
+  return `This program has not been fully translated, so ${list} ${parts.length === 1 ? 'is' : 'are'} shown in English.`;
 }
 
 /** True when any string inside these days falls back to English for `want`. */
@@ -299,7 +299,7 @@ export function daysFallBack(days: readonly TemplateDay[], want: TranslationLoca
 /* ── the labels a row prints ──────────────────────────────────────────────── */
 
 /**
- * The five goals the fifteen programmes use, in the order a browsing member
+ * The five goals the fifteen programs use, in the order a browsing member
  * meets them: what most people came for first, then the two that are somebody's
  * whole session, then the one that is ten minutes before one.
  */
@@ -326,8 +326,8 @@ const DIFFICULTY_LABEL: Record<string, string> = {
  * A stored value rendered as itself when we have no label for it.
  *
  * `goal` and `difficulty` are plain `text` columns with no check constraint, so
- * a sixteenth programme can arrive carrying a word this build has never heard
- * of. Dropping the row would hide a real programme; filing it under a
+ * a sixteenth program can arrive carrying a word this build has never heard
+ * of. Dropping the row would hide a real program; filing it under a
  * neighbouring label would be a lie about what it trains. Printing the word is
  * neither.
  */
@@ -350,7 +350,7 @@ export const tagLabel = (tag: string): string => labelled({}, tag);
  * "3 days a week", or null when the row does not say.
  *
  * Null and not "unknown": a member reading a list of fifteen does not need
- * fifteen admissions, and the one programme with no cadence simply does not
+ * fifteen admissions, and the one program with no cadence simply does not
  * carry that line. `frequency_per_week` is a smallint and the live values are 3
  * to 7, so no separator is needed and none is added.
  */
@@ -364,8 +364,8 @@ export function frequencyLabel(perWeek: number | null): string | null {
  *
  * Three outcomes, and the middle one is the reason this is a function:
  *
- *   null  the programme does not say. The row prints nothing.
- *   0     the programme says NOT TO REST. That is an instruction — the
+ *   null  the program does not say. The row prints nothing.
+ *   0     the program says NOT TO REST. That is an instruction — the
  *         kettlebell complex and the core finisher are performed back-to-back
  *         — and it is the value most easily destroyed by a falsy check.
  *   n     seconds, as minutes once it divides evenly, because "3 min" is how a
@@ -426,9 +426,9 @@ export function exerciseCount(t: WorkoutTemplate): number {
 }
 
 /**
- * "2 days · 11 exercises", or null when the programme lists no days at all.
+ * "2 days · 11 exercises", or null when the program lists no days at all.
  *
- * Null rather than "0 days", which reads as a measurement of a programme
+ * Null rather than "0 days", which reads as a measurement of a program
  * instead of as the absence of one. The screens say the empty case in words.
  */
 export function shapeLine(t: WorkoutTemplate): string | null {
@@ -440,21 +440,21 @@ export function shapeLine(t: WorkoutTemplate): string | null {
 }
 
 /**
- * The sentence a programme carries when part of it could not be read.
+ * The sentence a program carries when part of it could not be read.
  *
  * Null on the ordinary case. When it is not null it is about the ROW, not
  * about the network: these entries came back and had nothing in them we could
- * name, so they are not on screen and the day is shorter than the programme
+ * name, so they are not on screen and the day is shorter than the program
  * says it is.
  */
 export function unreadableNote(t: WorkoutTemplate): string | null {
   if (t.unreadableEntries <= 0) return null;
   return t.unreadableEntries === 1
-    ? 'One movement in this programme could not be read and is not listed below, so a day here is one exercise shorter than the programme is.'
-    : `${t.unreadableEntries} movements in this programme could not be read and are not listed below, so what you see is shorter than the programme is.`;
+    ? 'One movement in this program could not be read and is not listed below, so a day here is one exercise shorter than the program is.'
+    : `${t.unreadableEntries} movements in this program could not be read and are not listed below, so what you see is shorter than the program is.`;
 }
 
-/** Every distinct exercise id these programmes name, in the order first met. */
+/** Every distinct exercise id these programs name, in the order first met. */
 export function exerciseIdsIn(templates: readonly WorkoutTemplate[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -478,7 +478,7 @@ export function exerciseIdsIn(templates: readonly WorkoutTemplate[]): string[] {
  * Bands rather than the exact numbers, because the exact numbers are a property
  * of the fifteen rows and not of the question. The live values are 3, 4, 6 and
  * 7; a chip row built from them would gain and lose chips as the catalogue
- * grows, and "5" would appear the day a programme uses it and read as a filter
+ * grows, and "5" would appear the day a program uses it and read as a filter
  * that had been broken until then.
  *
  * `max` is inclusive. `null` means no upper bound.
@@ -508,9 +508,9 @@ export function isFiltering(f: TemplateFilter): boolean {
 }
 
 /**
- * The programmes matching a filter.
+ * The programs matching a filter.
  *
- * A programme with NO `frequency_per_week` matches every band filter's
+ * A program with NO `frequency_per_week` matches every band filter's
  * opposite: it is excluded the moment a band is chosen, because the row does
  * not claim a cadence and putting it under "up to 3 days" would be this app
  * asserting one. Under no band filter it is listed like everything else.

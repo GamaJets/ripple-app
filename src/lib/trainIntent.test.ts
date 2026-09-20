@@ -38,7 +38,7 @@ const TRAIN = '/(client)/workouts';
   ok(/[?&]mode=recovery/.test(u), 'a named mode rides along, so ?mode=recovery still means recovery');
   ok(/[?&]start=/.test(u), 'and it is still an arrival');
 }
-ok(!/mode=/.test(trainIntent(TRAIN)), 'no mode named, no mode param — the screen falls back to the programme itself');
+ok(!/mode=/.test(trainIntent(TRAIN)), 'no mode named, no mode param — the screen falls back to the program itself');
 
 /* ── everything that is not Train is left exactly alone ─────────────────── */
 

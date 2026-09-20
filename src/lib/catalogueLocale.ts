@@ -2,7 +2,7 @@
 //
 // ── The thing this file exists to prevent ─────────────────────────────────
 //
-// The catalogue is English. A member in Berlin opens their programme and reads
+// The catalogue is English. A member in Berlin opens their program and reads
 // "Bent-Over Barbell Row". Once the catalogue carries German names, most rows
 // will answer in German and some will not — and the ones that do not must not
 // look like the ones that do. An English name sitting silently among German
@@ -21,7 +21,7 @@
 // The identity of a movement in this app is `exercises.id`, which is
 // exerciseSlug() of its ENGLISH name — see src/lib/exerciseId.ts and
 // supabase/parts/76-catalogue-dedupe-rekey.sql, where 68 rows keyed by anything
-// else were in the catalogue and unreachable from it. A programme stores an
+// else were in the catalogue and unreachable from it. A program stores an
 // exercise NAME, a workout log stores an exercise NAME, and both resolve
 // through that slug.
 //

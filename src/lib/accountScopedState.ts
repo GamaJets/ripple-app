@@ -3,7 +3,7 @@
 // ── Why this is one rule and not one per screen ───────────────────────────
 //
 // Several screens in this app now keep something under an account-scoped
-// AsyncStorage key: a coach's unsaved programme (src/lib/builderDraft.ts), a
+// AsyncStorage key: a coach's unsaved program (src/lib/builderDraft.ts), a
 // member's changes to their own plan (src/lib/planEdits.ts), their meal swaps,
 // a coach's handset clips. Every one of them has the same three-way decision to
 // make when the signed-in account changes, and every one of them has the same

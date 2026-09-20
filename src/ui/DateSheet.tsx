@@ -2,12 +2,12 @@
 //
 // ── What was reported ─────────────────────────────────────────────────────
 //
-// A coach on Android, on the programme builder's assign panel: "Is there a way
+// A coach on Android, on the program builder's assign panel: "Is there a way
 // that when you click on the space of the date the whole calendar option pops
 // up for selection?" The Starts on field was a bare `TextInput` with a
 // `YYYY-MM-DD` placeholder, and they had typed a date by hand and then could not
 // proceed — so they assumed the date was the blocker. It was not; the button was
-// held because the programme had no exercises in it. The request stands anyway:
+// held because the program had no exercises in it. The request stands anyway:
 // nobody should have to type `2026-09-07` on a phone keyboard to say "the
 // Monday after next".
 //

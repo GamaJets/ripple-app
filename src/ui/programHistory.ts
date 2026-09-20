@@ -1,7 +1,7 @@
-// Reading one client's earlier programmes.
+// Reading one client's earlier programs.
 //
 // The table and the trigger are in
-// supabase/parts/176-the-programme-that-was-there-before.sql; every sentence a
+// supabase/parts/176-the-program-that-was-there-before.sql; every sentence a
 // screen may say about the rows is in src/lib/programHistory.ts, which is pure
 // and tested. This file is the round trip and the honesty about it.
 //
@@ -17,7 +17,7 @@
 // ── null rows, never an empty array, under a failure ──────────────────────
 //
 // The distinction the whole of this codebase turns on, and it bites hardest
-// here: "no earlier programmes" is a sentence a coach ACTS on — they conclude
+// here: "no earlier programs" is a sentence a coach ACTS on — they conclude
 // the client is new to them and stop looking. `historyBoard` is handed null and
 // answers 'unreadable' for it.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -64,7 +64,7 @@ export function useProgramHistory(clientId: string | null): ProgramHistoryRead {
     if (!USE_SUPABASE) {
       // No server means no history, and that is a fact about this build rather
       // than about the client — 'error', so nothing renders "no earlier
-      // programmes" about somebody whose record was never asked for.
+      // programs" about somebody whose record was never asked for.
       setRows(null); setStatus('error'); return;
     }
     // A client the coach typed in by hand has no user account, so their id is

@@ -195,22 +195,22 @@ const twice = planVsActual({
 });
 eq(twice.movements.length, 1, 'a movement prescribed twice in a week is one movement');
 
-/* ── no programme, and no read of one, are different answers ────────────── */
+/* ── no program, and no read of one, are different answers ────────────── */
 
 eq(planVsActual({ days: null, programStatus: 'ready', log, logStatus: 'ready', todayISO: TODAY }).state,
-  'no-programme', 'a client on nothing is a real state');
+  'no-program', 'a client on nothing is a real state');
 eq(planVsActual({ days: null, programStatus: 'error', log, logStatus: 'ready', todayISO: TODAY }).state,
-  'unreadable', 'and a programme that could not be read is a different one');
+  'unreadable', 'and a program that could not be read is a different one');
 // The third, which used to answer as the first. `useAssignedPrograms` reads
 // every client's assignment in one page ordered by `client_id`, so under a
 // truncated read the clients sorting last have no row and `getProgram` hands
 // back the same null it hands back for a client on nothing. This said "on no
-// coach-assigned programme" to their coach and "No coach has written you a
-// programme yet" to them.
+// coach-assigned program" to their coach and "No coach has written you a
+// program yet" to them.
 eq(planVsActual({ days: null, programStatus: 'partial', log, logStatus: 'ready', todayISO: TODAY }).state,
   'unreadable', 'a client missing from a TRUNCATED assignment read is unknown, never "on nothing"');
 // And the direction that must not have been broken to fix it: a client whose
-// row WAS inside the page has a whole programme and gets a whole comparison.
+// row WAS inside the page has a whole program and gets a whole comparison.
 eq(run({ programStatus: 'partial' }).state,
   'ready', 'and a client whose row was inside the page is still compared normally');
 
@@ -220,7 +220,7 @@ const line = coverageLine(base, WINDOW_DAYS, 'Priya');
 ok(/2 of 3 prescribed movements? logged/.test(line), 'the line counts movements');
 ok(!/%/.test(line), 'and there is no percentage anywhere in it — one number would hide every caveat above');
 ok(!/session/i.test(line), 'nor a session count, which a logged set carries no reference to a plan row to support');
-ok(/1 movement logged that this programme does not name/.test(line), 'off-plan work is named in the same breath');
+ok(/1 movement logged that this program does not name/.test(line), 'off-plan work is named in the same breath');
 
 const unreadLine = coverageLine(unread, WINDOW_DAYS, 'Priya');
 ok(/not a statement about Priya/i.test(unreadLine),
@@ -230,7 +230,7 @@ ok(coverageLine(cappedShort, WINDOW_DAYS, 'Priya').includes('cannot be answered 
 
 /* ── the load, not just the presence ─────────────────────────────────────
  *
- * P5. The sentence that changes next week's programme is not "they did four of
+ * P5. The sentence that changes next week's program is not "they did four of
  * six sessions", it is "they hit every prescribed load on upper and missed
  * every one on legs". Every assertion here is aimed at the same bug the rest of
  * this file is: a coach reads a verdict and acts on it, so a verdict must never

@@ -1,7 +1,7 @@
 // Following a stretch routine, one position at a time.
 //
 // The third runner in this app and deliberately the thinnest. `SessionRunner`
-// walks a lifting programme and `TimedSessionRunner` puts a clock on a cardio
+// walks a lifting program and `TimedSessionRunner` puts a clock on a cardio
 // or recovery session; this walks a fixed list of positions and counts each one
 // down. Everything it decides about WHAT to do — the order, the hold, which
 // stretches are done on both sides, how long the whole thing takes and what is

@@ -4,7 +4,7 @@
 // dumbbells and a bench is choosing from six hundred movements, a third of
 // which assume a cable stack, a Smith machine or a GHD. The only way to find
 // the ones that fit was to read the names and know which was which. So the
-// screen that lists everything you can programme has to be able to say "show
+// screen that lists everything you can program has to be able to say "show
 // me what this floor supports", and `exercises.equipment` is the column that
 // answers it.
 //
@@ -31,7 +31,7 @@
 //
 //   · A null is NOT "bodyweight". Filing 190 movements under bodyweight would
 //     be inventing a fact about each one, and the reading it invites — a cable
-//     fly dropped into a programme for somebody with no cable — is the exact
+//     fly dropped into a program for somebody with no cable — is the exact
 //     harm the filter exists to prevent. So a null matches no kit chip.
 //
 //   · Which means a lit kit chip drops 190 rows that were never tested, and a
@@ -141,4 +141,53 @@ export function equipmentGapNote(unplaced: number, chip: string, whole: boolean)
   return unplaced === 1
     ? `1 more movement is left out because the catalogue does not record what it is performed on. Tap ${UNRECORDED_KIT} to see it.`
     : `${num(unplaced)} more movements are left out because the catalogue does not record what they are performed on. Tap ${UNRECORDED_KIT} to see them.`;
+}
+
+/* ── "No equipment" is a different question from "which kit" ───────────────
+ *
+ * Everything above answers "does this row's kit match the chip", and a null
+ * column is a GAP there — the catalogue did not say. That is the right answer
+ * for a coach narrowing to Dumbbell and the wrong one for a client in a hotel
+ * room with nothing, because "we did not record it" is not "you need nothing".
+ *
+ * The catalogue answers the second question with a SECOND column,
+ * `exercises.is_bodyweight`, and the two columns only mean "needs nothing"
+ * TOGETHER. Counted against the live table: 615 rows, 183 with
+ * `equipment is null AND is_bodyweight = true` — the true no-kit pool — and 7
+ * more with a null column that are not flagged. Those 7 are unknown, not
+ * empty-handed, and they stay out.
+ *
+ * So this takes the ROW and not the `equipment` string, which is why it is not
+ * another chip inside `matchesEquipment`: that function is handed one field and
+ * physically cannot see the flag it would need. A caller that tried anyway
+ * would be back to reading a null as a claim, one layer down.
+ *
+ * Bands are equipment. A loop band (15 rows) and a resistance band (13) name
+ * their kit in the column, so they fail the first clause and are out of a
+ * no-kit program without anything here having to list them — which is the
+ * point of asking the column rather than keeping a vocabulary of our own.
+ */
+
+/** A catalogue row, as far as its kit is concerned. */
+export interface KitRow {
+  /** `exercises.equipment`. Null or blank = the catalogue did not record it. */
+  equipment: string | null;
+  /** `exercises.is_bodyweight`. Absent or null = the catalogue did not say,
+   *  which is not the same as false and is treated here as "do not assume". */
+  isBodyweight?: boolean | null;
+}
+
+/** The chip, and the label the builder's control uses. Sentence case after the
+ *  first word, like every other option in this app. */
+export const NO_KIT = 'No equipment';
+
+/**
+ * Whether this movement can be done with nothing at all.
+ *
+ * Both clauses, always. `isBodyweight === true` on its own would let through a
+ * row whose column names a pull-up bar, and an empty column on its own would
+ * let through the 7 rows nobody has classified.
+ */
+export function needsNoKit(row: KitRow): boolean {
+  return (row.equipment || '').trim() === '' && row.isBodyweight === true;
 }

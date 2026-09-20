@@ -1,14 +1,14 @@
 /**
- * PROGRAMME CHECKS — a rule engine that reads a programme before it is assigned.
+ * PROGRAM CHECKS — a rule engine that reads a program before it is assigned.
  *
  * ── What it is called, and why that is the first thing in this file ────────
  *
- * The roadmap item this was built from is headed "AI programme review". It is
+ * The roadmap item this was built from is headed "AI program review". It is
  * not one, and it is not called one anywhere a coach can see. There is no
  * model here, no scores, no grade and no verdict: `reviewProgram` runs seven
  * named rules over the exercises a coach has typed and returns the ones that
  * matched, each carrying the day, the movement and the figure it matched on.
- * The screen says "Programme checks" and lists them.
+ * The screen says "Program checks" and lists them.
  *
  * src/lib/finReview.ts is why that sentence is at the top. It is ninety
  * lines of arithmetic — margin, churn, growth, a weighted score out of a
@@ -28,14 +28,14 @@
  * with, so a rule earns its place only if a coach who disagrees can point at
  * the specific thing it is wrong about. Every `Finding` therefore carries:
  *
- *   · `day`        the day as the coach named it, or null for the programme
+ *   · `day`        the day as the coach named it, or null for the program
  *   · `exercises`  the movements, spelled exactly as the coach wrote them
  *   · `detail`     one sentence, containing counts, seconds and rep targets
  *                  that are all readable off the screen behind it
  *   · `volume`     kilogram figures, for the ONE rule that has any
  *
  * Nothing here returns a score, a rating, a colour or a total. There is no
- * "programme quality" figure, because there is no number behind one.
+ * "program quality" figure, because there is no number behind one.
  *
  * ── The rules ─────────────────────────────────────────────────────────────
  *
@@ -58,7 +58,7 @@
  *
  * ── Reads that did not land ───────────────────────────────────────────────
  *
- * Three of the seven rules need something other than the programme: the
+ * Three of the seven rules need something other than the program: the
  * client's disclosures, their training log, their goal. A rule whose input did
  * not load does NOT quietly return nothing — silence from a check reads as a
  * pass, and "no injury conflicts" over an injury list that failed to load is
@@ -97,8 +97,8 @@ export interface CheckDef {
   /** What the check is, said to a coach. Sentence case: this is prose on the
    *  screen, not a button. */
   label: string;
-  /** What it has to read besides the programme itself. */
-  needs: 'programme' | 'injuries' | 'history' | 'goal';
+  /** What it has to read besides the program itself. */
+  needs: 'program' | 'injuries' | 'history' | 'goal';
 }
 
 /**
@@ -112,10 +112,10 @@ export interface CheckDef {
  */
 export const CHECKS: readonly CheckDef[] = [
   { id: 'injury', label: 'movements that load a disclosed injury', needs: 'injuries' },
-  { id: 'set-count', label: 'set counts that disagree with the sets written out', needs: 'programme' },
-  { id: 'group-muscle', label: 'supersets whose movements share a muscle group', needs: 'programme' },
-  { id: 'heavy-rest', label: 'rest on low-rep movements', needs: 'programme' },
-  { id: 'warmup-volume', label: 'warm-ups and cool-downs counted as working volume', needs: 'programme' },
+  { id: 'set-count', label: 'set counts that disagree with the sets written out', needs: 'program' },
+  { id: 'group-muscle', label: 'supersets whose movements share a muscle group', needs: 'program' },
+  { id: 'heavy-rest', label: 'rest on low-rep movements', needs: 'program' },
+  { id: 'warmup-volume', label: 'warm-ups and cool-downs counted as working volume', needs: 'program' },
   { id: 'volume-jump', label: 'planned volume against what this client has been doing', needs: 'history' },
   { id: 'goal-reps', label: 'rep targets against the goal on record', needs: 'goal' },
 ];
@@ -204,15 +204,15 @@ export interface VolumeEvidence {
 export interface Finding {
   id: CheckId;
   /** The day as the coach named it — 'Mon', 'Day 1' — or null where the
-   *  finding is about the whole programme. */
+   *  finding is about the whole program. */
   day: string | null;
   /**
    * Which week of the block, 1-based, or null.
    *
-   * Null on a one-week programme, which is every programme written before
+   * Null on a one-week program, which is every program written before
    * `Program.weeks` existed — a week number there would be counting something
    * that does not exist, and src/lib/programs.ts is explicit that nothing
-   * renders one. Also null for a finding about the whole programme, which
+   * renders one. Also null for a finding about the whole program, which
    * `goal-reps` is.
    */
   week: number | null;
@@ -239,14 +239,14 @@ export interface ProgramReview {
   /**
    * 'ready' when every rule ran. 'partial' when at least one could not, and
    * `skipped` says which. 'loading' and 'error' are never returned: the
-   * programme itself is on the screen in front of the coach, so the structural
+   * program itself is on the screen in front of the coach, so the structural
    * rules always run and there is always something true to show.
    */
   status: LoadStatus;
   findings: Finding[];
   skipped: SkippedCheck[];
   /** What was read, so the screen can say how much the checks covered rather
-   *  than implying they covered a programme. `days` and `sets` are totals over
+   *  than implying they covered a program. `days` and `sets` are totals over
    *  the WHOLE block — a twelve-week block is twelve weeks of days, and a
    *  figure counting one of them under a heading about the draft would be the
    *  same understatement this file was carrying. */
@@ -264,7 +264,7 @@ export interface ReviewInput {
    * which is the distinction src/lib/injuryGate.ts was written for. `null` is
    * that there is no client attached to this draft at all, so there is nobody
    * to have disclosed anything and the check stands down rather than reporting
-   * a clean programme it never looked for injuries in.
+   * a clean program it never looked for injuries in.
    */
   injuries: readonly Injury[] | null;
   injuryStatus: LoadStatus;
@@ -291,7 +291,7 @@ export interface ReviewInput {
    * The goal on record, or null. Null is the ordinary case for a template with
    * no client attached and for a client whose goal was never set, and it is
    * reported as 'absent' rather than 'unread' — the builder already withholds
-   * a generated programme when it cannot read a goal, and saying the checks
+   * a generated program when it cannot read a goal, and saying the checks
    * are degraded on top of that would be a second alarm for one fact.
    */
   goal: Goal | null;
@@ -313,7 +313,7 @@ const dayOf = (day: string | null | undefined): string =>
 /**
  * Where in the block a finding is, as it reads inside a sentence.
  *
- * The day alone on a one-week programme, so nothing about those screens
+ * The day alone on a one-week program, so nothing about those screens
  * changes. The day AND the week on a block, because "back squat on Mon loads
  * the knee" is unactionable across twelve Mondays — the coach has to be told
  * which one to open. The number rather than the coach's own week label: a label
@@ -395,7 +395,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
    * that disagrees with its rows in week two all went unreported, and silence
    * from a check reads as a pass. `programWeeks` is the one resolver of the
    * block and it returns a single week built from `days` for a one-week
-   * programme, so nothing changes for one.
+   * program, so nothing changes for one.
    */
   const weeks = programWeeks(input.program);
   const multi = weeks.length > 1;
@@ -426,7 +426,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
       id: 'injury', kind: 'unread',
       why: input.injuryStatus === 'loading'
         ? 'This client\'s injuries are still being read, so nothing here has been checked against them.'
-        : 'This client\'s injuries could not be read, so no movement here has been checked against them. A programme written around an injury nobody has seen is what this check exists to catch.',
+        : 'This client\'s injuries could not be read, so no movement here has been checked against them. A program written around an injury nobody has seen is what this check exists to catch.',
     });
   } else {
     const injuries = input.injuries as Injury[];
@@ -536,7 +536,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
       findings.push({
         id: 'warmup-volume', day: d.day, week, exercises: [nameOf(ex.name)], volume: null,
         // numbers-ok: `total` is `setCount(ex)` — the sets on ONE exercise in
-        // one session. Three, five, occasionally ten; a programme that put a
+        // one session. Three, five, occasionally ten; a program that put a
         // thousand sets on one movement is a different finding entirely.
         detail: sentence(`${nameOf(ex.name)} on ${whereOf(d.day, week)} is named as a ${isWarm ? 'warm-up' : 'cool-down'} but `
           // numbers-ok: as above — the sets on one exercise.
@@ -722,7 +722,7 @@ export function checksLine(): string {
 }
 
 /**
- * What was actually read, said out loud, or null on a one-week programme.
+ * What was actually read, said out loud, or null on a one-week program.
  *
  * Only for a block, and it is not decoration. "7 checks run over this draft"
  * was true of week one and read as true of twelve weeks — so a coach who had

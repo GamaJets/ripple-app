@@ -50,7 +50,7 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, ListRow, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Meter, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Meter, Segmented, type Segment, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, font, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -61,9 +61,11 @@ import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercis
 import { useSettings } from '../../src/ui/settings';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
+import { canonicalExerciseName } from '../../src/lib/exerciseName';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
+import { MuscleGroupPicker, MUSCLE_GROUP_WHY } from '../../src/ui/MuscleGroupPicker';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
 // The coach's own standing cue for a movement, written once and carried into
@@ -77,6 +79,12 @@ import {
   type CueRead,
 } from '../../src/lib/coachCues';
 import { buildProgram, type Program, type ProgramDay } from '../../src/lib/programs';
+// The other half of "build a program": the one the client has nothing to build
+// it with. `buildProgram` above writes bars, stacks and machines out of its own
+// source and has no version with the kit taken out, so a no-equipment week is
+// drawn from the catalogue instead — and reports, by name, the muscle groups it
+// could not cover. See src/lib/noKitProgram.ts.
+import { noKitProgram, noKitCoverageNote } from '../../src/lib/noKitProgram';
 // A programme can now be more than one week. `programWeeks` is the ONE reader
 // that resolves the block, `withWeeks` the ONE writer that keeps `days` — which
 // is what the shipped client app renders — in step with week one. Neither this
@@ -173,6 +181,22 @@ const LIB: { name: string; group: string }[] = [
 /** Prose written by the program generator, which cites a body-fat reading this
  *  screen does not have. Never prefilled into the coach's note to a client. */
 const GENERATED_NOTE = /latest InBody scan/i;
+
+/* ── what the client has to train with ────────────────────────────────────
+   Asked for twice, the second time as the shape it had to take: "there needs
+   to be a way to select no equipment available as an option in order to build
+   a work out program". So it is two words a coach taps, on the screen where
+   they are already standing when they start one — not a filter hidden in the
+   exercise picker and not a preference on another page.
+
+   Two options and not eleven. The catalogue's `equipment` column would support
+   a chip per kit — dumbbell, bands, a pull-up bar — and that is the shape this
+   wants to grow into. It is deliberately not built yet: "no equipment" is the
+   thing that was asked for and the thing that has to work end to end first. */
+const KIT_OPTIONS: readonly Segment<'any' | 'none'>[] = [
+  { key: 'any', label: 'Any equipment' },
+  { key: 'none', label: 'No equipment', a11yLabel: 'No equipment available' },
+];
 
 let KEY = 1;
 const nextKey = () => 'e' + KEY++;
@@ -576,6 +600,16 @@ export default function Builder() {
   // screen is keyed on, so it stays. `movement()` is the same name to read.
   const { textOf: movement } = useMovementName();
   const [custom, setCustom] = useState('');
+  /**
+   * The muscle group for a movement the catalogue has never heard of.
+   *
+   * No default. A pre-selected chip is a group nobody chose, and a group
+   * nobody chose is what put four rows into the catalogue with no muscle group
+   * at all — which is invisible in a list and missing from the body map, the
+   * day's chips and Muscle Focus. Null until the coach taps one, and Add is
+   * held until then. Cleared with the box, below.
+   */
+  const [customGroup, setCustomGroup] = useState<string | null>(null);
   // Drawn in pages. Six hundred rows mounted inside a bottom sheet is a visibly
   // janky scroll on an older phone, and nobody reads past the first screenful
   // of an alphabetical list anyway.
@@ -588,6 +622,10 @@ export default function Builder() {
   const [previewing, setPreviewing] = useState(false);
   useFocusEffect(useCallback(() => { setPreviewing(false); }, []));
   const [tplPick, setTplPick] = useState(false);
+  /** What the client has to train with. 'any' is the default and is what every
+   *  program before now assumed; it is NOT a claim that they own a rack, it is
+   *  the absence of the restriction. Nothing is generated off it. */
+  const [kit, setKit] = useState<'any' | 'none'>('any');
   const [saveOpen, setSaveOpen] = useState(false);
   const [tplName, setTplName] = useState('');
   /**
@@ -1017,6 +1055,40 @@ export default function Builder() {
     Alert.alert(
       'Replace What Is in the Builder?',
       `“${tpl.name}” loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first — the button is at the foot of the screen.`,
+      [
+        { text: 'Keep What I Have', style: 'cancel' },
+        { text: 'Replace It', style: 'destructive', onPress: land },
+      ],
+    );
+  };
+
+  /**
+   * A week drawn only from movements that need nothing at all.
+   *
+   * Computed the moment the coach picks No equipment, BEFORE they tap Build,
+   * so the sentence about what it could not cover is read as part of the
+   * decision rather than found afterwards underneath a finished week.
+   *
+   * 'ready' only. Under 'partial' the catalogue held is a prefix, so which
+   * groups have no no-kit movement is a subtotal and printing it would state a
+   * gap in the catalogue out of a gap in the read; under 'loading' and 'error'
+   * there is nothing to count at all. Each says so on screen instead.
+   */
+  const noKit = useMemo(
+    () => (kit === 'none' && cat.status === 'ready' ? noKitProgram(cat.rows) : null),
+    [kit, cat.status, cat.rows],
+  );
+
+  /** Load that week over what is in the builder, asking first when the coach
+   *  has unsaved work — the same guard, and the same words, as the template
+   *  shortcut above, because it is the same loss. */
+  const buildNoKitWeek = () => {
+    if (!noKit?.program.days.length) return;
+    const land = () => loadFrom(noKit.program, null);
+    if (!builderDirty()) { land(); return; }
+    Alert.alert(
+      'Replace What Is in the Builder?',
+      `A no-equipment week loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first — the button is at the foot of the screen.`,
       [
         { text: 'Keep What I Have', style: 'cancel' },
         { text: 'Replace It', style: 'destructive', onPress: land },
@@ -1930,6 +2002,33 @@ export default function Builder() {
     return m;
   }, [cat.rows]);
   const rowFor = (name: string) => catByName.get(exerciseSlug(name)) ?? null;
+  /**
+   * What the Add button in the picker would write, and whether it may yet.
+   *
+   * Two rules, both asked for directly by the owner.
+   *
+   * The NAME is the catalogue's own spelling whenever the typed text resolves
+   * to a row — by slug, or by an exact synonym, and never by a near-miss (see
+   * `canonicalExerciseName`). A coach typing "Shoulder press" was putting that
+   * string into a programme while 615 rows and every join spelled it "Shoulder
+   * Press", so the same movement read two ways depending on who added it. Only
+   * a movement nothing resolves goes in as typed, and then in Title Case.
+   *
+   * The GROUP must exist before the movement can be added. It comes free from
+   * the catalogue row when there is one; the picker is shown, and Add is held,
+   * only when there is nothing to take it from. That includes a catalogue row
+   * whose own `muscle_group` is blank — four such rows reached this builder,
+   * and a programme row with no group is dropped by `groupsOf`, which is how a
+   * day holding an overhead press printed no Shoulders chip. The coach's
+   * answer fills the PROGRAMME row; it deliberately does not rewrite the
+   * catalogue's row, which is the library's to correct.
+   */
+  const customAdd = (() => {
+    const typed = custom.trim();
+    const name = canonicalExerciseName(typed, cat.rows);
+    const group = (rowFor(name)?.group || '').trim() || (customGroup ?? '').trim();
+    return { name, group, needsGroup: !!typed && !group, can: !!typed && !!group };
+  })();
   // Sets per muscle group over the week being edited — the Weekly Volume card.
   // See the card for why this is a plain sum and not `muscleBoard`.
   const weekVolume = useMemo(() => {
@@ -2840,6 +2939,60 @@ export default function Builder() {
             The count waits for a whole read, because under 'partial' or
             'error' `templates.length` is the size of what arrived plus three
             built-in starters, which is not the size of the library. */}
+        {/* ── what they have to train with ────────────────────────────────
+            The requirement, in the owner's own words: "there needs to be a way
+            to select no equipment available as an option in order to build a
+            work out program." So it is a control, above the two ways a program
+            is started, and the honest part is what sits under it — a coach
+            picking No equipment is told what the catalogue CANNOT give them
+            before they build, not after. */}
+        <Section>
+          <SectionHead title="Equipment" />
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+            What is available where this client trains. Pick No equipment and the whole week is drawn from movements that need nothing at all — no bar, no bands, no bench.
+          </Text>
+          <Segmented options={KIT_OPTIONS} value={kit} onChange={setKit} />
+
+          {kit !== 'none' ? null
+            : cat.status === 'loading' ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                Reading the movement catalogue…
+              </Text>
+            ) : cat.status === 'error' ? (
+              /* Not "there are no bodyweight movements". The read failed; the
+                 catalogue is untouched and says what it always said. */
+              <Notice tone={t.warn} kicker="Catalogue" title="The Movement Catalogue Could Not Be Read"
+                note="Nothing can be built from a list that did not come back, and this is not a statement that no movement needs no equipment. Reopen this screen once you have signal." />
+            ) : cat.status === 'partial' ? (
+              <View style={{ marginTop: sp.md }}>
+                <PartialRead what="catalogue movements" shown={cat.rows.length} />
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                  Only part of the catalogue came back, so which muscle groups a no-equipment week could not cover is not known — and a week generated from a prefix would leave out groups without being able to say which. Nothing is built from a partial list.
+                </Text>
+              </View>
+            ) : !noKit?.program.days.length ? (
+              <Notice tone={t.warn} kicker="Equipment" title="There Is No No-Equipment Week to Build"
+                note={noKit ? (noKitCoverageNote(noKit.coverage) ?? '') : ''} />
+            ) : (
+              <View style={{ marginTop: sp.md }}>
+                {/* The sentence the owner asked for, named group by group. It
+                    is shown BEFORE the button, and it is the same sentence the
+                    program itself carries into the client's note. */}
+                <Notice tone={t.ink3} kicker="Equipment"
+                  title={`${num(noKit.coverage.poolSize)} Movements Need Nothing at All`}
+                  note={noKitCoverageNote(noKit.coverage)
+                    ?? 'Every muscle group the catalogue names has a movement that needs no equipment.'} />
+                <View style={{ height: sp.md }} />
+                <Cta label="Build a No-Equipment Week" onPress={buildNoKitWeek} wide
+                  a11yLabel={`Build a ${noKit.program.days.length}-day week from movements that need no equipment. It loads into the builder below, over what is there.`} />
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  It loads into the builder below, where you can change any of it before assigning.
+                </Text>
+              </View>
+            )}
+        </Section>
+
+
         <Section>
           <SectionHead title="Templates" note={tplStatus === 'ready' && savedCount ? `${num(savedCount)} saved` : undefined} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
@@ -4716,13 +4869,18 @@ export default function Builder() {
         <View style={[sheet, { maxHeight: '82%' }]}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add Exercise</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-            <TextInput value={custom} onChangeText={setCustom} placeholder="Search, or type a new exercise" placeholderTextColor={t.ink3}
+            {/* The chosen group is cleared with every keystroke on purpose: it
+                was an answer about the name that was in the box, and carrying
+                it onto a different movement is the same fact-nobody-stated
+                that the blank groups were. */}
+            <TextInput value={custom} onChangeText={(v) => { setCustom(v); setCustomGroup(null); }}
+              placeholder="Search, or type a new exercise" placeholderTextColor={t.ink3}
               accessibilityLabel="Search the exercise catalogue, or type a name of your own"
               style={[inp, { flex: 1 }]} />
-            <Cta label="Add" onPress={() => {
-              if (custom.trim() && pickerDay !== null) {
-                const nm = custom.trim();
-                addExercise(pickerDay, nm, '');
+            <Cta label="Add" disabled={!customAdd.can} onPress={() => {
+              if (customAdd.can && pickerDay !== null) {
+                const { name: nm, group } = customAdd;
+                addExercise(pickerDay, nm, group);
                 // Deliberately not awaited. The exercise belongs to the program
                 // the moment it is typed; remembering it for next time is the
                 // convenience, and a failed write must not hold up the sheet or
@@ -4737,12 +4895,24 @@ export default function Builder() {
                 //
                 // Not awaited, for the same reason as remember() above: the
                 // exercise belongs to the program the moment it is typed.
-                void ensureCatalogueRow(nm);
-                setCustom('');
+                void ensureCatalogueRow(nm, { group });
+                setCustom(''); setCustomGroup(null);
                 setPickerDay(null);
               }
             }} />
           </View>
+
+          {/* ── the muscle group, when the movement needs one ───────────────
+              Only for a name the catalogue does not already answer to. A
+              movement it DOES hold arrives with its own `muscle_group` and
+              asking the coach to restate it would be asking them to disagree
+              with the library — see `customAdd`. */}
+          {customAdd.needsGroup ? (
+            <View style={{ marginTop: sp.md }}>
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.sm }}>{MUSCLE_GROUP_WHY}</Text>
+              <MuscleGroupPicker value={customGroup} onChange={setCustomGroup} />
+            </View>
+          ) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>
             Tap a movement to add it, or the arrow to read what it is first. Add puts whatever you
             typed in as it stands — a movement we have never heard of is fine.
@@ -4774,7 +4944,17 @@ export default function Builder() {
                 flexDirection: 'row', alignItems: 'center',
                 borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
               }}>
-                <Pressable onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
+                {/* A name off the coach's OWN saved list, which is where the
+                    typed spellings of the last two years live. It goes into
+                    the programme under the catalogue's name when it resolves
+                    to one, and takes that row's group when the saved entry has
+                    none — the catalogue is already in hand here, so a blank
+                    group is a lookup rather than a gap. */}
+                <Pressable onPress={() => { if (pickerDay !== null) {
+                  const nm = canonicalExerciseName(x.name, cat.rows);
+                  addExercise(pickerDay, nm, (x.group || '').trim() || (rowFor(nm)?.group ?? ''));
+                  setPickerDay(null);
+                } }}
                   accessibilityRole="button" accessibilityLabel={`Add ${x.name}`}
                   style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   {/* The still, when this name resolves to a catalogue

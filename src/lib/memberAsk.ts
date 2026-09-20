@@ -72,10 +72,10 @@ export interface MemberAskInput {
   adjustUnread: boolean;
   programTitle: string;
   programFocus: string;
-  /** True when the programme is the app's generated one standing in for a coach
+  /** True when the program is the app's generated one standing in for a coach
    *  assignment we could not read. */
   programUnknown: boolean;
-  /** Non-null while the programme being served is this device's stored copy of
+  /** Non-null while the program being served is this device's stored copy of
    *  one the coach may since have replaced. `assignedPrograms.cachedNote`. */
   programCachedNote: string | null;
   /** White-label: never a hardcoded product name. */
@@ -210,12 +210,12 @@ export function memberAskFacts(i: MemberAskInput): MemberAskFacts {
     carbs: i.macros?.carbs ?? (i.targetInputsUnknown ? 'not known' : 'not set'),
     fat: i.macros?.fat ?? (i.targetInputsUnknown ? 'not known' : 'not set'),
     // Whose block it is travels with the block. `?? buildProgram(…)` substitutes
-    // the app's automatic programme and nothing in the payload distinguished the
+    // the app's automatic program and nothing in the payload distinguished the
     // two, so the model discussed "your plan" about a block nobody assigned; and
     // `getProgram` serves this device's copy for up to thirty days, which the
     // screen flagged to the reader and never to the model.
     programTitle: i.programUnknown
-      ? `${i.programTitle} — this is ${i.brandLabel}'s automatic programme, not their coach's; we could not read whether a coach has assigned them one, so do not call it their coach's plan`
+      ? `${i.programTitle} — this is ${i.brandLabel}'s automatic program, not their coach's; we could not read whether a coach has assigned them one, so do not call it their coach's plan`
       : i.programCachedNote ? `${i.programTitle} (${i.programCachedNote})` : i.programTitle,
     programFocus: i.programFocus,
     // The gate that matters most. The empty list and the unread list are the

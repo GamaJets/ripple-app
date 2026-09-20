@@ -105,7 +105,7 @@ export default function Injuries() {
   // "read": a confirmation covers the disclosures it was made against, so a
   // client who has added one since is told it is waiting rather than read.
   // mine.readStatus, not mine.status: the acknowledgement read and the
-  // programme read fail independently, and the folded figure made this
+  // program read fail independently, and the folded figure made this
   // sentence disclaim an answer that had come back perfectly.
   // BOTH reads, folded with `worstStatus`. `ackState` is given a status and a
   // list of disclosures, and the status it was given was only ever the
@@ -307,7 +307,7 @@ export default function Injuries() {
                 </Text>
               ) : coachRead === 'none' ? (
                 <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-                  Not read yet. Your coach is shown these before they can assign you a programme, and can't assign one until they confirm they have read them.
+                  Not read yet. Your coach is shown these before they can assign you a program, and can't assign one until they confirm they have read them.
                 </Text>
               ) : coachRead === 'stale' ? (
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
@@ -323,7 +323,7 @@ export default function Injuries() {
               )}
 
               {/* What they did about it. A coach may put a movement that loads
-                  a disclosure into a programme on purpose — that is their
+                  a disclosure into a program on purpose — that is their
                   judgement — but not without saying so, and this is where the
                   saying-so is addressed to the person it is about. */}
               {choices === 'unknown' ? (

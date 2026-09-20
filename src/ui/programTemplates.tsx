@@ -230,7 +230,7 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
    * ── And what a delete does NOT touch ──────────────────────────────────────
    *
    * No foreign key anywhere in this database points at `program_templates` —
-   * read off `pg_constraint` live, the result was empty. A programme assigned
+   * read off `pg_constraint` live, the result was empty. A program assigned
    * from a template is a jsonb COPY in `assigned_programs`, with no reference
    * back, so deleting the stencil cannot reach a client who is training from
    * it, and `workouts` — keyed by user and date — cannot be reached from either.

@@ -10,7 +10,7 @@
 // owner reading yesterday's takings in 44pt type with nothing on the page
 // saying when it was fetched — is not an argument about owners. A member
 // standing in a basement looking at today's class list, their session credits
-// or their coach's programme is in exactly the same position, and rather more
+// or their coach's program is in exactly the same position, and rather more
 // likely to act on it: they walk to a room.
 //
 // It got MORE useful, not less, when the client providers learnt to recover on

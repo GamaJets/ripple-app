@@ -55,7 +55,7 @@ import { weekLabel } from './programBlock';
 /** The little of an exercise that changes the shape of a week. */
 export interface PlanExercise { name: string; sets: number; reps: string }
 
-/** One training day, as both the builder and a stored programme have one. */
+/** One training day, as both the builder and a stored program have one. */
 export interface PlanDay {
   day: string;
   focus?: string;
@@ -160,7 +160,7 @@ export function blockOverview(weeks: readonly PlanWeek[] | null | undefined): We
  * seen from the week strip, and it is what a coach gets by adding a week onto
  * an empty week one and then filling week one in.
  *
- * A one-week programme is never reported on. A coach who has just opened the
+ * A one-week program is never reported on. A coach who has just opened the
  * builder has an empty week one, and telling them their block has a hole in it
  * before they have written anything is a screen shouting at somebody for not
  * having started.
@@ -191,7 +191,7 @@ export interface WeekEdit<T> {
    *
    * A screen has to be able to say so before it happens. Every other week in a
    * block is stored and edited; week one is the one that goes onto somebody's
-   * phone the next time the programme is assigned, and moving a week into or
+   * phone the next time the program is assigned, and moving a week into or
    * out of position one is a different act from reordering weeks five and six.
    */
   movedWeekOne: boolean;
@@ -262,7 +262,7 @@ export function duplicateWeek<T>(
  * Only for the edit that reaches somebody else. Moving weeks five and six past
  * each other changes a stored plan and nothing a client can see; moving a week
  * into or out of position one changes what they will be given the next time
- * this programme is assigned, and the builder's own Remove This Week already
+ * this program is assigned, and the builder's own Remove This Week already
  * makes exactly that distinction in exactly this voice.
  */
 export function weekEditWarning(edit: WeekEdit<unknown> | null): string | null {

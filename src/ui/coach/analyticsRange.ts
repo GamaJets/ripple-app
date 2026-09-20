@@ -1,7 +1,7 @@
 // The four windows a coach reads their book over, and what each may say.
 //
 // The approved board opens Analytics on a 7D / 30D / 90D / 1Y chip row over
-// two figures — the book's adherence and its programme completions — each with
+// two figures — the book's adherence and its program completions — each with
 // a delta against the window before and a chart of the window's periods. This
 // module is the part of that which has to be RIGHT rather than merely drawn:
 // which days a window covers, how it is cut into bars, what is read for it,
@@ -22,9 +22,9 @@
 // that already exists for every client at once.
 //
 // Completions are logged workout sessions — one `workouts` row is one session
-// a client recorded, which is a programme day done. Read by `performed_at`,
+// a client recorded, which is a program day done. Read by `performed_at`,
 // the same column src/lib/clientDrift.ts takes as evidence a client trained.
-// It is NOT a count of programmes finished: nothing in the record marks a block
+// It is NOT a count of programs finished: nothing in the record marks a block
 // as complete, and the screen's caption says so.
 //
 // ── The window ends yesterday ──────────────────────────────────────────────

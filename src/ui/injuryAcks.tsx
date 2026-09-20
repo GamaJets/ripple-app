@@ -6,7 +6,7 @@
 //
 // The status is exposed for the same reason every other provider here exposes
 // one: an empty acknowledgement list means "not acknowledged" and "could not
-// read" equally, and the guard has to refuse both rather than let a programme
+// read" equally, and the guard has to refuse both rather than let a program
 // be built on the difference.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
@@ -186,7 +186,7 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
       // or not this push is delivered; this is the nudge, not the record.
       // no-error-ok: the acknowledgement is written and readable by them either way; a lost push costs a notification, not the fact
       void sendPush([clientId], 'Your coach has read your injuries',
-        'They have seen what you disclosed, and cannot assign you a programme until they have.',
+        'They have seen what you disclosed, and cannot assign you a program until they have.',
         { route: '/(client)/injuries' });
       return true;
     } catch (e) { reportError('injuryAcks.write', e); return false; }
@@ -226,8 +226,8 @@ export interface CoachRead {
   keys: string[];
 }
 
-/** One programme the coach assigned that loaded something disclosed. */
-export interface ProgrammeChoice {
+/** One program the coach assigned that loaded something disclosed. */
+export interface ProgramChoice {
   at: string;
   movements: { exercise: string; area: string; severity: string }[];
 }
@@ -243,7 +243,7 @@ export interface MyInjuryAcks {
   /** How the read of `choices` went, on its own. */
   choicesStatus: LoadStatus;
   read: CoachRead | null;
-  choices: ProgrammeChoice[];
+  choices: ProgramChoice[];
   /**
    * Ask both reads again.
    *
@@ -342,7 +342,7 @@ export function useMyInjuryAcks(): MyInjuryAcks {
             }
           : null;
 
-        const choices: ProgrammeChoice[] = progRows.rows
+        const choices: ProgramChoice[] = progRows.rows
           .map((r: any) => ({
             at: typeof r.acknowledged_at === 'string' ? r.acknowledged_at : '',
             movements: Array.isArray(r.movements) ? r.movements : [],

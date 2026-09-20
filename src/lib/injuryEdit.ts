@@ -108,17 +108,17 @@ export function editAckWarning(
  * Names the injury, because "Delete, are you sure?" over a list of five rows
  * does not say which one. Says what is lost, and says the alternative out loud:
  * most people reaching for Delete on a healed injury want Mark Recovered, which
- * keeps the history and stops it affecting their programme just the same.
+ * keeps the history and stops it affecting their program just the same.
  */
 export function deleteInjuryConfirm(injury: Pick<Injury, 'area' | 'status'>): { title: string; body: string } {
   const what = areaLabel(injury.area).toLowerCase();
   const alternative = injury.status === 'active'
-    ? `\n\nIf it has healed, use Mark Recovered instead. That keeps the record and stops it affecting your programme.`
+    ? `\n\nIf it has healed, use Mark Recovered instead. That keeps the record and stops it affecting your program.`
     : '';
   return {
     title: `Delete your ${what} injury?`,
     body: `This removes it from your list for good, and your coach stops seeing it. `
-      + `Anything already written around it, like a programme, is not changed.${alternative}`,
+      + `Anything already written around it, like a program, is not changed.${alternative}`,
   };
 }
 
@@ -146,7 +146,7 @@ export const editSheetTitle = (editing: boolean): string =>
  * Nothing ever asks.
  *
  * That is not a cosmetic gap. A mild ankle from a walk-in clinic two years ago
- * is still hiding movements from somebody's programme, still gating their
+ * is still hiding movements from somebody's program, still gating their
  * coach, and still being trained around. The member has forgotten it is there;
  * their coach cannot tell it from this morning's.
  *

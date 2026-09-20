@@ -33,7 +33,7 @@
 // and may not be added up.
 //
 // `muscleBoard` stays. Library filters on the group, the group is what a coach
-// writes on a programme, and the two answers are answers to two questions.
+// writes on a program, and the two answers are answers to two questions.
 //
 // ── How a secondary muscle counts, and why it is not one ───────────────────
 //

@@ -1,6 +1,6 @@
 // Three facts that had been collapsed into one empty list.
 //
-// A coach writing a programme needs to know what the person cannot do. The
+// A coach writing a program needs to know what the person cannot do. The
 // screens that ask have, until now, asked it in a shape with room for only two
 // answers — a list of injuries, or an empty list — and the shape cannot hold
 // the third answer, which is an ordinary one on a coach's book:
@@ -21,7 +21,7 @@
 //
 // The third one reached `guardInjuries` as `(c?.injuries ?? [])` — an empty
 // list, indistinguishable from the first — and the gate returned ALLOWED on it.
-// So a person with no account, who has never been asked, opened the programme
+// So a person with no account, who has never been asked, opened the program
 // gate exactly as though they had been asked and had answered that there was
 // nothing wrong. The screen said "no injuries recorded", which reads as an
 // all-clear about a human being, and a coach assigned a template on the
@@ -32,7 +32,7 @@
 //
 // ── What this deliberately does NOT do ────────────────────────────────────
 //
-// It does not stop the assign. Putting a programme in front of somebody the
+// It does not stop the assign. Putting a program in front of somebody the
 // coach added by hand is the ordinary case — it is most of what Add Client is
 // for — and a gate that refused it would be a worse product than the defect it
 // was fixing. What changes is that the absence stops being reported as a

@@ -1,7 +1,7 @@
-// What a coach is told about the movements they programme.
+// What a coach is told about the movements they program.
 // Compile with tsc, run with node.
 //
-// Reported from the coach app: "25 of the 25 movements you programme have no
+// Reported from the coach app: "25 of the 25 movements you program have no
 // clip at all", while every one of those movements had a bought animation the
 // client could watch. The claim was true when it was written — there were two
 // kinds of cover, a coach's clip and an Academy clip — and it stopped being
@@ -44,7 +44,7 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
   const r = coverageFor(programmed, [], COACH, illustrated('Back Squat'));
   eq(r.illustratedOnly.length, 1, 'the illustrated one is separated');
   eq(r.missing.length, 2, 'and the two with nothing are still named');
-  ok(coverageLine(r)!.includes('2 of the 3'), 'counted against the whole programme, not the remainder');
+  ok(coverageLine(r)!.includes('2 of the 3'), 'counted against the whole program, not the remainder');
   ok(r.missing.includes('Bench Press') && r.missing.includes('Deadlift'), 'by the name the coach typed');
 }
 
@@ -69,7 +69,7 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
 {
   const r = coverageFor(programmed, programmed.map((n) => clip(n, COACH)), COACH, illustrated());
   eq(r.missing.length, 0, 'nothing missing');
-  ok(coverageLine(r)!.startsWith('Every movement you programme has your own clip'), 'and it says so plainly');
+  ok(coverageLine(r)!.startsWith('Every movement you program has your own clip'), 'and it says so plainly');
 }
 
 /* ── an unreadable catalogue is unknown, never "nothing" ──────────────── */
@@ -109,7 +109,7 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
 {
   const one = ['Back Squat'];
   const bare = coverageLine(coverageFor(one, [], COACH, illustrated()))!;
-  ok(bare.includes('1 of the 1 movements you programme has nothing'), `singular bare: ${bare}`);
+  ok(bare.includes('1 of the 1 movements you program has nothing'), `singular bare: ${bare}`);
   ok(!bare.includes('have nothing'), 'not the plural verb');
 
   const illus = coverageLine(coverageFor(one, [], COACH, illustrated('Back Squat')))!;
@@ -167,7 +167,7 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
   const r = coverageFor(['Back Squat'], [clip('Back Squat', COACH), phoneOnly('Back Squat')], COACH, illustrated());
   eq(r.mine.length, 1, 'the server row is what counts');
   eq(r.localOnly.length, 0, 'and the handset copy is not reported as a gap');
-  ok(coverageLine(r)!.includes('Every movement you programme has your own clip'), 'so the screen reads as done');
+  ok(coverageLine(r)!.includes('Every movement you program has your own clip'), 'so the screen reads as done');
 }
 
 // Singular and plural of the new clause, like every other count here.
@@ -191,14 +191,14 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
   eq(r.mine.length, 0, 'a different movement is not cover');
   eq(r.missing.length, 1, 'it is still missing');
 }
-// Repeats across programmes are one movement.
+// Repeats across programs are one movement.
 {
   const r = coverageFor(['Back Squat', 'back squat', 'BACK SQUAT'], [], COACH, illustrated());
   eq(r.all.length, 1, 'the same movement written three ways is one row');
 }
 
 // Nothing programmed: no claim either way.
-eq(coverageLine(coverageFor([], [], COACH, illustrated())), null, 'no programmes means no sentence');
+eq(coverageLine(coverageFor([], [], COACH, illustrated())), null, 'no programs means no sentence');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('videoCoverage: ok');

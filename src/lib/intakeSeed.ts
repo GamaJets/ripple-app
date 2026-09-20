@@ -24,7 +24,7 @@
 // Three things move together and all three move the wrong way. The member sees
 // "0 of 7 parts answered", no warning, and a live Save button, and pressing it
 // writes an empty document over a readiness questionnaire — heart conditions,
-// chest pain, medication, injuries — that their coach programmes against. The
+// chest pain, medication, injuries — that their coach programs against. The
 // gesture the screen offers to recover from the failure is what disarms the
 // guard the screen's own header says must hold.
 //

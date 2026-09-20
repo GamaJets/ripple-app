@@ -123,7 +123,7 @@ ok(receiptBlockers(draft({ paidBy: '', amountText: '', receivedOn: '' })).length
 ok(!RECEIPT_METHODS.some((m) => String(m.id) === 'card'), 'there is no bare card method to double count with');
 ok(RECEIPT_METHODS.some((m) => m.id === 'card_at_gym'), 'a card taken somewhere else has its own value');
 eq(methodLabel('cash'), 'Cash', 'a known method has its label');
-// A programme written by a newer build must not blank the row on an older one:
+// A program written by a newer build must not blank the row on an older one:
 // the amount beside an unrecognised method is still a real payment.
 eq(methodLabel('crypto'), 'crypto', 'an unknown method shows what was stored rather than nothing');
 eq(methodLabel(null), 'Not stated', 'and a missing one says so rather than rendering blank');

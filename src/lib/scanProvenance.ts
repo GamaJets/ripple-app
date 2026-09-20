@@ -28,7 +28,7 @@
 // more than a month of good work — which is the reasoning already written down
 // at app/(trainer)/client-body.tsx:44-53 about the typed `manual_weight_kg`
 // figures, and which applies just as hard to two rows of `scans` that happen to
-// disagree about the equipment. A coach rewriting somebody's programme because
+// disagree about the equipment. A coach rewriting somebody's program because
 // their body fat "went up 1.8 points" needs to know whether that 1.8 is a
 // measurement or the difference between a machine and a guess.
 //

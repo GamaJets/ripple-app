@@ -77,7 +77,7 @@ ok(/Mark Recovered/.test(del.body),
   'and offers the thing most people reaching for Delete actually want');
 ok(!/Mark Recovered/.test(deleteInjuryConfirm({ area: 'knee', status: 'recovered' }).body),
   'but not to somebody who has already marked it recovered');
-ok(/not changed/.test(del.body), 'and does not overclaim: a programme written around it is untouched');
+ok(/not changed/.test(del.body), 'and does not overclaim: a program written around it is untouched');
 
 /* ── the sheet ─────────────────────────────────────────────────────────── */
 
@@ -89,7 +89,7 @@ eq(editSheetTitle(false), 'Disclose an Injury', 'and a first disclosure keeps it
 // The gap this closes: `at` has been on every injury since the type was
 // written and nothing has ever printed it, so a knee from a walk-in clinic two
 // years ago reads exactly like this morning's and goes on hiding movements
-// from somebody's programme.
+// from somebody's program.
 //
 // Every case below is built from LOCAL date arithmetic rather than from a
 // literal instant, because that is the whole point — the answer must be the

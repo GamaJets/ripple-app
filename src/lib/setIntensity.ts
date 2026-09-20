@@ -4,7 +4,7 @@
  *
  * ── What a coach was doing instead ────────────────────────────────────────
  *
- * A programme could say "4 × 6 at 100 kg" and nothing else. Everything a coach
+ * A program could say "4 × 6 at 100 kg" and nothing else. Everything a coach
  * actually adds to that — "@8", "@75%", "3-1-1" — went into
  * `ProgramExercise.note`, as free text, because there was nowhere else for it.
  * That is not a cosmetic problem. A note is a sentence rendered under a
@@ -46,9 +46,9 @@
  *
  * The same rule the rest of src/lib/setRows.ts follows, for the same reason.
  * These three fields are OPTIONAL on both `ProgramExercise` and `SetRow`, and
- * absent on a row means "the exercise's own answer". Every programme already
+ * absent on a row means "the exercise's own answer". Every program already
  * written carries none of them, and every one of those must render and run in
- * a new build exactly as it does in the old one — a programme lives in
+ * a new build exactly as it does in the old one — a program lives in
  * `program_templates`, on each client's `assigned_programs` row, and in the
  * coach's on-device AsyncStorage draft, and no migration reaches all three.
  *
@@ -430,7 +430,7 @@ const own = (o: object | null | undefined, k: string): boolean =>
  * and it matters in exactly the same way: `{ rpe: null }` on a row is a set the
  * coach deliberately took the RPE off, inside an exercise that carries one, and
  * it must not silently pick the exercise's back up. That is a top single with
- * no target inside a block written at RPE 8, which is a thing coaches programme
+ * no target inside a block written at RPE 8, which is a thing coaches program
  * on purpose.
  */
 export function intensityOf(ex: IntensitySpec | null | undefined, row: IntensitySpec | null | undefined): Intensity {
@@ -452,7 +452,7 @@ export function intensityOf(ex: IntensitySpec | null | undefined, row: Intensity
  *
  * Null rather than an empty string when nothing is set, so a caller renders
  * NOTHING rather than an empty line taking vertical space under every set of
- * every programme ever written — which is every programme, since none of them
+ * every program ever written — which is every program, since none of them
  * carry these fields.
  */
 export function intensityLine(i: Intensity): string | null {

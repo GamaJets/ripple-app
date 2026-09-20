@@ -417,7 +417,7 @@ export async function fetchPhotosSharedWithMe(clientId: string): Promise<SharedP
   const links: CoachLink[] = [{ clientId, coachId: uid, active: live === true }];
 
   // Chunked. `grants` has no bound at all — it is every share this client has
-  // ever made to this coach, and a client on a twelve-week programme who sends
+  // ever made to this coach, and a client on a twelve-week program who sends
   // a photo a week for three years is a good client, not an edge case. Past
   // roughly two hundred uuids the `in.("…","…")` list crosses the 8KB request
   // line, the proxy answers 414, and supabase-js returns that as `data: null`.

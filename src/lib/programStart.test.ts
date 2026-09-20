@@ -64,7 +64,7 @@ eq(at('2026-09-01', '2026-10-27').week, null, 'which is not a week number either
 eq(at('2026-09-02', '2026-09-08').week, 1, 'a Wednesday block is still in week one on the following Tuesday');
 eq(at('2026-09-02', '2026-09-09').week, 2, 'and reaches week two seven days after the day the coach chose');
 
-// A programme with no weeks at all must not read as a block that already ended
+// A program with no weeks at all must not read as a block that already ended
 // on the day it started.
 eq(at('2026-09-01', '2026-09-01', 0).phase, 'during', 'a zero week count is floored to one rather than ending the block');
 eq(at('2026-09-01', '2026-09-01', 0).weeks, 1, 'and is reported as one');
@@ -89,7 +89,7 @@ ok(/Nothing here says whether Priya did it/i.test(after),
   'a finished block is not a completed one — nothing in this app knows whether they trained it');
 
 const oneWeekLine = blockPositionLine(at('2026-09-01', '2026-09-02', 1), '2026-09-01', 'Priya');
-ok(!/Week 1 of 1/.test(oneWeekLine), 'a one-week programme is not given a week number, because there is nothing to count');
+ok(!/Week 1 of 1/.test(oneWeekLine), 'a one-week program is not given a week number, because there is nothing to count');
 
 // Four different phases, four different sentences. A screen that printed the
 // same line for two of them would be hiding the difference between "you did not
@@ -123,7 +123,7 @@ ok(!laterStart(null, '2026-09-01'), 'and an absent date is not later than anythi
 
 /* ── the promise this feature must not make ─────────────────────────────── */
 
-ok(/does not hold the programme back/i.test(CLIENT_STARTS_NOW),
+ok(/does not hold the program back/i.test(CLIENT_STARTS_NOW),
   'the sentence says the date does not gate what the client sees');
 ok(/replaces this week/i.test(CLIENT_STARTS_NOW),
   'and names the consequence a coach would otherwise discover from their client');

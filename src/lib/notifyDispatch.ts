@@ -198,7 +198,7 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   // the only push route in KNOWN_PUSHES with no channel that plainly had one.
   // src/ui/injuryAsk.ts sends 'Your coach asked about an injury' and
   // src/ui/injuryAcks.tsx sends the read receipt; both are a coach and a client
-  // settling a form the coach needs before they may write a programme —
+  // settling a form the coach needs before they may write a program —
   // injuryAcks' own body says so — which is what this switch's label means by
   // paperwork. Handset-pushed today, so the classification is inert at runtime
   // and is here for the reason '/(client)/explore' is: a null column on a row
@@ -222,7 +222,7 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   ['/(trainer)/nudges', 'book'],
   // A training block that ran out under a client (part 471). Not one of the
   // three the note names, and it belongs with them rather than with `clients`:
-  // it is the coach's own programme going stale, and what a coach does about it
+  // it is the coach's own program going stale, and what a coach does about it
   // is write the next block.
   ['/(trainer)/builder', 'book'],
 

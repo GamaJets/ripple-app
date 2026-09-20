@@ -14,7 +14,7 @@
 // reps box — which is a claim that they performed forty-five plank repetitions,
 // counted into the rep totals on History, and eligible to be read as a rep
 // record. The alternative was not logging the movement at all, which is what
-// most people did, so the one exercise in a beginner's programme they could
+// most people did, so the one exercise in a beginner's program they could
 // actually complete was the one their log never mentioned.
 //
 // ── Why a flag, and not a third number in the pair ─────────────────────────
@@ -79,7 +79,7 @@ export function hasTimedSet(e: Pick<WorkoutEntry, 'timed'>): boolean {
  *
  * Read from the prescription STRING because that is where the app already
  * says it: `'45 sec'`, `'30 sec/side'`, `'1 min'`, `'90s'`, `'2 min hold'`.
- * Nothing writes a machine-readable duration onto a programme, three years of
+ * Nothing writes a machine-readable duration onto a program, three years of
  * templates are already stored as prose, and a coach typing "45 sec" into the
  * builder means the same thing today as they did then.
  *

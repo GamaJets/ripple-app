@@ -12,7 +12,7 @@
  * The rest used when nobody has said, in seconds.
  *
  * 90 because that is the number the runner has always passed to `startRest`
- * since it was written, so an existing programme's behaviour does not change
+ * since it was written, so an existing program's behaviour does not change
  * the day per-exercise rest lands. It is a FALLBACK and is labelled as one
  * everywhere it is shown: it is not a recommendation, and this file is not
  * entitled to make one about somebody else's training.
@@ -63,13 +63,13 @@ export type RestRead =
   | { ok: false; reason: string };
 
 /**
- * Read the rest field on the programme builder.
+ * Read the rest field on the program builder.
  *
  * Refused rather than coerced, exactly like `readLift` in src/lib/units.ts and
  * for the same reason: `parseInt(text, 10) || 0` is what a field like this gets
  * written with, and a mistyped rest silently becoming 0 does not look like an
  * error to anybody — it looks like an exercise the coach chose not to set a
- * rest for, which is a different sentence about their programme than the one
+ * rest for, which is a different sentence about their program than the one
  * they meant.
  *
  * An EMPTY field is `{ ok: true, seconds: null }` and that is not the same as a
@@ -90,7 +90,7 @@ export function readRestSeconds(text: string | null | undefined): RestRead {
   }
   if (n === 0) {
     // Said, not accepted. A coach who means "no rest" and a coach who has not
-    // decided both end up with the same programme, and only one of them would
+    // decided both end up with the same program, and only one of them would
     // recognise it later.
     return { ok: false, reason: 'Leave the rest empty rather than setting it to 0 — an empty rest uses the app default of 90 seconds.' };
   }

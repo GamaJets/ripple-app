@@ -81,7 +81,7 @@ export function ackState(
   return active.every((i) => seen.has(injuryKey(i))) ? 'covered' : 'stale';
 }
 
-/** How the SECOND client-side read stands — the programmes a coach assigned
+/** How the SECOND client-side read stands — the programs a coach assigned
  *  knowing about a disclosure.
  *
  *  Separate from `ackState` because it is a separate table and a separate
@@ -105,7 +105,7 @@ export function programmeChoiceState(status: LoadStatus, count: number): ChoiceS
   // produced on the very next line — the type comment above lists all four
   // answers precisely so 'partial' would not have to hide inside one of the
   // others. This guard means "the read did not land", and a truncated read did
-  // land: some programmes assigned over a disclosure are known to exist, which
+  // land: some programs assigned over a disclosure are known to exist, which
   // is not 'unknown' and is not "these are all of them" either. Note that a
   // truncated read with a zero count still goes to 'unknown' below, because a
   // count of zero off a prefix is the one number a prefix cannot supply.
@@ -115,11 +115,11 @@ export function programmeChoiceState(status: LoadStatus, count: number): ChoiceS
 }
 
 /**
- * May this coach assign a programme to this client?
+ * May this coach assign a program to this client?
  *
  * `disclosures` is how the read of the client's OWN injury list went, and
  * `status` is how the read of the acknowledgement went. Both unknowns are
- * refused for the same reason the overwrite guard refuses one: a programme
+ * refused for the same reason the overwrite guard refuses one: a program
  * built without seeing an injury is not undone by finding out later.
  */
 export function guardInjuries(
@@ -168,7 +168,7 @@ export function guardInjuries(
     return {
       allowed: false,
       label: 'Injuries Could Not Be Read',
-      reason: `${clientName} has disclosed injuries and this screen could not confirm they have been acknowledged. Building a programme around an injury nobody has read is the thing this check exists to stop, so it is held until the list loads.`,
+      reason: `${clientName} has disclosed injuries and this screen could not confirm they have been acknowledged. Building a program around an injury nobody has read is the thing this check exists to stop, so it is held until the list loads.`,
       outstanding: [],
     };
   }
@@ -182,7 +182,7 @@ export function guardInjuries(
     allowed: false,
     label: `Read ${clientName}'s Injuries First`,
     reason: isFirst
-      ? `${clientName} has disclosed ${countPhrase(active.length)}. Read them and confirm before building a programme around them.`
+      ? `${clientName} has disclosed ${countPhrase(active.length)}. Read them and confirm before building a program around them.`
       : `${clientName} has disclosed ${countPhrase(unseen.length)} since you last confirmed. Read the change before assigning.`,
     // The whole current list, not just the new part: an acknowledgement stands
     // for everything it was made against, and writing only the delta would

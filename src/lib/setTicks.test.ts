@@ -7,7 +7,7 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   if (JSON.stringify(a) !== JSON.stringify(b)) errors.push(`${msg}: ${JSON.stringify(a)} !== ${JSON.stringify(b)}`);
 };
 
-/** The ordinary programme row: three of the same set, no table. */
+/** The ordinary program row: three of the same set, no table. */
 const plain: SetSpec = { sets: 3, reps: '10', loadKg: 60 };
 /** A ramp, written as a table by a coach. */
 const ramp: SetSpec = {

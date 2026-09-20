@@ -214,7 +214,7 @@ export function useExerciseTranslation(exerciseId: string | null | undefined): {
  * `useExerciseCatalogue` hands every row a `.display`, and the two library
  * screens use it. Nothing else could: the screens a member actually trains
  * from do not hold catalogue rows at all. A workout log row carries an
- * `exercise` COLUMN — a string — and a programme day carries a
+ * `exercise` COLUMN — a string — and a program day carries a
  * `ProgramExercise.name` frozen into the template JSON when the coach built
  * it. Both are the English name, because the English name is the identity
  * (see src/lib/catalogueLocale.ts), and both were rendered raw.
@@ -233,7 +233,7 @@ export function useExerciseTranslation(exerciseId: string | null | undefined): {
  * name a coach typed by hand does not resolve to any row and comes back as
  * itself, flagged as a fallback. That flag is honest and the caller decides
  * whether to render it: a list of six hundred catalogue rows marks them (see
- * `fallbackTag`), and a programme of eight movements a coach chose does not
+ * `fallbackTag`), and a program of eight movements a coach chose does not
  * need a badge on every line.
  *
  * ── one read, not one per row ─────────────────────────────────────────────

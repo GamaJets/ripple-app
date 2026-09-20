@@ -4,7 +4,7 @@
 //
 // Four pieces of state on app/(client)/workouts.tsx — `swaps`, `exEdits`,
 // `customEx` and `removedEx` — were plain `useState`. They are, between them,
-// every change a member can make to the programme they were given: swap a lift
+// every change a member can make to the program they were given: swap a lift
 // for one the gym actually has, correct the load the coach guessed, take out a
 // movement their shoulder will not do, add the one they did instead.
 //
@@ -12,12 +12,12 @@
 // guided-session draft (`repple.guidedSession`) and the per-day set draft
 // (`repple.workoutDraft.<date>`). So a swap made on Tuesday was gone on
 // Wednesday, and a load corrected at the rack was gone the moment the app was
-// killed. The member did the work of fixing their programme once a week, for
+// killed. The member did the work of fixing their program once a week, for
 // ever, and nobody ever saw it.
 //
 // The second half is worse than the first. None of it reached the coach. A
 // coach writing Bench Press for somebody whose gym has no bench sees a
-// programme being followed; the member sees a lift they substitute every single
+// program being followed; the member sees a lift they substitute every single
 // session. Neither of them can see the other, and the thing that would settle
 // it — "they have swapped this four weeks running" — was being typed into a
 // React state and thrown away.
@@ -70,7 +70,7 @@
 // next, because that is the row the coach wrote. `custom` is not keyed at all —
 // it is a flat list, exactly as the screen has always held it.
 //
-// Nothing here trims, migrates or reconciles against the programme. A key that
+// Nothing here trims, migrates or reconciles against the program. A key that
 // no longer matches any exercise is left alone: the coach may put that movement
 // back next week, and a member's correction is not the app's to discard.
 import { accountStateStep, type AccountStateStep } from './accountScopedState';
@@ -160,7 +160,7 @@ export interface PlanEdits {
   }>;
   /** `dayIdx:key` for every movement they have taken off that day. */
   removed: string[];
-  /** Movements they added that the programme does not contain. */
+  /** Movements they added that the program does not contain. */
   custom: ProgramExercise[];
 }
 

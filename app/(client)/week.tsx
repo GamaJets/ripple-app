@@ -39,7 +39,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { buildProgram } from '../../src/lib/programs';
 import { scheduledDay } from '../../src/lib/checklist';
 // Which week of the block this is. The seven rows below are a WEEK of a
-// programme, and until now they were always week one of it — so a member on a
+// program, and until now they were always week one of it — so a member on a
 // twelve week block read the same seven rows for twelve weeks while their coach
 // looked at eleven more they had written. See src/lib/clientBlock.ts.
 import { useClientWeek } from '../../src/ui/clientWeek';
@@ -77,8 +77,8 @@ export default function ThisWeek() {
   // history — `historyBoard` answers 'unreadable' for both.
   const history = useProgramHistory(c.id === 'unknown' ? null : c.id);
   // What the coach assigned, what has been trained against it, the blocks that
-  // came before it, and the profile the generic fallback programme is built
-  // from. A programme assigned this morning was invisible here until the app
+  // came before it, and the profile the generic fallback program is built
+  // from. A program assigned this morning was invisible here until the app
   // was killed — and a block replaced this morning is exactly what somebody
   // pulls this screen to check.
   const pull = usePullToRefresh(useCallback(() => {
@@ -94,7 +94,7 @@ export default function ThisWeek() {
   //
   // 'loading' is not "known" either. The provider starts at 'loading' under
   // Supabase (src/ui/assignedPrograms.tsx), so the first frame drew seven days
-  // of a generated programme under "The Plan" with nothing said — and a member
+  // of a generated program under "The Plan" with nothing said — and a member
   // glancing at their week has usually looked away before the real one lands.
   // 'partial' is the third: the page came back at the row cap, so their
   // assignment may have been on the part we never read. Anything that is not
@@ -111,7 +111,7 @@ export default function ThisWeek() {
   // for the other: src/ui/assignedPrograms.tsx:191 and :198 set 'ready' the
   // moment there is no session or no uid to read for. So on a cold launch
   // `programStatus === 'ready'` and `c.id === 'unknown'` arrive together, and
-  // the screen drew seven days of a generated programme under "The Plan" with
+  // the screen drew seven days of a generated program under "The Plan" with
   // no banner and no "· coach plan" suffix — the silent substitution the whole
   // note above exists to stop, reached from a read that succeeded.
   const idKnown = c.id !== 'unknown';
@@ -134,7 +134,7 @@ export default function ThisWeek() {
     [history.rows, history.status, coachProgram, startsOn, c.id, programStatus],
   );
   // The week they are on, and its days. Identical to `program.days` for every
-  // one-week programme, which is every programme this app generates and every
+  // one-week program, which is every program this app generates and every
   // one written before blocks existed.
   const blk = useClientWeek(program, c.id);
   const blockLine = clientWeekLine(blk.week, blk.week.index);
@@ -204,9 +204,9 @@ export default function ThisWeek() {
    * reading "1 of 6" would be reading a number about the calendar rather than
    * about themselves.
    *
-   * `days` is null while the coach programme is unknown. The plan drawn above
+   * `days` is null while the coach program is unknown. The plan drawn above
    * is then the generated one and may be about to be replaced, so comparing
-   * against it would measure somebody's week against a programme they may not
+   * against it would measure somebody's week against a program they may not
    * be on — `programUnknown` is the flag the banner at the top already uses for
    * exactly that doubt.
    */
@@ -234,7 +234,7 @@ export default function ThisWeek() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        {/* The board's pushed-page head; the programme this week belongs to
+        {/* The board's pushed-page head; the program this week belongs to
             is the one quiet line under the title. */}
         <PageHead title="This Week" subtitle={`${program.title}${coachProgram ? ' · coach plan' : ''}`} />
 
@@ -314,7 +314,7 @@ export default function ThisWeek() {
           })() : null}
 
           {/* Which week of the block these seven days are, and the sentence
-              saying why that one. Nothing at all for a one-week programme, so a
+              saying why that one. Nothing at all for a one-week program, so a
               plan written before blocks existed reads exactly as it did. The
               week is not tappable here: Train is where a member moves through
               the block, and two screens offering the same control is two places
@@ -345,7 +345,7 @@ export default function ThisWeek() {
               : 'Nothing scheduled — train anyway if you want to';
             // What THIS day trains, off its own exercise rows and never off its
             // name — a day called "Push" with a row in it shows Back. Every
-            // part of the row describes the one day; the programme's name is
+            // part of the row describes the one day; the program's name is
             // the page's subtitle and appears on no row.
             const groups = workout ? groupsOf(workout.exercises) : [];
             return (
@@ -392,7 +392,7 @@ export default function ThisWeek() {
             rather than sessions, no percentage, and "we could not tell" never
             wearing the face of "you did not do it".
 
-            'no-programme' never fires from here, because the plan drawn above
+            'no-program' never fires from here, because the plan drawn above
             is always a plan; the branch is kept in the module for a caller
             that has none. */}
         <Section>
@@ -435,12 +435,12 @@ export default function ThisWeek() {
             overwriting what their coach wrote for this evening.
 
             `historyLine` carries the sentence that stops the true answer being
-            read as the wrong one: programmes replaced before the record existed
-            were overwritten and cannot be recovered, so "no earlier programme"
+            read as the wrong one: programs replaced before the record existed
+            were overwritten and cannot be recovered, so "no earlier program"
             is silent about anything before that, not a claim about a member who
             has been training here for two years. */}
         <Section>
-          <SectionHead title="Programmes You've Been On"
+          <SectionHead title="Programs You've Been On"
             note={hist.earlierCount == null ? undefined : `${hist.earlierCount} earlier`} />
           <Text style={{ ...ty.caption, color: t.ink3 }}>{historyLine(history.status, hist, 'you')}</Text>
           {hist.entries.map((e, i) => (
@@ -465,7 +465,7 @@ export default function ThisWeek() {
                   same call in app/(client)/notices.tsx: "Showing the first 0"
                   is not a sentence, and a capped page whose only entry is the
                   current block is exactly the case that produces it. */}
-              <PartialRead what="earlier programmes" shown={hist.entries.filter((e) => !e.current).length || undefined}
+              <PartialRead what="earlier programs" shown={hist.entries.filter((e) => !e.current).length || undefined}
                 onPress={history.reload} />
             </View>
           ) : null}

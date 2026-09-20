@@ -5,12 +5,12 @@
 // A coach says the same sentence about the same lift to every client they
 // train: "brace before you unrack, chin tucked". Until now the only place in
 // Repple to put it was `ProgramExercise.note` — the per-exercise note INSIDE
-// one programme day, on one client's week. So it was retyped on every
+// one program day, on one client's week. So it was retyped on every
 // assignment, and it drifted: the same coach's front squat carried three
 // different cues across three clients, and nothing anywhere could tell which
 // of the three was the one they meant.
 //
-// A cue is a fact about the MOVEMENT and the coach. The programme note is a
+// A cue is a fact about the MOVEMENT and the coach. The program note is a
 // fact about THIS client on THIS day. Two different things, so two different
 // places to keep them — supabase/parts/3150 holds the first, and the second
 // stays exactly where it was.
@@ -19,7 +19,7 @@
 //
 // This is the whole of the danger in the feature and it is stated first.
 //
-// A cue is a DEFAULT. The programme note is the INSTANCE. A coach who wrote
+// A cue is a DEFAULT. The program note is the INSTANCE. A coach who wrote
 // "go easy, right shoulder still sore" against Sara's overhead press wrote
 // that about Sara, on purpose, and a cue arriving later must not replace it —
 // that is not a prefill, it is an erasure of something a human typed about a
@@ -48,7 +48,7 @@
 // screen that treated that as "no cues" would be claiming something about the
 // coach from the absence of a table. Worse, a screen that let the error
 // through takes the builder down — which is a coach unable to write a
-// programme because of a feature they have never used.
+// program because of a feature they have never used.
 //
 // So the read has THREE outcomes and collapsing any two of them is a defect:
 //
@@ -487,7 +487,7 @@ export async function saveCue(
  * Remove this coach's cue for a movement.
  *
  * Deleting a cue is NOT an erasure of anything a client can see. Every note
- * already prefilled from it is a note in a programme, stored on its own row,
+ * already prefilled from it is a note in a program, stored on its own row,
  * and it stays — which is the correct behaviour and worth saying: a coach who
  * changes their standing cue is not retracting what they told forty people
  * last month, and a delete that reached into those weeks would be rewriting

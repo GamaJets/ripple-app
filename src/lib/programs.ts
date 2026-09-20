@@ -38,7 +38,7 @@ export interface ProgramExercise {
    * It lived on the builder's own `BEx` and NOT here, so it survived exactly as
    * long as the screen was open: save a template in pounds, reopen it, and the
    * weights came back in kilograms. Absent means "use whatever this coach
-   * usually works in", which is what every programme written before now meant.
+   * usually works in", which is what every program written before now meant.
    */
   loadUnit?: WeightUnit;
   /**
@@ -73,8 +73,8 @@ export interface ProgramExercise {
    *
    * Asked for as "there should a rest timer in between sets" — the timer itself
    * already existed in the guided runner, hardcoded to 90 seconds for every
-   * exercise in every programme. That number is right for accessory work and
-   * wrong at both ends of a session: a coach who programmes heavy triples wants
+   * exercise in every program. That number is right for accessory work and
+   * wrong at both ends of a session: a coach who programs heavy triples wants
    * three minutes, and the same coach wants forty seconds on a finisher. One
    * constant cannot say either, and a client following a 90 second rest through
    * a set of heavy singles is training something the coach did not write.
@@ -109,7 +109,7 @@ export interface ProgramExercise {
    * handling here: a tri-set that loses a movement is a run of two and is
    * relabelled a superset by the renderer that reads it.
    *
-   * Optional, and absent is the ordinary case. Every programme already on a
+   * Optional, and absent is the ordinary case. Every program already on a
    * phone has no groups at all, and a `null` or a missing field both mean the
    * same thing to `groupRuns` — which is why nothing here defaults it.
    */
@@ -127,7 +127,7 @@ export interface ProgramExercise {
    * is what keeps somebody's numbers from jumping when they did nothing
    * different).
    *
-   * A STRING rather than a union, so a programme written by a newer build and
+   * A STRING rather than a union, so a program written by a newer build and
    * opened on an older one still loads: `methodFor` resolves an id it does not
    * know to the default instead of dropping the set. Optional for the same
    * reason `loadKg` and `note` are — most sets are ordinary, and writing
@@ -150,7 +150,7 @@ export interface ProgramExercise {
    * OPTIONAL, and absent is the ordinary case — the rules for reading it are
    * in src/lib/setRows.ts and every one of them falls back to `sets`, `reps`,
    * `loadKg` and `method` when it is not here. That is not politeness about
-   * old data. A programme lives in `program_templates`, on each client's
+   * old data. A program lives in `program_templates`, on each client's
    * assignment, and in the coach's on-device draft in AsyncStorage, and no
    * migration reaches all three — so an exercise without this field must
    * render and run in a new build exactly as it does in the old one, and
@@ -183,7 +183,7 @@ export interface ProgramExercise {
    * client's account of their own session, which is the one direction this app
    * never lets data flow.
    *
-   * Absent is the ordinary case and every programme in the database is absent.
+   * Absent is the ordinary case and every program in the database is absent.
    * See src/lib/setIntensity.ts for the scale, the bounds and — the part that
    * matters most — the fact that the CLIENT'S Train tab does not render this
    * yet, so anything they need at the machine still belongs in `note`.
@@ -236,7 +236,7 @@ export interface ProgramDay { day: string; focus: string; cardio?: string; exerc
  * So `days` stays exactly what it was — WEEK ONE — and `weeks` is an OPTIONAL
  * list that carries the whole block including week one. A reader that does not
  * know about `weeks` shows `days`, which is week one, which is what it showed
- * before and is a true week of the programme rather than an error.
+ * before and is a true week of the program rather than an error.
  *
  * ── The duplication, and why it is the same pattern as `sets` ─────────────
  *
@@ -252,14 +252,14 @@ export interface ProgramDay { day: string; focus: string; cardio?: string; exerc
  *
  * ── absent means exactly what it meant before ─────────────────────────────
  *
- * A programme with no `weeks` is a one-week programme, which is what every
- * programme in every one of the three homes is today. `programWeeks` returns a
+ * A program with no `weeks` is a one-week program, which is what every
+ * program in every one of the three homes is today. `programWeeks` returns a
  * single week built from `days` for it, `weekCount` returns 1, and nothing
- * anywhere renders a week number. Nothing writes `weeks` onto a programme the
+ * anywhere renders a week number. Nothing writes `weeks` onto a program the
  * coach has not deliberately given a second week to.
  */
 export interface ProgramWeek {
-  /** The days of THIS week, in the same shape a one-week programme uses. */
+  /** The days of THIS week, in the same shape a one-week program uses. */
   days: ProgramDay[];
   /**
    * What the coach calls this week — 'Accumulation', 'Week 3', 'Deload'. Absent
@@ -297,8 +297,8 @@ export interface Program {
   /** WEEK ONE. See `ProgramWeek` for why this field cannot be replaced. */
   days: ProgramDay[];
   /**
-   * The whole block, week one included, or absent for the one-week programme
-   * every programme in the database currently is.
+   * The whole block, week one included, or absent for the one-week program
+   * every program in the database currently is.
    *
    * Read through `programWeeks` and written through `withWeeks`, both in
    * src/lib/programBlock.ts. Nothing else should touch it: the invariant that

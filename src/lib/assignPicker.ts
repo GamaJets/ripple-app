@@ -1,4 +1,4 @@
-// Who a built programme is about to go to, and what the builder is allowed to
+// Who a built program is about to go to, and what the builder is allowed to
 // throw away on the way there.
 //
 // Everything here is pure. It takes statuses and ids and returns decisions and
@@ -6,11 +6,11 @@
 // what would happen before anything does. The fan-out itself is NOT here —
 // src/lib/groupProgram.ts plans it and src/lib/bulkActions.ts writes the
 // sentences around it, and a second copy of either is how the two screens that
-// assign programmes would start disagreeing about what a bulk write means.
+// assign programs would start disagreeing about what a bulk write means.
 //
 // ── 1 · THE BUILDER WAS DESTROYING THE COACH'S OWN WORK ────────────────────
 //
-// app/(trainer)/builder.tsx loaded the selected client's current programme into
+// app/(trainer)/builder.tsx loaded the selected client's current program into
 // the builder whenever the selected client changed, unconditionally:
 //
 //     useEffect(() => {
@@ -25,9 +25,9 @@
 // back, so it is always `''`. So the coach's actual sequence is: open Programs,
 // lay out a week, then pick the person it is for. That last tap ran the effect
 // above and replaced everything they had typed with the client's existing
-// programme, or with nothing at all. Twenty minutes of work, gone at the exact
+// program, or with nothing at all. Twenty minutes of work, gone at the exact
 // gesture that was supposed to send it — which is, in the user's words, being
-// unable to assign a programme they had built.
+// unable to assign a program they had built.
 //
 // This is the same defect as the ones the guards in that file already stop,
 // pointed at the coach instead of the client: a silent, unrecoverable
@@ -37,7 +37,7 @@
 // the coach taps.
 //
 // The honesty requirement cuts the other way too, and is why this is not simply
-// "stop loading". A builder showing one client's programme while another
+// "stop loading". A builder showing one client's program while another
 // client's name is selected is the trap the file's own header describes — the
 // coach adjusts what is on screen and assigns it, believing it to be theirs. So
 // when the two disagree the screen must not stay silent about it either.
@@ -72,7 +72,7 @@ import type { LoadStatus } from '../ui/loadStatus';
  *
  *   'seed'  — fill it from what that client is currently on. Only ever when
  *             there is nothing in it to lose.
- *   'clear' — leave it empty. The client's programme could not be read, and an
+ *   'clear' — leave it empty. The client's program could not be read, and an
  *             empty builder is the honest state for "we do not know".
  *   'hold'  — change nothing. The coach has work in progress and it is theirs.
  */
@@ -84,7 +84,7 @@ export interface SeedDecision {
   note: string | null;
   /** Title Case label for the control that discards the draft and loads what
    *  the client is really on, or null when there is nothing to offer — either
-   *  because there is no disagreement or because their programme could not be
+   *  because there is no disagreement or because their program could not be
    *  read and so cannot be loaded. */
   replaceLabel: string | null;
 }
@@ -93,10 +93,10 @@ const NOTHING_TO_SAY = (action: SeedAction): SeedDecision =>
   ({ action, note: null, replaceLabel: null });
 
 /**
- * May the builder fill itself from `clientId`'s current programme?
+ * May the builder fill itself from `clientId`'s current program?
  *
  * `hasDraft` is whether there is anything in the builder at all — a day, a
- * title, a note. `seededFor` is the client whose programme the contents were
+ * title, a note. `seededFor` is the client whose program the contents were
  * last loaded FROM, or null when the contents are the coach's own composition
  * (typed from blank, or loaded from a template). It is compared rather than
  * trusted as "unedited": once contents are on screen this function will not
@@ -127,7 +127,7 @@ export function seedDecision(o: {
         action: 'hold',
         note:
           `What is in the builder is your own work, so picking ${o.firstName} has not replaced it. `
-          + `It is not what ${o.firstName} is currently training — load their programme if you would rather start from that.`,
+          + `It is not what ${o.firstName} is currently training — load their program if you would rather start from that.`,
         replaceLabel: `Load What ${o.firstName} Is On`,
       };
     }
@@ -190,11 +190,11 @@ export function pruneSelection(
 const s = (n: number) => (n === 1 ? '' : 's');
 
 /**
- * The label on the control that fans a built programme out to the ticked
+ * The label on the control that fans a built program out to the ticked
  * clients.
  *
  * The order of the branches is the order the coach hits them, and it matters:
- * a programme with no exercises in it cannot be assigned to anybody, so that is
+ * a program with no exercises in it cannot be assigned to anybody, so that is
  * said before "pick who gets this" rather than after it.
  *
  * `planLabel` is `planFanOut`'s refusal or partial label, and it is asked AFTER
@@ -207,7 +207,7 @@ export function assignCtaLabel(o: {
   busy: boolean;
   /** How many clients are ticked. */
   picked: number;
-  /** What is in the programme. */
+  /** What is in the program. */
   exercises: number;
   /** `planFanOut`'s label, or null when it is happy for the button to carry its
    *  usual one. */

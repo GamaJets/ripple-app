@@ -1,15 +1,15 @@
 // Which version of the bootcamp each member is on. Compile with tsc, run with node.
 //
 // The bug every assertion here is aimed at: a member still training last
-// month's version of the group programme and a member whose Thursday was
+// month's version of the group program and a member whose Thursday was
 // rewritten around their shoulder both read 'diverged'. That is true and
 // useless, because those two need OPPOSITE actions — the first needs one tap,
 // and re-sending to the second silently undoes the modification the coach made
 // on purpose.
 //
-// The group still does not own the plan. supabase/parts/134-a-programme-written-once.sql
+// The group still does not own the plan. supabase/parts/134-a-program-written-once.sql
 // gives three reasons and none of them has changed; what this adds is the
-// group's PAST programmes, so there is something to compare against, and every
+// group's PAST programs, so there is something to compare against, and every
 // answer below is DERIVED from a member's actual assignment rather than stamped
 // on them when the fan-out ran.
 import {
@@ -43,24 +43,24 @@ const sig3 = programSignature(v3);
 
 /* ── a version is derived, every time, from what they are actually on ───── */
 
-eq(versionOf(versions, v2), 2, 'a member on the July programme is on version 2');
-eq(versionOf(versions, v3), 3, 'and one on the current programme is on version 3');
+eq(versionOf(versions, v2), 2, 'a member on the July program is on version 2');
+eq(versionOf(versions, v3), 3, 'and one on the current program is on version 3');
 eq(versionOf(versions, bespoke), null,
   'a member on something that is none of the group’s versions is not "an old version" — that is the client with the shoulder');
 eq(versionOf(versions, null), null, 'and a member on nothing has no version');
 
-// A coach who changes the programme and changes it back produces two versions
+// A coach who changes the program and changes it back produces two versions
 // that fingerprint the same. Saying "they are on version 1" about somebody
-// holding a programme identical to version 3 would send the coach off to
+// holding a program identical to version 3 would send the coach off to
 // re-assign something they already have.
 const reverted: GroupVersion[] = [...versions, { version: 4, signature: programSignature(v1), createdAt: '2026-09-01T00:00:00Z' }];
 eq(versionOf(reverted, v1), 4, 'where two versions are identical the NEWEST wins, so nobody is asked to re-send what they already hold');
 
-// A stored programme this build could not read has a null signature, and a null
+// A stored program this build could not read has a null signature, and a null
 // must never match a member — including a member who is also on nothing, which
 // is 'none' and is decided before this is asked.
 eq(versionOf([{ version: 1, signature: null, createdAt: null }], v1), null,
-  'an unreadable stored version matches nobody rather than matching everybody with no programme');
+  'an unreadable stored version matches nobody rather than matching everybody with no program');
 
 /* ── the spread, and the two lists that need opposite actions ───────────── */
 
@@ -128,7 +128,7 @@ eq(behindNote(memberVersions('ready', versions, 3, [{ clientId: 'ann', assigned:
 // so comparing them would report a client as diverged when the sessions in
 // front of them are identical.
 const reworded: Program = { ...v3, note: 'Different letter at the top', focus: ['Anything'] };
-eq(programSignature(reworded), sig3, 'a programme with the same sessions and different prose is the same programme');
+eq(programSignature(reworded), sig3, 'a program with the same sessions and different prose is the same program');
 eq(versionOf(versions, reworded), 3, 'so a member on it is on version 3, not adrift');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

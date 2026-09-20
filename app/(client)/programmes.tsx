@@ -1,10 +1,10 @@
-// Client · Programmes — the fifteen ready-made plans, and what is actually in
+// Client · Programs — the fifteen ready-made plans, and what is actually in
 // each one.
 //
 // ── Why this screen exists ────────────────────────────────────────────────
 //
 // `public.workout_templates` has been live and populated since
-// supabase/parts/2600 and was read by NOTHING. Fifteen programmes, trilingual,
+// supabase/parts/2600 and was read by NOTHING. Fifteen programs, trilingual,
 // 126 movements resolved against the catalogue by hand, and no route into any
 // of it. A member on no coach's book had the exercise library — six hundred
 // movements with no order to do them in — and nothing that said "start here on
@@ -20,12 +20,12 @@
 // the only cadence figure printed. src/lib/workoutTemplates.ts argues this at
 // the point it would be computed.
 //
-// ── These are not a coach's programmes and must not read as one ───────────
+// ── These are not a coach's programs and must not read as one ───────────
 //
-// A member on a coach's book gets their programme on the Train tab, written for
+// A member on a coach's book gets their program on the Train tab, written for
 // them, around their injuries. These fifteen are written for nobody. The
 // heading and the standing line under it say so, and the screen never uses the
-// words a coached programme uses ("your programme", "assigned") about any of
+// words a coached program uses ("your program", "assigned") about any of
 // them.
 //
 // ── Four statuses, four sentences ─────────────────────────────────────────
@@ -34,7 +34,7 @@
 // empty are four different things and this screen says four different things.
 // The signed-out case is not theoretical: `wt_read` is `to authenticated`, so a
 // session that has not been restored is handed zero rows and no error, and
-// "there are no programmes" would be a false statement about fifteen that
+// "there are no programs" would be a false statement about fifteen that
 // exist. See src/ui/workoutTemplates.ts.
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
@@ -108,7 +108,7 @@ function ChipRow({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export default function Programmes() {
+export default function Programs() {
   const t = useTheme();
   const router = useRouter();
   // Rows here open the exercise detail, so Back must skip its own details —
@@ -125,7 +125,7 @@ export default function Programmes() {
   const [filter, setFilter] = useState<TemplateFilter>(NO_FILTER);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // Both reads. The names read cannot be re-armed by re-reading the programmes
+  // Both reads. The names read cannot be re-armed by re-reading the programs
   // — the ids do not change — so it carries its own reload and the pull asks
   // for both. A member whose name read failed on a train has no other way back.
   const pull = usePullToRefresh(useCallback(() => {
@@ -160,7 +160,7 @@ export default function Programmes() {
 
   const G = layout.gutter;
 
-  /* ── the summary line under a programme's name ──────────────────────────
+  /* ── the summary line under a program's name ──────────────────────────
    *
    * Goal, level, cadence and shape, in that order, with anything the row does
    * not carry simply absent. Never padded with "unknown": a member reading
@@ -171,7 +171,7 @@ export default function Programmes() {
     [goalLabel(x.goal), difficultyLabel(x.difficulty), frequencyLabel(x.frequencyPerWeek), shapeLine(x)]
       .filter(Boolean).join(' · ');
 
-  /* ── the detail of one programme ─────────────────────────────────────── */
+  /* ── the detail of one program ─────────────────────────────────────── */
   const detail = (x: WorkoutTemplate) => {
     const name = localisedText(x.name, locale);
     const description = localisedText(x.description, locale);
@@ -180,7 +180,7 @@ export default function Programmes() {
     return (
       <>
         <Section>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Ready-Made Programme</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Ready-Made Program</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{name?.text ?? x.id}</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{metaLine(x)}</Text>
           {description ? (
@@ -193,7 +193,7 @@ export default function Programmes() {
 
           {/* Not about the network. These entries came back and had nothing in
               them we could name, so the days below are shorter than the
-              programme is — which a member following it has to know. */}
+              program is — which a member following it has to know. */}
           {shortfall ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{shortfall}</Flag> : null}
 
           {x.tags.length ? (
@@ -206,24 +206,24 @@ export default function Programmes() {
             </View>
           ) : null}
 
-          {/* Whose programmes these are, said on the page they are read from
+          {/* Whose programs these are, said on the page they are read from
               rather than two screens away on a credits card. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-            Programme by RepDB · repdb.co
+            Program by RepDB · repdb.co
           </Text>
         </Section>
 
         {/* The movement names are a second read and it can fail on its own.
             When it does the days are still real and still worth following — the
-            sets, the reps and the rests all come off the programme row — so the
+            sets, the reps and the rests all come off the program row — so the
             list is shown and the gap is named rather than the screen refusing. */}
         {movements.status === 'error' ? (
           <Notice tone={t.warn} kicker="Movement Names" title="The names of these movements could not be read"
-            note="The programme itself is below and is complete. What is missing is only the catalogue name for each line, so the rows are listed by their catalogue id. Pull down to try again." />
+            note="The program itself is below and is complete. What is missing is only the catalogue name for each line, so the rows are listed by their catalogue id. Pull down to try again." />
         ) : null}
         {movements.status === 'ready' && movements.missing.length ? (
           <Flag tone={t.warn}>
-            Some movements in these programmes are not in the exercise catalogue on this device, so they are
+            Some movements in these programs are not in the exercise catalogue on this device, so they are
             listed by their catalogue id and have no page to open.
           </Flag>
         ) : null}
@@ -231,7 +231,7 @@ export default function Programmes() {
         {x.days.length === 0 ? (
           <Section>
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              This programme lists no days. That is a gap in the programme itself and not something that
+              This program lists no days. That is a gap in the program itself and not something that
               failed to load — there is nothing here to follow yet.
             </Text>
           </Section>
@@ -242,12 +242,12 @@ export default function Programmes() {
               <Rule />
               <Section>
                 {/* The day's card is about the day: its own name (or its place,
-                    where the programme gives none), its own counts. The set
+                    where the program gives none), its own counts. The set
                     total is drawn only when EVERY movement in the day states a
                     set count — a sum over the rows that happen to carry one
                     would be a smaller number passing for the day's. There are
                     no muscle-group chips here, unlike Train and This Week: a
-                    ready-made programme's rows hold a catalogue id and the
+                    ready-made program's rows hold a catalogue id and the
                     library read brings back names only, so there is no group
                     on this screen to draw one from. */}
                 <SectionHead
@@ -325,15 +325,15 @@ export default function Programmes() {
     <>
       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
         Complete plans anyone can follow. They are not written for you and nobody is coaching you through
-        them — your coach's programme, if you have one, is on your Train tab.
+        them — your coach's program, if you have one, is on your Train tab.
       </Text>
 
       {goals.length > 1 ? (
         <ChipRow title="Goal">
-          <Chip label="All" on={filter.goal === null} spoken="Show programmes for every goal"
+          <Chip label="All" on={filter.goal === null} spoken="Show programs for every goal"
             onPress={() => setFilter((f) => ({ ...f, goal: null }))} />
           {goals.map((g) => (
-            <Chip key={g} label={goalLabel(g)} on={filter.goal === g} spoken={`Show ${goalLabel(g)} programmes only`}
+            <Chip key={g} label={goalLabel(g)} on={filter.goal === g} spoken={`Show ${goalLabel(g)} programs only`}
               onPress={() => setFilter((f) => ({ ...f, goal: f.goal === g ? null : g }))} />
           ))}
         </ChipRow>
@@ -341,10 +341,10 @@ export default function Programmes() {
 
       {levels.length > 1 ? (
         <ChipRow title="Level">
-          <Chip label="All" on={filter.difficulty === null} spoken="Show programmes at every level"
+          <Chip label="All" on={filter.difficulty === null} spoken="Show programs at every level"
             onPress={() => setFilter((f) => ({ ...f, difficulty: null }))} />
           {levels.map((d) => (
-            <Chip key={d} label={difficultyLabel(d)} on={filter.difficulty === d} spoken={`Show ${difficultyLabel(d)} programmes only`}
+            <Chip key={d} label={difficultyLabel(d)} on={filter.difficulty === d} spoken={`Show ${difficultyLabel(d)} programs only`}
               onPress={() => setFilter((f) => ({ ...f, difficulty: f.difficulty === d ? null : d }))} />
           ))}
         </ChipRow>
@@ -352,10 +352,10 @@ export default function Programmes() {
 
       {bands.length > 1 ? (
         <ChipRow title="How Often">
-          <Chip label="Any" on={filter.frequency === null} spoken="Show programmes at any number of days a week"
+          <Chip label="Any" on={filter.frequency === null} spoken="Show programs at any number of days a week"
             onPress={() => setFilter((f) => ({ ...f, frequency: null }))} />
           {bands.map((b) => (
-            <Chip key={b.key} label={b.label} on={filter.frequency === b.key} spoken={`Show programmes of ${b.label.toLowerCase()} a week`}
+            <Chip key={b.key} label={b.label} on={filter.frequency === b.key} spoken={`Show programs of ${b.label.toLowerCase()} a week`}
               onPress={() => setFilter((f) => ({ ...f, frequency: f.frequency === b.key ? null : (b.key as FrequencyBandKey) }))} />
           ))}
         </ChipRow>
@@ -367,7 +367,7 @@ export default function Programmes() {
             catalogue, and a count over a signed-out read is a measurement of a
             permissions refusal. `isWhole`, both times. */}
         <SectionHead
-          title="Programmes"
+          title="Programs"
           note={isWhole(status) && !signedOut && templates.length
             ? (isFiltering(filter) ? `${shown.length} of ${templates.length}` : String(templates.length))
             : undefined}
@@ -378,38 +378,38 @@ export default function Programmes() {
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
             <Icon name="grid" size={26} color={t.ink3} />
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
-              Reading the programme library…
+              Reading the program library…
             </Text>
           </View>
         ) : status === 'error' ? (
-          <Notice tone={t.warn} kicker="Programmes" title="The programme library could not be read"
-            note="This is our end, not yours — the programmes are still there. Pull down to try again once you have signal." />
+          <Notice tone={t.warn} kicker="Programs" title="The program library could not be read"
+            note="This is our end, not yours — the programs are still there. Pull down to try again once you have signal." />
         ) : signedOut ? (
-          <Notice tone={t.warn} kicker="Programmes" title="Sign in to see the programmes"
+          <Notice tone={t.warn} kicker="Programs" title="Sign in to see the programs"
             note="These are only available once you are signed in, so this screen was not allowed to look them up. Nothing has been removed." />
         ) : (
           <>
-            {status === 'partial' ? <PartialRead what="programmes" shown={templates.length} onPress={lib.reload} /> : null}
+            {status === 'partial' ? <PartialRead what="programs" shown={templates.length} onPress={lib.reload} /> : null}
 
-            {/* Rows that came back and could not be turned into a programme.
+            {/* Rows that came back and could not be turned into a program.
                 Zero on every read of the live table, and said out loud rather
                 than left as a list that is quietly one short. */}
             {unreadableRows > 0 ? (
               <Flag tone={t.warn}>
                 {unreadableRows === 1
-                  ? 'One programme came back in a shape this app could not read and is not listed below.'
-                  : `${unreadableRows} programmes came back in a shape this app could not read and are not listed below.`}
+                  ? 'One program came back in a shape this app could not read and is not listed below.'
+                  : `${unreadableRows} programs came back in a shape this app could not read and are not listed below.`}
               </Flag>
             ) : null}
 
             {templates.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                There are no ready-made programmes yet. They appear here as they are added.
+                There are no ready-made programs yet. They appear here as they are added.
               </Text>
             ) : shown.length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
                 <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center' }}>
-                  No programme matches what you picked.
+                  No program matches what you picked.
                 </Text>
                 <View style={{ marginTop: sp.md }}>
                   <Ghost label="Clear Filters" onPress={() => setFilter(NO_FILTER)} />
@@ -454,17 +454,17 @@ export default function Programmes() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        {/* Back LEADS the row and is announced. While a programme is open it
-            closes the programme rather than leaving the screen — the member's
+        {/* Back LEADS the row and is announced. While a program is open it
+            closes the program rather than leaving the screen — the member's
             way back to the list is the control they already used to get here,
             and a Back that jumped two levels would drop the filters they set. */}
         {/* The board's pushed-page head. On the list it carries the title;
-            on an open programme only the back control, because the card under
-            it names the programme. */}
+            on an open program only the back control, because the card under
+            it names the program. */}
         <PageHead
-          title={open ? undefined : 'Programmes'}
+          title={open ? undefined : 'Programs'}
           subtitle={open ? undefined : 'Ready-made, for anyone'}
-          backLabel={open ? 'Back to the list of programmes' : 'Back'}
+          backLabel={open ? 'Back to the list of programs' : 'Back'}
           onBack={() => { if (open) setOpenId(null); else goBack(); }}
         />
 

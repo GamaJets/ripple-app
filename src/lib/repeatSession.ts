@@ -2,7 +2,7 @@
 //
 // ── What was missing ───────────────────────────────────────────────────────
 //
-// Train can start a session from exactly one place: the programme day. For a
+// Train can start a session from exactly one place: the program day. For a
 // member with a coach that is the coach's day, and for a solo member it is
 // whatever `buildProgram` generated for that weekday — the same four movements
 // every Tuesday for ever. Every other lifting app in the world lets somebody
@@ -85,7 +85,7 @@
 // app/(client)/workouts.tsx writes an entry only for an exercise with at least
 // one set typed against it, and a set that was not done is not written at all.
 // A session where somebody did two of four planned sets and went home is four
-// planned sets in the programme and TWO SETS in the log, and the difference is
+// planned sets in the program and TWO SETS in the log, and the difference is
 // not recoverable from the log because the plan is not in it.
 //
 // So this file converts what is recorded and refuses to pad. Repeating that
@@ -106,7 +106,7 @@
 //
 // Real and ordinary: a trainer types any exercise they like into the builder, a
 // member types any exercise they like into "Add an Exercise You Did", coaches
-// change programmes, and a name logged in March may match nothing today.
+// change programs, and a name logged in March may match nothing today.
 //
 // It is NOT dropped. The member did it, it is in their history, and a repeat
 // list quietly two movements short is the app editing somebody's training. It

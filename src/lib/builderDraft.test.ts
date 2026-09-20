@@ -1,4 +1,4 @@
-// A coach's unsaved programme belongs to the coach who typed it.
+// A coach's unsaved program belongs to the coach who typed it.
 // Compile with tsc, run with node.
 //
 // The middle of this file is not a unit test. It is one long-lived handset
@@ -217,7 +217,7 @@ class Builder {
     title: "Somebody's block", note: '', days: [dayOf('Mon')], weeks: [{ days: [dayOf('Mon')] }],
   }));
 
-  // ── coach A signs in and writes a programme ──────────────────────────
+  // ── coach A signs in and writes a program ──────────────────────────
   let screen = new Builder(store);
   screen.session('coach-a');
   eq(screen.title, '', 'coach A opens an empty builder — the unqualified draft is not theirs and is not read');
@@ -241,7 +241,7 @@ class Builder {
 
   // ── A signs out. The tab stays mounted; the state must not. ───────────
   screen.session(null);
-  eq(screen.title, '', 'signing out takes the programme off the screen as well as out of the writes');
+  eq(screen.title, '', 'signing out takes the program off the screen as well as out of the writes');
   eq(screen.weeks[0]?.days.length, 0, 'every week with it');
   eq(screen.loaded, false, 'and the autosave is disarmed');
   eq(screen.onScreenKey, null, 'and the screen belongs to nobody');
@@ -254,7 +254,7 @@ class Builder {
   // ── coach B signs in on the same handset ──────────────────────────────
   screen = screen.remount();
   screen.session('coach-b');
-  eq(screen.title, '', "coach B's builder is empty — A's programme is not restored into it");
+  eq(screen.title, '', "coach B's builder is empty — A's program is not restored into it");
   eq(screen.note, '', 'not the note either');
   eq(screen.weeks[0]?.days.length, 0, 'nor a single day of it');
   screen.type({ title: 'B beginners', day: 'Wed' });
@@ -267,7 +267,7 @@ class Builder {
   // ── and A comes back to exactly what they left ────────────────────────
   screen = screen.remount();
   screen.session('coach-a');
-  eq(screen.title, 'Hypertrophy 8', 'A signs back in to their own programme');
+  eq(screen.title, 'Hypertrophy 8', 'A signs back in to their own program');
   eq(screen.weeks[0]?.days[0]?.day, 'Mon', 'the same day');
   eq(screen.note, 'her left shoulder', 'and the same note');
 }
@@ -281,7 +281,7 @@ class Builder {
   screen.type({ title: 'A block', day: 'Mon' });
   // Some paths hand one account straight to the next with no null in between.
   screen.session('coach-b');
-  eq(screen.title, '', "B never sees A's programme even when the session never went null");
+  eq(screen.title, '', "B never sees A's program even when the session never went null");
   eq(screen.weeks[0]?.days.length, 0, 'nor any of its days');
   eq(readBuilderDraft<Day>(store.items.get(builderDraftKey('coach-a')!)!).draft!.title, 'A block',
     "and A's work is still on the device");

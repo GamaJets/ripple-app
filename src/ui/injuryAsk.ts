@@ -37,7 +37,7 @@ export interface AskResult {
  *
  * Deliberately says the coach CANNOT do it for them. Without that sentence the
  * request reads as bureaucracy — "why are you asking me, you know already" —
- * and the honest answer, that this has to come from them for their programme to
+ * and the honest answer, that this has to come from them for their program to
  * be built around it, is also the reason they should bother.
  */
 export function askMessage(areaId: string | null, note: string): string {

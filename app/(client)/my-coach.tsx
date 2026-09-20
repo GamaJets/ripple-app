@@ -457,7 +457,7 @@ export default function MyCoach() {
     // language model as `coaching` and gets back "your coach is in the room
     // for your booked sessions" about a coach who is not; the dashboard keeps
     // `booksSessions` true; app/(client)/workouts.tsx keeps waiting on a
-    // programme nobody is going to assign; and the Me hub keeps showing the
+    // program nobody is going to assign; and the Me hub keeps showing the
     // rows `soloHide` exists to take away. Every one of those is a claim about
     // a relationship the server has just ended.
     //
@@ -896,7 +896,7 @@ export default function MyCoach() {
                       can be undone. Said rather than implied: the list above
                       names a day and a kind of change and deliberately does not
                       name the movement, because the stored key is a slug and
-                      the programme that would turn it into a name is on that
+                      the program that would turn it into a name is on that
                       screen and not on this one. */}
                   <View style={{ flexDirection: 'row', marginTop: sp.md }}>
                     <Ghost label="Open My Plan" onPress={() => go('/(client)/workouts')} />

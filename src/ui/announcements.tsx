@@ -38,7 +38,7 @@
 // policies; not null means the row is addressed to that coach's CURRENT roster,
 // through `is_my_coach()`, which reads the same `clients.trainer_id` that
 // `end_coaching()` clears. A client who leaves a coach stops seeing that
-// coach's announcements, deliberately and unlike a training programme: a plan
+// coach's announcements, deliberately and unlike a training program: a plan
 // somebody is following stays theirs when they change coach, but "the 6pm class
 // is cancelled tonight" from a coach they no longer train with is not news
 // addressed to them.

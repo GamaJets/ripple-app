@@ -17,7 +17,7 @@
 // A member three months into a cut reads "−6.0 kg since 4 May" for six weeks
 // running while the actual weekly loss falls to nothing, and the screen whose
 // whole subject is the direction of travel never says the travel stopped. A
-// rate is also the figure a coach programmes from: 0.5–1% of bodyweight a week
+// rate is also the figure a coach programs from: 0.5–1% of bodyweight a week
 // is the standard cut, and nothing in this app has ever put a member's own
 // number beside it.
 //

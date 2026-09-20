@@ -11,7 +11,7 @@ ok(SET_METHODS.length >= 12, 'the catalogue covers more than the four the other 
 eq(SET_METHODS.filter((m) => m.id === DEFAULT_METHOD).length, 1, 'exactly one default');
 eq(SET_METHODS[0].id, DEFAULT_METHOD, 'the default is offered first');
 
-// Ids are what get STORED in programmes on people's phones, so a duplicate or
+// Ids are what get STORED in programs on people's phones, so a duplicate or
 // a renamed one is a data bug, not a cosmetic one.
 eq(new Set(SET_METHODS.map((m) => m.id)).size, SET_METHODS.length, 'ids are unique');
 eq(new Set(SET_METHODS.map((m) => m.label)).size, SET_METHODS.length, 'labels are unique');
@@ -37,7 +37,7 @@ eq(restAfter('normal', 0), 0, 'no rest configured means no rest');
 eq(restAfter('normal', -5), 0, 'a negative rest is floored, never handed to a countdown');
 eq(restAfter('normal', 90.6), 91, 'a fractional rest is rounded, not truncated into a stray millisecond');
 
-// ── An unknown id is a NEWER programme, not a broken one ──────────────────
+// ── An unknown id is a NEWER program, not a broken one ──────────────────
 eq(methodFor('myotatic-crunch-2029').method.id, DEFAULT_METHOD, 'an unknown method falls back to normal');
 ok(!methodFor('myotatic-crunch-2029').known, 'and says it was not recognised');
 ok(methodFor('drop').known, 'a known one says so');

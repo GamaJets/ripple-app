@@ -1,13 +1,13 @@
-// Which exercises a coach programmes but has no clip for.
+// Which exercises a coach programs but has no clip for.
 //
 // The library screen answers "what have I recorded". It cannot answer the more
 // useful question, which is "what am I asking people to do that they have never
 // seen done". A coach with an empty library gets a blank screen; a coach with
 // forty clips has no idea which of them matter. Both want the same list.
 //
-// Deliberately scoped to what the coach ACTUALLY PROGRAMMES, not the whole
+// Deliberately scoped to what the coach ACTUALLY PROGRAMS, not the whole
 // catalogue. A list of everything is a chore nobody starts; a list of the nine
-// movements in the programmes you have already written is a job.
+// movements in the programs you have already written is a job.
 //
 // This comment used to call that "the whole 56-row catalogue". 56 is the number
 // of distinct EQUIPMENT values, not the number of exercises — counted against
@@ -27,7 +27,7 @@
 // and everything else was "no clip at all". That was true when it was written
 // and stopped being true the day a bought pack of animations and stills landed
 // on the catalogue: a coach was being told that 25 of the 25 movements they
-// programme have nothing, while their clients were watching a proper animation
+// program have nothing, while their clients were watching a proper animation
 // of every one. Counted against the live table on 13 Sep 2026: of 615 rows, 496
 // carry an animation, 608 carry stills and 7 carry neither.
 //
@@ -57,7 +57,7 @@ import { clipOwner } from './clipOwner';
 export interface CoverageVideo { id: string; exerciseId: string | null; name: string; trainerId?: string | null }
 
 export interface Covered {
-  /** The exercise as the coach wrote it in the programme. */
+  /** The exercise as the coach wrote it in the program. */
   name: string;
   /** Covered by a clip this coach recorded. */
   mine: boolean;
@@ -76,7 +76,7 @@ export interface Covered {
 }
 
 export interface CoverageReport {
-  /** Every distinct movement across the programmes given, alphabetical. */
+  /** Every distinct movement across the programs given, alphabetical. */
   all: Covered[];
   /** Nothing at all: no clip, no Academy clip, and no catalogue illustration.
    *  The list that matters most, and the only one that is urgent.
@@ -109,7 +109,7 @@ export interface CoverageReport {
 }
 
 /**
- * Compare the movements a coach programmes against the clips available.
+ * Compare the movements a coach programs against the clips available.
  *
  * `exerciseNames` may repeat and may be cased however the coach typed them;
  * they are matched by the same slug the player uses, so what this reports and
@@ -183,7 +183,7 @@ export function coverageFor(
 /**
  * The one line a coach reads at the top of their library.
  *
- * Null when there is nothing to say — no programmes written yet, so no claim
+ * Null when there is nothing to say — no programs written yet, so no claim
  * can be made about coverage either way. An empty string would render as a
  * blank row; null lets the caller omit the whole thing.
  */
@@ -203,12 +203,12 @@ export function coverageLine(r: CoverageReport): string | null {
   // therefore told a coach who had filmed nothing that they had filmed
   // everything. Emptiness is not completeness.
   if (r.mine.length === r.all.length) {
-    return `Every movement you programme has your own clip. ${r.all.length} in all.`;
+    return `Every movement you program has your own clip. ${r.all.length} in all.`;
   }
 
   const parts: string[] = [];
   if (n > 0) {
-    parts.push(`${n} of the ${r.all.length} movements you programme ${n === 1 ? 'has' : 'have'} nothing to show at all`);
+    parts.push(`${n} of the ${r.all.length} movements you program ${n === 1 ? 'has' : 'have'} nothing to show at all`);
   }
   if (i > 0) {
     parts.push(`${i} ${i === 1 ? 'shows' : 'show'} the catalogue animation rather than you`);

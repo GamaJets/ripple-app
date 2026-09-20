@@ -15,7 +15,7 @@
 // FINDING the row is half of it. The other half is that the row a synonym found
 // still has to be ITSELF. `CatalogueRow.display` is the translated name a screen
 // prints; `name` is the identity — it is what `exerciseSlug` turns into the id,
-// what a programme stores, and what the detail screen is opened with. A search
+// what a program stores, and what the detail screen is opened with. A search
 // that resolved "butt kicks" to a row called "butt kicks" would put a movement
 // into a client's week that resolves to nothing. So every assertion below that
 // finds a row also checks what the row IS.
@@ -87,7 +87,7 @@ const found = (term: string, rows: Row[] = ROWS): Row[] =>
     // a tautology and this has to fail if the search ever starts answering with
     // the synonym rather than with the movement.
     eq(hit.name, 'Heel Flicks', 'the row found by "butt kicks" is the one named Heel Flicks — the synonym is how it was found, never what it is called');
-    eq(hit.id, 'heel-flicks', 'and it carries the real id, which is what a programme and the detail screen resolve');
+    eq(hit.id, 'heel-flicks', 'and it carries the real id, which is what a program and the detail screen resolve');
     eq(exerciseSlug(hit.name), hit.id, 'the id is still the slug of the identity name, which is the whole basis of resolving a movement');
     eq(hit.display.text, 'Heel Flicks', 'the name on screen is the catalogue name, not the thing that was typed');
     // The reason the "matched" line has to exist at all: nothing the member

@@ -1,10 +1,10 @@
-// The programmes a reassign used to destroy. Compile with tsc, run with node.
+// The programs a reassign used to destroy. Compile with tsc, run with node.
 //
-// The bug every assertion here is aimed at: "no earlier programmes" is a
+// The bug every assertion here is aimed at: "no earlier programs" is a
 // sentence a coach ACTS on. They conclude the client is new to them, or that
 // nothing was ever kept, and they stop looking. So an empty timeline must never
 // be producible by a read that failed — and where the timeline genuinely is
-// empty, the line has to say that programmes replaced before this record
+// empty, the line has to say that programs replaced before this record
 // existed were overwritten and are not coming back.
 import {
   CURRENT_KEY, blockSpanLine, historyBoard, historyLine, type HistoryRow,
@@ -43,7 +43,7 @@ ok(board.entries[0].current, 'and is marked as the current one');
 eq(board.entries[0].weeks, 8, 'carrying its own length, so a coach reads "8 weeks" without asking a second module');
 eq(board.entries[0].startsOn, '2026-09-01', 'and the date the coach set');
 
-// Counting EARLIER blocks only. "5 programmes" that silently includes the one
+// Counting EARLIER blocks only. "5 programs" that silently includes the one
 // on screen is the off-by-one a coach checks by counting the list and then
 // stops trusting the screen over.
 eq(board.earlierCount, 2, 'the count is of earlier blocks, not of the whole list');
@@ -71,7 +71,7 @@ eq(partial.state, 'some', 'a truncated read still has real blocks in it');
 eq(partial.earlierCount, null, 'and no count over them');
 eq(partial.entries.length, 3, 'every block that arrived is listed');
 
-// The current programme's own read fails independently of the history's, and a
+// The current program's own read fails independently of the history's, and a
 // null under anything but a landed read is "we did not find out what they are
 // on" — not "they are on nothing".
 const noCurrent = historyBoard(rows, 'ready', null, null, 'error');
@@ -79,7 +79,7 @@ eq(noCurrent.entries.filter((e) => e.current).length, 0, 'an unread assignment i
 eq(noCurrent.entries.length, 2, 'and the history is still shown');
 const currentUnread = historyBoard(rows, 'ready', current, null, 'loading');
 eq(currentUnread.entries.filter((e) => e.current).length, 0,
-  'a current programme whose read has not landed is not put on the timeline either');
+  'a current program whose read has not landed is not put on the timeline either');
 
 /* ── the genuinely empty case, and what a coach needs told about it ─────── */
 
@@ -89,7 +89,7 @@ eq(none.earlierCount, 0, 'which is a count, because the read was whole');
 
 const noneLine = historyLine('ready', none, 'Priya');
 ok(/overwritten and cannot be recovered/i.test(noneLine),
-  'and the line says that programmes replaced before this record existed are gone — a coach of two years must not read "none" as "we kept nothing worth keeping"');
+  'and the line says that programs replaced before this record existed are gone — a coach of two years must not read "none" as "we kept nothing worth keeping"');
 ok(/could not be read/i.test(historyLine('ready', unread, 'Priya')),
   'an unreadable history names the read');
 ok(/not the same as Priya never having been on one/i.test(historyLine('ready', unread, 'Priya')),
@@ -98,14 +98,14 @@ ok(/row limit/i.test(historyLine('ready', partial, 'Priya')), 'a truncated one s
 eq(new Set([noneLine, historyLine('ready', unread, 'P'), historyLine('ready', partial, 'P'), historyLine('ready', board, 'P')]).size, 4,
   'four states, four sentences');
 
-/* ── a row with no programme is not a block ─────────────────────────────── */
+/* ── a row with no program is not a block ─────────────────────────────── */
 
 const broken = historyBoard(
   [{ id: 'x', program: null, startsOn: null, assignedAt: null, replacedAt: null, reason: 'replaced' }],
   'ready', null, null, 'ready',
 );
 eq(broken.state, 'none',
-  'a history row carrying no programme is dropped rather than rendered as an untitled block with no exercises in it');
+  'a history row carrying no program is dropped rather than rendered as an untitled block with no exercises in it');
 
 /* ── the spans, with no dash left in the middle of a sentence ───────────── */
 
@@ -119,7 +119,7 @@ const removed = historyBoard(
   'ready', null, null, 'ready',
 );
 ok(/taken off it/.test(blockSpanLine(removed.entries[0], day)),
-  'being taken OFF a programme is a different event from being moved onto another one, and a timeline that merged them would show a gap as a change');
+  'being taken OFF a program is a different event from being moved onto another one, and a timeline that merged them would show a gap as a change');
 
 // `assigned_programs.updated_at` was stale on every overwrite made before part
 // 176 fixed it, so `assignedAt` can genuinely be null. A missing end is said

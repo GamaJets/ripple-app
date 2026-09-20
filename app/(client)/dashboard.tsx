@@ -171,7 +171,7 @@ export default function Home() {
   //
   // ONE clock for the whole screen, and that is the point of holding the Date
   // as well as the milliseconds. The date line in the header, the greeting, the
-  // day of the programme the card names and the week the KPI row counts were
+  // day of the program the card names and the week the KPI row counts were
   // four separate reads of the clock, three of them `new Date()` in the render
   // body — so they were not merely stale, they could disagree with each other
   // across a midnight this tab sat open through.
@@ -291,8 +291,8 @@ export default function Home() {
   const programUnknown = !solo && programStatus === 'error' && coachProgram == null;
   const program = (solo ? null : coachProgram) ?? buildProgram(c.goal, c.bodyFatPct);
   // The days of the WEEK OF THE BLOCK they are on, not `program.days`, which is
-  // week one for ever. Identical for a one-week programme, which is every
-  // programme this app generates itself. `useClientWeek` is the one rule, and
+  // week one for ever. Identical for a one-week program, which is every
+  // program this app generates itself. `useClientWeek` is the one rule, and
   // Train, This Week and this screen all ask it rather than each deciding —
   // three screens naming three different sessions for the same Tuesday is worse
   // than all three naming week one.
@@ -310,7 +310,7 @@ export default function Home() {
   // `nowMs`, not a bare `new Date()` in the render body. Home is a TAB: expo
   // router mounts it once and nothing tears it down, so a clock read here is
   // fixed at whatever moment the member first opened the app — and this one
-  // picks WHICH DAY OF THE PROGRAMME the card names. A member who left Home
+  // picks WHICH DAY OF THE PROGRAM the card names. A member who left Home
   // open on Monday evening and picked the phone up on Tuesday morning was shown
   // "Today · Push" over Monday's session, tapped Start Workout, and trained the
   // wrong day. It self-healed only when something else happened to re-render,
@@ -325,7 +325,7 @@ export default function Home() {
    * Null when there is no session to describe — the Rest Day fallback above, or
    * a coach block with an empty day in it — so the caption under the card is
    * absent rather than reading "0 exercises" over something somebody is about
-   * to train. `sets` is a number on every `ProgramExercise`, but a programme
+   * to train. `sets` is a number on every `ProgramExercise`, but a program
    * that came out of an import may not have one on every row, so an unreported
    * set count contributes nothing to the total rather than a zero, and the
    * caption drops the clause entirely when nothing reported.
@@ -649,7 +649,7 @@ export default function Home() {
   // set. `useClientWeek` resolves every other phase to a real week so Train
   // always has a session to show, but 'no-date', 'unreadable', 'not-started'
   // and 'ended' are all "this number was not counted", and a one-week
-  // programme has no week to name. The eyebrow then says TODAY and no more.
+  // program has no week to name. The eyebrow then says TODAY and no more.
   const heroEyebrow = blk.week.reason === 'counted' && !programUnknown
     ? `TODAY · WEEK ${num(blk.week.index + 1)} OF ${num(blk.week.count)}`
     : 'TODAY';
@@ -674,7 +674,7 @@ export default function Home() {
     ? `${workout.exercises.length === 1 ? '1 exercise' : `${num(workout.exercises.length)} exercises`}`
       + (workoutSetCount > 0 ? ` · ${workoutSetCount === 1 ? '1 set' : `${num(workoutSetCount)} sets`}` : '')
       + (workout.cardio ? ` · ${workout.cardio}` : '')
-    : planDays.length > 0 ? 'Nothing on your plan for today' : 'This week of your programme has no days in it';
+    : planDays.length > 0 ? 'Nothing on your plan for today' : 'This week of your program has no days in it';
 
   // ── Daily Snapshot: four rings, four owners, four gates ──────────────────
   //
@@ -910,11 +910,11 @@ export default function Home() {
             app/(client)/week.tsx. */}
         {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{cachedNote}</Flag> : null}
         {/* One line now, not a titled notice: it is the reason beside a
-            headline, and the same two facts — whose programme this is, and that
+            headline, and the same two facts — whose program this is, and that
             the coach's takes over when it can be read. */}
         {programUnknown ? (
           <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-            {`We couldn’t check for a coach plan, so today’s session is from ${BRAND.label}’s automatic programme. Your coach’s takes over as soon as we can read it.`}
+            {`We couldn’t check for a coach plan, so today’s session is from ${BRAND.label}’s automatic program. Your coach’s takes over as soon as we can read it.`}
           </Flag>
         ) : null}
 

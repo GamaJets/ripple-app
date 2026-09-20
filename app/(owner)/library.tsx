@@ -46,7 +46,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
  *  Not "Bodyweight". A null equipment column means nobody wrote down what this
  *  movement is performed on — which is a gap in our data, and filing it under
  *  bodyweight would be inventing a fact about a movement. A cable fly landing
- *  in a hotel-room programme is what that invention costs.
+ *  in a hotel-room program is what that invention costs.
  *
  *  It gets a chip of its own so those rows stay reachable rather than falling
  *  out of every filter and off the screen.

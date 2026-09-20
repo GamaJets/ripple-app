@@ -37,6 +37,10 @@ const AUDIO = 'ExpoAudio';
 // over-the-air update would have taken all three down on every Android install
 // made before the morning those two dependencies landed.
 const CLIPBOARD = 'ExpoClipboard';
+// expo-device's entry point calls requireNativeModule at module scope too, so
+// importing it to ask "is this a simulator?" takes the ROOT layout down on any
+// install made before that dependency landed — every screen, not one feature.
+const DEVICE = 'ExpoDevice';
 const DOCUMENT_PICKER = 'ExpoDocumentPicker';
 // expo-image is the fourth of these and the widest. Its entry point resolves to
 // `requireNativeModule('ExpoImage')`, which THROWS, and src/ui/ExerciseDemo.tsx
@@ -109,6 +113,18 @@ export const HAS_NATIVE_IMAGE = requireOptionalNativeModule(IMAGE) != null;
 
 /** Whether this binary can read a file off disk. */
 export const HAS_NATIVE_FILE_SYSTEM = requireOptionalNativeModule(FILE_SYSTEM) != null;
+
+/**
+ * Whether the app is running on real hardware rather than a simulator.
+ *
+ * `null` means the question could not be asked — this binary has no expo-device
+ * — which is NOT the same as "this is a simulator". A caller that folds the two
+ * together would treat every old install as a simulator. The only caller today
+ * wants to hide a simulator-only warning, so it treats null as "assume real
+ * hardware" and shows the warning, which is the honest way round.
+ */
+export const IS_PHYSICAL_DEVICE: boolean | null =
+  (requireOptionalNativeModule(DEVICE) as { isDevice?: boolean } | null)?.isDevice ?? null;
 
 /** Whether this binary can open a page WITHOUT handing it to another app. */
 export const HAS_NATIVE_WEB_BROWSER = requireOptionalNativeModule(WEB_BROWSER) != null;

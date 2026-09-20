@@ -84,7 +84,7 @@ ok(!/no written steps/i.test(truncated), 'nor does a truncated one');
 ok(/signed in/i.test(out), 'a signed-out read blames the session, not the catalogue');
 ok(!/no written steps/i.test(out), 'and does not deny the steps exist');
 ok(/not in our catalogue/i.test(noRow), 'a movement with no row says exactly that');
-ok(/ask them/i.test(noRow), 'and points at the person who wrote it into the programme');
+ok(/ask them/i.test(noRow), 'and points at the person who wrote it into the program');
 eq(empty, 'No written steps for this one yet.', 'only a real, whole, present row states the gap');
 
 // Not one of them tells the member they have done something wrong.

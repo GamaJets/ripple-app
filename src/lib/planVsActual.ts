@@ -8,7 +8,7 @@
  * surfaces on two different screens and the reconciliation is performed by a
  * human being with a thumb, scrolling between them.
  *
- * The sentence that changes next week's programme — "they got through the upper
+ * The sentence that changes next week's program — "they got through the upper
  * days and dropped every leg day" — is arithmetic over those two tables and
  * nothing in this app has ever done it.
  *
@@ -16,7 +16,7 @@
  *
  * 1. IT WILL NOT SAY A SESSION WAS COMPLETED. A logged set carries no reference
  *    to a plan row: `workouts` is `(user_id, performed_at, exercise, sets)` and
- *    there is no programme id, no day index and no set index on it. Nothing
+ *    there is no program id, no day index and no set index on it. Nothing
  *    connects a squat somebody logged to the squat somebody prescribed except
  *    the NAME, matched by `exerciseSlug`. So "they did the Monday session" is
  *    not a fact this data supports; "the four movements Monday prescribes were
@@ -52,7 +52,7 @@
  * Per prescribed movement: was it logged in the window, when last, how many
  * separate days it was logged on, and the heaviest set logged against the load
  * the coach wrote. Per prescribed day: how many of its movements that is. And
- * separately, the movements the client logged that the programme does not
+ * separately, the movements the client logged that the program does not
  * contain — which is the other half of the conversation and the half a coach
  * currently has no way to see at all.
  *
@@ -75,7 +75,7 @@ import { type LoadStatus } from '../ui/loadStatus';
  * had five days, and a movement they do fortnightly would read as dropped. A
  * quarter is too long: a movement logged eleven weeks ago is not evidence about
  * the block they are on now, and a coach reading "logged" would be reassured
- * about a session that happened before this programme was written.
+ * about a session that happened before this program was written.
  *
  * Four weeks is also the longest block most of the coaches on this platform
  * write, so the window is the same order of magnitude as the thing it is
@@ -153,8 +153,8 @@ export interface DayCoverage {
 
 export interface PlanVsActual {
   /** 'unreadable' when nothing below is a fact about this client — either read
-   *  failed, or there is no programme to compare against. */
-  state: 'unreadable' | 'no-programme' | 'ready';
+   *  failed, or there is no program to compare against. */
+  state: 'unreadable' | 'no-program' | 'ready';
   days: DayCoverage[];
   /** Every prescribed movement across the whole week, de-duplicated by slug —
    *  a squat on Monday and Friday is one movement the client either does or
@@ -163,7 +163,7 @@ export interface PlanVsActual {
    *  on `days[].movements`, where the day is what the load belongs to. */
   movements: MovementCheck[];
   /**
-   * Movements LOGGED in the window that the programme does not contain.
+   * Movements LOGGED in the window that the program does not contain.
    *
    * The other half of the conversation, and the half a coach has had no way to
    * see. A client quietly swapping the prescribed row for a machine they prefer
@@ -191,7 +191,7 @@ export interface PlanVsActualInput {
   /** The week to compare. For a multi-week block the caller passes the week the
    *  client is standing in — `blockPosition` in src/lib/programStart.ts decides
    *  which, and passes week one when there is no start date to decide from.
-   *  Null is a client on no coach-assigned programme, which is a real state. */
+   *  Null is a client on no coach-assigned program, which is a real state. */
   days: readonly ProgramDay[] | null;
   /** How the read of the assignment went. A null `days` under anything but a
    *  landed read is "we did not find out", not "they are on nothing". */
@@ -263,13 +263,13 @@ export function planVsActual(input: PlanVsActualInput): PlanVsActual {
   const toDay = input.todayISO;
   const fromDay = backDays(toDay, windowDays - 1);
 
-  // No programme is one of FOUR different answers and only one of them is
-  // 'no-programme'. A null under a read that has not landed is "we did not find
+  // No program is one of FOUR different answers and only one of them is
+  // 'no-program'. A null under a read that has not landed is "we did not find
   // out what they are on", which is exactly the confusion
   // src/ui/assignedPrograms.tsx exists to prevent.
   //
   // whole-ok: this line is the "did not land" half and it is right to stop at
-  // two — a truncated assignment read still hands back whole programmes for the
+  // two — a truncated assignment read still hands back whole programs for the
   // clients it reached, and refusing those a comparison would withhold a true
   // answer from every client whose row was inside the page. What 'partial'
   // cannot do is support the ABSENCE, and that is refused two lines down rather
@@ -280,14 +280,14 @@ export function planVsActual(input: PlanVsActualInput): PlanVsActual {
     // reads every client's assignment in one page ordered by `client_id`, so
     // under 'partial' a client near the end of that ordering has no row here —
     // and `getProgram` returns the same null it returns for a client genuinely
-    // on nothing. Saying 'no-programme' off that told a coach, on
+    // on nothing. Saying 'no-program' off that told a coach, on
     // app/(trainer)/client-training.tsx, that a client they had written a block
     // for was on none, and told the member the same thing in their own words on
-    // app/(client)/week.tsx: "No coach has written you a programme yet." A
+    // app/(client)/week.tsx: "No coach has written you a program yet." A
     // prefix of the assignments cannot say a client is absent from them.
     return input.programStatus === 'partial'
       ? { ...UNREADABLE, fromDay, toDay }
-      : { ...UNREADABLE, state: 'no-programme', fromDay, toDay };
+      : { ...UNREADABLE, state: 'no-program', fromDay, toDay };
   }
 
   // Whether the record may be used to say a movement was NOT logged.
@@ -432,15 +432,15 @@ const s = (n: number) => (n === 1 ? '' : 's');
  */
 export function coverageLine(pva: PlanVsActual, windowDays: number, who: string): string {
   if (pva.state === 'unreadable') {
-    return `The programme or the training could not be read, so nothing here compares them. An empty list below is not a statement about ${who}.`;
+    return `The program or the training could not be read, so nothing here compares them. An empty list below is not a statement about ${who}.`;
   }
-  if (pva.state === 'no-programme') {
-    return `${who} is on no coach-assigned programme, so there is nothing to compare their training against.`;
+  if (pva.state === 'no-program') {
+    return `${who} is on no coach-assigned program, so there is nothing to compare their training against.`;
   }
   const all = pva.movements;
   const logged = all.filter((m) => m.coverage === 'logged').length;
   const unknown = all.filter((m) => m.coverage === 'unknown').length;
-  if (!all.length) return 'This programme names no movements, so there is nothing to compare.';
+  if (!all.length) return 'This program names no movements, so there is nothing to compare.';
   if (unknown === all.length) {
     // Two different failures land here — the log read was refused, or it came
     // back at the row cap before reaching the start of the window — and both
@@ -453,7 +453,7 @@ export function coverageLine(pva: PlanVsActual, windowDays: number, who: string)
   const head = `${logged} of ${all.length} prescribed movement${s(all.length)} logged in the last ${windowDays} days.`;
   const tail = unknown ? ` ${unknown} of them cannot be answered for — the read did not cover the whole window.` : '';
   const off = pva.offPlan.length
-    ? ` ${pva.offPlan.length} movement${s(pva.offPlan.length)} logged that this programme does not name.`
+    ? ` ${pva.offPlan.length} movement${s(pva.offPlan.length)} logged that this program does not name.`
     : '';
   return head + tail + off;
 }
@@ -461,7 +461,7 @@ export function coverageLine(pva: PlanVsActual, windowDays: number, who: string)
 /* ── the load, not just the presence ───────────────────────────────────────
  *
  * P5. Everything above compares PRESENCE: which prescribed movements appear in
- * the log at all. That is not the sentence that changes next week's programme.
+ * the log at all. That is not the sentence that changes next week's program.
  * "They did four of six sessions" tells a coach almost nothing; "they hit every
  * prescribed load on upper and missed every one on legs" tells them what to
  * write.

@@ -1,5 +1,5 @@
 // Which week of a block the client is shown, and the promise that none of the
-// five phases can withhold a programme. Compile with tsc, run with node.
+// five phases can withhold a program. Compile with tsc, run with node.
 //
 // The bug every assertion here is aimed at: a start date that quietly becomes a
 // gate. `blockPosition` has a phase for a block that has not begun and a phase
@@ -30,12 +30,12 @@ const block = (n: number): Program => {
 const at = (start: string | null, today: string, weeks: number): ClientWeek =>
   clientWeek(blockPosition(start, today, weeks), weeks);
 
-/* ── a one-week programme is untouched by all of this ───────────────────── */
+/* ── a one-week program is untouched by all of this ───────────────────── */
 
 eq(at(null, '2026-09-01', 1), { index: 0, count: 1, reason: 'only-week' },
-  'every programme written before blocks existed is one week, and is answered as one week');
+  'every program written before blocks existed is one week, and is answered as one week');
 eq(at('2026-01-01', '2026-09-01', 1), { index: 0, count: 1, reason: 'only-week' },
-  'a start date on a one-week programme does not start it counting weeks that do not exist');
+  'a start date on a one-week program does not start it counting weeks that do not exist');
 eq(clientWeekLine(at('2026-01-01', '2026-09-01', 1), 0), null,
   'and no week number is printed anywhere on it');
 
@@ -47,7 +47,7 @@ eq(at('2026-09-01', '2026-09-08', 8).index, 1, 'the eighth day is week two');
 eq(at('2026-09-01', '2026-10-15', 8).reason, 'counted', 'a block in progress counts from the date');
 eq(at('2026-09-01', '2026-10-15', 8).index, 6, 'and the seventh week of an eight week block is index six');
 
-/* ── NONE of the five phases withholds a programme ──────────────────────── */
+/* ── NONE of the five phases withholds a program ──────────────────────── */
 //
 // The whole point of this file. Each of these is a day on which a client opens
 // Train, and every one of them has to resolve to a week of real training days.
@@ -75,12 +75,12 @@ eq(at('2026-01-01', '2026-09-01', 8), { index: 7, count: 8, reason: 'ended' },
 
 /* ── the week index can never fall off the end of the block ─────────────── */
 //
-// `pos.week` is arithmetic on a date and the programme can be edited between
+// `pos.week` is arithmetic on a date and the program can be edited between
 // the two calls. An index past the end renders an empty training day over a
-// programme that is not empty, which reads exactly like a rest day nobody
+// program that is not empty, which reads exactly like a rest day nobody
 // scheduled.
 {
-  // A position computed against a twelve week block, then handed a programme
+  // A position computed against a twelve week block, then handed a program
   // that has since been cut to three.
   const stale = blockPosition('2026-09-01', '2026-11-10', 12);
   eq(stale.week, 11, 'the position itself says week eleven');

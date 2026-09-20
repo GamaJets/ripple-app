@@ -9,7 +9,7 @@
 //      index leaves the coach typing into a week they are not looking at. There
 //      is no cue on the screen for that — the strip highlights one week and the
 //      day list below it is another week's — and what it produces is a
-//      programme with two half-written weeks in it.
+//      program with two half-written weeks in it.
 //
 //   2. WHETHER WEEK ONE MOVED. `days` is week one and week one is what the
 //      client's phone renders (src/lib/programBlock.ts). A move that reports
@@ -79,8 +79,8 @@ const week = (...ds: PlanWeek['days'][number][]): PlanWeek => ({ days: ds });
 /* ── the one warning, and the silence around it ─────────────────────────── */
 {
   const full = week(day('Mon', 'Bench Press'));
-  eq(blockWarnings([{ days: [] }]).length, 0, 'an unstarted one-week programme is not complained about');
-  eq(blockWarnings([full]).length, 0, 'a one-week programme is never warned about');
+  eq(blockWarnings([{ days: [] }]).length, 0, 'an unstarted one-week program is not complained about');
+  eq(blockWarnings([full]).length, 0, 'a one-week program is never warned about');
   eq(blockWarnings([full, full]).length, 0, 'a block with training in every week is not warned about');
 
   const one = blockWarnings([full, { days: [] }]);

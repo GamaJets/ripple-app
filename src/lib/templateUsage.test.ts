@@ -1,4 +1,4 @@
-// Who is training which saved programme, and the read that is not allowed to
+// Who is training which saved program, and the read that is not allowed to
 // answer that question.
 //
 // ── The property that matters most ────────────────────────────────────────
@@ -64,7 +64,7 @@ const tpl = (id: string, name: string, program: Program): UsableTemplate => ({ i
   const u = templateUsage(library, book, 'ready');
 
   eq(u.withheld, null, 'a whole read carries no withholding sentence');
-  eq(u.byId.t1.on.join(','), 'ana,ben', 'the clients whose programme fingerprints identically are the ones on it');
+  eq(u.byId.t1.on.join(','), 'ana,ben', 'the clients whose program fingerprints identically are the ones on it');
   eq(u.byId.t1.from.join(','), 'cal', 'a client on the same title with different training is on an edited copy');
   ok(!u.byId.t1.on.includes('cal'), 'somebody on an edited copy is not also counted as on it');
   eq(u.byId.t2.on.join(','), 'dee', 'a second template counts its own people');
@@ -85,16 +85,16 @@ const tpl = (id: string, name: string, program: Program): UsableTemplate => ({ i
 
 /* ── the edge cases that would otherwise invent a match ─────────────────── */
 {
-  // An untitled programme must not sweep up every other untitled programme.
+  // An untitled program must not sweep up every other untitled program.
   const blank = prog('', day('Mon', 'Bench Press'));
   const blankOther = prog('', day('Tue', 'Plank'));
   const u = templateUsage([tpl('t1', 'No name', blank)], { ana: blankOther }, 'ready');
-  eq(u.byId.t1.from.length, 0, 'two untitled programmes are not copies of each other');
+  eq(u.byId.t1.from.length, 0, 'two untitled programs are not copies of each other');
 
-  // A client with no programme is in the map as nothing at all, and a null in
-  // it must not fingerprint as an empty programme.
+  // A client with no program is in the map as nothing at all, and a null in
+  // it must not fingerprint as an empty program.
   const withNull = templateUsage([tpl('t1', 'PPL', PPL)], { ana: null as unknown as Program, ben: PPL }, 'ready');
-  eq(withNull.byId.t1.on.join(','), 'ben', 'a client with no programme is not on anything');
+  eq(withNull.byId.t1.on.join(','), 'ben', 'a client with no program is not on anything');
 
   // An empty library and an empty book are both answerable rather than errors.
   eq(Object.keys(templateUsage([], {}, 'ready').byId).length, 0, 'an empty library has no rows');
@@ -110,13 +110,13 @@ const tpl = (id: string, name: string, program: Program): UsableTemplate => ({ i
 /* ── weeks two onward are part of the fingerprint ───────────────────────── */
 {
   // `programSignature` covers the whole block, so a six-week template and a
-  // one-week programme that share a Monday are not the same programme. A
+  // one-week program that share a Monday are not the same program. A
   // library that said otherwise would tell a coach six people were on a block
   // they had never been sent.
   const oneWeek = prog('Block', day('Mon', 'Bench Press'));
   const sixWeek: Program = { ...oneWeek, weeks: [{ days: oneWeek.days }, { days: oneWeek.days }] };
   const u = templateUsage([tpl('t1', 'Block', sixWeek)], { ana: oneWeek }, 'ready');
-  eq(u.byId.t1.on.length, 0, 'a one-week programme is not the same as the block it was cut from');
+  eq(u.byId.t1.on.length, 0, 'a one-week program is not the same as the block it was cut from');
   eq(u.byId.t1.from.join(','), 'ana', 'it is reported as an edited copy instead, which is what it is');
 }
 

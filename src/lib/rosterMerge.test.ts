@@ -141,7 +141,7 @@ ok(goalsDisagree('Tone', 'fatloss'), 'the comparison works whichever side the la
 
 // 'General' is what the roster puts where a goal could not be read. Reading it
 // as fat loss is how a client nobody could read a goal for got a fat-loss
-// programme generated for them.
+// program generated for them.
 eq(goalToEnum('General'), null, "'General' is a placeholder for unknown, not a goal");
 eq(goalToEnum(''), null, 'an empty goal is unknown');
 eq(goalToEnum(null), null, 'a null goal is unknown');
@@ -149,7 +149,7 @@ eq(goalToEnum(undefined), null, 'a missing goal is unknown');
 eq(goalToEnum('—'), null, 'a dash is unknown');
 // Substring matching answered 'muscle' here, because it tested for muscle
 // before tone — the opposite of what was typed, on the string that chooses
-// somebody's programme.
+// somebody's program.
 eq(goalToEnum('muscle tone'), null, 'a phrase naming two goals resolves to neither');
 eq(goalToEnum('get strong for skiing'), null, 'free text a coach typed is not silently a goal');
 // The lookup is hasOwnProperty and not a bare index, because the key comes off

@@ -68,7 +68,7 @@ ok(guardInjuries('ready', 'ready', [knee], [injuryKey(knee), injuryKey(shoulder)
 
 /* ── unknown is refused, not assumed ───────────────────────────────────── */
 //
-// Same rule as the overwrite guard: a programme built without seeing an injury
+// Same rule as the overwrite guard: a program built without seeing an injury
 // is not undone by finding out afterwards.
 for (const status of ['loading', 'error', 'partial'] as const) {
   const g = guardInjuries('ready', status, [knee], null, 'Priya');
@@ -132,9 +132,9 @@ ok(injuryKey(knee) === injuryKey(inj('knee', 'mild', 'a different note')), 'the 
 
 /* ── the second client-side read, which is not the first one ───────────── */
 
-// The bug: one folded status meant a failed programme read was reported as a
+// The bug: one folded status meant a failed program read was reported as a
 // failed acknowledgement read, and the block that failed drew as nothing.
-eq(programmeChoiceState('error', 0), 'unknown', 'a failed programme read is not "none assigned"');
+eq(programmeChoiceState('error', 0), 'unknown', 'a failed program read is not "none assigned"');
 eq(programmeChoiceState('error', 3), 'unknown', 'nor is a failed one with stale rows still in hand');
 eq(programmeChoiceState('loading', 0), 'unknown', 'nor is one still in flight');
 eq(programmeChoiceState('ready', 0), 'none', 'a finished read with no rows is genuinely none');
@@ -143,11 +143,11 @@ eq(programmeChoiceState('partial', 900), 'partial', 'a truncated read is shown b
 eq(programmeChoiceState('partial', 0), 'unknown', 'a truncation that returned nothing tells us nothing');
 
 // The two states are independent: every combination is reachable, and the one
-// that mattered is a good acknowledgement read beside a failed programme read.
+// that mattered is a good acknowledgement read beside a failed program read.
 eq(ackState('ready', [knee], [injuryKey(knee)]), 'covered',
-  'the acknowledgement read stands on its own when the programme read failed');
+  'the acknowledgement read stands on its own when the program read failed');
 eq(programmeChoiceState('error', 0), 'unknown',
-  'and the programme read says so on its own when the acknowledgement read worked');
+  'and the program read says so on its own when the acknowledgement read worked');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('injuryGate: ok');

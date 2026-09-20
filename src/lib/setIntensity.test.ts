@@ -129,7 +129,7 @@ eq(intensityOf(ex, {}), { rpe: 8, pct1rm: 75, tempo: '3-1-1-0' },
 eq(intensityOf(ex, { rpe: 9 }).rpe, 9, 'a row that says something answers for itself');
 
 // THE assertion. `{ rpe: null }` is a top single with no target inside a block
-// written at RPE 8, which is a thing coaches programme on purpose — and a
+// written at RPE 8, which is a thing coaches program on purpose — and a
 // resolver that treated null as absence would silently put the 8 back.
 eq(intensityOf(ex, { rpe: null }).rpe, null, 'an explicit null is the row taking the target OFF, not the row saying nothing');
 eq(intensityOf(ex, { rpe: undefined }).rpe, 8, 'and undefined is absence, which is what survives jsonb and JSON.stringify');
@@ -139,7 +139,7 @@ eq(intensityOf(null, null), { rpe: null, pct1rm: null, tempo: null },
 eq(intensityLine({ rpe: 8, pct1rm: 75, tempo: '3-1-1-0' }), '@8 · 75% · 3-1-1-0', 'all three read as one line');
 eq(intensityLine({ rpe: 8, pct1rm: null, tempo: null }), '@8', 'and one reads as one');
 eq(intensityLine({ rpe: null, pct1rm: null, tempo: null }), null,
-  'none of them renders NOTHING rather than an empty line under every set of every programme ever written');
+  'none of them renders NOTHING rather than an empty line under every set of every program ever written');
 
 /* ── what the client is told, in words ──────────────────────────────────── */
 

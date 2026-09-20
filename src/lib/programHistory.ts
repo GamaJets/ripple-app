@@ -2,7 +2,7 @@
  * WHAT THEY WERE ON BEFORE — the blocks a reassign used to destroy.
  *
  * `assigned_programs` is one row per client and an assign is an upsert over it,
- * so until supabase/parts/176-the-programme-that-was-there-before.sql there was
+ * so until supabase/parts/176-the-program-that-was-there-before.sql there was
  * no copy of the spring block anywhere once the summer block landed. That part
  * adds the table and the trigger; this file is everything a screen may honestly
  * say about what it holds.
@@ -11,7 +11,7 @@
  *
  * An empty timeline under a failed read. It is the same refusal the rest of
  * this codebase is built on and it bites harder here than almost anywhere else,
- * because "no earlier programmes" is a sentence a coach ACTS on: they conclude
+ * because "no earlier programs" is a sentence a coach ACTS on: they conclude
  * the client is new to them, or that the record was never kept, and they stop
  * looking. `historyBoard` therefore takes the `LoadStatus` and answers
  * 'unreadable' for anything but a landed read, and every count on it is null
@@ -19,7 +19,7 @@
  * src/lib/rowCap.ts) and "4 previous blocks" over a truncated page is a wrong
  * number rather than a small one.
  *
- * ── Why the current programme is part of the timeline ─────────────────────
+ * ── Why the current program is part of the timeline ─────────────────────
  *
  * Because a timeline that started at "the one before this one" is a list a
  * coach has to mentally prepend the present to, on the screen where they are
@@ -55,7 +55,7 @@ import { weekCount } from './programBlock';
 import { type LoadStatus } from '../ui/loadStatus';
 import { dayKeyOf } from './entryEdit';
 
-/** Why a programme stopped being what somebody was on. Mirrors the CHECK on
+/** Why a program stopped being what somebody was on. Mirrors the CHECK on
  *  `assigned_program_history.reason`; a value neither of these — from a build
  *  ahead of this one — is carried through as-is and rendered as the generic
  *  sentence rather than dropping the block out of the timeline. */
@@ -77,14 +77,14 @@ export interface BlockEntry {
    *  the live assignment, which has no id of its own — `assigned_programs` is
    *  keyed by client and carries none. */
   key: string;
-  /** True for the programme they are on RIGHT NOW. */
+  /** True for the program they are on RIGHT NOW. */
   current: boolean;
   program: Program;
-  /** The programme's own title, or the fallback. A programme with no title is a
+  /** The program's own title, or the fallback. A program with no title is a
    *  real state — the builder lets a coach clear the field — and a blank
    *  heading reads as a screen that has lost its text. */
   title: string;
-  /** How many weeks it is, by `weekCount`. One for every programme written
+  /** How many weeks it is, by `weekCount`. One for every program written
    *  before multi-week blocks existed, which is what they are. */
   weeks: number;
   /** The coach's own start date, when they set one. */
@@ -105,7 +105,7 @@ export interface BlockEntry {
 export const CURRENT_KEY = 'current-assignment';
 
 const titleOf = (p: Program | null | undefined): string =>
-  (p?.title ?? '').trim() || 'An untitled programme';
+  (p?.title ?? '').trim() || 'An untitled program';
 
 /**
  * Whole days between two day keys, or null.
@@ -125,12 +125,12 @@ function daysBetweenKeys(from: string | null, to: string | null): number | null 
   return Math.round((b - a) / 86_400_000);
 }
 
-/** What a screen may say about a client's programme history. */
+/** What a screen may say about a client's program history. */
 export interface HistoryBoard {
   /**
    * 'unreadable'  the read failed, was refused, or has not landed. Nothing
    *               below is a fact about this client.
-   * 'none'        the read landed and there is no earlier programme. Which is
+   * 'none'        the read landed and there is no earlier program. Which is
    *               true of every client on their first block, and of every
    *               client in the app until part 176 shipped — a coach reading
    *               this needs to know the second one, and `historyLine` says it.
@@ -140,7 +140,7 @@ export interface HistoryBoard {
   /** Newest first, the current assignment at the top when there is one. */
   entries: BlockEntry[];
   /** How many EARLIER blocks there are, or null when the read cannot support a
-   *  count. Excludes the current one, because "5 programmes" that silently
+   *  count. Excludes the current one, because "5 programs" that silently
    *  includes the one on screen is the sort of off-by-one a coach checks by
    *  counting the list and then stops trusting the screen. */
   earlierCount: number | null;
@@ -151,7 +151,7 @@ const UNREADABLE: HistoryBoard = { state: 'unreadable', entries: [], earlierCoun
 /**
  * The timeline.
  *
- * `current` is the live `assigned_programs` programme or null, and
+ * `current` is the live `assigned_programs` program or null, and
  * `currentStatus` is how THAT read went — separately from `status`, which is
  * how the history read went. Two reads, two statuses, and a null `current`
  * under anything but a landed read means "we did not find out what they are on"
@@ -173,7 +173,7 @@ export function historyBoard(
 
   // The live assignment leads, and only when its own read landed. Under
   // 'loading' or 'error' it is left out entirely rather than drawn as absent:
-  // the screen's own branch says the current programme could not be read, and
+  // the screen's own branch says the current program could not be read, and
   // a timeline that silently omitted it would read as a client between blocks.
   if (current && (currentStatus === 'ready' || currentStatus === 'partial')) {
     entries.push({
@@ -216,12 +216,12 @@ export function historyBoard(
   }
 
   for (const r of rows) {
-    // A history row with no programme is not a block. It cannot happen —
+    // A history row with no program is not a block. It cannot happen —
     // `program` is NOT NULL in the table — and a jsonb column read through two
     // layers of optional chaining can still hand back null, at which point
     // there is nothing to name, nothing to count weeks of, and nothing a coach
     // could open. Dropped rather than rendered as an untitled empty block,
-    // which would read as a programme with no exercises in it.
+    // which would read as a program with no exercises in it.
     if (!r.program) continue;
     const fromDay = r.assignedAt ? dayKeyOf(r.assignedAt) : null;
     const toDay = r.replacedAt ? dayKeyOf(r.replacedAt) : null;
@@ -259,25 +259,25 @@ const s = (n: number) => (n === 1 ? '' : 's');
  * The line under the timeline heading.
  *
  * The 'none' branch carries the sentence that stops a coach drawing the wrong
- * conclusion from a true answer. There genuinely is no earlier programme for
+ * conclusion from a true answer. There genuinely is no earlier program for
  * this client — and that is also true of every client in the app whose
- * programmes were replaced before the history table existed, because those
+ * programs were replaced before the history table existed, because those
  * overwrites destroyed what came before and nothing can bring them back. A
- * coach who reads "no earlier programmes" about a client they have coached for
+ * coach who reads "no earlier programs" about a client they have coached for
  * two years should be told which of the two they are looking at.
  */
 export function historyLine(status: LoadStatus, board: HistoryBoard, who: string): string {
   if (status === 'loading') return 'Reading what they were on before…';
   if (board.state === 'unreadable') {
-    return `The earlier programmes could not be read. That is not the same as ${who} never having been on one.`;
+    return `The earlier programs could not be read. That is not the same as ${who} never having been on one.`;
   }
   if (board.state === 'none') {
-    return `No earlier programme on record. Programmes replaced before this app started keeping the record were overwritten and cannot be recovered, so this is silent about anything before then.`;
+    return `No earlier program on record. Programs replaced before this app started keeping the record were overwritten and cannot be recovered, so this is silent about anything before then.`;
   }
   if (board.earlierCount == null) {
-    return `Their earlier programmes came back at the row limit, so how many there are cannot be counted from here. Every block listed is real.`;
+    return `Their earlier programs came back at the row limit, so how many there are cannot be counted from here. Every block listed is real.`;
   }
-  return `${board.earlierCount} earlier programme${s(board.earlierCount)} on record.`;
+  return `${board.earlierCount} earlier program${s(board.earlierCount)} on record.`;
 }
 
 /**

@@ -1,4 +1,4 @@
-// Reading the platform's fifteen programmes, and the names of the movements
+// Reading the platform's fifteen programs, and the names of the movements
 // they name.
 //
 // The rules — how a row is parsed, which language a string is shown in, what
@@ -15,7 +15,7 @@
 // them is 126 exercise references — a few tens of kilobytes, checked against
 // the live table. Splitting that into a list read and a detail read would cost
 // a round trip on every tap to save nothing, and would put the browse list and
-// the opened programme on two different reads that can disagree.
+// the opened program on two different reads that can disagree.
 //
 // ── 2 · why the movement NAMES are a second read ──────────────────────────
 //
@@ -27,8 +27,8 @@
 // "Incline Push Up" and the row is called "Incline Push-Up", so a screen that
 // guessed would send a member to an exercise page that resolves to nothing.
 //
-// It is ONE read of 57 distinct ids across all fifteen programmes — read once
-// for the whole screen rather than per opened programme, so opening a second
+// It is ONE read of 57 distinct ids across all fifteen programs — read once
+// for the whole screen rather than per opened program, so opening a second
 // one costs nothing. `readByIds` chunks it and finishes it, so this read is
 // never a prefix: it is whole or it failed. See src/lib/idLookup.ts.
 //
@@ -38,7 +38,7 @@
 // is therefore handed ZERO ROWS AND NO ERROR — PostgREST filters them away and
 // reports success — which is indistinguishable at the call site from a table
 // that is genuinely empty. The screens above this would then say "there are no
-// programmes" about fifteen that exist. Same guard, same reasoning and very
+// programs" about fifteen that exist. Same guard, same reasoning and very
 // nearly the same code as useExerciseCatalogue; the duplication is deliberate,
 // because the alternative is one screen quietly inheriting the other's idea of
 // what an empty answer means.
@@ -83,9 +83,9 @@ export interface WorkoutTemplatesRead {
   /** True when an empty list is a permissions answer rather than a real one. */
   signedOut: boolean;
   /**
-   * Rows that came back and could not be turned into a programme at all — no
+   * Rows that came back and could not be turned into a program at all — no
    * id, or no English name. Zero on every read of the live table, and carried
-   * because a list quietly one programme short is a list nobody can audit.
+   * because a list quietly one program short is a list nobody can audit.
    */
   unreadableRows: number;
   /** The reader's catalogue language, or null when they read English. */
@@ -94,7 +94,7 @@ export interface WorkoutTemplatesRead {
 }
 
 /**
- * Every platform programme, in the order a member should meet them.
+ * Every platform program, in the order a member should meet them.
  *
  * Ordered by `goal` then `id`, and the second half is the part that matters:
  * `.order('goal')` alone is not a total order — five goals over fifteen rows
@@ -132,7 +132,7 @@ export function useWorkoutTemplates(): WorkoutTemplatesRead {
       const page = capped(data);
       // Cleared as well as set. A flag left standing from the read that
       // happened before sign-in would keep telling a signed-in member to sign
-      // in, over fifteen programmes that are on the screen.
+      // in, over fifteen programs that are on the screen.
       setSignedOut(page.rows.length ? false : !(await signedIn()));
       const parsed: WorkoutTemplate[] = [];
       let dropped = 0;
@@ -169,14 +169,14 @@ export interface MovementNames {
    * Ids that were asked for and did not come back.
    *
    * Only meaningful under 'ready'. A trigger on `workout_templates` refuses a
-   * programme naming a movement the catalogue does not have, so under a whole
+   * program naming a movement the catalogue does not have, so under a whole
    * read this is empty in practice — and it is carried rather than assumed,
    * because "the database guarantees it" is a statement about the database and
    * not about the read.
    */
   missing: string[];
   /** Ask again. A pull-to-refresh has to be able to retry THIS read: the ids
-   *  do not change when the programmes are re-read, so an effect keyed on them
+   *  do not change when the programs are re-read, so an effect keyed on them
    *  would never re-run and a failed name read would stay failed for the life
    *  of the screen. */
   reload: () => void;
@@ -189,8 +189,8 @@ const NO_NAMES: ReadonlyMap<string, string> = new Map();
  *
  * Never 'partial': `readByIds` pages every chunk to the end, so the answer is
  * the whole set or a thrown error. That is the right trade here — the set is
- * bounded by the programmes on screen and a prefix would render half the rows
- * of a workout with no name, which looks like a programme with holes in it
+ * bounded by the programs on screen and a prefix would render half the rows
+ * of a workout with no name, which looks like a program with holes in it
  * rather than like a read that came back short.
  *
  * `.order('id')` is total on a primary key, which is the contract `readByIds`
@@ -229,7 +229,7 @@ export function useMovementNames(ids: readonly string[]): MovementNames {
             .in('id', chunk)
             .order('id', { ascending: true })
             .range(from, to),
-          'the movements in these programmes',
+          'the movements in these programs',
         );
         if (cancelled) return;
         const map = new Map<string, string>();
@@ -265,7 +265,7 @@ export function useMovementNames(ids: readonly string[]): MovementNames {
 }
 
 /**
- * The two reads a programme screen needs, taken together.
+ * The two reads a program screen needs, taken together.
  *
  * One hook rather than two at every call site, because the second read's
  * argument is derived from the first one's answer and getting that wrong — a

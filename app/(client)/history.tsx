@@ -1147,7 +1147,7 @@ function MuscleSection({ log, unit, weightSeries }: {
             {/* The bar is a share of the most-trained group, so it compares
                 muscles against each other and never against a target nobody
                 set. There is no right number of sets for a back, and drawing
-                one would be this screen inventing a programme. The colour is
+                one would be this screen inventing a program. The colour is
                 the GROUP's — the one map the library's chips use — so Chest
                 is the same blue here as on the exercise it was trained with. */}
             <Meter label={g.group} tone={groupTone(g.group)} val={g.sets} target={most || 1}

@@ -4,7 +4,7 @@
 // The assertion that matters here is the negative one. A test that only checked
 // "'ready' is allowed" would pass against a guard that allowed everything, and
 // allowing everything is precisely the bug: a coach's Assign button offered over
-// a programme the screen never read, replacing somebody's training with the
+// a program the screen never read, replacing somebody's training with the
 // generic auto plan and reporting success.
 //
 // So most of what follows asserts that the three unsound statuses are each
@@ -27,13 +27,13 @@ import type { LoadStatus } from '../ui/loadStatus';
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 
-const SUBJECT = "Priya's current programme";
+const SUBJECT = "Priya's current program";
 const UNSOUND: LoadStatus[] = ['loading', 'partial', 'error'];
 
 // ── only a whole read licenses a write ──
 //
 // 'ready' is the single status that means the server answered and what came
-// back is all of it. Every other one leaves a client's saved programme either
+// back is all of it. Every other one leaves a client's saved program either
 // unknown or possibly missing from the page that arrived, and both read at the
 // call site as "nothing assigned".
 ok(guardOverwrite('ready', SUBJECT).allowed, 'a whole read must let the coach save');
@@ -51,7 +51,7 @@ for (const s of UNSOUND) {
 
 // ── the refusals are not interchangeable ──
 //
-// 'partial' and 'error' both mean the programme is unknown, but they are not
+// 'partial' and 'error' both mean the program is unknown, but they are not
 // the same event and a coach acts on them differently: one is retried, the
 // other is waited out. Identical wording would have hidden that, and would also
 // have let a future edit collapse the three branches into one without any test

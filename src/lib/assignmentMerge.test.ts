@@ -13,7 +13,7 @@
 //   2. A LIVE BLOCK DELETED BY A LONG ROSTER. The read is capped. A client
 //      whose row sat past the cap is absent from a truncated page for a reason
 //      that has nothing to do with them, and a replace would take their real
-//      programme off their real screen.
+//      program off their real screen.
 //
 //   3. A COACH'S OWN TAP ERASED. The map is written optimistically so the
 //      screen answers the tap. A read that started before that write returns
@@ -82,10 +82,10 @@ const BUSY: ReadFacts = { whole: true, writesInFlight: 1 };
   eq(keys(dates), 'ana,bo', 'and a truncated page cannot take a start date away either');
 }
 {
-  // The orphan case on its own: a date whose programme is gone must not survive
+  // The orphan case on its own: a date whose program is gone must not survive
   // even when the date map still lists it.
   const dates = mergeStartsOn({ ghost: '2026-03-03' }, { ghost: '2026-03-03' }, {}, WHOLE);
-  eq(keys(dates), '', 'a start date with no assignment left is dropped rather than printed over a generic programme');
+  eq(keys(dates), '', 'a start date with no assignment left is dropped rather than printed over a generic program');
 }
 
 if (errors.length) {

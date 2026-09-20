@@ -2009,7 +2009,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
        'a class with no capacity cannot be joined');
   }
 
-  // What a coach programmes vs what anybody has filmed.
+  // What a coach programs vs what anybody has filmed.
   {
     // The 'db' prefix is load-bearing and not decoration. coverageFor reads it
     // through clipOwner, because an entry saved on the handset after a refused
@@ -2044,7 +2044,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(line !== null && line.includes('2 of the 4') && line.includes('Academy'),
        'the line names both jobs: what is missing, and what is only the Academy');
     const done = coverageLine(coverageFor(['Back Squat'], vids, 'me', NONE_ILLUSTRATED));
-    ok(done !== null && done.startsWith('Every movement you programme has your own clip'),
+    ok(done !== null && done.startsWith('Every movement you program has your own clip'),
        'and says so plainly when there is nothing left to film');
   }
 

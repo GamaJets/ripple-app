@@ -28,8 +28,8 @@
 /** The screens a detail view can be opened from, by the key they pass. */
 export const BACK_TO = {
   clientLibrary: '/(client)/library',
-  // The platform programme library. It opens the exercise detail from inside an
-  // opened programme, several days down a long page, and the member's filters
+  // The platform program library. It opens the exercise detail from inside an
+  // opened program, several days down a long page, and the member's filters
   // and scroll position are on the screen behind it — which is exactly the path
   // the tab history reorders away, because a member reads three movements out
   // of one workout in a row.
@@ -48,10 +48,10 @@ export const BACK_TO = {
   trainerDashboard: '/(trainer)/dashboard',
   trainerGroup: '/(trainer)/group',
   trainerLibrary: '/(trainer)/library',
-  // The coach's template library, whose Platform Programmes section opens the
-  // exercise detail from inside an expanded programme. Without a carried
+  // The coach's template library, whose Platform Programs section opens the
+  // exercise detail from inside an expanded program. Without a carried
   // origin, Back from that movement lands on whichever screen the tab history
-  // last reordered to the front — and the coach loses the programme they had
+  // last reordered to the front — and the coach loses the program they had
   // open, several days down a long page.
   trainerTemplates: '/(trainer)/templates',
 } as const;

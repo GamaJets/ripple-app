@@ -1,4 +1,4 @@
-// Assertions for the COACH's view of a member's rewrite of their programme.
+// Assertions for the COACH's view of a member's rewrite of their program.
 //
 // The one that matters most is the join. `storedKeyOf` derives the stored key
 // out of an id that `planEditItems` builds, and it is derived rather than
@@ -8,11 +8,11 @@
 // against a string this file made up — if the id format changes, this fails,
 // which is the whole point. A silent failure would resolve no movement names at
 // all and the coach's screen would read like a client whose changes were all
-// about movements the programme does not contain.
+// about movements the program does not contain.
 //
 // After that, the two collapses this codebase keeps paying for: a failed read
 // must never read as "they have followed it as written", and a key the current
-// programme cannot resolve must never read as no change.
+// program cannot resolve must never read as no change.
 import {
   EDIT_STALE_MS, editAge, planEditDiffLine, planEditsCoachNote, planEditsDiff,
   slugOfKey, storedKeyOf,
@@ -64,18 +64,18 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   ok(slugOfKey(null) === null, 'no key is no slug');
 }
 
-/* ── resolution against the programme ──────────────────────────────────── */
+/* ── resolution against the program ──────────────────────────────────── */
 
 {
   const d = planEditsDiff({ edits: EDITS, editStatus: 'ready', readable: true, days: DAYS });
-  ok(d.state === 'ready', 'a read programme and read edits are ready');
+  ok(d.state === 'ready', 'a read program and read edits are ready');
   ok(d.rows.length === 4, `expected four rows, got ${d.rows.length}`);
-  ok(d.strayCount === 0, 'every key in this blob is in this programme');
+  ok(d.strayCount === 0, 'every key in this blob is in this program');
 
   const swap = d.rows.filter((r) => r.kind === 'swap')[0];
   ok(swap.assigned === 'Bench Press', 'the slug resolved to the movement the coach wrote');
   ok(swap.theirs === 'Machine Chest Press', 'the swap names what they do instead');
-  ok(swap.dayLabel === 'Mon · Push', 'the day is named out of the programme');
+  ok(swap.dayLabel === 'Mon · Push', 'the day is named out of the program');
   ok(swap.dayIdx === 0, 'the row index counts from zero because it subscripts days');
   ok(planEditDiffLine(swap, 'Amy', kg) === 'Mon · Push — you wrote Bench Press; Amy does Machine Chest Press instead.',
     `swap line read: ${planEditDiffLine(swap, 'Amy', kg)}`);
@@ -86,7 +86,7 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   ok(nums.reps != null && nums.reps.wrote === '8-10' && nums.reps.theirs === '10', 'both rep figures are carried');
   // The coach wrote no load for the overhead press, so there is nothing of
   // theirs to put beside the member's 40 — and that is a null rather than a
-  // zero, because a programme naming no load has not prescribed one.
+  // zero, because a program naming no load has not prescribed one.
   ok(nums.loadKg != null && nums.loadKg.wrote === null && nums.loadKg.theirs === 40, 'an unprescribed load is null, not zero');
   ok(nums.tableRows === 3, 'the member wrote a three-row set table');
   const numLine = planEditDiffLine(nums, 'Amy', kg);
@@ -102,7 +102,7 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   ok(added.dayLabel === null, 'an added movement sits on no day and is not given one');
   ok(added.resolved, 'an added movement resolves against nothing by construction and is not a stray');
   ok(added.sets != null && added.sets.wrote === null && added.sets.theirs === 3, 'an added movement carries its own sets and none of the coach’s');
-  ok(planEditDiffLine(added, 'Amy', kg) === 'Amy added Face Pull, which this programme does not contain.',
+  ok(planEditDiffLine(added, 'Amy', kg) === 'Amy added Face Pull, which this program does not contain.',
     `added line read: ${planEditDiffLine(added, 'Amy', kg)}`);
 
   // No sentence is built around a missing day or a missing name.
@@ -114,29 +114,29 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   }
 }
 
-/* ── the programme has moved on ────────────────────────────────────────── */
+/* ── the program has moved on ────────────────────────────────────────── */
 
 {
   // The coach has rewritten the block. Every key the member corrected names a
   // movement that is no longer in it. Those rows are still listed — "they have
   // been correcting the load on something for a month" is worth reading — and
-  // the count of them is a fact about the PROGRAMME, not about the member.
+  // the count of them is a fact about the PROGRAM, not about the member.
   const other: ProgramDay[] = [{ day: 'Mon', focus: 'Push', exercises: [ex('dip', 'Dip', 3, '8')] }];
   const d = planEditsDiff({ edits: EDITS, editStatus: 'ready', readable: true, days: other });
-  ok(d.state === 'ready', 'a programme that no longer matches is still a programme');
+  ok(d.state === 'ready', 'a program that no longer matches is still a program');
   ok(d.rows.length === 4, 'no row is dropped for failing to resolve');
   ok(d.strayCount === 3, `expected three strays, got ${d.strayCount}`);
   const swap = d.rows.filter((r) => r.kind === 'swap')[0];
   ok(swap.assigned === null, 'an unresolved key names no movement rather than guessing one');
   ok(swap.resolved === false, 'and says so');
   const line = planEditDiffLine(swap, 'Amy', kg);
-  ok(line === 'Mon · Push — Amy does Machine Chest Press instead of what this programme names here.',
+  ok(line === 'Mon · Push — Amy does Machine Chest Press instead of what this program names here.',
     `unresolved swap line read: ${line}`);
   const note = planEditsCoachNote({ diff: d, who: 'Amy', whenWords: '3 March 2026', ageWords: '2 days ago', stale: false });
   ok(note.indexOf('no longer') >= 0, `the note did not mention the strays: ${note}`);
 }
 
-/* ── a day index the programme does not have ───────────────────────────── */
+/* ── a day index the program does not have ───────────────────────────── */
 
 {
   // A member whose block used to have four days, corrected on day four, and
@@ -145,7 +145,7 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   const far: PlanEdits = { ...EMPTY_PLAN_EDITS, removed: ['7:bench'] };
   const d = planEditsDiff({ edits: far, editStatus: 'ready', readable: true, days: DAYS });
   ok(d.rows.length === 1, 'the row survives');
-  ok(d.rows[0].dayLabel === null && d.rows[0].assigned === null, 'a day past the end of the programme names nothing');
+  ok(d.rows[0].dayLabel === null && d.rows[0].assigned === null, 'a day past the end of the program names nothing');
   ok(d.rows[0].dayIdx === 7, 'the index it was stored under is still reported');
   ok(planEditDiffLine(d.rows[0], 'Amy', kg) === 'Amy has taken a movement off.',
     `line read: ${planEditDiffLine(d.rows[0], 'Amy', kg)}`);
@@ -155,11 +155,11 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
 
 {
   const d = planEditsDiff({ edits: EDITS, editStatus: 'ready', readable: true, days: null });
-  ok(d.state === 'unmatched', 'no programme is unmatched, not unreadable');
-  ok(d.rows.length === 4, 'the changes are real even where the programme is not readable');
-  ok(d.resolvedCount === 1, 'only the added movement resolves without a programme');
+  ok(d.state === 'unmatched', 'no program is unmatched, not unreadable');
+  ok(d.rows.length === 4, 'the changes are real even where the program is not readable');
+  ok(d.resolvedCount === 1, 'only the added movement resolves without a program');
   const note = planEditsCoachNote({ diff: d, who: 'Amy', whenWords: null, ageWords: null, stale: false });
-  ok(note.indexOf('could not be read') >= 0, `unmatched note must say the programme was not read: ${note}`);
+  ok(note.indexOf('could not be read') >= 0, `unmatched note must say the program was not read: ${note}`);
   ok(note.indexOf('has changed 4 things') >= 0, `unmatched note must still count the changes: ${note}`);
 }
 
@@ -182,7 +182,7 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   const none = planEditsDiff({ edits: EMPTY_PLAN_EDITS, editStatus: 'ready', readable: true, days: DAYS });
   ok(none.state === 'ready' && none.rows.length === 0, 'an empty blob under a good read is empty');
   const note = planEditsCoachNote({ diff: none, who: 'Amy', whenWords: null, ageWords: null, stale: false });
-  ok(note === 'Amy has not changed anything about the programme you assigned them.', `empty note read: ${note}`);
+  ok(note === 'Amy has not changed anything about the program you assigned them.', `empty note read: ${note}`);
 }
 
 /* ── the staleness stamp ───────────────────────────────────────────────── */

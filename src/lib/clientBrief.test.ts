@@ -87,34 +87,34 @@ const days: PlannedDay[] = [
   { dateISO: '2026-09-03', type: 'rest', note: null },
   { dateISO: '2026-08-30', type: 'training', note: null },
 ];
-const noProgramme: ScheduledFocus = () => undefined;
+const noProgram: ScheduledFocus = () => undefined;
 // Thursday 3 Sep — which they have marked a rest day — is a session in the
-// coach's programme. That is `planConflict`'s 'plan-schedules-a-session', and
+// coach's program. That is `planConflict`'s 'plan-schedules-a-session', and
 // it is the one a coach can still settle before the day arrives.
-const programme: ScheduledFocus = (wd) => (wd === 4 ? 'Push' : null);
+const program: ScheduledFocus = (wd) => (wd === 4 ? 'Push' : null);
 
-const plainWeek = coachWeek(days, TODAY, noProgramme);
+const plainWeek = coachWeek(days, TODAY, noProgram);
 ok(/^2 days marked from today on\./.test(weekLine('ready', plainWeek, WHO)),
   'the days ahead are counted; the one behind is left to the screen itself');
 ok(/at least 2 days/i.test(weekLine('partial', plainWeek, WHO)),
   'a truncated week is hedged too');
-ok(/could not be read/.test(weekLine('ready', coachWeek(null, TODAY, noProgramme), WHO)),
+ok(/could not be read/.test(weekLine('ready', coachWeek(null, TODAY, noProgram), WHO)),
   'a failed planned-days read is never "they have marked nothing"');
-const empty = coachWeek([], TODAY, noProgramme);
+const empty = coachWeek([], TODAY, noProgram);
 ok(weekLine('ready', empty, WHO).includes(String(WEEK_SPAN_DAYS))
    && WEEK_SPAN_DAYS === DAYS_BEHIND + DAYS_AHEAD,
   'the empty-week sentence names the window it actually looked at');
 // Both ahead days disagree, for the two different reasons `planConflict` names:
-// Wednesday is marked training and the programme schedules nothing, Thursday is
-// marked rest and the programme schedules Push.
-const clash = coachWeek(days, TODAY, programme);
-ok(clash.conflicts.length === 2 && /2 disagree with the programme you set/.test(weekLine('ready', clash, WHO)),
-  'a disagreement with the programme is surfaced in the summary');
-ok(/1 disagrees with the programme you set/.test(
-     weekLine('ready', coachWeek([days[1]], TODAY, programme), WHO)),
+// Wednesday is marked training and the program schedules nothing, Thursday is
+// marked rest and the program schedules Push.
+const clash = coachWeek(days, TODAY, program);
+ok(clash.conflicts.length === 2 && /2 disagree with the program you set/.test(weekLine('ready', clash, WHO)),
+  'a disagreement with the program is surfaced in the summary');
+ok(/1 disagrees with the program you set/.test(
+     weekLine('ready', coachWeek([days[1]], TODAY, program), WHO)),
   'and one of them is singular — a summary line that says "1 disagree" is read as broken');
 ok(!/disagree/.test(weekLine('ready', plainWeek, WHO)),
-  'and is never claimed when no programme of the coach could be read');
+  'and is never claimed when no program of the coach could be read');
 
 /* ── photos ──────────────────────────────────────────────────────────────── */
 
@@ -164,14 +164,14 @@ ok(/Nothing ticked at all/.test(listLine('ready', 3, { seenDays: 0, windowDays: 
    && /drawer/.test(listLine('ready', 3, { seenDays: 0, windowDays: 28 }, WHO)),
   'a real zero is stated as one AND carries the doubt that a zero cannot separate');
 
-/* ── the programme ───────────────────────────────────────────────────────── */
+/* ── the program ───────────────────────────────────────────────────────── */
 
 ok(/could not be read/.test(programmeLine('error', null, null, WHO)),
-  'a failed programme read is not "no programme assigned"');
+  'a failed program read is not "no program assigned"');
 ok(/that this app can read/.test(programmeLine('ready', null, null, WHO)),
-  'no programme is hedged, because another coach\'s programme looks identical from here');
+  'no program is hedged, because another coach\'s program looks identical from here');
 ok(programmeLine('ready', 'Push Pull Legs', 3, WHO) === 'Push Pull Legs · 3 days a week.',
-  'an assigned programme is named with its own shape');
+  'an assigned program is named with its own shape');
 
 /* ── what is outstanding, and what was not checked ───────────────────────── */
 
@@ -251,7 +251,7 @@ const busy = attention({
 ok(busy.items.length === 3, `unread, an overdue goal and a clash are three separate things to do, got ${busy.items.length}`);
 ok(busy.items[0] === '2 unread messages from Sam.', 'with nothing disclosed, the message a client has already sent leads');
 ok(busy.items.some((x) => /past its target date/.test(x)), 'the overdue goal is named');
-ok(busy.items.some((x) => /2 days they have marked ahead disagree with your programme/.test(x)),
+ok(busy.items.some((x) => /2 days they have marked ahead disagree with your program/.test(x)),
   'the clash is named');
 ok(busy.blind === null, 'nothing was missed, so nothing is claimed to have been');
 
@@ -259,7 +259,7 @@ const noRoster = attention({ ...base, unread: null });
 ok(noRoster.items.length === 0 && noRoster.blind != null && /anything unread/.test(noRoster.blind),
   'a roster that did not come back is a blind spot, not a client with no unread messages');
 
-const dark = attention({ ...base, goalStatus: 'error', board: goalBoard(null), weekStatus: 'error', week: coachWeek(null, TODAY, noProgramme), driftFailed: true });
+const dark = attention({ ...base, goalStatus: 'error', board: goalBoard(null), weekStatus: 'error', week: coachWeek(null, TODAY, noProgram), driftFailed: true });
 ok(dark.items.length === 0, 'a failed read contributes no items — it has nothing to contribute');
 ok(dark.blind != null
    && /their goals/.test(dark.blind)

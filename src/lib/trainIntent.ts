@@ -45,8 +45,8 @@ let seq = 0;
  *
  * @param route the route the caller would have pushed anyway.
  * @param mode  optionally the log to open, for callers with a more specific
- *   intent than "the programme" — the Recovery screen sending somebody to log a
- *   sauna, say. Left off, the receiving screen resets to the programme.
+ *   intent than "the program" — the Recovery screen sending somebody to log a
+ *   sauna, say. Left off, the receiving screen resets to the program.
  */
 export function trainIntent(route: string, mode?: string): string {
   if (!isTrainRoute(route)) return route;

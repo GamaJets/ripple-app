@@ -18,7 +18,7 @@
 // because the body did.
 //
 // It also decides whether any of the rest is worth reading. A change between
-// two readings six months apart is not a fortnight's programme working; a
+// two readings six months apart is not a fortnight's program working; a
 // person scanned twice in a year has a before and an after and no trend at all.
 //
 // ── why this is not a field on clientBody.ts ───────────────────────────────

@@ -7,7 +7,7 @@
 // start training somebody. No readiness questions, no history, no account of
 // what has already been tried, no idea which days of the week are actually
 // available. Every coach on the platform was taking this on paper and typing
-// none of it back in, which meant the app's own programme builder — the thing
+// none of it back in, which meant the app's own program builder — the thing
 // that gates on injuries — was working from less than the coach knew.
 //
 // ── Why it is all one screen ───────────────────────────────────────────────
@@ -87,7 +87,7 @@ const SLEEP = [5, 6, 7, 8, 9];
  * screens they are on are filled in by somebody new to the gym, often standing
  * up, often on a phone they are holding in one hand. Two wrong taps in a row of
  * "1 2 3 4 5" is a different training age, a different injury history and a
- * different starting programme, and nothing on the form says which answer was
+ * different starting program, and nothing on the form says which answer was
  * meant.
  *
  * `minHeight` rather than `hitSlop`, deliberately, and it is the opposite of
@@ -531,7 +531,7 @@ export default function IntakeScreen() {
                 value={draft.tried.didnt} placeholder="And what happened"
                 onChangeText={(v) => edit((d) => ({ ...d, tried: { ...d.tried, didnt: v } }))} />
               <Field t={t} label="What will you not do again?" multiline
-                value={draft.tried.wont} placeholder="Say it here and your coach will not programme it"
+                value={draft.tried.wont} placeholder="Say it here and your coach will not program it"
                 onChangeText={(v) => edit((d) => ({ ...d, tried: { ...d.tried, wont: v } }))} />
             </Section>
 

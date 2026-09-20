@@ -189,7 +189,7 @@ export function useExerciseDetail(name: string | null | undefined) {
   // ── the name and description the SCREEN shows ───────────────────────────
   //
   // `detail.name` stays the English identity — it is what the id is the slug
-  // of, what a programme stores, and what gets written back when this screen
+  // of, what a program stores, and what gets written back when this screen
   // logs a set. `display` is the reader's own language, and it says which
   // language each string is actually in so the screen can mark an English one
   // instead of passing it off as a translation. See src/lib/catalogueLocale.ts.
@@ -214,6 +214,26 @@ export interface CatalogueRow {
    *  on rows where the catalogue does not record it, which is a gap and not the
    *  claim that the exercise needs no kit. */
   equipment: string | null;
+  /**
+   * `exercises.is_bodyweight` — 183 of 615 rows, never null (the column is
+   * `not null default false`).
+   *
+   * It means "needs no kit", NOT "the load is the person": chin-ups and dips
+   * are false because a bar and a dip station are equipment, and 58 of the 183
+   * are stretches. src/lib/bodyweightSets.ts explains at length why that makes
+   * it useless for pricing a set, and it is not read for that here either.
+   *
+   * It is here because it is the other half of the one question `equipment`
+   * cannot answer on its own — can this be done with nothing at all — and a
+   * coach building for somebody in a hotel room needs exactly that. Paired
+   * with `equipment` by `needsNoKit` in src/lib/equipmentFacet.ts; neither
+   * column means it alone.
+   */
+  isBodyweight: boolean;
+  /** `exercises.category` — 'strength', 'stretching', 'plyometrics'. Read so a
+   *  generated program can prescribe a stretch as a hold rather than as twelve
+   *  repetitions; null where the catalogue does not classify the row. */
+  category: string | null;
   hasDemo: boolean;
   /** The first still, for the row's thumbnail. One path per row, not the whole
    *  array — a list of 608 needs one picture each and never the second. */
@@ -309,7 +329,7 @@ export interface CatalogueRow {
    * The name to PUT ON SCREEN, in the reader's language where we have it.
    *
    * `name` above is untouched and stays the identity: it is what the id is the
-   * slug of, what the builder writes into a programme, and what the exercise
+   * slug of, what the builder writes into a program, and what the exercise
    * screen is opened with. A list that navigated by `display.text` would send a
    * German reader to a movement called "Kniebeuge", which resolves to nothing.
    */
@@ -395,7 +415,7 @@ export function useExerciseCatalogue() {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, equipment, level, mechanic, force, goals, tags, met, primary_muscles, secondary_muscles, synonyms, image_paths, equipment_icon_path, source')
+        .select('id, name, muscle_group, equipment, is_bodyweight, category, level, mechanic, force, goals, tags, met, primary_muscles, secondary_muscles, synonyms, image_paths, equipment_icon_path, source')
         .order('name', { ascending: true })
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
@@ -411,6 +431,12 @@ export function useExerciseCatalogue() {
         name: r.name,
         group: r.muscle_group ?? null,
         equipment: r.equipment ?? null,
+        // `=== true` and not `!!`. The column is `not null default false`, so
+        // a null here is PostgREST having omitted the field rather than the
+        // catalogue saying no — and the one caller that matters treats a
+        // missing answer as "do not assume", which false already is.
+        isBodyweight: r.is_bodyweight === true,
+        category: r.category ?? null,
         // hasDemo stays about the MOVEMENT. An equipment icon fills the tile
         // so the row is not blank, but it is not a demonstration and a filter
         // for "has a demo" must not start returning these three.

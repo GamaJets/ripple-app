@@ -1,6 +1,5 @@
 import { Stack, useRouter } from 'expo-router';
 import { LogBox } from 'react-native';
-import * as Device from 'expo-device';
 import { useEffect } from 'react';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -26,6 +25,7 @@ import { BadgeWatchProvider } from '../src/ui/badgeWatch';
 import { NotifyPrefsProvider } from '../src/ui/notifyPrefs';
 import { ReminderSyncProvider } from '../src/ui/reminderSync';
 import { MotivationNudgeProvider } from '../src/ui/motivationNudges';
+import { IS_PHYSICAL_DEVICE } from '../src/ui/nativeModules';
 import { DeviceSleepProvider } from '../src/ui/deviceSleep';
 import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
@@ -83,7 +83,7 @@ import { MessageOutboxHandler } from '../src/ui/messaging';
 // only, this one message only. On a real device the same line WOULD mean
 // something (a provisioning profile without keychain sharing), so it stays
 // loud there.
-if (__DEV__ && !Device.isDevice) {
+if (__DEV__ && IS_PHYSICAL_DEVICE === false) {
   LogBox.ignoreLogs(['[expo-notifications] Error reading persisted server registration info']);
 }
 

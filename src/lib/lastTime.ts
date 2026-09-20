@@ -17,7 +17,7 @@
 // The same sentence is printed for everybody else who touches that lift.
 // app/(client)/progression.tsx renders `tip.rationale` under the target load.
 // src/lib/builderProgression.ts was written so the COACH gets `reason` under
-// the weight box in the programme builder, and its header states the case in
+// the weight box in the program builder, and its header states the case in
 // one line: "the one number that changes week to week was the one the person
 // deciding it had no help with, while the arithmetic sat finished in the
 // repository." That is now true of exactly one screen — the one where the

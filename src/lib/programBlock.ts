@@ -1,5 +1,5 @@
 /**
- * A PROGRAMME THAT LASTS MORE THAN A WEEK.
+ * A PROGRAM THAT LASTS MORE THAN A WEEK.
  *
  * ── What could not be written down ────────────────────────────────────────
  *
@@ -53,7 +53,7 @@
 import type { Program, ProgramDay, ProgramWeek } from './programs';
 
 /**
- * The most weeks one programme may hold.
+ * The most weeks one program may hold.
  *
  * Twelve, and it is a real limit rather than a shrug. Every one of these weeks
  * is stored in full — days, exercises, set rows — inside a single jsonb value
@@ -70,17 +70,17 @@ import type { Program, ProgramDay, ProgramWeek } from './programs';
 export const MAX_WEEKS = 12;
 
 /**
- * Every week of a programme, week one first, for a programme of any age.
+ * Every week of a program, week one first, for a program of any age.
  *
  * This is THE reader. Nothing else in the app looks at `Program.weeks`.
  *
- * A programme with no `weeks` is a one-week programme — which is every
- * programme currently in `program_templates`, in `assigned_programs` and in
+ * A program with no `weeks` is a one-week program — which is every
+ * program currently in `program_templates`, in `assigned_programs` and in
  * every coach's draft — and it comes back as a single week built from `days`.
- * That is not a compatibility shim, it is the truth: those programmes ARE one
+ * That is not a compatibility shim, it is the truth: those programs ARE one
  * week long and always were.
  *
- * A programme whose `weeks` is present but whose first week disagrees with
+ * A program whose `weeks` is present but whose first week disagrees with
  * `days` is answered by `days`, and the disagreement is reported by
  * `weeksDisagree` rather than silently preferred. A jsonb column can hold
  * anything any build ever wrote, and the shipped client app renders `days` — so
@@ -118,7 +118,7 @@ export function weeksDisagree(p: Program | null | undefined): boolean {
     return JSON.stringify(p.weeks[0]?.days ?? []) !== JSON.stringify(p.days ?? []);
   } catch {
     // A cyclic or unserialisable value cannot have come out of jsonb or
-    // AsyncStorage, so this is unreachable from a stored programme. Answered as
+    // AsyncStorage, so this is unreachable from a stored program. Answered as
     // "no disagreement to report" rather than thrown: a comparison that cannot
     // be made is not evidence of a mismatch, and throwing here would take down
     // a screen over a diagnostic.
@@ -126,14 +126,14 @@ export function weeksDisagree(p: Program | null | undefined): boolean {
   }
 }
 
-/** How many weeks this programme is. One for every programme written before
+/** How many weeks this program is. One for every program written before
  *  `weeks` existed, which is the honest answer for them. */
 export function weekCount(p: Program | null | undefined): number {
   return programWeeks(p).length;
 }
 
-/** True when this programme is more than one week — the single test a screen
- *  uses to decide whether to draw a week strip at all. A one-week programme
+/** True when this program is more than one week — the single test a screen
+ *  uses to decide whether to draw a week strip at all. A one-week program
  *  must look exactly as it did before, with no week number anywhere. */
 export function isBlock(p: Program | null | undefined): boolean {
   return weekCount(p) > 1;
@@ -151,7 +151,7 @@ export function isBlock(p: Program | null | undefined): boolean {
  *
  * Takes the two fields it reads rather than a whole `ProgramWeek`, so the
  * builder's own week — which carries the draft keys and the unit the coach
- * typed in, and is not a stored programme — can be labelled without being
+ * typed in, and is not a stored program — can be labelled without being
  * converted first. The same structural-parameter reasoning `SetSpec` in
  * src/lib/setRows.ts gives for exactly the same caller.
  */
@@ -163,9 +163,9 @@ export function weekLabel(w: { label?: string; deload?: boolean } | null | undef
 
 /**
  * The one-line description of a block, in sentence case, for a note under a
- * programme's title.
+ * program's title.
  *
- * Deliberately says "week" for a one-week programme rather than staying silent,
+ * Deliberately says "week" for a one-week program rather than staying silent,
  * where the caller asks for it — a coach who has just deleted week two should
  * see the count go to one rather than see the line vanish.
  */
@@ -179,7 +179,7 @@ export function blockLine(p: Program | null | undefined): string {
 }
 
 /**
- * Write a whole block back onto a programme, keeping `days` in step.
+ * Write a whole block back onto a program, keeping `days` in step.
  *
  * THE ONLY WRITER. Every caller that changes the shape of a block goes through
  * here, and the reason is the invariant: `days` is what the shipped client app
@@ -187,21 +187,21 @@ export function blockLine(p: Program | null | undefined): string {
  * their own screen and week one on their client's phone, with nothing anywhere
  * saying which is which.
  *
- * An empty list is refused — it would produce a programme with no days at all,
- * which is not a lighter programme, it is a Train tab with nothing on it. The
- * programme is returned unchanged, which is the same shape `removeSetRow` uses
+ * An empty list is refused — it would produce a program with no days at all,
+ * which is not a lighter program, it is a Train tab with nothing on it. The
+ * program is returned unchanged, which is the same shape `removeSetRow` uses
  * for its last row and for the same reason.
  *
  * A list longer than `MAX_WEEKS` is TRUNCATED rather than refused, and this is
  * the one place in this file that silently changes what it was given. It is
  * reachable only from `addWeek`, which checks the ceiling itself and does not
- * call with more; this is the belt behind that brace, and a programme that
+ * call with more; this is the belt behind that brace, and a program that
  * arrived from a future build with thirty weeks in it is better rendered as
  * twelve than as a screen that will not open.
  *
  * `weeks` is dropped entirely when the block is one week long, so a coach who
- * deletes their second week leaves behind a programme byte-identical to one
- * that never had a second week. Otherwise every one-week programme edited after
+ * deletes their second week leaves behind a program byte-identical to one
+ * that never had a second week. Otherwise every one-week program edited after
  * today would carry a `weeks: [...]` that means nothing, and `programSignature`
  * in src/lib/groupProgram.ts would have to know the difference.
  */
@@ -210,9 +210,9 @@ export function withWeeks(p: Program, weeks: ProgramWeek[]): Program {
   const kept = weeks.slice(0, MAX_WEEKS);
   const firstDays = Array.isArray(kept[0].days) ? kept[0].days : [];
   if (kept.length === 1) {
-    // A one-week programme carries no `weeks` at all. `label`, `note` and
+    // A one-week program carries no `weeks` at all. `label`, `note` and
     // `deload` on that single week are dropped with it, and that is deliberate:
-    // "Week 1 · Deload" is a statement about a block, and a programme that is
+    // "Week 1 · Deload" is a statement about a block, and a program that is
     // one week is not a block. Anything the coach wanted to say about it goes
     // in `Program.note`, which every reader already shows.
     const { weeks: _dropped, ...rest } = p;
@@ -236,7 +236,7 @@ export function withWeeks(p: Program, weeks: ProgramWeek[]): Program {
  * shown week four by src/lib/clientBlock.ts, which reads the block rather than
  * `days`.
  *
- * An index outside the block changes nothing and returns the programme it was
+ * An index outside the block changes nothing and returns the program it was
  * given. No bounds guard of its own — `map` simply matches no week — for the
  * reason `removeSetRow` gives: a check that cannot be wrong is code a mutation
  * run can delete without an assertion noticing.
@@ -273,7 +273,7 @@ export function patchWeek(p: Program, at: number, patch: Partial<Omit<ProgramWee
  * which is right. The `deload` flag is not copied either, for the same reason:
  * a coach adding a week after a deload is not adding another deload.
  *
- * At the ceiling it returns the programme unchanged. The caller checks
+ * At the ceiling it returns the program unchanged. The caller checks
  * `canAddWeek` and hides the control; this is what makes a stray second tap
  * harmless rather than a silent no-op the coach reads as a broken button.
  */
@@ -295,8 +295,8 @@ export function canAddWeek(p: Program | null | undefined): boolean {
  * Remove a week.
  *
  * The LAST REMAINING week is not removable, exactly as the last set row is not:
- * a programme of no weeks is a Train tab with nothing on it, and the coach who
- * means that means "delete the programme", which is a different control with a
+ * a program of no weeks is a Train tab with nothing on it, and the coach who
+ * means that means "delete the program", which is a different control with a
  * different confirmation.
  *
  * Removing WEEK ONE is allowed and it moves what the client trains — week two
@@ -346,9 +346,9 @@ function deepCopyDays(days: ProgramDay[]): ProgramDay[] {
  * A block's weeks folded into the signature line `programSignature` needs.
  *
  * Returns null — meaning "add nothing to the signature" — for a one-week
- * programme, so a programme with no `weeks` fingerprints EXACTLY as it did
+ * program, so a program with no `weeks` fingerprints EXACTLY as it did
  * before this file existed. That is load-bearing: `programSignature` decides
- * which members of a group are on the group's programme, and a signature that
+ * which members of a group are on the group's program, and a signature that
  * changed shape for everybody would have reported every member of every group
  * as diverged on the morning this shipped.
  *

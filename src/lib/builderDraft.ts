@@ -1,4 +1,4 @@
-// The programme a coach is part-way through writing — and whose it is.
+// The program a coach is part-way through writing — and whose it is.
 //
 // ── The defect ────────────────────────────────────────────────────────────
 //
@@ -14,7 +14,7 @@
 // src/lib/handsetClips.ts and src/lib/mealSwaps.ts were written to end, and on
 // this screen it is worse than either of them.
 //
-// What the blob holds is a whole programme: a title, a coach's note, and every
+// What the blob holds is a whole program: a title, a coach's note, and every
 // week, day, exercise, set, rep, load and cue they have typed. On a shared gym
 // handset coach B signs in, opens Programs, and coach A's entire draft is
 // restored into their builder with `seededFor` set to null — which is the
@@ -40,15 +40,15 @@
 // from the previous coach's on a gym's shared one. So a migration is a guess,
 // and the two ways of being wrong are not symmetrical:
 //
-//   · Guess right and a coach is spared retyping one unsaved programme.
-//   · Guess wrong and one coach's programme — their loads, their progressions,
+//   · Guess right and a coach is spared retyping one unsaved program.
+//   · Guess wrong and one coach's program — their loads, their progressions,
 //     their notes about a named client's shoulder — opens inside another
 //     coach's builder, presented as that coach's own work, one tap from being
 //     assigned to that coach's clients under that coach's name.
 //
 // An unsaved draft is, by definition, work that never reached the server;
 // losing it costs one coach one evening's typing that they still remember.
-// Restoring it to the wrong coach costs a client the wrong programme and costs
+// Restoring it to the wrong coach costs a client the wrong program and costs
 // the first coach their work being sent out under somebody else's name. The
 // cheap loss is the one taken deliberately here.
 //
@@ -213,9 +213,9 @@ export type RestoreWhy = 'no-draft' | 'empty-draft' | 'builder-in-use' | 'restor
  *
  * It is deliberately NOT the thing that keeps one account's draft out of
  * another's builder. That is `draftStepFor`'s `forget`, which runs before this
- * is asked — because this function's honest answer to "coach A's programme is
+ * is asked — because this function's honest answer to "coach A's program is
  * on screen and coach B's is on disk" is to refuse the restore, and a refusal
- * would leave A's programme exactly where it must not be.
+ * would leave A's program exactly where it must not be.
  */
 export function restoreDraftDecision<D>(args: {
   stored: BuilderDraft<D> | null;
@@ -244,7 +244,7 @@ export type DraftStep = AccountStateStep;
  *     screen belongs to a DIFFERENT account and must be dropped before the read
  *     lands, not merely left for the restore to overwrite: the restore is
  *     allowed to refuse (see `restoreDraftDecision`), and a refusal that left
- *     coach A's programme sitting in coach B's builder is the whole defect
+ *     coach A's program sitting in coach B's builder is the whole defect
  *     wearing a fix.
  *
  *   · `forget` — the account is gone and everything on screen is already on

@@ -1,4 +1,4 @@
-// "Gym Kit" — the register the coach programmes against, read-only.
+// "Gym Kit" — the register the coach programs against, read-only.
 //
 // ── What it draws, and the four things it refuses to ──────────────────────
 //

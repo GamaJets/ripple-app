@@ -20,6 +20,7 @@
 import { useMemo, useState } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { num } from '../../src/lib/format';
+import { titleCaseName } from '../../src/lib/exerciseName';
 import { View, Text, Pressable, TextInput, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -259,12 +260,16 @@ export default function ScanMachine() {
   const save = async () => {
     if (saving) return;
     if (!exercise.trim()) { Alert.alert('Name the Exercise', 'Pick or type the machine/exercise first.'); return; }
+    // One spelling, decided once, for the entry, the remembered machine and every
+    // message below. Title casing cannot change the slug (src/lib/exerciseName.ts),
+    // so a machine typed in lower case still lands on the same movement.
+    const named = titleCaseName(exercise.trim());
     let entry;
     if (cardio) {
       const m = parseFloat(mins) || 0;
       if (m <= 0) { Alert.alert('Add Your Time', 'Enter how many minutes you did.'); return; }
       const w = parseFloat(watts) || 0;
-      entry = { t: new Date().toISOString(), exercise: exercise.trim(), cardio: { mins: m, dist: readNumber(dist) ?? 0, unit, watts: w || undefined }, kcal: estKcal() };
+      entry = { t: new Date().toISOString(), exercise: named, cardio: { mins: m, dist: readNumber(dist) ?? 0, unit, watts: w || undefined }, kcal: estKcal() };
     } else {
       if (!sets.length) { Alert.alert('Log a Set First', 'Enter reps (and weight) and tap Add Set.'); return; }
       // The same `strengthKcalOf` the caption above renders, so the log and
@@ -275,7 +280,7 @@ export default function ScanMachine() {
       // everywhere downstream, and a short array is a set nobody flagged.
       entry = {
         t: new Date().toISOString(),
-        exercise: exercise.trim(),
+        exercise: named,
         sets: sets.map((s) => [s.reps, s.kg] as [number, number]),
         bw: sets.map((s) => s.bw),
         timed: sets.map((s) => s.timed),
@@ -300,16 +305,16 @@ export default function ScanMachine() {
       setSaving(false);
     }
     // Remember this machine's setup so the next scan of the same code auto-fills.
-    if (rawCode) rememberMachine(rawCode, { name: exercise.trim(), group, cardio, unit });
+    if (rawCode) rememberMachine(rawCode, { name: named, group, cardio, unit });
     if (out === 'unsent') {
-      Alert.alert('Saved on This Phone', exercise.trim() + ' has not reached your workout log yet — there is no connection here. Nothing is lost: it is saved on this phone and goes up on its own the next time you have signal.', [{ text: 'OK' }]);
+      Alert.alert('Saved on This Phone', named + ' has not reached your workout log yet — there is no connection here. Nothing is lost: it is saved on this phone and goes up on its own the next time you have signal.', [{ text: 'OK' }]);
       return;
     }
     if (out === 'refused') {
-      Alert.alert('Not Saved', exercise.trim() + ' was rejected by your workout log, so it is not recorded and it is not waiting to send. Logging it again as it is will be rejected again.', [{ text: 'OK' }]);
+      Alert.alert('Not Saved', named + ' was rejected by your workout log, so it is not recorded and it is not waiting to send. Logging it again as it is will be rejected again.', [{ text: 'OK' }]);
       return;
     }
-    Alert.alert('Logged', exercise.trim() + ' saved to your workout log.', [
+    Alert.alert('Logged', named + ' saved to your workout log.', [
       { text: 'View History', onPress: () => router.replace('/(client)/activity') },
       { text: 'Done', onPress: () => router.back() },
     ]);

@@ -10,21 +10,21 @@ const eq = (a: unknown, b: unknown, msg: string) => {
 
 };
 
-/** What every set of every programme written before src/lib/setIntensity.ts
+/** What every set of every program written before src/lib/setIntensity.ts
  *  carries. Named rather than repeated so the assertions below read as "nothing
  *  changed" rather than as three nulls somebody has to check by eye. */
 const NO_INTENSITY = { rpe: null, pct1rm: null, tempo: null };
 
-/** The shape every programme already on a phone has: one spec, no table. */
+/** The shape every program already on a phone has: one spec, no table. */
 const old: SetSpec = { sets: 3, reps: '8-10', loadKg: 42.5 };
 
 // ── the old shape still runs exactly as it did ────────────────────────────
 //
-// This is the assertion the whole file exists for. Programmes live in the
+// This is the assertion the whole file exists for. Programs live in the
 // database AND in an on-device draft, and no migration reaches both.
 ok(!hasSetRows(old), 'an exercise with no table has no table');
 eq(setCount(old), 3, 'its set count is still `sets`');
-// `intensity` is on every planned set and is three nulls for every programme
+// `intensity` is on every planned set and is three nulls for every program
 // ever written — the RPE, %1RM and tempo columns arrived after these, and
 // absent still means absent. Asserted in full here rather than picked apart,
 // because the whole claim of src/lib/setIntensity.ts is that adding them
@@ -183,7 +183,7 @@ eq(expandSets({ ...old, ...added, method: 'drop' }).map((s) => s.method), ['drop
   'the exercise method still reaches rows that were added before it was set');
 eq(expandSets({ ...old, ...patchSetRow({ ...old, ...added }, 0, { method: 'warmup' }), method: 'drop' }).map((s) => s.method),
   ['warmup', 'drop', 'drop', 'drop'], 'and the one row that overrode it keeps its own');
-// It is the same programme it was: the four rows still say what the three did.
+// It is the same program it was: the four rows still say what the three did.
 eq(expandSets({ ...old, ...added }).map((s) => `${s.reps}@${s.loadKg}`),
   ['8-10@42.5', '8-10@42.5', '8-10@42.5', '8-10@42.5'], 'and nothing about the first three changed');
 

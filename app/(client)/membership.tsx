@@ -10,7 +10,7 @@
 // Fabrication removed in this pass: the card used to print a "Plan · Member"
 // and a "Valid until <today + 1 year>" that no billing system had ever issued,
 // a "Loyalty points" figure invented as (visit days × 10 + log entries × 2)
-// with no loyalty programme behind it, and a "Balance · Add top-up ›" tile for
+// with no loyalty program behind it, and a "Balance · Add top-up ›" tile for
 // an account balance that does not exist. Nothing replaced them — what is left
 // is the member number, which is derived from the signed-in user, and visit
 // counts, which come from the real workout log.

@@ -2,13 +2,13 @@
 //
 // ── What exists, and who it was written for ────────────────────────────────
 //
-// src/lib/planVsActual.ts reconciles the programme against the log. It is
+// src/lib/planVsActual.ts reconciles the program against the log. It is
 // careful, tested, and states four things it refuses to say — no completed
 // sessions, no named weekdays, no percentage, and never "not done" over a read
 // that was not whole. Its only importer is app/(trainer)/client-training.tsx.
 //
 // So a coach can open a screen and read "9 of 12 prescribed movements logged in
-// the last 28 days, and 3 movements logged that this programme does not name",
+// the last 28 days, and 3 movements logged that this program does not name",
 // and the person who did or did not do those movements has no way to see it.
 // app/(client)/week.tsx draws the seven rows of the plan and marks a day
 // "Logged" when ANYTHING was logged on it — which is a different claim
@@ -20,7 +20,7 @@
 //
 // Because that sentence is in the third person and is addressed to somebody
 // making a decision about another person: "Their logged training could not be
-// read", "they are on no coach-assigned programme". Turning it round with a
+// read", "they are on no coach-assigned program". Turning it round with a
 // pronoun swap would produce prose, and the wrong prose: a coach is being told
 // what to write next week, and a member is being told where their week actually
 // went. Those are different sentences even where they are the same arithmetic.
@@ -40,7 +40,7 @@
 // they did is the fastest way to make them stop reading.
 //
 // It does not treat off-plan work as a failure. A member who swapped a barbell
-// row for a machine because the rack was busy has trained; the programme simply
+// row for a machine because the rack was busy has trained; the program simply
 // does not name what they did. `offPlan` is stated as information, in a
 // sentence that says what it is for — so their coach can be told — rather than
 // as a correction.
@@ -86,10 +86,10 @@ export type MyPlanWeek =
    * read as "you have done none of it".
    */
   | { kind: 'unreadable'; note: string }
-  /** No coach has assigned a programme. Not a failure and not an empty state
+  /** No coach has assigned a program. Not a failure and not an empty state
    *  to apologise for — the app generates one, and this says so. */
-  | { kind: 'no-programme'; note: string }
-  /** A programme with nothing in it. */
+  | { kind: 'no-program'; note: string }
+  /** A program with nothing in it. */
   | { kind: 'empty'; note: string }
   /** The read did not reach back far enough to answer for anything. */
   | { kind: 'unanswerable'; note: string }
@@ -108,7 +108,7 @@ export type MyPlanWeek =
       /** Movements the read cannot answer for. Never folded into `missing`. */
       unanswered: NamedList;
       unansweredNote: string | null;
-      /** What they logged that the programme does not name. Information, not a
+      /** What they logged that the program does not name. Information, not a
        *  correction — see the header. */
       offPlanNote: string | null;
       /** `planVsActual`'s own disclaimer, carried through unchanged. */
@@ -118,7 +118,7 @@ export type MyPlanWeek =
 const s = (n: number) => (n === 1 ? '' : 's');
 
 /**
- * What to say to the member about their own programme and their own log.
+ * What to say to the member about their own program and their own log.
  *
  * `windowDays` is the window the caller asked `planVsActual` for and is printed
  * rather than assumed — the constant in that module is 28 and a client screen
@@ -129,19 +129,19 @@ export function myPlanWeek(pva: PlanVsActual, windowDays: number): MyPlanWeek {
   if (pva.state === 'unreadable') {
     return {
       kind: 'unreadable',
-      note: 'Your programme or your training log could not be read, so nothing here compares them. That is a read that did not land — it is not a week with nothing in it.',
+      note: 'Your program or your training log could not be read, so nothing here compares them. That is a read that did not land — it is not a week with nothing in it.',
     };
   }
-  if (pva.state === 'no-programme') {
+  if (pva.state === 'no-program') {
     return {
-      kind: 'no-programme',
-      note: 'No coach has written you a programme yet, so there is nothing here to measure your training against. The plan above is the one this app builds from your goal.',
+      kind: 'no-program',
+      note: 'No coach has written you a program yet, so there is nothing here to measure your training against. The plan above is the one this app builds from your goal.',
     };
   }
 
   const all = pva.movements;
   if (!all.length) {
-    return { kind: 'empty', note: 'This programme names no movements, so there is nothing to compare.' };
+    return { kind: 'empty', note: 'This program names no movements, so there is nothing to compare.' };
   }
 
   const loggedM = all.filter((m) => m.coverage === 'logged');
@@ -164,7 +164,7 @@ export function myPlanWeek(pva: PlanVsActual, windowDays: number): MyPlanWeek {
 
   return {
     kind: 'ready',
-    note: `You have logged ${loggedM.length} of the ${all.length} movement${s(all.length)} your programme names, in the last ${windowDays} days.`,
+    note: `You have logged ${loggedM.length} of the ${all.length} movement${s(all.length)} your program names, in the last ${windowDays} days.`,
     logged: loggedM.length,
     total: all.length,
     missing,
@@ -179,7 +179,7 @@ export function myPlanWeek(pva: PlanVsActual, windowDays: number): MyPlanWeek {
       ? `${unknownM.length} more cannot be answered for — your history did not come back far enough to cover the window: ${phrase(unanswered)}.`
       : null,
     offPlanNote: pva.offPlan.length
-      ? `You also logged ${pva.offPlan.length} movement${s(pva.offPlan.length)} this programme does not name: ${pva.offPlan.slice(0, MAX_NAMED).join(', ')}${pva.offPlan.length > MAX_NAMED ? ` and ${pva.offPlan.length - MAX_NAMED} more` : ''}. That is worth telling your coach — it is the half of your week their screen cannot explain.`
+      ? `You also logged ${pva.offPlan.length} movement${s(pva.offPlan.length)} this program does not name: ${pva.offPlan.slice(0, MAX_NAMED).join(', ')}${pva.offPlan.length > MAX_NAMED ? ` and ${pva.offPlan.length - MAX_NAMED} more` : ''}. That is worth telling your coach — it is the half of your week their screen cannot explain.`
       : null,
     caveat: CAVEAT,
   };
@@ -210,5 +210,5 @@ export function allLoggedNote(r: MyPlanWeek, windowDays: number): string | null 
   if (r.kind !== 'ready') return null;
   if (r.missing.names.length || r.missing.more) return null;
   if (r.unanswered.names.length || r.unanswered.more) return null;
-  return `Every movement your programme names has been logged in the last ${windowDays} days.`;
+  return `Every movement your program names has been logged in the last ${windowDays} days.`;
 }

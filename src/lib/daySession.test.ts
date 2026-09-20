@@ -11,7 +11,7 @@
 //   · a rest day that is not a rest day. Three of the six states below mean
 //     "nothing is scheduled" for three different reasons, and only one of them
 //     may be drawn as a day off. The other two are an unread connection and an
-//     empty programme, and a coach shown a rest day for either trains around a
+//     empty program, and a coach shown a rest day for either trains around a
 //     plan that was never written or was never read.
 //
 // So the assertions are mostly about the states that must NOT collapse into
@@ -129,7 +129,7 @@ const ex = (name: string): ProgramExercise =>
 const day = (d: string, focus: string, n: number, cardio?: string): ProgramDay =>
   ({ day: d, focus, exercises: Array.from({ length: n }, (_, i) => ex(`Lift ${i + 1}`)), ...(cardio ? { cardio } : {}) });
 
-const one = (days: ProgramDay[]): Program => ({ title: 'A programme', focus: [], note: '', days });
+const one = (days: ProgramDay[]): Program => ({ title: 'A program', focus: [], note: '', days });
 /** A block of `n` weeks whose Monday session names its own week, so the join
  *  from a date to a week to a day can be walked rather than trusted. */
 const block = (n: number): Program => withWeeks(one([day('Mon', 'Push 1', 3)]),
@@ -153,10 +153,10 @@ const W1 = '2026-09-07', W2 = '2026-09-14', W5 = '2026-10-05';
 
 {
   const d = trainingOnDay(null, null, W1, 'ready', 'Ana');
-  eq(d.state, 'unassigned', 'a null programme under a whole read is a client with no programme');
+  eq(d.state, 'unassigned', 'a null program under a whole read is a client with no program');
   eq(d.confirmed, true, 'which is a confirmed answer');
   eq(dayPlanUnread(d), false, 'and is ordinary rather than a problem to solve');
-  ok(/no programme from you/i.test(d.line), 'and the line says whose omission it is');
+  ok(/no program from you/i.test(d.line), 'and the line says whose omission it is');
 }
 
 for (const status of STATUSES.filter((s) => s !== 'ready')) {
@@ -164,27 +164,27 @@ for (const status of STATUSES.filter((s) => s !== 'ready')) {
   // same null for "nothing assigned" and "the read did not land", and only one
   // of those may reach a coach as a fact about their client.
   const d = trainingOnDay(null, null, W1, status, 'Ana');
-  eq(d.state, 'unreadable', `a null programme under ${status} is UNKNOWN, not unassigned`);
+  eq(d.state, 'unreadable', `a null program under ${status} is UNKNOWN, not unassigned`);
   ok(d.state !== 'rest', `and is never a rest day (${status})`);
   ok(/not a rest day/i.test(d.line), `and says so in words (${status})`);
   eq(d.day, null, `with no plan behind it (${status})`);
   eq(dayPlanUnread(d), true, `and is the one a coach must not walk past (${status})`);
   eq(dayTrainingCaveat(d), null, `its line is the caveat, so there is no second one (${status})`);
   ok(dayPlanHeading(d) !== dayPlanHeading(trainingOnDay(null, null, W1, 'ready', 'Ana')),
-    `and it does not share a heading with "no programme assigned" (${status})`);
+    `and it does not share a heading with "no program assigned" (${status})`);
 }
 
 {
-  // The regression. `programWeeks` never returns an empty list for a programme
-  // that exists — a programme with no `weeks` IS one week, and that week is
+  // The regression. `programWeeks` never returns an empty list for a program
+  // that exists — a program with no `weeks` IS one week, and that week is
   // `days` — so a guard on the list's length could not fire, and an assigned
-  // programme with nothing in it was answered with the rest-day sentence.
+  // program with nothing in it was answered with the rest-day sentence.
   const d = trainingOnDay(one([]), null, W1, 'ready', 'Ana');
-  eq(d.state, 'unwritten', 'an assigned programme with no days in it is unwritten, not a rest day');
+  eq(d.state, 'unwritten', 'an assigned program with no days in it is unwritten, not a rest day');
   ok(!/schedules nothing/i.test(d.line), 'and does not borrow the rest day’s sentence');
-  ok(/no days written/i.test(d.line), 'it says the programme is empty');
+  ok(/no days written/i.test(d.line), 'it says the program is empty');
   eq(d.day, null, 'and there is no plan behind it');
-  eq(dayPlanHeading(d), 'Programme is empty', 'a one-week programme with no days IS the empty programme');
+  eq(dayPlanHeading(d), 'Program is empty', 'a one-week program with no days IS the empty program');
 }
 
 {
@@ -197,16 +197,16 @@ for (const status of STATUSES.filter((s) => s !== 'ready')) {
   eq(d.state, 'unwritten', 'a blank week of a written block is unwritten on every day of it');
   eq(d.weekLabel, 'Week 2', 'and names the week that is blank');
   eq(dayPlanHeading(d), 'Nothing written for that week',
-    'and does not tell the coach to go and rewrite a programme that is eleven-twelfths written');
+    'and does not tell the coach to go and rewrite a program that is eleven-twelfths written');
 }
 
 /* ── the one that may be drawn as a day off ────────────────────────────── */
 
 {
-  // Tuesday, on a programme that only has a Monday.
+  // Tuesday, on a program that only has a Monday.
   const d = trainingOnDay(one([day('Mon', 'Push', 3)]), null, '2026-09-08', 'ready', 'Ana');
-  eq(d.state, 'rest', 'a written programme that puts nothing on this weekday is a rest day');
-  eq(d.weekLabel, null, 'a one-week programme is given no week number');
+  eq(d.state, 'rest', 'a written program that puts nothing on this weekday is a rest day');
+  eq(d.weekLabel, null, 'a one-week program is given no week number');
   eq(d.week && d.week.count, 1, 'because it is one week');
   eq(dayPlanUnread(d), false, 'and a rest day is not a warning');
   eq(dayTrainingCaveat(d), null, 'nor does it carry one under a whole read');
@@ -254,7 +254,7 @@ for (const status of STATUSES.filter((s) => s !== 'ready')) {
 //
 // The day sheet is routinely open on a date that is not today, and "what are
 // they due to train" on that date is that date's week of the block. Two dates
-// against ONE programme and one start date, so nothing but the date can be
+// against ONE program and one start date, so nothing but the date can be
 // making the difference.
 
 {
@@ -301,15 +301,15 @@ for (const status of STATUSES.filter((s) => s !== 'ready')) {
 /* ── the weekday is read off the date locally ──────────────────────────── */
 //
 // `new Date(iso).getDay()` is UTC-parsed for a bare date, which west of
-// Greenwich is the day before — asking the programme for Monday's session on a
+// Greenwich is the day before — asking the program for Monday's session on a
 // Tuesday. Walked across a whole week: exactly one date resolves to the single
-// day the programme holds, and it is the one whose LOCAL weekday matches.
+// day the program holds, and it is the one whose LOCAL weekday matches.
 
 {
   const p = one([day('Thu', 'Pull', 4)]);
   const week = ['2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12'];
   const hit = week.filter((iso) => trainingOnDay(p, null, iso, 'ready', 'Ana').state === 'session');
-  eq(hit.length, 1, 'a programme with one day in it trains on exactly one day of the week');
+  eq(hit.length, 1, 'a program with one day in it trains on exactly one day of the week');
   eq(weekdayOfIso(hit[0]), 4, 'and that day is the Thursday the coach wrote, read as a local date');
   for (const iso of week) {
     const d = trainingOnDay(p, null, iso, 'ready', 'Ana');
@@ -320,7 +320,7 @@ for (const status of STATUSES.filter((s) => s !== 'ready')) {
 /* ── confirmed is a caveat on a true answer, not a different answer ────── */
 //
 // `useAssignedPrograms` keeps what it last held when a read fails. The
-// programme in hand is a real programme; it is simply not known to be the
+// program in hand is a real program; it is simply not known to be the
 // newest one. Folding that into the state would cost the day its plan every
 // time the connection dropped, which is precisely when a coach is standing in
 // a basement looking at it.
@@ -330,7 +330,7 @@ for (const status of STATUSES.filter((s) => s !== 'ready')) {
   const good = trainingOnDay(p, null, W1, 'ready', 'Ana');
   const stale = trainingOnDay(p, null, W1, 'error', 'Ana');
 
-  eq(stale.state, 'session', 'a programme in hand under a failed read still resolves');
+  eq(stale.state, 'session', 'a program in hand under a failed read still resolves');
   eq(stale.focus, good.focus, 'to the same session');
   eq(stale.line, good.line, 'and the same line');
   eq(stale.confirmed, false, 'on a separate axis that says it is not confirmed current');
@@ -346,10 +346,10 @@ for (const status of STATUSES.filter((s) => s !== 'ready')) {
 
 {
   // 'partial' is not 'ready' here either: a truncated assignments read may have
-  // dropped this client's row, so the programme in hand is not known to be the
+  // dropped this client's row, so the program in hand is not known to be the
   // whole answer.
   const d = trainingOnDay(one([day('Mon', 'Push', 3)]), null, W1, 'partial', 'Ana');
-  eq(d.confirmed, false, 'a truncated read does not confirm a programme');
+  eq(d.confirmed, false, 'a truncated read does not confirm a program');
   eq(d.state, 'session', 'but does not withhold the one it has');
 }
 
@@ -388,4 +388,4 @@ for (const status of STATUSES.filter((s) => s !== 'ready')) {
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('daySession: ok — no dead tap, no unread programme drawn as a rest day, and the week counted to the day on screen');
+console.log('daySession: ok — no dead tap, no unread program drawn as a rest day, and the week counted to the day on screen');

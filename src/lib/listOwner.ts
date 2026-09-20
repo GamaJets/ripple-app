@@ -24,7 +24,7 @@
 // B's own id, made by B's session, so RLS is satisfied, PostgREST returns the
 // row, and `classifyWrite` reports 'stored'. There is no error anywhere and
 // nothing afterwards can tell the two apart: A's lifts are indistinguishable
-// from sets B performed, in the history B's coach programmes from.
+// from sets B performed, in the history B's coach programs from.
 //
 // The reconnect edge reaches it faster still. `flushQueue` is registered once
 // and reads `uidRef.current` and `listRef.current` independently; between an

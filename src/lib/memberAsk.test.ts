@@ -181,12 +181,12 @@ for (const status of ['error', 'partial'] as const) {
   saysUnknown(unread.muscleKg, 'an unread muscle figure says so');
 }
 
-/* ── whose programme it is travels with the programme ───────────────────── */
+/* ── whose program it is travels with the program ───────────────────── */
 
 {
   const gen = memberAskFacts({ ...WHOLE, programUnknown: true });
   ok(/Push Pull Legs/.test(gen.programTitle), 'the block is still named');
-  ok(/automatic programme/.test(gen.programTitle), 'and is named as the app’s, not the coach’s');
+  ok(/automatic program/.test(gen.programTitle), 'and is named as the app’s, not the coach’s');
   ok(/Repple/.test(gen.programTitle), 'white-label: the brand comes from the caller');
   ok(/not their coach/.test(gen.programTitle), 'the model is told not to call it their coach’s plan');
 

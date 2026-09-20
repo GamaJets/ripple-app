@@ -15,7 +15,7 @@
 // whether a set enters somebody's training history has to look and read the
 // same wherever it appears, and the two screens that carry it are in different
 // apps: the coach logging their own session, and the member working through a
-// programme. One drawing, two callers, and nothing about either app's rules
+// program. One drawing, two callers, and nothing about either app's rules
 // crosses into the other — `SetLadder` knows nothing about a plan and
 // `SetChecklist` writes nothing itself.
 //

@@ -1,8 +1,8 @@
-// One programme, several clients — and the refusals that go with sending it.
+// One program, several clients — and the refusals that go with sending it.
 //
 // ── Why a group owns the list and not the plan ─────────────────────────────
 //
-// The full argument is in supabase/parts/134-a-programme-written-once.sql,
+// The full argument is in supabase/parts/134-a-program-written-once.sql,
 // where the tables are. The short of it: `assigned_programs` stays the one
 // place that says what any client is training, an assign to a group is a
 // FAN-OUT of that same row per member, and this file is the arithmetic that
@@ -17,7 +17,7 @@
 //
 // A bulk assign is the place where a per-client check gets skipped, because
 // asking eleven times is awkward and asking once is not. The injury gate is
-// exactly such a check — a coach may not build a programme around disclosures
+// exactly such a check — a coach may not build a program around disclosures
 // they have not read — and it is per client by construction: it is about what
 // ONE person's shoulder cannot do. So the fan-out consults it once per member
 // and SPLITS the list. The ten who are clear are assigned; the one who is not
@@ -31,19 +31,19 @@ import type { LoadStatus } from '../ui/loadStatus';
 import { guardOverwrite } from './overwriteGuard';
 import { guardInjuries } from './injuryGate';
 
-/** Where one member stands against the group's programme.
+/** Where one member stands against the group's program.
  *
  *   'unknown'  — what they are on could not be read. NOT 'none': that is the
  *                confusion this whole codebase keeps paying for.
- *   'none'     — they are on no coach-assigned programme at all.
- *   'on'       — they are training the group's programme.
- *   'diverged' — they are on a coach-assigned programme that is not it. The
+ *   'none'     — they are on no coach-assigned program at all.
+ *   'on'       — they are training the group's program.
+ *   'diverged' — they are on a coach-assigned program that is not it. The
  *                client with the shoulder, two days later, is this.
  */
 export type MemberState = 'unknown' | 'none' | 'on' | 'diverged';
 
 /**
- * A stable fingerprint of what a programme actually asks somebody to DO.
+ * A stable fingerprint of what a program actually asks somebody to DO.
  *
  * Days, their focus and cardio, and each exercise's name, sets and reps —
  * deliberately not `note`, `focus[]`, `alternatives` or the exercise `key`.
@@ -54,11 +54,11 @@ export type MemberState = 'unknown' | 'none' | 'on' | 'diverged';
  * identical, which is a false alarm on the one screen whose job is to tell the
  * coach who is off-plan.
  *
- * The corollary is worth stating: two programmes with the same sessions and
- * different prose read as the same programme here. That is the intended
- * reading of "is Priya on the bootcamp programme".
+ * The corollary is worth stating: two programs with the same sessions and
+ * different prose read as the same program here. That is the intended
+ * reading of "is Priya on the bootcamp program".
  *
- * Null in, null out — a group that has not been given a programme has no
+ * Null in, null out — a group that has not been given a program has no
  * fingerprint, rather than the fingerprint of an empty one.
  */
 export function programSignature(p: Program | null | undefined): string | null {
@@ -67,15 +67,15 @@ export function programSignature(p: Program | null | undefined): string | null {
   const base = `${(p.title ?? '').trim().toLowerCase()}::${days}`;
   // ── weeks two onward, and why they are APPENDED rather than folded in ───
   //
-  // A programme is one week unless the coach wrote more (see
+  // A program is one week unless the coach wrote more (see
   // src/lib/programBlock.ts). Once it can be twelve, a signature over week one
   // alone says two eight-week blocks that share a Monday are the same
-  // programme — so a coach who fixed week six and re-fanned it out would be
+  // program — so a coach who fixed week six and re-fanned it out would be
   // told everybody was already on it, which is the one sentence this whole
   // module exists to get right.
   //
-  // `weeksSignaturePart` returns null for a ONE-WEEK programme, and that is
-  // load-bearing rather than tidy. Every programme in `program_templates`,
+  // `weeksSignaturePart` returns null for a ONE-WEEK program, and that is
+  // load-bearing rather than tidy. Every program in `program_templates`,
   // every `assigned_programs` row and every group's own plan is one week
   // today, and a signature that changed shape for all of them would have
   // reported every member of every group as 'diverged' on the morning this
@@ -107,12 +107,12 @@ function daySignature(days: readonly ProgramDay[]): string {
  * Where one member stands, given how the read of `assigned_programs` went.
  *
  * `programStatus` is asked FIRST and answers for everything. Under anything
- * but a whole read, a null programme means "we did not find out" — so a member
+ * but a whole read, a null program means "we did not find out" — so a member
  * is 'unknown', never 'none'. Rendering them as "not assigned yet" is how a
- * coach comes to assign over a programme they never saw.
+ * coach comes to assign over a program they never saw.
  *
- * When the group itself has no programme (`groupSig` null) there is nothing to
- * be on, so a member with a programme is 'diverged' — on something that is not
+ * When the group itself has no program (`groupSig` null) there is nothing to
+ * be on, so a member with a program is 'diverged' — on something that is not
  * the group's — and a member without one is 'none'. Both are true sentences.
  */
 export function memberState(
@@ -171,12 +171,12 @@ export interface FanOutBlock {
 }
 
 /**
- * Where the programme being fanned out came from, which decides the WORDS in
+ * Where the program being fanned out came from, which decides the WORDS in
  * the two refusals that are about the thing itself rather than about a person.
  *
- * 'chosen'  the coach picks an existing programme — the Groups screen and the
+ * 'chosen'  the coach picks an existing program — the Groups screen and the
  *           template library. "Choose one from your library" is the act.
- * 'written' the coach is WRITING the programme on this screen, in
+ * 'written' the coach is WRITING the program on this screen, in
  *           app/(trainer)/builder.tsx. Telling somebody mid-build to go and
  *           pick one from their library is backwards, and telling a coach who
  *           has ticked nobody that "this group" is empty is a sentence about a
@@ -225,7 +225,7 @@ const NOTHING = (code: FanOutHold, label: string, reason: string): FanOutPlan =>
  * `listStatus` is how the read of the LIST OF PEOPLE went. For a group that is
  * the membership read, and it is load-bearing: a group whose membership came
  * back short is not a smaller group, and assigning to the four names that
- * arrived out of eight leaves four people on last month's programme with
+ * arrived out of eight leaves four people on last month's program with
  * nothing anywhere saying so. For a hand-made tick-list — the bulk assign in
  * the template library — the coach chose the names themselves and there is no
  * read of the list to have failed, so the caller passes 'ready'.
@@ -250,7 +250,7 @@ export function planFanOut(
     return NOTHING('list-loading', 'Checking Who Is In This Group…', 'Still reading who is in this group. Assigning now could reach only the people who have loaded so far.');
   }
   if (listStatus === 'partial') {
-    return NOTHING('list-partial', 'Cannot assign to part of a group', 'Only part of this group came back, so this screen cannot tell you who is in it. Assigning would send the programme to the people who happened to load and leave the rest on what they are on, with nothing saying which was which.');
+    return NOTHING('list-partial', 'Cannot assign to part of a group', 'Only part of this group came back, so this screen cannot tell you who is in it. Assigning would send the program to the people who happened to load and leave the rest on what they are on, with nothing saying which was which.');
   }
   if (listStatus === 'error') {
     return NOTHING('list-error', 'Cannot assign to an unread group', 'Who is in this group could not be read. An empty list here means the read failed, not that the group is empty, so the assign is held until it loads.');
@@ -262,23 +262,23 @@ export function planFanOut(
   const over = guardOverwrite(programStatus, subject);
   if (!over.allowed) return NOTHING('overwrite', over.label as string, over.reason as string);
 
-  // ── the two refusals that are about the programme, not about a person ────
+  // ── the two refusals that are about the program, not about a person ────
   //
   // Both used to be written for a group and only for a group, and this function
   // is shared with app/(trainer)/builder.tsx, where a coach is writing the
-  // programme rather than choosing one. Seen on a device: an empty draft in the
-  // builder showed "HELD — Pick a Programme First — This group has no programme
+  // program rather than choosing one. Seen on a device: an empty draft in the
+  // builder showed "HELD — Pick a Program First — This group has no program
   // yet. Choose one from your library…" with no group anywhere on the screen,
   // and the correct sentence sitting directly underneath it.
   if (!hasProgram) {
     return origin === 'written'
-      ? NOTHING('no-program', 'Nothing To Assign Yet', 'There are no exercises in this programme yet. Add at least one and it can go out.')
-      : NOTHING('no-program', 'Pick a Programme First', 'This group has no programme yet. Choose one from your library and it can go out to everybody in the group at once.');
+      ? NOTHING('no-program', 'Nothing To Assign Yet', 'There are no exercises in this program yet. Add at least one and it can go out.')
+      : NOTHING('no-program', 'Pick a Program First', 'This group has no program yet. Choose one from your library and it can go out to everybody in the group at once.');
   }
   if (!members.length) {
     return origin === 'written'
       ? NOTHING('nobody', 'Nobody Ticked Yet', 'Tick everybody who should get this — one client or twenty — and it goes out to all of them at once.')
-      : NOTHING('nobody', 'Nobody In This Group Yet', 'Add the clients who should be on this programme, then assign it to all of them at once.');
+      : NOTHING('nobody', 'Nobody In This Group Yet', 'Add the clients who should be on this program, then assign it to all of them at once.');
   }
 
   const send: string[] = [];
@@ -330,11 +330,11 @@ export function listNames(names: readonly string[]): string {
  *  the group screen and the template library say the same thing. */
 export function fanOutSubject(count: number): string {
   return count === 1
-    ? 'the programme this client is currently on'
-    : 'the programmes these clients are currently on';
+    ? 'the program this client is currently on'
+    : 'the programs these clients are currently on';
 }
 
-/* ── which VERSION of the group's programme each of them is on ─────────────── */
+/* ── which VERSION of the group's program each of them is on ─────────────── */
 
 /**
  * ── Why versioning, and why the group still does not own the plan ─────────
@@ -342,11 +342,11 @@ export function fanOutSubject(count: number): string {
  * The complaint this answers is real and specific: a coach running an eight
  * week bootcamp cannot fix a typo in week three without re-fanning it out to
  * everybody, and cannot tell who has the fixed one. The obvious remedy — make
- * the group own the programme and have members point at it — is the design
- * supabase/parts/134-a-programme-written-once.sql rejected, for three reasons
+ * the group own the program and have members point at it — is the design
+ * supabase/parts/134-a-program-written-once.sql rejected, for three reasons
  * that have not changed:
  *
- *   · everything downstream of a programme is already keyed per client, so a
+ *   · everything downstream of a program is already keyed per client, so a
  *     group-owned plan needs reconciling on every read, in a shipped client app
  *     that has never heard of a group;
  *   · divergence is the JOB, not the exception — the client with the shoulder
@@ -356,9 +356,9 @@ export function fanOutSubject(count: number): string {
  *     precise failure `guardOverwrite` exists to prevent.
  *
  * So the fan-out stays. What was actually missing is smaller and entirely
- * honest: the group kept ONE programme and no memory of the ones before it, so
+ * honest: the group kept ONE program and no memory of the ones before it, so
  * "who is on the old one" had nothing to compare against. A member on last
- * month's version and a member on a bespoke programme both read 'diverged',
+ * month's version and a member on a bespoke program both read 'diverged',
  * which is true and useless — the first needs one tap, the second must not be
  * touched.
  *
@@ -370,7 +370,7 @@ export function fanOutSubject(count: number): string {
  * builder does, every time a coach edits one client's copy. The member row
  * would go on claiming version 3 for somebody now on something bespoke.
  *
- * Instead the group keeps its past programmes and this compares SIGNATURES, the
+ * Instead the group keeps its past programs and this compares SIGNATURES, the
  * same way `memberState` already does. A member's version is whichever stored
  * version their actual assignment fingerprints as, and it cannot drift from the
  * truth because it is recomputed from the truth. A coach who edits one client's
@@ -380,9 +380,9 @@ export function fanOutSubject(count: number): string {
 export interface GroupVersion {
   /** 1-based, in the order the coach set them. The number a screen prints. */
   version: number;
-  /** `programSignature` of that programme, or null when the stored programme
+  /** `programSignature` of that program, or null when the stored program
    *  could not be read as one. A null NEVER matches a member — a member whose
-   *  own signature is also null is one with no programme at all, which is
+   *  own signature is also null is one with no program at all, which is
    *  'none' and is decided before this is consulted. */
   signature: string | null;
   /** When the coach set it. Null where the record does not carry one. */
@@ -390,7 +390,7 @@ export interface GroupVersion {
 }
 
 /**
- * Which stored version a member's actual programme is, or null for none of
+ * Which stored version a member's actual program is, or null for none of
  * them.
  *
  * Null is the interesting answer and it is not a failure: it is the client with
@@ -399,8 +399,8 @@ export interface GroupVersion {
  * one is a re-send, the other must not be re-sent at all.
  *
  * The NEWEST matching version wins where two versions fingerprint the same,
- * which happens when a coach changes the programme and changes it back. Saying
- * "they are on version 1" about somebody holding a programme identical to
+ * which happens when a coach changes the program and changes it back. Saying
+ * "they are on version 1" about somebody holding a program identical to
  * version 3 would send the coach off to re-assign something they already have.
  */
 export function versionOf(versions: readonly GroupVersion[], assigned: Program | null | undefined): number | null {
@@ -417,11 +417,11 @@ export function versionOf(versions: readonly GroupVersion[], assigned: Program |
 export interface MemberVersion {
   clientId: string;
   state: MemberState;
-  /** The version they are on, or null when their programme matches none of the
+  /** The version they are on, or null when their program matches none of the
    *  group's — including when they are on nothing, and when it could not be
    *  read. `state` is what tells those apart. */
   version: number | null;
-  /** True when they are on a version of the group's programme that is not the
+  /** True when they are on a version of the group's program that is not the
    *  current one. The ONE flag a re-send is offered on. */
   behind: boolean;
 }
@@ -429,7 +429,7 @@ export interface MemberVersion {
 /**
  * Where every member stands, by version.
  *
- * `current` is the version number of the group's programme as it stands now —
+ * `current` is the version number of the group's program as it stands now —
  * `versions[versions.length - 1].version` in practice, passed in rather than
  * assumed so a caller that has read a truncated version list cannot silently
  * name the wrong one as current.
@@ -464,11 +464,11 @@ export interface VersionSpread {
   onCurrent: number;
   /** On a stored EARLIER version — the ones a re-send fixes. */
   behind: number;
-  /** On a programme that is none of the group's versions. Not a problem to
+  /** On a program that is none of the group's versions. Not a problem to
    *  solve: this is the client whose Thursday was rewritten for their shoulder,
    *  and re-sending would undo exactly the thing the coach did on purpose. */
   bespoke: number;
-  /** On no programme at all. */
+  /** On no program at all. */
   none: number;
   /** Could not be read. */
   unknown: number;
@@ -513,7 +513,7 @@ export function behindNote(rows: readonly MemberVersion[], names: (clientId: str
   const behind = rows.filter((r) => r.behind);
   if (!behind.length) return null;
   const who = listNames(behind.map((r) => names(r.clientId)));
-  return `${who} ${behind.length === 1 ? 'is' : 'are'} on an earlier version of this programme. Sending it again replaces what ${behind.length === 1 ? 'they are' : 'they are'} training with the current one.`;
+  return `${who} ${behind.length === 1 ? 'is' : 'are'} on an earlier version of this program. Sending it again replaces what ${behind.length === 1 ? 'they are' : 'they are'} training with the current one.`;
 }
 
 /**
@@ -530,5 +530,5 @@ export function bespokeNote(rows: readonly MemberVersion[], names: (clientId: st
   const bespoke = rows.filter((r) => r.state === 'diverged' && !r.behind);
   if (!bespoke.length) return null;
   const who = listNames(bespoke.map((r) => names(r.clientId)));
-  return `${who} ${bespoke.length === 1 ? 'is' : 'are'} on a programme that is not any version of this one — someone edited ${bespoke.length === 1 ? 'their' : 'their'} copy. Assigning to the whole group would overwrite that.`;
+  return `${who} ${bespoke.length === 1 ? 'is' : 'are'} on a program that is not any version of this one — someone edited ${bespoke.length === 1 ? 'their' : 'their'} copy. Assigning to the whole group would overwrite that.`;
 }

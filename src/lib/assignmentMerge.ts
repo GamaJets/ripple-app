@@ -1,4 +1,4 @@
-// What happens to a programme the server no longer returns.
+// What happens to a program the server no longer returns.
 //
 // ── The defect ─────────────────────────────────────────────────────────────
 //
@@ -24,7 +24,7 @@
 //   1. A PREFIX PROVES NOTHING. The read is capped (src/lib/rowCap.ts) and
 //      arrives as 'partial' when it hits the cap. A client whose row sat past
 //      the cap is ABSENT from a truncated page for a reason that has nothing to
-//      do with their programme, and replacing the map with that page would take
+//      do with their program, and replacing the map with that page would take
 //      a live block off a screen because a coach's book got long.
 //
 //   2. A WRITE IN FLIGHT IS NOT YET IN A READ. `assignProgramTo` writes the map
@@ -90,12 +90,12 @@ export function mergeAssignments<T>(
 }
 
 /**
- * The start dates after the same read, kept in step with the programmes.
+ * The start dates after the same read, kept in step with the programs.
  *
  * Keyed off the assignments that survived rather than merged on their own,
  * because a start date is a fact about an assignment and there is nothing for
  * one to be the first week of once the assignment is gone. Leaving an orphan
- * behind is how "week 3 of 8" ends up printed over a generic programme.
+ * behind is how "week 3 of 8" ends up printed over a generic program.
  *
  * A client who is still assigned but whose row now carries no date loses theirs
  * too, on a read that may drop: the coach clearing a start date is a real edit,

@@ -181,7 +181,7 @@ export interface IntakeWant {
 export interface IntakeTried {
   worked: string;
   didnt: string;
-  /** What they will not do again. A coach who programmes it anyway has lost
+  /** What they will not do again. A coach who programs it anyway has lost
    *  them by week three. */
   wont: string;
 }

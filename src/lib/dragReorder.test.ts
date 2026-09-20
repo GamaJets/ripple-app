@@ -46,7 +46,7 @@ eq(applyMove(['a', 'b', 'c', 'd'], 0, 2), ['b', 'c', 'a', 'd'], 'moving down');
 eq(applyMove(['a', 'b', 'c', 'd'], 3, 0), ['d', 'a', 'b', 'c'], 'moving up');
 eq(applyMove(['a', 'b', 'c'], 1, 1), ['a', 'b', 'c'], 'moving nowhere');
 // The SAME reference, so an accidental pixel of drag is not an edit against a
-// programme somebody is part way through writing.
+// program somebody is part way through writing.
 const same = ['a', 'b', 'c'];
 ok(applyMove(same, 1, 1) === same, 'a no-op returns the same array, not a copy');
 ok(applyMove(same, 0, 9) === same, 'and so does an out-of-range destination');

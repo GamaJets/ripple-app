@@ -2,7 +2,7 @@
 // coach.
 //
 // Four `useState`s on app/(client)/workouts.tsx held every change a member can
-// make to the programme they were given, and nothing wrote any of them
+// make to the program they were given, and nothing wrote any of them
 // anywhere. src/lib/planEdits.ts says at length what that cost. This is the
 // half that does I/O.
 //

@@ -17,7 +17,7 @@ import { sp, layout, radius, hairline, elevation, fontScale, type as ty, font } 
    private opinions about which colour Legs is would be four legends, so the
    two answers live here, beside the builder chrome that was already shared.
 
-   A programme stores no "type" on a day. It stores the coach's focus line and
+   A program stores no "type" on a day. It stores the coach's focus line and
    the exercises, so the type is READ from those — the focus first, because it
    is what the coach said the day is, and the exercises' groups only when the
    focus says nothing this can recognise. 'Other' is an answer, not a failure:
@@ -81,11 +81,11 @@ export const tonePlate = (t: Theme, tone: Tone): { mark: string; soft: string; i
 export const toneOnFill = (t: Theme, tone: Tone): string => (tone === 'brand' ? t.brandInk : t.surface);
 
 /**
- * A programme's week as pips: seven, one per weekday in the order the app
+ * A program's week as pips: seven, one per weekday in the order the app
  * draws a week, each training day filled in its type's colour. A library row's
  * answer to "what shape is this" without opening it.
  *
- * A programme whose days are not weekdays ("Day 1", "Day 2") has no place in a
+ * A program whose days are not weekdays ("Day 1", "Day 2") has no place in a
  * seven-slot week, so it is drawn as one pip per day instead — still true, and
  * no day is dropped for having an unexpected name.
  */
@@ -219,7 +219,7 @@ export function ProgramBuilderFlow({
  * save/assign action". This is that editor: a twelve-week block is forty
  * screens tall and the two writes that matter were at the far end of it.
  *
- * It answers the review's acceptance test without scrolling: WHO the programme
+ * It answers the review's acceptance test without scrolling: WHO the program
  * is for, WHERE in it the coach is editing, WHAT is still outstanding, and what
  * each button WRITES. The two writes are two controls with two names — a
  * template goes to the coach's own library and reaches nobody; an assignment

@@ -66,9 +66,9 @@ same(before, [1, 3], 'the map passed in is left as it was');
 
 /* ── a wholesale replacement keeps nothing ─────────────────────────────── */
 
-// Loading a template or a client's programme replaces every day, so an index
+// Loading a template or a client's program replaces every day, so an index
 // that was folded now names a day the coach has never seen.
-eq(Object.keys(foldsForNewProgramme()).length, 0, 'a new programme starts with nothing folded');
+eq(Object.keys(foldsForNewProgramme()).length, 0, 'a new program starts with nothing folded');
 ok(foldsForNewProgramme() !== foldsForNewProgramme(), 'each caller gets its own map, not a shared one');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

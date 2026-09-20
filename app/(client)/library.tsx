@@ -28,7 +28,7 @@
 // A list of exercises, and the one thing you could not do to any of them was
 // log it. Tapping opened the clip and the footer sent you to Train, where you
 // then had to find the same movement again in a plan that may not contain it at
-// all — the library holds everything a coach has ever filmed, today's programme
+// all — the library holds everything a coach has ever filmed, today's program
 // holds six lifts. So somebody who did an extra set of face pulls after their
 // session had nowhere to put it from the screen they were already looking at.
 //
@@ -105,11 +105,11 @@ const LEVEL_ORDER = ['beginner', 'intermediate', 'advanced'];
  * app should put in front of somebody choosing what to train on.
  *
  * It also routes around the one process built for this. An injury is disclosed
- * to the coach, and src/lib/injuryGate.ts holds a programme closed until the
- * coach has acknowledged it — "building a programme around an injury nobody
+ * to the coach, and src/lib/injuryGate.ts holds a program closed until the
+ * coach has acknowledged it — "building a program around an injury nobody
  * has read is the thing this check exists to stop". A chip that filters six
  * hundred movements down to "the safe ones" is a member building that
- * programme alone, off a third party's label, with no coach in the loop.
+ * program alone, off a third party's label, with no coach in the loop.
  *
  * They stay in `CatalogueRow.tags` — the column is read, the data is intact,
  * and a screen with a clinician or a coach in front of it may yet have a use
@@ -357,7 +357,7 @@ export default function Library() {
   (group === 'All' || (e.group || '').trim().toLowerCase() === group.toLowerCase()) &&
   // Both names, and the catalogue's synonyms. A member whose phone is in German
   // sees "Kniebeuge" and must be able to type it; the same member reading a
-  // programme their coach wrote in English must be able to type "Back Squat"
+  // program their coach wrote in English must be able to type "Back Squat"
   // and land on the same row. And a member who has only ever heard the movement
   // called "butt kicks" must find Heel Flicks, which is what `synonyms` is for
   // — before this, that search returned nothing and the screen said so, about a
@@ -966,7 +966,7 @@ export default function Library() {
          and on a small phone they were what pushed Log to Today off the sheet. */}
      <Expandable title="How This Works">
       <Text style={{ ...ty.caption, color: t.ink3 }}>
-       Goes into today's log alongside your programme, so your calendar, streak and records all count it. Leave the weight blank for a bodyweight set.
+       Goes into today's log alongside your program, so your calendar, streak and records all count it. Leave the weight blank for a bodyweight set.
       </Text>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
        The clip plays here rather than in the browser, so a set you have already typed is still there when you go back. If a lift bothers you, use “Swap” on the workout screen for an alternative.

@@ -206,7 +206,7 @@ interface MeasureValue {
    * `addEntry` and `reload` were the whole of this provider's surface. A tape
    * measurement is the hero figure of its screen, the baseline every "since"
    * is computed against, a row in the summary a member hands a clinician, and
-   * one of the things a coach programmes from — and a waist typed as 8.4
+   * one of the things a coach programs from — and a waist typed as 8.4
    * instead of 84 was permanent. The member's only options were to leave it or
    * to log a second wrong figure to average it out. The scans screen next door
    * has had `updateScan` and `deleteScan` all along.

@@ -2071,7 +2071,7 @@ export function CtaBright({ label, onPress, disabled, a11yLabel, tone }: {
  *
  * `eyebrow` is drawn as the caller types it. The mockups set it in capitals
  * and the caller types the capitals; nothing here transforms case, because a
- * transform would shout a client's name or a programme's title that happened
+ * transform would shout a client's name or a program's title that happened
  * to be passed in. The words are one spoken sentence with the header role, so
  * the rotor lands on the card; the ring and the button keep their own stops
  * because they are a different quantity and an action.
@@ -2340,7 +2340,7 @@ export interface Segment<K extends string = string> {
  * the floor is high and the bar does the rest: from 1.35 the segments WRAP,
  * two to a row, in a rounded box rather than a pill. `scroll` is the other
  * answer, for a set whose length is the data's (a day's meal slots, a
- * programme's weeks) and could be seven: the bar scrolls sideways, segments
+ * program's weeks) and could be seven: the bar scrolls sideways, segments
  * sized to their words. It is opt-in and not the default for the reason
  * ChipGrid gives — a row you must drag to discover hides its tail — and it
  * earns the exception only because the selected segment is always on screen

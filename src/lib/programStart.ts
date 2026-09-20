@@ -18,12 +18,12 @@
  * standing in, has it run out.
  *
  * IT DECIDES WHICH WEEK OF A BLOCK IS ON SCREEN. IT DOES NOT DECIDE WHETHER THE
- * PROGRAMME IS. That distinction is the whole of this file's honesty and it is
+ * PROGRAM IS. That distinction is the whole of this file's honesty and it is
  * enforced one level up, in src/lib/clientBlock.ts, where every one of the five
  * phases below resolves to a real week the client can train today: a block
  * dated for next Monday is week one NOW, and a block whose last week has passed
  * stays on its last week rather than emptying a Train tab. There is no phase
- * that withholds a programme, and `CLIENT_STARTS_NOW` below is the sentence
+ * that withholds a program, and `CLIENT_STARTS_NOW` below is the sentence
  * that says so to the coach.
  *
  * Saying it plainly is not a consolation prize. A coach who believes the date
@@ -128,7 +128,7 @@ export interface BlockPosition {
  * Which week of the block today falls in.
  *
  * `weeks` is the block's own length from `weekCount` in src/lib/programBlock.ts,
- * and a value below one is treated as one: a programme always has at least the
+ * and a value below one is treated as one: a program always has at least the
  * week its `days` describe, and a zero here would make every block read 'after'
  * on the day it started.
  *
@@ -189,7 +189,7 @@ export function blockPositionLine(pos: BlockPosition, startsOn: string | null | 
     case 'during':
       return pos.weeks > 1
         ? `Week ${pos.week} of ${pos.weeks}, counted from the ${startsOn} you set.`
-        : `Started ${startsOn}. This programme is one week long, so there is no week to count.`;
+        : `Started ${startsOn}. This program is one week long, so there is no week to count.`;
     case 'after':
       return `This block ran ${pos.weeks} week${pos.weeks === 1 ? '' : 's'} from ${startsOn} and its last week has passed. The last week is still what ${who} is being shown, because a plan that has run out is not the same as no plan. Nothing here says whether ${who} did it — that is what their logged training answers.`;
   }
@@ -212,7 +212,7 @@ export function blockPositionLine(pos: BlockPosition, startsOn: string | null | 
  */
 export const CLIENT_STARTS_NOW =
   'A start date is your own record of when the block begins, and once it has passed it is what counts the week '
-  + "number on the client's Train tab. It does not hold the programme back: their Train tab shows the block from "
+  + "number on the client's Train tab. It does not hold the program back: their Train tab shows the block from "
   + 'the moment it is saved, so assigning a future block mid-week replaces this week as well, with week one of it '
   + 'on their plan until the date arrives.';
 

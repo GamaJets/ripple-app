@@ -199,7 +199,7 @@ export function MuscleWorkPanel({
   /** One ranked muscle. The figures come off `rankingLine`, which prints REAL
    *  sets and never the dimensionless score the order runs on — a coach who
    *  read "18 sets" for a trapezius that was assisting on ninety movements
-   *  would write next week's programme against a number nobody performed. */
+   *  would write next week's program against a number nobody performed. */
   const rankRow = (muscle: string, line: string | null, i: number) => (
     <View key={`${muscle}-${i}`} accessible
       accessibilityLabel={line ? `${muscle}. ${line}` : muscle}

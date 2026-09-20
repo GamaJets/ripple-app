@@ -190,7 +190,7 @@ export default function Measurements() {
   *
   * A slipped decimal is not a display glitch: this figure is the baseline every
   * "since" on this screen is measured from, a row in the summary a member gives
-  * a clinician, and one of the things a coach programmes from. Re-logging the
+  * a clinician, and one of the things a coach programs from. Re-logging the
   * right number does not fix it — it puts a correct figure on TODAY and leaves
   * the trend bent around the day the mistake was made — so the correction keeps
   * the original date and the removal takes only the one site.

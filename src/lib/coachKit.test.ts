@@ -68,7 +68,7 @@ function kit(over: Partial<Equipment> = {}): Equipment {
 /* ── retired kit is gone, not broken ──────────────────────────────────────── */
 {
   const v = coachKitView('gym', 'ready', [kit({ status: 'retired' })], TODAY);
-  eq(v.kind, 'unwritten', 'a register holding only disposed-of kit has nothing in it to programme on');
+  eq(v.kind, 'unwritten', 'a register holding only disposed-of kit has nothing in it to program on');
 
   const mixed = coachKitView('gym', 'ready', [kit(), kit({ id: 'e2', status: 'retired' })], TODAY);
   eq(mixed.kind === 'clear' ? mixed.items : null, 1, 'retired rows are not counted as stock');

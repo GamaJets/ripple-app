@@ -26,7 +26,7 @@
 //          SECONDS. See src/lib/timedSets.
 //
 // The second of those is the one this row exists to make possible. The app
-// prescribes `'45 sec'` planks in its own programme builder and the isometric
+// prescribes `'45 sec'` planks in its own program builder and the isometric
 // set method's blurb says "the reps column is seconds", and until now both log
 // paths refused anything that was not a positive whole number of reps. What
 // people typed instead was 45 into a reps box, which reads for ever after as

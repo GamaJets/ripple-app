@@ -1,4 +1,4 @@
-// The two properties of RepDB's programme data that will be destroyed by the
+// The two properties of RepDB's program data that will be destroyed by the
 // obvious code, and the four that are ordinary care.
 //
 // ── The two that matter ───────────────────────────────────────────────────
@@ -145,13 +145,13 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   eq(noExercises.days[0].exercises.length, 0, 'with nothing in it');
 }
 
-/* ── 5 · a row with no identity does not become a programme ─────────────── */
+/* ── 5 · a row with no identity does not become a program ─────────────── */
 {
   ok(parseTemplateRow(row()) !== null, 'a live-shaped row parses');
-  eq(parseTemplateRow(row({ id: null })), null, 'a row with no id is not a programme');
-  eq(parseTemplateRow(row({ name_en: null })), null, 'a row with no English name is not a programme');
-  eq(parseTemplateRow(null), null, 'null is not a programme');
-  eq(parseTemplateRow('stronglifts'), null, 'a string is not a programme');
+  eq(parseTemplateRow(row({ id: null })), null, 'a row with no id is not a program');
+  eq(parseTemplateRow(row({ name_en: null })), null, 'a row with no English name is not a program');
+  eq(parseTemplateRow(null), null, 'null is not a program');
+  eq(parseTemplateRow('stronglifts'), null, 'a string is not a program');
   const t = parseTemplateRow(row())!;
   eq(t.id, 'stronglifts-5x5', 'the id is carried');
   eq(t.goal, 'strength', 'the goal is carried');
@@ -233,7 +233,7 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   eq(frequencyLabel(3), '3 days a week', 'the one cadence figure the data has');
   eq(frequencyLabel(1), 'Once a week', 'one is not "1 days"');
   eq(frequencyLabel(7), '7 days a week', 'the mobility routine is daily and says so');
-  eq(frequencyLabel(null), null, 'a programme that does not state a cadence says nothing');
+  eq(frequencyLabel(null), null, 'a program that does not state a cadence says nothing');
   eq(frequencyLabel(0), null, 'and zero a week is not a cadence either');
 }
 
@@ -250,7 +250,7 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   }))!;
   eq(shapeLine(two), '2 days · 2 exercises', 'plural day, plural exercises');
   eq(shapeLine(parseTemplateRow(row({ days: [] }))!), null,
-    'a programme with no days prints nothing rather than "0 days"');
+    'a program with no days prints nothing rather than "0 days"');
   const oneEx = parseTemplateRow(row({
     days: [{ name_en: 'A', exercises: [{ exercise_id: 'plank', sets: 3, reps: '30s', rest_seconds: 30 }] }],
   }))!;
@@ -258,7 +258,7 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   const empty = parseTemplateRow(row({ days: [{ name_en: 'A', exercises: [] }] }))!;
   eq(shapeLine(empty), '1 day', 'a day with nothing in it counts the day and not the nothing');
 
-  eq(unreadableNote(t), null, 'a clean programme says nothing about unreadable rows');
+  eq(unreadableNote(t), null, 'a clean program says nothing about unreadable rows');
   const short = parseTemplateRow(row({
     days: [{ name_en: 'A', exercises: [{ sets: 3, reps: '8' }] }],
   }))!;
@@ -269,8 +269,8 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   ok(unreadableNote(shorter)!.startsWith('2 movements'), 'two dropped entries read as two');
 
   eq(exerciseIdsIn([t]).join(','), 'back-squat,bench-press', 'the ids, in the order first met');
-  eq(exerciseIdsIn([t, t]).length, 2, 'and each one only once across programmes');
-  eq(exerciseIdsIn([]).length, 0, 'no programmes name no movements');
+  eq(exerciseIdsIn([t, t]).length, 2, 'and each one only once across programs');
+  eq(exerciseIdsIn([]).length, 0, 'no programs name no movements');
 }
 
 /* ── 10 · filtering, and the row with no cadence ────────────────────────── */
@@ -299,11 +299,11 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   eq(filterTemplates(all, { goal: 'strength', difficulty: 'intermediate', frequency: null }).length, 0,
     'the three filters are an AND, not an OR');
 
-  // The property this function exists to get right: a programme with no stated
+  // The property this function exists to get right: a program with no stated
   // cadence must not be swept into a band it never claimed.
   for (const b of FREQUENCY_BANDS) {
     ok(!filterTemplates(all, { ...NO_FILTER, frequency: b.key }).some((t) => t.id === 'e'),
-      `a programme with no cadence is not filed under ${b.label}`);
+      `a program with no cadence is not filed under ${b.label}`);
   }
   ok(filterTemplates(all, NO_FILTER).some((t) => t.id === 'e'),
     'and it is still listed when no band is chosen');
@@ -316,8 +316,8 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   eq(goalsPresent(all).join(','), 'strength,hypertrophy,endurance,core,mobility',
     'the goals present, in the house order rather than in row order');
   eq(difficultiesPresent(all).join(','), 'beginner,intermediate',
-    'only the levels actually present — a chip that filters to nothing says a programme was removed');
-  eq(goalsPresent([]).length, 0, 'no programmes offer no chips');
+    'only the levels actually present — a chip that filters to nothing says a program was removed');
+  eq(goalsPresent([]).length, 0, 'no programs offer no chips');
   const odd = [...all, mk('f', 'power-endurance', 'elite', 3)];
   eq(goalsPresent(odd)[goalsPresent(odd).length - 1], 'power-endurance',
     'a goal this build has not met is offered last rather than dropped');
@@ -332,7 +332,7 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   eq(exerciseSpoken('Plank', 3, '30s', 0), 'Plank, 3 sets of 30s, Straight into the next',
     'including the instruction not to rest');
   eq(exerciseSpoken('Plank', 1, '60s', null), 'Plank, 1 set of 60s',
-    'and nothing is said about a rest the programme does not state');
+    'and nothing is said about a rest the program does not state');
   eq(exerciseSpoken('Burpee', null, 'AMRAP', null), 'Burpee, AMRAP', 'a set count we do not have is not spoken');
   eq(exerciseSpoken('Burpee', null, null, null), 'Burpee', 'a row with only a name is only a name');
   // Not the multiplication sign: VoiceOver reads "5 × 5" as "5 times 5".

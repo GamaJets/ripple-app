@@ -147,7 +147,7 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   ok(matchesSearch('knie', 'Back Squat', shown), 'a German member finds it by the German name');
   // Most German coaches learned these movements in English. Dropping the
   // English haystack would hide the catalogue from the person building the
-  // programme.
+  // program.
   ok(matchesSearch('squat', 'Back Squat', shown), 'and a coach finds it by the English one');
   ok(matchesSearch('SQUAT', 'Back Squat', shown), 'case is not a filter');
   ok(!matchesSearch('deadlift', 'Back Squat', shown), 'and an unrelated term still does not match');

@@ -120,7 +120,7 @@ export function mergeRoster<T extends MergeableClient>(linked: readonly T[], man
 // Matched on an exact normalised key, never by substring. The builder used to
 // ask `s.includes('muscle')` before `s.includes('tone')`, which answers
 // "muscle" for the phrase "muscle tone" — the opposite of what was typed — and
-// this function is now what decides which programme gets generated for
+// this function is now what decides which program gets generated for
 // somebody.
 const GOAL_KEYS: Record<string, Goal> = {
   fatloss: 'fatloss',

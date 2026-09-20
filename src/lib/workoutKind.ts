@@ -149,10 +149,10 @@ export function workoutKind(e: { exercise: string; sets?: unknown[]; cardio?: un
  * cost, after a looser rule put a distance box on every barbell row and none on
  * cycling — but the set it matched against was the picker's own eight
  * activities plus the seven cardio machines, and those are the names THIS APP
- * writes. A programme written by a coach, or imported from a catalogue, calls
+ * writes. A program written by a coach, or imported from a catalogue, calls
  * the same movements other things.
  *
- * So a member cycling inside a programme got no boxes at all and no way to
+ * So a member cycling inside a program got no boxes at all and no way to
  * record the distance they had just ridden, which is what was reported.
  *
  * These are aliases, not new activities: every one names a movement already in

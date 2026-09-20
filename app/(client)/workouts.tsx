@@ -41,14 +41,14 @@ import { tapLight } from '../../src/ui/haptics';
 import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 // Supersets and set methods. Both are pure and both are read POSITIONALLY here
 // — `badges` returns one entry per exercise in the order it was handed them, so
-// the labels on screen describe the list on screen rather than the programme as
+// the labels on screen describe the list on screen rather than the program as
 // it was written. That matters on this file's list, which is filtered (removed
 // movements) and re-sorted (progress-photo focus areas) before it is rendered.
 import { badges as groupBadges, groupRuns } from '../../src/lib/setGroups';
 import { badgeFor, countsToVolume, methodFor, restAfter } from '../../src/lib/setMethods';
 // The sets of an exercise, one by one — a coach's ramp, a warm-up first set, a
 // drop-set last one. Read through `expandSets` rather than off the fields, so a
-// programme that never got a table still reads as `sets` copies of one spec and
+// program that never got a table still reads as `sets` copies of one spec and
 // every screen below behaves as it did. See src/lib/setRows.ts.
 import { expandSets, hasSetRows, readRepSpan, setCount } from '../../src/lib/setRows';
 // ── the block, the week of it this client is on, and the three fields a set
@@ -82,7 +82,7 @@ import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { announcePersonalBest } from '../../src/lib/prNotifyStore';
 import { est1RM } from '../../src/lib/streaks';
 import { bodyweightAtKg, bodyweightSetLabel, tonnage, tonnageNote, type BodyweightHistory } from '../../src/lib/bodyweightSets';
-// A hold is a set whose first number is seconds. The programme builder writes
+// A hold is a set whose first number is seconds. The program builder writes
 // '45 sec' planks and '30 sec/side' side planks, so the prescription is read
 // here to decide which box this screen opens with — see src/lib/timedSets.ts.
 import { isTimedPrescription, prescribedSeconds, readHold, holdLabel, timedSetLabel, setChipLabel, setListLabel } from '../../src/lib/timedSets';
@@ -157,6 +157,7 @@ import { RepdbInlineCredit } from '../../src/ui/Attribution';
 // this whole screen down while it loaded. React Native's own <Image> is the
 // fallback and is in every binary ever built.
 import { videoForExercise, exerciseSlug, type ExerciseRef } from '../../src/lib/exerciseId';
+import { titleCaseName } from '../../src/lib/exerciseName';
 // One classifier for "whose clip is this". A null trainer is a platform clip
 // AND a handset entry whose upload was refused; only the id prefix tells them
 // apart, and src/lib/clipOwner.ts is where that is written down.
@@ -302,9 +303,9 @@ const CARDIO_MOVEMENTS: ReadonlySet<string> = new Set(
   [
     ...CARDIO_ACTS.map((a) => a.name),
     ...MACHINES.filter((m) => m.cardio).map((m) => m.name),
-    // The same movements under the names a programme calls them. Without these
+    // The same movements under the names a program calls them. Without these
     // the set held only the names THIS app writes, so a member cycling inside a
-    // coach's programme — where the movement might be 'Bike' or 'Indoor
+    // coach's program — where the movement might be 'Bike' or 'Indoor
     // Cycling' — was offered no distance box and no way to record the ride.
     // Still exact, still no substring: see the note in src/lib/workoutKind.ts.
     ...CARDIO_MOVEMENT_ALIASES,
@@ -333,7 +334,7 @@ const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility' | 'recovery', string[
 const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility'], ['recovery', 'Recovery'], ['stretch', 'Stretch']] as const;
 
 /** What this screen is currently offering to do. Two of the six are not a
- *  clock over an activity: 'strength' is today's programme, and 'stretch' is a
+ *  clock over an activity: 'strength' is today's program, and 'stretch' is a
  *  library of guided routines. */
 type TrainMode = 'strength' | 'cardio' | 'hiit' | 'mobility' | 'recovery' | 'stretch';
 
@@ -343,7 +344,7 @@ type TrainMode = 'strength' | 'cardio' | 'hiit' | 'mobility' | 'recovery' | 'str
 type SessionKind = 'cardio' | 'hiit' | 'mobility' | 'recovery';
 
 /** True for a mode that IS a clock over an activity — the four above, and not
- *  the programme or the stretch library. One predicate rather than
+ *  the program or the stretch library. One predicate rather than
  *  `m !== 'strength'` repeated, which is what silently started indexing
  *  SESSION_TYPES with 'stretch' the moment a sixth mode existed. */
 const isSessionKind = (m: TrainMode): m is SessionKind => m !== 'strength' && m !== 'stretch';
@@ -459,7 +460,7 @@ export default function Train() {
   // finished asking, under 'error' we asked and could not find out, and under
   // 'partial' the page came back at the row cap so their assignment may have
   // been on the part we never saw. In all three the `??` below hands the member
-  // a GENERATED session, drawn under the generic programme title at the header
+  // a GENERATED session, drawn under the generic program title at the header
   // — indistinguishable from a member who has no coach plan at all. This is the
   // same defect app/(client)/week.tsx names, and the reason
   // src/ui/assignedPrograms.tsx was given a `status` at all.
@@ -601,11 +602,11 @@ export default function Train() {
    * `startMode` still wins over 'strength' when the caller named a mode, because
    * `?mode=recovery` from the Recovery screen is an intent too and a more
    * specific one. The reset is to what was ASKED FOR, not unconditionally to the
-   * programme.
+   * program.
    *
    * Deliberately not a `useFocusEffect`: this must fire on arrival-with-intent
    * and NOT every time the tab is focused, or a member who taps Cardio, wanders
-   * to Home and taps Train would be bounced back to the programme by an app
+   * to Home and taps Train would be bounced back to the program by an app
    * overruling a choice they just made.
    */
   /* One arrival per nonce, and this ref is what makes that true.
@@ -617,7 +618,7 @@ export default function Train() {
    * more specific of the two intents: arriving at `?start=abc&mode=recovery`
    * set the mode to recovery, the mode effect then cleared the param, which
    * recomputed `startMode` from 'recovery' to 'strength', which re-ran THIS
-   * effect on the same unchanged nonce and set the mode back to the programme.
+   * effect on the same unchanged nonce and set the mode back to the program.
    * A member sent to log a sauna landed on their strength plan — the reported
    * bug this whole path exists to fix, arriving from the other direction.
    *
@@ -673,7 +674,12 @@ export default function Train() {
     // No kcal — see `buildEntries` in the session runner. The figure this
     // used to carry was `volume / 60 + sets * 8`, which knows nothing about
     // the person doing the lifting.
-    const out = await logWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets })));
+    // Title Case on the way in, for the reason `commitCx` gives: the parser
+    // hands back whatever was typed, and "calf raise" written into `workouts`
+    // reads as a second movement beside the catalogue's "Calf Raise" on every
+    // screen that lists them. The slug is untouched, so nothing joins
+    // differently.
+    const out = await logWorkouts(lifts.map((l) => ({ t: nowISO, exercise: titleCaseName(l.exercise), sets: l.sets })));
     // The box is emptied for the two outcomes that KEPT what was typed, and not
     // for the one that threw it away. A refused write leaves the text where it
     // is, which is the only copy of it that exists — the same reasoning
@@ -692,11 +698,11 @@ export default function Train() {
   const [deloadDismiss, setDeloadDismiss] = useState(false);
   const { videos: exVideos, status: exVideoStatus, reload: reloadVideos } = useExerciseVideos();
   // The notice at the top of this screen ends "open this screen again when you
-  // have signal" — the plan below it is the automatic programme wearing the
+  // have signal" — the plan below it is the automatic program wearing the
   // coach's layout whenever the assignment read failed, and until now leaving
   // and returning really was the only way to try again. Four reads: the
   // assigned plan, the training log the day strip is ticked from, the coach's
-  // clips, and the profile the fallback programme is built from.
+  // clips, and the profile the fallback program is built from.
   const pull = usePullToRefresh(useCallback(() => {
     assigned.reload(); reloadLog(); void reloadVideos(); cd.reload();
   }, [assigned, reloadLog, reloadVideos, cd.reload]));
@@ -780,11 +786,11 @@ export default function Train() {
    * Nothing. Not a swap, not an exercise edit, not a removal, and above all not
    * `customEx`. Every one of those goes through `usePlanEdits`, and a plan edit
    * in this app means one specific thing: THE MEMBER HAS CHANGED THEIR
-   * PROGRAMME. It is written to the phone, upserted to `client_plan_edits`, and
+   * PROGRAM. It is written to the phone, upserted to `client_plan_edits`, and
    * drawn on the coach's console as the member rewriting what they were given.
    *
    * Repeating last Thursday is not that. It is one session's choice, today, and
-   * recording it as a programme change would tell a coach something untrue —
+   * recording it as a program change would tell a coach something untrue —
    * permanently, because nothing in this app ever expires a plan edit.
    *
    * `customEx` in particular would be worse than untrue. It is NOT day-scoped:
@@ -804,7 +810,7 @@ export default function Train() {
    *
    * The confirm on the picker says so in as many words, because the one thing
    * that must not happen is a member repeating a session in the belief they
-   * have done today's programme. Whether repeating should also be able to
+   * have done today's program. Whether repeating should also be able to
    * DISCHARGE today's plan — mark it done, or swap it out for the week — is a
    * product decision and not a default anyone should pick in a lane: it changes
    * what adherence means, and adherence is what the coach is paid on. This
@@ -914,7 +920,7 @@ export default function Train() {
    * and that is the decision rather than a shortcut: the blob carries no
    * account, so reading it into whoever is signed in now is a GUESS, and the
    * wrong answer files a stranger's lifts under this member's name in a health
-   * record their coach then programmes from. The right answer saves somebody
+   * record their coach then programs from. The right answer saves somebody
    * re-typing sets that had not reached the server anyway. See the header of
    * src/lib/sessionScope.ts.
    *
@@ -1103,16 +1109,16 @@ export default function Train() {
   const [confetti, setConfetti] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   /**
-   * Sets, reps and load a member has changed on a PROGRAMME exercise.
+   * Sets, reps and load a member has changed on a PROGRAM exercise.
    *
    * Keyed like `swaps`, by `dayIdx:key`, because that is what identifies one
    * row on one day rather than a movement in general. Held apart from
    * `customEx` because these rows still belong to the plan: the coach can
-   * change the programme underneath and everything else about the row should
+   * change the program underneath and everything else about the row should
    * follow, while the three numbers the member set stay theirs.
    *
    * This exists because editing was reachable only for exercises the member had
-   * typed themselves — `replaceExercise` sent a programme lift to the SWAP
+   * typed themselves — `replaceExercise` sent a program lift to the SWAP
    * sheet — so on the plan a coach had written, none of the three numbers could
    * be changed at all. The load was the one people noticed, because it is the
    * one that changes every week.
@@ -1120,7 +1126,7 @@ export default function Train() {
   // (held by `usePlanEdits` above.)
   const [addOpen, setAddOpen] = useState(false);
   // Exercises the user took off, by uid — a WEEKDAY and a key, so taking
-  // Monday's bench off takes Monday's bench off. The programme itself is not
+  // Monday's bench off takes Monday's bench off. The program itself is not
   // edited, so Wednesday's copy of the same lift still appears.
   // When set, the add sheet is editing this custom exercise rather than
   // creating one. Same sheet, because renaming IS replacing for a lift the
@@ -1139,7 +1145,7 @@ export default function Train() {
    * TestFlight on the coach app, in the same words that produced the coach's
    * own table: a set count should open a row per set with its own weight.
    *
-   * `setRows` — the shape a coach's programme has used for this since it
+   * `setRows` — the shape a coach's program has used for this since it
    * existed — is what it writes. Nothing about the store changed.
    */
   const [cxRows, setCxRows] = useState<LadderRow[]>([]);
@@ -1337,8 +1343,8 @@ export default function Train() {
   const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
   // The days of the week they are ON, not `program.days`. Identical for every
-  // one-week programme, which is every programme written before blocks existed
-  // and every programme this app generates itself.
+  // one-week program, which is every program written before blocks existed
+  // and every program this app generates itself.
   const programDays = Array.isArray(blk.days) ? blk.days : [];
   const workout = programDays[dayIdx % (programDays.length || 1)] || programDays[0] || { day: '', focus: 'Rest Day', exercises: [] };
 
@@ -1355,7 +1361,7 @@ export default function Train() {
    * NOT the 615-row `exercises` catalogue. `useExerciseCatalogue` is a third of
    * a megabyte and this screen is used in basements; reading it here to fill in
    * a muscle group would be six hundred rows over a gym's signal for one word
-   * under a movement name. What it is instead is the member's own programme —
+   * under a movement name. What it is instead is the member's own program —
    * every movement on every day of the week they are on, plus anything they
    * have added themselves — which is the list that actually answers the
    * question the picker asks: is this still something you train?
@@ -1456,7 +1462,7 @@ export default function Train() {
    * all — and the difference is real. A meal week is COMPOSED from the
    * exclusions: filtering renumbers the catalogue, so a week built without them
    * cannot be marked up after the fact, and an unfiltered week is simply the
-   * wrong food. A workout is the coach's programme, and injuries only ever
+   * wrong food. A workout is the coach's program, and injuries only ever
    * SUBTRACT from it. The plan on screen is still the plan; what is missing is
    * the subtraction. That can be stated honestly, and stating it is better than
    * taking training away from every member in a gym with no signal — which is
@@ -1562,7 +1568,7 @@ export default function Train() {
   // THE list the runner is handed, named once so that the button which opens it
   // and the runner itself cannot be asked about different days.
   //
-  // They were: the Start gate asked `exercises` — the raw programme day — and
+  // They were: the Start gate asked `exercises` — the raw program day — and
   // the runner was given this. A day emptied by the per-row Remove, or by a
   // severe injury that every movement on it runs into with no safe alternative,
   // left a live Start Workout in front of an empty runner, whose mount effect
@@ -1574,7 +1580,7 @@ export default function Train() {
   // Exercise You Did", offered on any day with a plan — was on the list on
   // screen (`planRows` below) and in nothing else: the runner was handed
   // `planEx` alone and ran straight past it, and on a REST day the gate was
-  // asked about a programme of zero, answered 'rest-day', and took the Start
+  // asked about a program of zero, answered 'rest-day', and took the Start
   // button away from somebody who had just typed in the three movements they
   // were about to do. src/lib/startGate.ts says its whole purpose is keeping
   // the button and the runner asking about the same list; this is that list.
@@ -1664,7 +1670,7 @@ export default function Train() {
       'Remove ' + shownName(e) + '?',
       hasSets
         ? 'It comes off today, and the sets you logged against it are discarded.'
-        : 'It comes off today only. The rest of your programme is unchanged.',
+        : 'It comes off today only. The rest of your program is unchanged.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: () => {
@@ -1679,7 +1685,7 @@ export default function Train() {
 
   /**
    * Open the editor for ANY exercise — one the member typed or one the coach
-   * planned. Sets, reps and the load are all editable either way; a programme
+   * planned. Sets, reps and the load are all editable either way; a program
    * row keeps its Swap action separately, because replacing the movement and
    * correcting its numbers are different intentions.
    */
@@ -1735,7 +1741,7 @@ export default function Train() {
     setAddOpen(true);
   };
 
-  /** Replace an exercise. A programme lift swaps to a catalogue alternative;
+  /** Replace an exercise. A program lift swaps to a catalogue alternative;
    *  one the user typed has none, so it opens for editing instead. */
   const replaceExercise = (e: ProgramExercise) => {
     openEditFor(e);
@@ -1744,7 +1750,18 @@ export default function Train() {
   /** Commit the add sheet. Only clears the draft once the exercise is really
    *  on the list — an interrupted sheet keeps what was typed. */
   const commitCx = () => {
-    const name = cxName.trim();
+    // Title Case, because this name is about to sit in a list beside movements
+    // the catalogue wrote — and, once it is logged, in `workouts.exercise`
+    // next to 615 rows that are all spelled that way. `titleCaseName` cannot
+    // change the slug (src/lib/exerciseName.ts), so this is a spelling and
+    // never an identity.
+    //
+    // The catalogue's own name is NOT reached for here, and that is this
+    // screen's standing rule rather than an oversight: `knownMovements` above
+    // explains why the 615-row catalogue is not read on a screen used in
+    // basements. So a member who types "shoulder press" gets "Shoulder Press"
+    // and not the catalogue's row — same slug, same movement, same history.
+    const name = titleCaseName(cxName);
     if (!name) return;
     // The table, one row per set. A load that cannot be believed is REFUSED and
     // named by its row rather than quietly becoming no target: this sheet used
@@ -1769,8 +1786,8 @@ export default function Train() {
         // Same key, so sets already logged against it survive the rename.
         setCustomEx((prev) => prev.map((x) => (x.key === editingKey ? { ...x, name, sets, reps, loadKg, setRows } : x)));
       } else {
-        // A PROGRAMME row. The numbers are recorded as an override rather than
-        // by rewriting the plan, so the coach's programme stays the programme
+        // A PROGRAM row. The numbers are recorded as an override rather than
+        // by rewriting the plan, so the coach's program stays the program
         // and this stays the member's correction to it. A rename on a planned
         // movement goes through `swaps`, which is what the Swap sheet already
         // writes and what `nameOf` already reads.
@@ -1796,10 +1813,10 @@ export default function Train() {
   const plannedSets = exercises.reduce((n, e) => n + setCount(e), 0);
   // What the selected day trains, in the order the day meets it, for the chips
   // under the hero — and what the whole week on screen asks of each group, most
-  // sets first, for the Muscle Focus bars. Both read `group` off the programme's
+  // sets first, for the Muscle Focus bars. Both read `group` off the program's
   // own rows; a row with none is left out rather than filed under a guess.
   const dayGroups = groupsOf(exercises);
-  // The selected day's own name, exactly as the programme stores it; a day a
+  // The selected day's own name, exactly as the program stores it; a day a
   // coach left unnamed is "Day n" by its place in the week rather than being
   // given a name inferred from what is in it.
   const dayTitle = (workout.focus || '').trim() || `Day ${(dayIdx % (programDays.length || 1)) + 1}`;
@@ -1823,7 +1840,7 @@ export default function Train() {
     : dateFor(dayIdx).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   const heroNote = exercises.length === 0
     // A rest day the member has added movements to is still a rest day in the
-    // programme, and it is no longer a day with nothing on it — the Start
+    // program, and it is no longer a day with nothing on it — the Start
     // button is now offered for exactly those movements, so the line under it
     // has to agree.
     ? (customEx.length > 0
@@ -1839,7 +1856,7 @@ export default function Train() {
     // reader can price their own evening from it.
     : `${plannedSets === 1 ? '1 set' : `${plannedSets} sets`}` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
   // Whether the session may be started, asked of the list the runner receives
-  // rather than of the programme, and what to say when it may not be. A
+  // rather than of the program, and what to say when it may not be. A
   // withheld button that explains nothing is how the injury case reads
   // otherwise: the app decides today's plan is unsafe for them and then simply
   // has no button, which tells them nothing about a decision made on their
@@ -2173,7 +2190,7 @@ export default function Train() {
       <ScrollView ref={pageScroll} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ───────────────────────────────────────────────────────
-            Whose plan this is stays the eyebrow here. The programme's own name
+            Whose plan this is stays the eyebrow here. The program's own name
             is the eyebrow ON the hero, and nowhere else on it. */}
         <ScreenHeader eyebrow={coachProgram ? 'Coach plan' : 'Your training'} title="My Program" />
 
@@ -2192,14 +2209,14 @@ export default function Train() {
             Everything on this card is about one day — the one picked on the
             strip below, today until somebody picks another — the way Home's
             hero is about today. The Sora line is that day's own name as the
-            programme stores it; the picture is that day's first movement that
+            program stores it; the picture is that day's first movement that
             has one; the meta is that day's counts; the chips under it are that
             day's muscle groups; Start begins that day. They all read `dayIdx`,
             so they move together.
 
-            It used to lead with the PROGRAMME's name, which on "Push · Pull ·
+            It used to lead with the PROGRAM's name, which on "Push · Pull ·
             Legs" put three day types over a bench press and a row of Push
-            chips — a card contradicting itself. The programme is the eyebrow
+            chips — a card contradicting itself. The program is the eyebrow
             now and appears nowhere else on the card.
 
             Every gate on Start came with it: the unsent-work note, the injury
@@ -2220,7 +2237,7 @@ export default function Train() {
               the same sentence is spoken once, from the group. */}
           <View accessible accessibilityLabel={`${program.title}${blockCounted ? `, week ${blk.week.index + 1} of ${blk.week.count}` : ''}. ${dayTitle}. ${cardDay}, ${exercises.length === 1 ? '1 exercise' : `${exercises.length} exercises`}, ${heroNote}`}
             style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingHorizontal: 18, paddingTop: sp.lg, paddingBottom: sp.lg, backgroundColor: 'rgba(0,0,0,0.62)' }}>
-            {/* The programme, and the week of it — the week only when it was
+            {/* The program, and the week of it — the week only when it was
                 COUNTED from a start date the coach set. A block with no date,
                 an unreadable one or one not yet begun sits on week one by
                 default, and "week 1 of 12" over a progress bar would draw that
@@ -2323,14 +2340,14 @@ export default function Train() {
             gate of its own and disappears the moment a live read lands.
             app/(client)/week.tsx :194 and app/(trainer)/client-week.tsx :437
             render the same sentence in the same position over the same
-            programme. The plan is NOT withheld: the cache exists so the member
+            program. The plan is NOT withheld: the cache exists so the member
             can train in a basement. This labels it. */}
         {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{cachedNote}</Flag> : null}
 
         {/* The sentence that stops a generated session passing for the coach's.
             Everything below this line — the day strip, the plan rows, Start
             Workout — is drawn from `program`, and when the read did not land
-            that is the automatic programme wearing the same layout. */}
+            that is the automatic program wearing the same layout. */}
         {programUnknown ? (
           <View style={{ marginTop: sp.lg }}>
             {programStatus === 'loading' ? (
@@ -2439,7 +2456,7 @@ export default function Train() {
         ) : null}
 
         {/* ── the block ──────────────────────────────────────────────────── */}
-        {/* Drawn only for a programme of more than one week, so a plan written
+        {/* Drawn only for a program of more than one week, so a plan written
             before blocks existed looks exactly as it did, with no week number
             anywhere on the screen.
 
@@ -2483,7 +2500,7 @@ export default function Train() {
             </ScrollView>
             {blockLine ? <Text style={{ ...ty.caption, color: t.ink3 }}>{blockLine}</Text> : null}
             {/* What the coach wanted said about THIS week. A different thing
-                from the note at the top of the programme, which is read once:
+                from the note at the top of the program, which is read once:
                 this one is read on the Monday of week four, which is why it
                 lives on the week. Attributed, for the reason the exercise note
                 is: rendered bare it would read as the app telling somebody how
@@ -2615,7 +2632,7 @@ export default function Train() {
                 const meth = badgeFor(e.method);
                 // The sets as planned. One row per set, from the coach's table
                 // when there is one and from `sets` copies of the single spec
-                // when there is not — which is every programme already on a
+                // when there is not — which is every program already on a
                 // phone, and which draws exactly what it drew before.
                 const planned = expandSets(e);
                 // Whether those rows actually differ from each other. A ramp is
@@ -2924,7 +2941,7 @@ export default function Train() {
                             {/* A pencil on every row. It used to be a pencil
                                 only on exercises the member had typed, and a
                                 SWAP arrow on everything the coach had planned —
-                                so on a real programme there was no way to
+                                so on a real program there was no way to
                                 change the sets, the reps or the load at all.
                                 Swapping the movement is a different intention
                                 and keeps its own button beside this one. */}
@@ -2954,7 +2971,7 @@ export default function Train() {
               {/* Where the member's own changes are. Said out loud because
                   until now they were nowhere: a swap or a corrected load lived
                   in a React state until the app was next killed, and the coach
-                  went on writing a programme the member went on quietly
+                  went on writing a program the member went on quietly
                   rewriting. The three states are three sentences — see
                   `planEditsNote` — and "your coach can see them" is never said
                   off a write nobody answered. */}
@@ -2978,7 +2995,7 @@ export default function Train() {
 
               {/* ── start from a session you have already done ──────────────
                   Offered on any day, rest days included: a member who wants
-                  Thursday again on a Sunday is not asking the programme for
+                  Thursday again on a Sunday is not asking the program for
                   permission. It does not replace the day and does not touch the
                   plan — see `repeatRun` at the top of this screen for the whole
                   of that decision.
@@ -3019,7 +3036,7 @@ export default function Train() {
                that and none of the rest.
 
                So the duration IS asked for, at the top, and it produces a
-               programme rather than a stopwatch: the chips below build a real
+               program rather than a stopwatch: the chips below build a real
                routine out of the catalogue and hand it to the same runner the
                six written ones use. Minutes and routines, not minutes instead
                of routines. */
@@ -3370,7 +3387,7 @@ export default function Train() {
               My Coach into the Train tab under Go To". Both screens already
               existed and both were reachable from the Me hub, which is where
               somebody goes to change a setting — not where they go mid-session
-              when they want to ask the person who wrote the programme a
+              when they want to ask the person who wrote the program a
               question. This is the training screen, so the coach belongs on it,
               and above the equipment rather than after the tool drawer.
 
@@ -3415,11 +3432,11 @@ export default function Train() {
             // complete plans that put them in one.
             //
             // "Ready-Made" is load-bearing and is not decoration. This screen is
-            // where a coached member reads the programme their coach wrote for
-            // them, so a row here labelled "Programmes" would read as that, and
+            // where a coached member reads the program their coach wrote for
+            // them, so a row here labelled "Programs" would read as that, and
             // the fifteen behind it are written for nobody. The screen itself
             // says so again at the top.
-            ['grid', 'Ready-Made Programmes', '/(client)/programmes'],
+            ['grid', 'Ready-Made Programs', '/(client)/programmes'],
             ['calendar', 'This Week', '/(client)/week'],
             ['trending', 'Targets', '/(client)/progression'],
             // Sits with the training tools rather than three levels down inside
@@ -3707,7 +3724,7 @@ export default function Train() {
 
           The sentence under the heading is the one that has to be right: a
           member tapping here must not come away believing they have done
-          today's programme. It says what happens to the plan, because what
+          today's program. It says what happens to the plan, because what
           happens to the plan is nothing. */}
       <Modal visible={repeatPick} transparent animationType="slide" onRequestClose={() => setRepeatPick(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRepeatPick(false)}
@@ -4554,7 +4571,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
  * mid-set was always "No demonstration for this exercise yet", under a toggle
  * that had just offered to show them one. Meanwhile the catalogue holds a
  * bought, commercially licensed animation for 489 of its movements and
- * reference frames for 601, including every lift in every programme this app
+ * reference frames for 601, including every lift in every program this app
  * builds. The demonstration existed; the session runner was the one screen in
  * the app that did not look for it.
  *
@@ -4721,7 +4738,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId, onNoMedia 
     ? 'The exercise library is only available once you are signed in, so this could not be looked up.'
     : detail
     ? 'No demonstration for this one yet — no clip from your coach and no reference frames in the catalogue. Ask your coach how they want it done.'
-    : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your programme, ask them how they want it done.';
+    : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your program, ask them how they want it done.';
   return (
     <View style={{ paddingVertical: sp.md }}>
       <Text style={{ ...ty.label, color: t.ink3 }}>{note}</Text>
@@ -4824,7 +4841,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
    * A cardio movement inside a plan came through here and left as sets. The
    * standalone cardio timer has asked for distance and average watts since it
    * was written, and `scan-machine.tsx` asks for both as well — but a bike that
-   * arrived as the fourth line of a programme had nowhere to put either, so the
+   * arrived as the fourth line of a program had nowhere to put either, so the
    * one number a cyclist actually trains against was not recordable on the
    * screen they were most likely to be looking at.
    *
@@ -5226,7 +5243,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   /**
    * The sets of this movement, one by one — the coach's table where there is
    * one, and `sets` copies of the single spec where there is not, which is
-   * every programme written before the table existed.
+   * every program written before the table existed.
    */
   // Guarded, because this runs above the empty-exercises return below and a
   // runner mounted on nothing must not crash on the way to rendering nothing.
@@ -5349,7 +5366,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     // reason to look. It no longer needs to: the board's ready page carries
     // the demonstration in its first viewport, and the set page links to it.
     // The coach's rest for THIS movement, or the app's fallback when they did
-    // not set one. It used to be 90 for every exercise in every programme,
+    // not set one. It used to be 90 for every exercise in every program,
     // which is right for accessory work and wrong for a heavy triple and wrong
     // again for a finisher. `restSecondsFor` is the one place an absent value
     // becomes a usable one — a stored 0 must not be honoured here, because
@@ -5787,7 +5804,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               runner and left as sets: the standalone cardio timer has asked for
               distance and average watts since it was written, and scan-machine
               asks for both, but a bike that arrived as the fourth line of a
-              programme had nowhere to put either — so the one number a cyclist
+              program had nowhere to put either — so the one number a cyclist
               trains against was not recordable on the screen they were most
               likely to be looking at.
 
@@ -6097,7 +6114,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   /* The rest's provenance and the way out of it, under whichever ring is
      drawing it. Whose number this is: a client resting three minutes because
      their coach said so and a client resting because nobody set anything are
-     looking at the same digits, and only one of them is following a programme
+     looking at the same digits, and only one of them is following a program
      — so the fallback names itself rather than borrowing the coach's
      authority. */
   const restLine = rest > 0 ? (
@@ -6135,7 +6152,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     </>
   );
 
-  /* ── "3 sets × 10 reps", off the programme's own prescription ────────────
+  /* ── "3 sets × 10 reps", off the program's own prescription ────────────
      `plan.length` is the coach's table where there is one and `sets` copies
      of the single spec where there is not. The reps are printed as the coach
      wrote them — "8-12", "AMRAP", "45 sec" — with " reps" added only to a bare

@@ -1,5 +1,5 @@
 // The load this client's own history supports, offered where the coach writes
-// the programme.
+// the program.
 //
 // ── What was already built, and where it was not ───────────────────────────
 //
@@ -11,7 +11,7 @@
 // app/(trainer)/ imported a line of it.
 //
 // So the client's phone would tell them "you hit 12 reps at 60 kg, add 2.5 kg",
-// and the coach writing next week's programme for that same person had the
+// and the coach writing next week's program for that same person had the
 // weight box and nothing else. The one number that changes week to week was the
 // one the person deciding it had no help with, while the arithmetic sat
 // finished in the repository.
@@ -20,7 +20,7 @@
 //
 // app/(trainer)/builder.tsx has held `reviewLog` — the client's own `workouts`
 // rows, same columns and same cap as app/(trainer)/client-training.tsx — since
-// the programme checks were added. Nothing new is read here and nothing new is
+// the program checks were added. Nothing new is read here and nothing new is
 // asked of the database.
 //
 // ── The three answers a coach must be able to tell apart ───────────────────
@@ -41,7 +41,7 @@
 // It is worth being explicit, because the same screen's volume check declines
 // on 'partial' and a reader will reasonably ask why this one does not.
 //
-// The volume check compares a written programme against the client's HEAVIEST
+// The volume check compares a written program against the client's HEAVIEST
 // ever session, and the cap drops the OLDEST rows — so a prefix can be missing
 // exactly the sessions that would have refuted "more than she has ever done".
 // A finding from half a record is a finding about the read.
@@ -67,7 +67,7 @@ export interface ProgressionInput {
    *  has logged nothing. */
   log: WorkoutEntry[] | null;
   status: LoadStatus;
-  /** The movement as written in the programme. Matched against the log by name,
+  /** The movement as written in the program. Matched against the log by name,
    *  which is how `lastSetsFor` matches and is the same string the client's own
    *  Train tab logs under. */
   exercise: string;
@@ -124,7 +124,7 @@ export function progressionOffer(i: ProgressionInput): ProgressionOffer {
   // load. The second is every bodyweight movement in the catalogue — press-ups,
   // pull-ups, dips, a plank — and both fell through to the sentence at the
   // bottom of this function, which told the coach the client had not logged the
-  // movement. They had. A coach writing next week's programme was reading an
+  // movement. They had. A coach writing next week's program was reading an
   // accusation of absence about somebody who did the work on Tuesday.
   //
   // ── and it came to disagree anyway ───────────────────────────────────────

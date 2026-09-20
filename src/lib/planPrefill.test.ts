@@ -93,7 +93,7 @@ eq(targetLine('   '), null, 'nor for a row that is only whitespace');
 /* ── four reasons there is nothing to offer, and they are four sentences ──
  *
  * The distinction this whole codebase turns on. A coach told "they have no
- * programme" when the truth is "the read did not land" writes the session from
+ * program" when the truth is "the read did not land" writes the session from
  * memory and stops trusting the screen.
  */
 const MON = '2026-09-07'; // a Monday
@@ -111,26 +111,26 @@ eq([loading.state, failed.state, truncated.state, unassigned.state, emptyProg.st
 ok(new Set([loading.line, failed.line, unassigned.line, emptyProg.line]).size === 4,
   'and four different sentences — the whole point is that a coach can tell them apart');
 ok(!loading.line.includes('not assigned') && !failed.line.includes('not assigned'),
-  'neither a read in flight nor a read that failed may say the client has no programme');
-ok(failed.line.includes('not a client without a programme'),
+  'neither a read in flight nor a read that failed may say the client has no program');
+ok(failed.line.includes('not a client without a program'),
   'the failed read says what it is instead');
-ok(unassigned.line.includes('You have not assigned Ana a programme'),
+ok(unassigned.line.includes('You have not assigned Ana a program'),
   'and only a read that landed says the client has none');
 eq([loading.days.length, failed.days.length, unassigned.days.length, emptyProg.days.length], [0, 0, 0, 0],
   'none of the four offers a day to load');
-eq(emptyProg.state, 'empty', 'a programme whose day has no movements on it is empty, not a rest day');
+eq(emptyProg.state, 'empty', 'a program whose day has no movements on it is empty, not a rest day');
 ok(emptyProg.line.includes('no exercises written'), 'and says so in those words');
 
 // ── and the day the coach picks ───────────────────────────────────────────
 const ready = planOffer(one, null, MON, 'ready', 'Ana');
-eq(ready.state, 'ready', 'a written programme is offered');
+eq(ready.state, 'ready', 'a written program is offered');
 eq(ready.days.map((d) => [d.label, d.exercises, d.scheduled]), [['Mon · Push', 2, true]],
   'the chip carries what it would add and whether the date schedules it');
 eq(ready.scheduledKey, '0:0', 'the scheduled day is named so the screen can pre-select it');
 // A coach writing up the Friday session they ran on a Wednesday still gets the
 // picker: the offer is the WEEK, not only the day the date happens to fall on.
 const offDay = planOffer(one, null, TUE, 'ready', 'Ana');
-eq(offDay.state, 'ready', 'a day the programme schedules nothing on still offers the week');
+eq(offDay.state, 'ready', 'a day the program schedules nothing on still offers the week');
 eq(offDay.scheduledKey, null, 'with nothing pre-selected');
 ok(offDay.line.includes('schedules nothing on this day'), 'and says why nothing is chosen for them');
 eq(offDay.days.length, 1, 'and the days of that week are all still there to pick from');
@@ -142,9 +142,9 @@ eq(twice.days.map((d) => d.key), ['0:0', '0:1'],
 eq(twice.days.filter((d) => d.scheduled).length, 1, 'and exactly one of them is the scheduled one');
 
 // A plan resolved from a read that did not land is offered WITH the caveat, not
-// withheld: the programme is real, it is simply not known to be the newest.
+// withheld: the program is real, it is simply not known to be the newest.
 const stale = planOffer(one, null, MON, 'error', 'Ana');
-eq(stale.state, 'ready', 'a programme in hand under a failed read is still a programme');
+eq(stale.state, 'ready', 'a program in hand under a failed read is still a program');
 ok((stale.caveat ?? '').length > 0, 'and carries the caveat saying it is the last copy this phone had');
 eq(ready.caveat, null, 'while a confirmed read carries none');
 
@@ -163,7 +163,7 @@ eq(wk2.days.map((d) => d.key), ['1:0'],
   'and its key names that week — a key of just the position would tell a coach who moved the date '
   + 'that a day of week two was already on the sheet');
 ok((wk2.weekLabel ?? '').includes('2'), 'and the week is named, so the coach can see which one they are loading');
-eq(ready.weekLabel, null, 'a one-week programme names no week, because there is nothing to count');
+eq(ready.weekLabel, null, 'a one-week program names no week, because there is nothing to count');
 
 if (errors.length) { errors.forEach((e) => console.error('FAIL', e)); process.exit(1); }
 console.log('planPrefill ok — the coach’s own session, offered back with the targets shown and no rep number invented');

@@ -15,7 +15,7 @@
  *
  * ── What it does not do ───────────────────────────────────────────────────
  *
- * It never withholds a programme. `clientWeek` resolves all five phases of
+ * It never withholds a program. `clientWeek` resolves all five phases of
  * `blockPosition` to a real week — see the header there — so there is no state
  * this hook can be in where `days` is empty because of a date.
  *
@@ -38,7 +38,7 @@
  * `href: null`, and neither shape is ever torn down: backgrounding the app does
  * not unmount anything. The block's week therefore stopped advancing at
  * whichever moment the member first opened the app after installing it, and
- * only started again if their coach happened to edit the programme.
+ * only started again if their coach happened to edit the program.
  *
  * That is not a stale label. `days` is the list Train draws, so the member does
  * the wrong session — last week's, for as long as the app stays alive — and the
@@ -64,7 +64,7 @@ import { useAssignedPrograms } from './assignedPrograms';
 import { useToday } from './today';
 
 export interface ClientBlockView {
-  /** Every week of the block, week one first. One entry for a programme
+  /** Every week of the block, week one first. One entry for a program
    *  written before blocks existed, which is most of them. */
   weeks: ProgramWeek[];
   position: BlockPosition;
@@ -78,9 +78,9 @@ export interface ClientBlockView {
 }
 
 /**
- * `program` is the programme the screen is actually drawing, which is the
- * coach's assignment where there is one and the app's own generated programme
- * where there is not. Both go through here: a generated programme is one week
+ * `program` is the program the screen is actually drawing, which is the
+ * coach's assignment where there is one and the app's own generated program
+ * where there is not. Both go through here: a generated program is one week
  * long, so it resolves to week one with reason 'only-week' and no screen prints
  * a week number over it.
  */
@@ -95,7 +95,7 @@ export function useClientWeek(program: Program | null | undefined, clientId: str
   const today = useToday();
   return useMemo(() => {
     const weeks = programWeeks(program);
-    // `programWeeks` returns at least one week for any programme and an empty
+    // `programWeeks` returns at least one week for any program and an empty
     // array only for a null one — a screen still rendering while the provider
     // reads. One, not zero, so `blockPosition` cannot be handed a block of no
     // weeks and answer 'after' on the day it started.

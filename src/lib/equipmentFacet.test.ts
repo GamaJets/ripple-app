@@ -3,7 +3,7 @@
 //
 // The shape under test is the one a third of the live catalogue is in: 190 of
 // 615 rows name no equipment. A rule that treats those as bodyweight puts a
-// cable fly in a hotel-room programme; a rule that drops them without saying so
+// cable fly in a hotel-room program; a rule that drops them without saying so
 // tells a coach the catalogue holds 425 movements. Both are here.
 import {
   ALL_KIT, UNRECORDED_KIT, equipmentChips, matchesEquipment, unplacedByEquipment, equipmentGapNote,
@@ -60,7 +60,7 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   // The whole point of the module. 190 live rows are in this state.
   ok(!matchesEquipment(null, 'Barbell'), 'an unrecorded row is NOT a barbell movement');
   ok(!matchesEquipment(null, 'Body Only'),
-    'nor a bodyweight one — that is the reading that puts a cable fly in a hotel-room programme');
+    'nor a bodyweight one — that is the reading that puts a cable fly in a hotel-room program');
   ok(matchesEquipment(null, UNRECORDED_KIT), 'it is reachable through the chip that names its state');
   ok(matchesEquipment('', UNRECORDED_KIT), 'and so is a blank string, which is the same gap');
   ok(!matchesEquipment('barbell', UNRECORDED_KIT), 'a labelled row is not unrecorded');

@@ -116,12 +116,12 @@ export default function Coach() {
     : null;
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   /* Whether the block the model is about to be told the member is on is their
-   * coach's. `?? buildProgram(…)` substitutes Repple's automatic programme, and
+   * coach's. `?? buildProgram(…)` substitutes Repple's automatic program, and
    * nothing in the payload distinguished the two — so the model discussed "your
    * plan" in the second person about a block nobody assigned. The screen's own
    * `cachedNote` Flag below makes the same point about the THIRTY-DAY cached
    * copy and, until now, made it only to the reader: the model was still handed
-   * the cached title as fact. Both now travel with the programme. */
+   * the cached title as fact. Both now travel with the program. */
   const programUnknown = cd.coachingMode !== 'solo' && assigned.status === 'error' && coachProgram == null;
   // Every line of `context` below is handed to a language model as fact about
   // this person, and the model writes it back to them in the second person. So
@@ -134,7 +134,7 @@ export default function Coach() {
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   const { consumed, status: foodStatus, reload: reloadFood } = useFoodLog();
   // What this coach is told about the member — the profile, the assigned
-  // programme, the coach's own macro adjustment, the training log and today's
+  // program, the coach's own macro adjustment, the training log and today's
   // food — is read once at mount and shown verbatim under "What Gets Sent". A
   // workout logged in the last ten minutes was not in it, and there was no way
   // to bring it in short of killing the app.
@@ -172,7 +172,7 @@ export default function Coach() {
   /* ── the half of the payload that answers to the profile and scan reads ───
    *
    * `coaching`, the goal, the diet, the meals, the three body figures, the four
-   * target figures, the programme, the injuries and the focus areas. Every one
+   * target figures, the program, the injuries and the focus areas. Every one
    * of them is either the member's own answer or one of src/ui/clientData.tsx's
    * constructed defaults, and only its status can say which — see the header of
    * src/lib/memberAsk.ts for what each substitution costs when a model is the
@@ -215,7 +215,7 @@ export default function Coach() {
   // phone from `cd.name` and always was, so nothing the member sees changes.
   const context = {
     // `coaching`, goal, diet, mealsPerDay, the three body figures, the four
-    // targets, the programme, the injuries and the focus areas — each of them
+    // targets, the program, the injuries and the focus areas — each of them
     // the member's answer or a sentence saying it is not. See `facts` above.
     ...facts,
     // What the score is made of travels with it. A model handed a bare 83

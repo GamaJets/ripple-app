@@ -88,13 +88,13 @@ interface AssignedProgramsValue {
    *
    * IT DOES NOT GATE ANYTHING, and this provider is where that is enforced.
    * The client's Train tab renders whatever is on their row from the moment it
-   * is written; a provider that withheld a programme until its start date would
+   * is written; a provider that withheld a program until its start date would
    * empty a Train tab, and an empty Train tab is indistinguishable from having
    * no coach.
    *
    * What the date DOES decide, since src/lib/clientBlock.ts, is which week of a
    * multi-week block is on screen. That is a week number moving, never a
-   * programme being withheld: a block dated for next Monday shows week one
+   * program being withheld: a block dated for next Monday shows week one
    * today, and a block that has run out stays on its last week.
    * `CLIENT_STARTS_NOW` in src/lib/programStart.ts is the sentence every screen
    * showing a start date has to carry, and it says both halves.
@@ -106,12 +106,12 @@ interface AssignedProgramsValue {
   clearProgram: (clientId: string) => Promise<boolean>;
   /** The same removal, with the sentence saying why it did not land.
    *
-   *  A coach taking several clients off a programme at once has to be told
+   *  A coach taking several clients off a program at once has to be told
    *  which of them it worked for, by name — the same rule the assign side
    *  already follows. See src/lib/bulkActions.ts. */
   clearProgramFrom: (clientId: string) => Promise<{ ok: boolean; why: string | null }>;
   /**
-   * The sentence saying this programme came off the phone and how old it is, or
+   * The sentence saying this program came off the phone and how old it is, or
    * null when it did not.
    *
    * Non-null ONLY while the device's copy is what `getProgram` is serving, so a
@@ -140,7 +140,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * src/lib/assignmentMerge.ts for what it decides.
    */
   const writing = useRef(0);
-  /** The programmes as of the last render, so the read can work out which
+  /** The programs as of the last render, so the read can work out which
    *  survive without calling a setter from inside another setter's updater. */
   const programsRef = useRef<Record<string, Program>>(programs);
   programsRef.current = programs;
@@ -202,8 +202,8 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         // published an EMPTY assignment map as the server's own answer. The
         // header of this file is about precisely that reading arriving through
         // the select: `getProgram` returns null, app/(client)/week.tsx reads a
-        // null under 'ready' as "your coach has not assigned you a programme",
-        // and builds the generic auto programme instead. A client on a bespoke
+        // null under 'ready' as "your coach has not assigned you a program",
+        // and builds the generic auto program instead. A client on a bespoke
         // block trains the wrong session and has nothing on the screen to doubt.
         //
         // One call, not two. `getUser()` was here only for the id, which the
@@ -250,7 +250,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         // the roster's ceiling. Ordered on client_id because there is no other
         // stable key here and an unordered cap lets the server return a
         // different thousand each launch — a coach would see a client's
-        // programme appear on Monday and be gone on Tuesday.
+        // program appear on Monday and be gone on Tuesday.
         // Snapshotted BEFORE the request goes out. What matters is whether any
         // write of this device's OVERLAPPED the read: one that started before
         // the select and finished before the answer came back may still be
@@ -268,7 +268,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         // is a fact about the ASSIGNMENT — one client's copy of a plan and when
         // their coach said it begins — and the same Program object is also the
         // group's plan, a library template and an on-device draft, none of which
-        // has a start date. Hanging it on the programme would carry a date into
+        // has a start date. Hanging it on the program would carry a date into
         // a template and out to the next person it was assigned to.
         const d: Record<string, string> = {};
         for (const r of page.rows as any[]) {
@@ -278,7 +278,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
           // `startsOn` on the interface above.
           if (typeof r.starts_on === 'string' && r.starts_on) d[r.client_id] = r.starts_on;
         }
-        // ── and a programme the server no longer lists is taken away ───────
+        // ── and a program the server no longer lists is taken away ───────
         //
         // This was `if (Object.keys(m).length) setPrograms(prev => …)`, which
         // is a merge with no way to say "gone" — and zero rows, the shape a
@@ -310,10 +310,10 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         //
         // Not written at all when the page was truncated: a prefix kept as the
         // answer is a member whose row was past the cap being told by their own
-        // phone that they have no programme. src/lib/programCache.ts · mayCache.
+        // phone that they have no program. src/lib/programCache.ts · mayCache.
         if (mayCache(page.truncated)) {
           AsyncStorage.setItem(programCacheKey(id), packPrograms(m, d))
-            .catch(() => { /* the programme is right this session either way */ });
+            .catch(() => { /* the program is right this session either way */ });
         }
       } catch { setStatus('error'); /* stay in-memory, but say the read failed */ }
     })();
@@ -336,7 +336,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   }, []);
 
   /**
-   * The programme for one person, or null.
+   * The program for one person, or null.
    *
    * The device's copy is consulted LAST and only while no read has landed this
    * session. So the order of preference is: what the server said this session,
@@ -344,7 +344,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * last time it could be asked — and never the last of those over either of
    * the first two.
    *
-   * `status` is untouched by any of this. A cached programme is served under
+   * `status` is untouched by any of this. A cached program is served under
    * 'error', which src/ui/loadStatus.ts already defines as "whatever we had
    * before the failure … not confirmed current". Nothing here makes anything
    * 'ready', and app/(client)/week.tsx's `programUnknown` still reads a null
@@ -357,7 +357,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     return null;
   }, [programs, cached, live]);
   /**
-   * Put a programme on one client, and say what happened.
+   * Put a program on one client, and say what happened.
    *
    * ── Why the row count, and not `error` ─────────────────────────────────
    *
@@ -388,11 +388,11 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     //
     // The optimistic entry is written first so the screen responds to the tap,
     // and it used to be left there whatever happened. That was already a small
-    // lie — a coach's own device showed a client on a programme the server had
+    // lie — a coach's own device showed a client on a program the server had
     // refused — and a bulk assign turns it into a load-bearing one, because
     // `getProgram` is what the overwrite confirmation counts. Leave a failed
     // write in the map and the retry's confirmation says "9 of these 12 are on
-    // a programme now" about people whose programme never landed, which is the
+    // a program now" about people whose program never landed, which is the
     // screen reading its own guess back to the coach as a fact.
     const previous = programsRef.current[clientId] ?? null;
     const putBack = () => setPrograms((p) => {
@@ -404,7 +404,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     const me = uidRef.current;
     if (!USE_SUPABASE || !me) {
       putBack();
-      return { ok: false, why: 'This programme was not saved — the app could not confirm who you are signed in as, so nothing was sent to the server.' };
+      return { ok: false, why: 'This program was not saved — the app could not confirm who you are signed in as, so nothing was sent to the server.' };
     }
     // Counted from before the request is sent, so a read that lands while it
     // is out cannot treat this client's absence from the server's answer as a
@@ -423,7 +423,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       if (when !== undefined) row.starts_on = when;
       const r = await supabase.from('assigned_programs')
         .upsert(row, { onConflict: 'client_id', count: 'exact' });
-      const why = writeFailure('That programme', r);
+      const why = writeFailure('That program', r);
       if (why) {
         reportError('assignedPrograms.assignProgram', new Error(why), { clientId });
         putBack();
@@ -436,7 +436,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         return { ok: false, why: `${why} Clients you added by hand have no Train tab until they join.` };
       }
       // The local map follows the write, and only after it landed. The
-      // optimistic entry above is the PROGRAMME, because the screen has to
+      // optimistic entry above is the PROGRAM, because the screen has to
       // respond to the tap; a start date is read back as prose ("week 3 of 8")
       // and a wrong one is a sentence rather than a delay, so it is written
       // once the server has agreed to it.
@@ -451,7 +451,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     } catch (e) {
       reportError('assignedPrograms.assignProgram', e, { clientId });
       putBack();
-      return { ok: false, why: 'That programme did not reach the server, so nothing has changed for them.' };
+      return { ok: false, why: 'That program did not reach the server, so nothing has changed for them.' };
     } finally {
       writing.current = Math.max(0, writing.current - 1);
     }
@@ -462,7 +462,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   const assignProgram = useCallback(async (clientId: string, program: Program): Promise<boolean> =>
     (await assignProgramTo(clientId, program)).ok, [assignProgramTo]);
   /**
-   * Take a client off their coach-assigned programme.
+   * Take a client off their coach-assigned program.
    *
    * ── Why the row count, and not `error` ─────────────────────────────────
    *
@@ -471,13 +471,13 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * either half matches zero rows, and PostgREST answers 204 with `error`
    * null — so `!error` was true for a delete that removed nothing, and
    * builder.tsx's `revert` announced "Reverted to auto" over a client who is
-   * still training the programme their coach believes they took away.
+   * still training the program their coach believes they took away.
    *
    * This is not a second-gym problem. There is ONE row per client
    * (`onConflict: 'client_id'`), so it carries whichever coach last wrote it.
    * When a client moves from coach A to coach B, coach B is their coach and
    * the row is still coach A's — proved live against phgfwzpkkwdysftlgkoq by
-   * seeding exactly that: coach B could not even SELECT the programme their
+   * seeding exactly that: coach B could not even SELECT the program their
    * own client is following, and the DELETE affected 0 rows and raised
    * nothing. Coach A's identical delete affected 1, so the count only ever
    * rejects a write that genuinely did not happen.
@@ -487,7 +487,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * builder.tsx already handles it correctly.
    */
   /**
-   * ── And why taking somebody OFF a programme does not touch their history ──
+   * ── And why taking somebody OFF a program does not touch their history ──
    *
    * Asked for as "assign and un-assign templates meanwhile keeping the data for
    * the history of the workouts done in those templates so you can add it back
@@ -501,7 +501,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * either table, so nothing can cascade from either. `workouts` is keyed by
    * `user_id`, `performed_at` and `exercise`, and carries no reference to a
    * plan at all — a logged set belongs to the person who did it, not to the
-   * programme it was done under. So this DELETE removes a plan and can reach
+   * program it was done under. So this DELETE removes a plan and can reach
    * nothing else, and re-assigning the same template later needs nothing
    * special to "add the history back": it was never gone.
    */
@@ -517,7 +517,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       if (previousStart) setStartsOn((p) => ({ ...p, [clientId]: previousStart }));
     };
     setPrograms((p) => { const n = { ...p }; delete n[clientId]; return n; });
-    // The date goes with the row it was on. A client taken off a programme is
+    // The date goes with the row it was on. A client taken off a program is
     // on no block, and a start date left behind would have the next screen say
     // "week 3 of 8" about nothing.
     setStartsOn((p) => { const n = { ...p }; delete n[clientId]; return n; });
@@ -530,7 +530,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     writing.current += 1;
     try {
       const r = await supabase.from('assigned_programs').delete({ count: 'exact' }).eq('client_id', clientId);
-      const why = writeFailure('That programme', r);
+      const why = writeFailure('That program', r);
       if (why) {
         reportError('assignedPrograms.clearProgram', new Error(why), { clientId });
         putBack();
@@ -566,7 +566,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   );
 
   /**
-   * How old the programme on screen is, when it is the phone's copy.
+   * How old the program on screen is, when it is the phone's copy.
    *
    * Non-null for exactly as long as `getProgram` is serving the device's copy —
    * the same `mayServeCached` gate, so the sentence and the rows can never

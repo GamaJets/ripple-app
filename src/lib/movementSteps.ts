@@ -128,10 +128,10 @@ function noSteps({ status, signedOut, hasRow }: StepsInput): string {
     return 'The exercise library is only available once you are signed in, so the steps could not be looked up.';
   }
   if (!hasRow) {
-    return 'This movement is not in our catalogue, so we have no written steps for it. If your coach wrote it into your programme, ask them how they want it done.';
+    return 'This movement is not in our catalogue, so we have no written steps for it. If your coach wrote it into your program, ask them how they want it done.';
   }
   // The row is there and genuinely carries nothing. Said plainly, and said as a
-  // gap in OUR catalogue rather than as a peculiarity of their programme.
+  // gap in OUR catalogue rather than as a peculiarity of their program.
   return 'No written steps for this one yet.';
 }
 

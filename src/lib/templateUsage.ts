@@ -1,4 +1,4 @@
-// Which of a coach's saved programmes anybody is actually training.
+// Which of a coach's saved programs anybody is actually training.
 //
 // ── The gap ────────────────────────────────────────────────────────────────
 //
@@ -9,29 +9,29 @@
 //
 // The library screen already holds everything needed to answer that and used
 // none of it. `useProgramTemplates` gives the templates. `useAssignedPrograms`
-// gives every client's programme, because the same screen needs it to say whose
+// gives every client's program, because the same screen needs it to say whose
 // training a bulk assign is about to replace. Nothing new is read here and
 // nothing new is asked of the database.
 //
 // ── Why an assignment can be matched to a template at all ─────────────────
 //
 // It cannot be matched by id: `assignProgramTo` writes a jsonb COPY of the
-// programme with no reference back, and the builder's own delete confirmation
+// program with no reference back, and the builder's own delete confirmation
 // says so — "an assignment is a copy, not a link back to this". There is no
 // foreign key anywhere pointing at `program_templates` and adding one would be
 // wrong, because a coach who deletes a template has not taken anybody off the
-// programme they are training.
+// program they are training.
 //
 // So it is matched by CONTENT, through `programSignature` — the same
 // fingerprint src/lib/groupProgram.ts uses to answer "is Priya on the bootcamp
-// programme", byte for byte, including weeks two onward. Two programmes with
-// the same sessions and different prose are the same programme, which is the
+// program", byte for byte, including weeks two onward. Two programs with
+// the same sessions and different prose are the same program, which is the
 // intended reading of that question and is the intended reading of this one.
 //
 // ── The three answers, and why only two are counted ───────────────────────
 //
-// ON IT — the client's programme fingerprints identically to the template.
-// FROM IT — the client's programme carries the template's TITLE and different
+// ON IT — the client's program fingerprints identically to the template.
+// FROM IT — the client's program carries the template's TITLE and different
 //   training. That is what a coach gets by loading a template into the builder,
 //   changing a movement for one person's shoulder, and assigning it. Counted
 //   separately and never added to the first: "six on it" and "six on it, two on
@@ -41,7 +41,7 @@
 //
 // ── What this is NOT ──────────────────────────────────────────────────────
 //
-// It is not a measure of whether a programme WORKED. Nothing here reads a
+// It is not a measure of whether a program WORKED. Nothing here reads a
 // session, an adherence figure or a completion, and a count of who is on
 // something is not a count of who is finishing it. The wording every sentence
 // in here uses is "training", present tense, about right now — because that is
@@ -71,11 +71,11 @@ export interface UsableTemplate {
   program: Program;
 }
 
-/** How many people are on one saved programme, right now. */
+/** How many people are on one saved program, right now. */
 export interface TemplateUse {
-  /** Client ids whose programme fingerprints identically to the template. */
+  /** Client ids whose program fingerprints identically to the template. */
   on: readonly string[];
-  /** Client ids on a programme carrying the template's title and different
+  /** Client ids on a program carrying the template's title and different
    *  training — a copy of it that was edited before it was assigned. */
   from: readonly string[];
   /**
@@ -103,18 +103,18 @@ export interface LibraryUsage {
 
 const EMPTY: TemplateUse = { on: [], from: [], line: null };
 
-/** The title a programme was saved under, folded for comparison. Empty when it
+/** The title a program was saved under, folded for comparison. Empty when it
  *  has none — and an empty title matches nothing, because "every untitled
- *  programme came from this untitled template" is not a claim about anything. */
+ *  program came from this untitled template" is not a claim about anything. */
 const titleKey = (p: Program | null | undefined): string =>
   String(p?.title ?? '').trim().toLowerCase();
 
 const people = (n: number) => `${n} ${n === 1 ? 'client' : 'clients'}`;
 
 /**
- * Count who is on each saved programme.
+ * Count who is on each saved program.
  *
- * `programs` is the map the screen already holds — client id to the programme
+ * `programs` is the map the screen already holds — client id to the program
  * the server says they are on. `status` is that read's own status and it
  * governs everything: under anything but a whole read the counts are not
  * computed at all rather than computed and hidden, so there is no number
@@ -135,14 +135,14 @@ export function templateUsage(
       withheld: status === 'loading'
         ? 'Still reading who is training what, so no template says how many people are on it yet.'
         : status === 'partial'
-          ? 'More clients are on programmes than could be read in one request, so no template says how many people are on it. A count over part of your book is a wrong number, not a small one.'
+          ? 'More clients are on programs than could be read in one request, so no template says how many people are on it. A count over part of your book is a wrong number, not a small one.'
           : 'Who is training what could not be read, so no template says how many people are on it. Nothing here is a statement that your templates are unused.',
     };
   }
 
   // One pass over the book rather than one per template: a coach with a
   // hundred clients and twenty templates would otherwise fingerprint two
-  // thousand programmes on every render of the library.
+  // thousand programs on every render of the library.
   const bySig = new Map<string, string[]>();
   const byTitle = new Map<string, string[]>();
   for (const [clientId, program] of Object.entries(programs ?? {})) {
@@ -153,7 +153,7 @@ export function templateUsage(
       if (seen) seen.push(clientId); else bySig.set(sig, [clientId]);
     }
     // Indexed under whatever title it carries, EMPTY INCLUDED. The decision
-    // about an untitled programme is made once, below, where the template's own
+    // about an untitled program is made once, below, where the template's own
     // title is read — two guards for one rule is one of them being wrong later.
     const title = titleKey(program);
     const seen = byTitle.get(title);
@@ -163,9 +163,9 @@ export function templateUsage(
   for (const tpl of list) {
     const sig = programSignature(tpl.program);
     const on = sig === null ? [] : (bySig.get(sig) ?? []).slice();
-    // An UNTITLED template claims nobody. "Every untitled programme in your
+    // An UNTITLED template claims nobody. "Every untitled program in your
     // book came from this untitled template" is not a claim about anything, and
-    // a title is the only thread between a saved programme and the copy of it a
+    // a title is the only thread between a saved program and the copy of it a
     // coach edited for one person's shoulder.
     const title = titleKey(tpl.program);
     // Everybody under the same title who is NOT on it exactly. `on` is the

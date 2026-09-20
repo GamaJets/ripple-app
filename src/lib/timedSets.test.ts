@@ -65,7 +65,7 @@ const HISTORY: BodyweightHistory = [{ t: at('2026-01-10'), v: 80 }];
 /* ── READING ONE ──────────────────────────────────────────────────────────
  *
  * The prescription is prose, because that is what three years of stored
- * programmes are and what a coach types today.
+ * programs are and what a coach types today.
  */
 {
   eq(prescribedSeconds('45 sec'), 45, "the app's own plank prescription reads as forty-five seconds");

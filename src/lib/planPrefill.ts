@@ -8,7 +8,7 @@
 // then offered was `LIB` — sixteen generic movement names, the same list for
 // every client on the book — so a coach who had spent twenty minutes writing
 // somebody a push day retyped it, movement by movement, standing next to them.
-// This module is the other half: the programme that coach assigned, read back
+// This module is the other half: the program that coach assigned, read back
 // as rows they can put figures into.
 //
 // ── THE ONE RULE, AND IT IS THE WHOLE DESIGN ──────────────────────────────
@@ -67,10 +67,10 @@
 // ── FOUR REASONS THERE IS NOTHING TO OFFER, AND THEY ARE FOUR SENTENCES ───
 //
 // `planOffer` is the second half of this module and it exists for one reason:
-// "still reading", "the read failed", "no programme assigned" and "a programme
+// "still reading", "the read failed", "no program assigned" and "a program
 // with nothing in it" are four different facts, and only two of them are about
 // the client. A coach standing on a gym floor who is told "they have no
-// programme" when the truth is "your phone could not reach the server" will
+// program" when the truth is "your phone could not reach the server" will
 // write the session from memory and stop trusting the screen. That is the
 // distinction src/ui/loadStatus.ts exists for and it is enforced here rather
 // than left to a screen's ternary.
@@ -191,7 +191,7 @@ export function prefillExercise(ex: ProgramExercise): PrefillExercise {
 }
 
 /**
- * A whole day of the programme, ready to be put on the sheet.
+ * A whole day of the program, ready to be put on the sheet.
  *
  * A movement with no NAME is dropped and counted. The name is the only thing
  * `workouts` stores about which exercise a set belongs to — there is no
@@ -303,17 +303,17 @@ export function targetLine(target: string | null | undefined): string | null {
 
 /* ── what there is to offer ───────────────────────────────────────────────── */
 
-/** Why the sheet can or cannot be filled from the programme. Five answers, and
+/** Why the sheet can or cannot be filled from the program. Five answers, and
  *  the four that are not 'ready' are four different sentences. */
 export type PlanOfferState =
   /** The assignments have not come back yet. Nothing is known either way. */
   | 'loading'
   /** The read failed, or came back truncated. Whether this client has a
-   *  programme is UNKNOWN, and must never be said as "they have none". */
+   *  program is UNKNOWN, and must never be said as "they have none". */
   | 'unreadable'
-  /** The read landed, and this coach has assigned this client no programme. */
+  /** The read landed, and this coach has assigned this client no program. */
   | 'none'
-  /** A programme is assigned and there is nothing written in the week this day
+  /** A program is assigned and there is nothing written in the week this day
    *  falls in — or nothing but empty days. */
   | 'empty'
   /** There are days to choose from. */
@@ -344,7 +344,7 @@ export interface PlanDayOption {
    * without asking a second time which week it came out of.
    *
    * Carried rather than looked up again by index. A caller holding a position
-   * and a programme would have to re-resolve the week to turn one into the
+   * and a program would have to re-resolve the week to turn one into the
    * other, and the whole reason `trainingOnDay` hands back `weekDays` is that
    * there is one answer to which week a date falls in.
    */
@@ -358,11 +358,11 @@ export interface PlanOffer {
   /** Empty on every state but 'ready'. */
   days: PlanDayOption[];
   /** The day the date schedules, so the screen can pre-select it. Null when the
-   *  programme schedules nothing on that weekday, which is ordinary — a coach
+   *  program schedules nothing on that weekday, which is ordinary — a coach
    *  logging Friday's session on a Wednesday still gets the picker. */
   scheduledKey: string | null;
   /** 'Week 3 of 8' when the client is on a block, null on a one-week
-   *  programme where a week number counts something that does not exist. */
+   *  program where a week number counts something that does not exist. */
   weekLabel: string | null;
   /** The caveat for a plan resolved from a read that did not land — the phone's
    *  last copy rather than a confirmed one. Null when there is none. */
@@ -383,20 +383,20 @@ function dayLabel(day: ProgramDay, i: number): string {
 /**
  * What this coach may load onto the sheet for this client, on this date.
  *
- * `programme`, `startsOn` and `status` are what `useAssignedPrograms` holds;
+ * `program`, `startsOn` and `status` are what `useAssignedPrograms` holds;
  * `dateISO` is the day the coach has chosen to file the session under — not
  * today, because a coach writing up Monday's session on Tuesday is asking about
  * Monday and the week of a block is counted to the day on screen. `who` is a
  * first name or a noun phrase, and every sentence below reads with either.
  */
 export function planOffer(
-  programme: Program | null | undefined,
+  program: Program | null | undefined,
   startsOn: string | null | undefined,
   dateISO: string,
   status: LoadStatus,
   who: string,
 ): PlanOffer {
-  const d = trainingOnDay(programme, startsOn, dateISO, status, who);
+  const d = trainingOnDay(program, startsOn, dateISO, status, who);
   const caveat = dayTrainingCaveat(d);
   const bare = { days: NO_DAYS, scheduledKey: null, weekLabel: null, caveat: null };
 
@@ -405,30 +405,30 @@ export function planOffer(
   if (d.state === 'undated') {
     return { ...bare, state: 'unreadable', line: 'The day this session is being filed under could not be read, so what was planned for it cannot be worked out.' };
   }
-  if (!programme) {
-    // Three answers to "there is no programme in hand", and they are three
+  if (!program) {
+    // Three answers to "there is no program in hand", and they are three
     // different facts. The order is the one src/ui/assignedPrograms.ts argues
     // for: only a read that LANDED may say a client has nothing assigned.
     if (status === 'loading') {
-      return { ...bare, state: 'loading', line: `Reading the programme you have assigned ${who}…` };
+      return { ...bare, state: 'loading', line: `Reading the program you have assigned ${who}…` };
     }
     if (d.state === 'unassigned') {
       return {
         ...bare,
         state: 'none',
-        line: `You have not assigned ${who} a programme, so there is nothing to load. Add what they did below.`,
+        line: `You have not assigned ${who} a program, so there is nothing to load. Add what they did below.`,
       };
     }
     return {
       ...bare,
       state: 'unreadable',
-      line: `Your programme assignments could not be read in full, so whether ${who} has one is not known here. That is a connection problem, not a client without a programme — add what they did below, or try again once you are connected.`,
+      line: `Your program assignments could not be read in full, so whether ${who} has one is not known here. That is a connection problem, not a client without a program — add what they did below, or try again once you are connected.`,
     };
   }
 
   const days = d.weekDays ?? [];
   // The week `trainingOnDay` resolved, for the key. Zero on a one-week
-  // programme, which has no week index to speak of and needs none.
+  // program, which has no week index to speak of and needs none.
   const weekIndex = d.week?.index ?? 0;
   const options = days.map((day, i): PlanDayOption => ({
     key: `${weekIndex}:${i}`,
@@ -445,7 +445,7 @@ export function planOffer(
   if (!usable.length) {
     // 'unwritten' is a week with no days in it; a week of days with no
     // movements on them is the same fact for a coach standing here. Both are
-    // said as the programme being empty rather than as a rest day, because the
+    // said as the program being empty rather than as a rest day, because the
     // coach wrote it and is the only person who can fill it.
     const where = d.weekLabel ? d.weekLabel.toLowerCase() : 'it';
     return {
@@ -453,7 +453,7 @@ export function planOffer(
       state: 'empty',
       weekLabel: d.weekLabel,
       caveat,
-      line: `${who}’s programme has no exercises written in ${where}, so there is nothing to load from it. Add what they did below.`,
+      line: `${who}’s program has no exercises written in ${where}, so there is nothing to load from it. Add what they did below.`,
     };
   }
   const scheduled = options.find((o) => o.scheduled) ?? null;
@@ -464,7 +464,7 @@ export function planOffer(
     weekLabel: d.weekLabel,
     caveat,
     line: scheduled
-      ? `${scheduled.label} is what ${who}’s programme puts on this day. Load it and edit the sets to what they actually did.`
-      : `${who}’s programme schedules nothing on this day, so pick the session you ran. The figures load as targets and you edit them to what was done.`,
+      ? `${scheduled.label} is what ${who}’s program puts on this day. Load it and edit the sets to what they actually did.`
+      : `${who}’s program schedules nothing on this day, so pick the session you ran. The figures load as targets and you edit them to what was done.`,
   };
 }

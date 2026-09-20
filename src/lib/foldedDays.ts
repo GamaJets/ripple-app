@@ -1,9 +1,9 @@
-// Which days of a programme the coach has folded shut, kept across an edit
+// Which days of a program the coach has folded shut, kept across an edit
 // that moves them.
 //
 // ── The bug this exists to end ────────────────────────────────────────────
 //
-// The programme builder folds a day away by INDEX: `foldedDays[2]` means "the
+// The program builder folds a day away by INDEX: `foldedDays[2]` means "the
 // third day in the list is collapsed". That is the cheapest key available and
 // it is a key that means something different after every structural edit,
 // because removing a day shifts every day after it down one.
@@ -18,7 +18,7 @@
 //
 // Resetting would fix the misattribution and throw away every fold the coach
 // set, on a screen where the whole point of folding is to keep a five-day
-// programme readable. Re-keying costs nothing and keeps them, so that is what
+// program readable. Re-keying costs nothing and keeps them, so that is what
 // this does: the removed day's entry is dropped, everything above it slides
 // down by one, and everything below it is untouched.
 //
@@ -55,7 +55,7 @@ export function foldsAfterRemoval(folds: FoldedDays, removed: number): FoldedDay
 
 /**
  * The fold map for a day list that has been replaced wholesale — loading a
- * client's programme, loading a template, clearing the builder, or restoring a
+ * client's program, loading a template, clearing the builder, or restoring a
  * draft.
  *
  * Nothing carries over, because the indices now name entirely different days.

@@ -14,7 +14,7 @@
  * client's record is behind Check In, which MARKS THEM PRESENT on the way
  * through — a write, and the wrong one, for a coach who only wanted to read
  * their injuries before the session starts. And what they are due to train was
- * on the client screen, three taps and a programme tab further on, resolved by
+ * on the client screen, three taps and a program tab further on, resolved by
  * a week calculation that lives in four other files.
  *
  * This module is the vocabulary for both, so the screen stays a screen.
@@ -41,7 +41,7 @@
  * standing in for a name must never be handed to a screen that will print it as
  * a title.
  *
- * ── Rule two: an unread programme is never drawn as a rest day ────────────
+ * ── Rule two: an unread program is never drawn as a rest day ────────────
  *
  * `trainingOnDay` has SIX states and three of them mean "nothing is scheduled"
  * for three different reasons a coach acts on differently:
@@ -51,15 +51,15 @@
  *                    the reason this function returns a state rather than a
  *                    nullable day.
  *   · 'unassigned' — the read landed and this coach has assigned them nothing.
- *   · 'unwritten'  — a programme is assigned and the week this date falls in
+ *   · 'unwritten'  — a program is assigned and the week this date falls in
  *                    has no days written in it.
- *   · 'rest'       — a programme is assigned, was read, has days, and puts none
+ *   · 'rest'       — a program is assigned, was read, has days, and puts none
  *                    of them on this weekday. The ONLY state that may say the
- *                    programme schedules nothing today.
+ *                    program schedules nothing today.
  *
  * `confirmed` is the fourth axis and is deliberately separate from the state.
  * `useAssignedPrograms` keeps whatever it last held when a read fails, so a
- * programme in hand under 'error' is a real programme that may be out of date —
+ * program in hand under 'error' is a real program that may be out of date —
  * which is a caveat on a true answer, not a different answer, and folding it
  * into the state would have cost the day its plan for a dropped connection.
  *
@@ -170,11 +170,11 @@ export function clientTapLabel(tap: ClientTap): string {
     : 'Open this client’s record and the session planned for this day';
 }
 
-/* ── 2 · what the programme puts on that day ──────────────────────────────── */
+/* ── 2 · what the program puts on that day ──────────────────────────────── */
 
 /** Why the day looks the way it does. Six answers, and the first four are all
  *  "nothing scheduled" said for reasons a coach does four different things
- *  about. Folding any two together is how an unread programme gets drawn as a
+ *  about. Folding any two together is how an unread program gets drawn as a
  *  rest day. */
 export type DayTrainingState =
   /** The date on the row could not be read. Defensive: the day sheet builds it
@@ -182,12 +182,12 @@ export type DayTrainingState =
   | 'undated'
   /** The assignments did not come back. Nothing about this day is known. */
   | 'unreadable'
-  /** The read landed and this coach has assigned them no programme. */
+  /** The read landed and this coach has assigned them no program. */
   | 'unassigned'
-  /** A programme is assigned and the week this date falls in has no days
-   *  written in it — which on a one-week programme is the whole of it. */
+  /** A program is assigned and the week this date falls in has no days
+   *  written in it — which on a one-week program is the whole of it. */
   | 'unwritten'
-  /** A programme is assigned, was read, has days, and schedules none of them on
+  /** A program is assigned, was read, has days, and schedules none of them on
    *  this weekday. The only state that may be drawn as a day off. */
   | 'rest'
   /** This is the day, and `day` is it. */
@@ -219,7 +219,7 @@ export interface DayTraining {
    * their client was never shown.
    *
    * Null on 'undated', 'unreadable' and 'unassigned', where there is no
-   * programme or no date to resolve a week from. An EMPTY ARRAY on 'unwritten',
+   * program or no date to resolve a week from. An EMPTY ARRAY on 'unwritten',
    * which is a week that genuinely has no days written in it — the same
    * distinction between "none" and "not known" that every other field here
    * holds.
@@ -237,11 +237,11 @@ export interface DayTraining {
    *  count against, and null on every state before 'rest'. */
   week: ClientWeek | null;
   /** 'Week 5 of 8' in the coach's own words when they named it. Null on a
-   *  one-week programme, where a week number counts something that does not
+   *  one-week program, where a week number counts something that does not
    *  exist. */
   weekLabel: string | null;
   /**
-   * Whether the programme this was resolved from is confirmed current.
+   * Whether the program this was resolved from is confirmed current.
    *
    * False when the assignment read did not land and this is what the provider
    * was already holding. A caveat on a true answer, never a different answer —
@@ -260,14 +260,14 @@ const EMPTY: Omit<DayTraining, 'state' | 'line' | 'confirmed'> = {
 /**
  * What one client is due to train on one date.
  *
- * `programme` and `startsOn` are what `useAssignedPrograms` holds for that
+ * `program` and `startsOn` are what `useAssignedPrograms` holds for that
  * client, `status` is that provider's own, and `dateISO` is the day the coach
  * has open — `YYYY-MM-DD`, built from a local Date, never from a UTC slice.
  * `who` is a first name or a noun phrase; every sentence below reads as English
  * with either.
  */
 export function trainingOnDay(
-  programme: Program | null | undefined,
+  program: Program | null | undefined,
   startsOn: string | null | undefined,
   dateISO: string,
   status: LoadStatus,
@@ -281,33 +281,33 @@ export function trainingOnDay(
       line: 'This day could not be read as a date, so what is planned for it cannot be worked out.',
     };
   }
-  if (!programme) {
-    // The order matters. A null programme under a failed read is UNKNOWN, and
+  if (!program) {
+    // The order matters. A null program under a failed read is UNKNOWN, and
     // it is the exact null that used to be presented all over this app as "your
     // coach has not assigned you anything" — see the header of
     // src/ui/assignedPrograms.ts, which is where that was first separated.
     return confirmed
       ? {
         ...EMPTY, state: 'unassigned', confirmed,
-        line: `${who} has no programme from you, so nothing is planned for this day. What you do in the session is yours to decide.`,
+        line: `${who} has no program from you, so nothing is planned for this day. What you do in the session is yours to decide.`,
       }
       : {
         ...EMPTY, state: 'unreadable', confirmed,
-        line: `Your programme assignments could not be read, so what ${who} is due to train on this day is not known. This is a connection problem, not a rest day.`,
+        line: `Your program assignments could not be read, so what ${who} is due to train on this day is not known. This is a connection problem, not a rest day.`,
       };
   }
-  const weeks = programWeeks(programme);
-  const pos = blockPosition(startsOn, dateISO, weekCount(programme));
+  const weeks = programWeeks(program);
+  const pos = blockPosition(startsOn, dateISO, weekCount(program));
   const at = clientWeek(pos, weeks.length);
   const wk = weeks[at.index] ?? weeks[0];
   const label = at.count > 1 ? weekLabel(wk, at.index + 1) : null;
   // Emptiness is a property of the WEEK this date lands in, never of the list.
   //
-  // `programWeeks` cannot return an empty array for a programme that exists: a
-  // programme with no `weeks` IS one week, and that week is `days` — see its
+  // `programWeeks` cannot return an empty array for a program that exists: a
+  // program with no `weeks` IS one week, and that week is `days` — see its
   // header. So the `!weeks.length` guard that used to stand here could not
   // fire, 'unwritten' was unreachable, and a coach who had assigned somebody a
-  // programme with nothing in it read "schedules nothing on this day", which
+  // program with nothing in it read "schedules nothing on this day", which
   // is the rest-day sentence and sends them to train around a plan that was
   // never written. Asked of `wk` it fires for the case it is named for, and
   // also for the blank week of a block whose other weeks are written — which
@@ -317,8 +317,8 @@ export function trainingOnDay(
     return {
       ...EMPTY, state: 'unwritten', confirmed, week: at, weekLabel: label, weekDays: days,
       line: label
-        ? `${who}’s programme has no days written in ${label.toLowerCase()}, so there is nothing planned for this day.`
-        : `${who}’s programme has no days written in it, so nothing is planned for this day.`,
+        ? `${who}’s program has no days written in ${label.toLowerCase()}, so there is nothing planned for this day.`
+        : `${who}’s program has no days written in it, so nothing is planned for this day.`,
     };
   }
   const day = scheduledDay(days, weekday);
@@ -326,8 +326,8 @@ export function trainingOnDay(
     return {
       ...EMPTY, state: 'rest', confirmed, week: at, weekLabel: label, weekDays: days,
       line: label
-        ? `${who}’s programme schedules nothing on this day of ${label.toLowerCase()}.`
-        : `${who}’s programme schedules nothing on this day.`,
+        ? `${who}’s program schedules nothing on this day of ${label.toLowerCase()}.`
+        : `${who}’s program schedules nothing on this day.`,
     };
   }
   const focus = String(day.focus || '').trim() || null;
@@ -378,7 +378,7 @@ function sessionLine(
 export function dayTrainingCaveat(d: DayTraining): string | null {
   if (d.confirmed) return null;
   if (d.state === 'unreadable' || d.state === 'undated') return null;
-  return 'Your programme assignments could not be read just now, so this is the last plan this phone had rather than a confirmed one.';
+  return 'Your program assignments could not be read just now, so this is the last plan this phone had rather than a confirmed one.';
 }
 
 /**
@@ -392,11 +392,11 @@ export function dayPlanHeading(d: DayTraining): string {
   switch (d.state) {
     case 'session': return 'Planned for this day';
     case 'rest': return 'Nothing planned for this day';
-    case 'unassigned': return 'No programme assigned';
-    // On a block, the week is the thing that is empty and the programme is
+    case 'unassigned': return 'No program assigned';
+    // On a block, the week is the thing that is empty and the program is
     // not — a heading that said otherwise would send a coach to rewrite a
-    // programme whose other eleven weeks are written.
-    case 'unwritten': return d.weekLabel ? 'Nothing written for that week' : 'Programme is empty';
+    // program whose other eleven weeks are written.
+    case 'unwritten': return d.weekLabel ? 'Nothing written for that week' : 'Program is empty';
     case 'unreadable': return 'Plan not read';
     case 'undated': return 'Plan not read';
   }

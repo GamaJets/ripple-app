@@ -1,4 +1,4 @@
-// The gym's kit register, told to the coach who has to programme around it.
+// The gym's kit register, told to the coach who has to program around it.
 //
 // ── Why this did not exist ────────────────────────────────────────────────
 //
@@ -13,7 +13,7 @@
 // mentioned the table at all: the only reader anywhere in the product was the
 // owner's console (app/(owner)/equipment.tsx and studio-web/app/equipment), so
 // the register was written by the person who buys the kit and read by the
-// person who buys the kit, and the person who programmes a session on it was
+// person who buys the kit, and the person who programs a session on it was
 // left to find out at 6am that four of the rowers are broken.
 //
 // That is a scheduling fact, not a maintenance one — `capacityFor` in
@@ -40,7 +40,7 @@
 //   · A GYM, A WHOLE READ, AND NOTHING WRONG. The one case where silence is an
 //     answer, and it is said out loud rather than drawn as a blank space.
 //   · A READ THAT DID NOT LAND. Nothing may be stated from it. A coach told
-//     "nothing is out of action" over a timeout programmes the broken rack.
+//     "nothing is out of action" over a timeout programs the broken rack.
 //
 // ── Read-only, and why that is the whole feature ──────────────────────────
 //
@@ -50,7 +50,7 @@
 // owner's capacity banner and the maintenance history in `gym_equipment_log`;
 // a half-built version of that — a toggle with no reason box, or one that
 // reports success from the absence of an error — is worse than not having it.
-// What a coach needs before they write a programme is the state, and the state
+// What a coach needs before they write a program is the state, and the state
 // is what this gives them.
 //
 // Pure: no react, no supabase, no clock. `today` is passed in, and the caller
@@ -80,7 +80,7 @@ import { isWhole, type LoadStatus } from '../ui/loadStatus';
  */
 export const KIT_UNREAD_NOTE =
   'Your gym’s equipment register could not be read, so nothing here says what is in service. ' +
-  'It is not a statement that everything works — check with the gym before you programme around a machine.';
+  'It is not a statement that everything works — check with the gym before you program around a machine.';
 
 /**
  * A gym whose register has no rows in it.
@@ -88,7 +88,7 @@ export const KIT_UNREAD_NOTE =
  * Said as a fact about the FORM rather than about the gym, for the reason
  * `capacityFor` gives about returning null instead of 0: an unfilled register
  * and a gym that owns nothing are indistinguishable in the data, and only one
- * of them is a reason to change a programme.
+ * of them is a reason to change a program.
  */
 export const KIT_UNWRITTEN_NOTE =
   'Your gym has not put anything in its equipment register. That is an empty form rather than an empty gym — ' +
@@ -295,7 +295,7 @@ export function coachKitView(
 
   // Retired kit has been disposed of. It is not broken and it is not usable,
   // and counting it anywhere on a coach's screen would answer "how much of this
-  // can I programme on" with stock the gym no longer owns.
+  // can I program on" with stock the gym no longer owns.
   const live = items.filter((e) => e.status !== 'retired');
   if (live.length === 0) return { kind: 'unwritten', note: KIT_UNWRITTEN_NOTE };
 

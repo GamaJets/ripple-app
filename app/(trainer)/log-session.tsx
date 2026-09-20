@@ -202,6 +202,7 @@ import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { exerciseSlug } from '../../src/lib/exerciseId';
+import { canonicalExerciseName } from '../../src/lib/exerciseName';
 // Ticking a set off standing next to the person doing it, and the one rule that
 // makes a tick safe on a screen that writes to somebody else's permanent
 // record: it may only put a figure in a box where the plan states a definite
@@ -1044,8 +1045,30 @@ export default function LogSession() {
   const sheet = { backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 };
   const G = layout.gutter;
 
+  /**
+   * Put a movement on the sheet.
+   *
+   * The name is resolved to the CATALOGUE's own spelling before it goes on,
+   * and that is the whole of the fix: `entriesToWrite` writes `r.name`
+   * straight into `workouts.exercise`, so whatever lands here is what a
+   * client's history says forever. Ten rows in the live table held a coach's
+   * typed text — "Calf raise", "Hip abduction", "Shoulder press" — against
+   * catalogue rows spelled "Calf Raise", "Hip Abduction", "Shoulder Press",
+   * and the member's own screen then printed the same lift two ways depending
+   * on which handset wrote it.
+   *
+   * Resolution is by slug or by an exact synonym and never by a near-miss (see
+   * src/lib/exerciseName.ts); a movement nothing resolves goes on as typed, in
+   * Title Case, so a coach's own invention still looks like the library around
+   * it. Re-casing cannot change the slug, so an unread catalogue costs nothing
+   * here either.
+   *
+   * Every caller routes through this — the custom box, the coach's saved list
+   * and the built-in list — rather than each one remembering to ask.
+   */
   const addExercise = (n: string) => {
-    setRows((p) => [...p, { key: mkKey(), name: n, sets: [{ reps: '', kg: '' }] }]);
+    const name = canonicalExerciseName(n, cat.rows);
+    setRows((p) => [...p, { key: mkKey(), name, sets: [{ reps: '', kg: '' }] }]);
     setPicker(false);
     setCustom('');
   };
@@ -2397,10 +2420,13 @@ export default function LogSession() {
               <TextInput value={custom} onChangeText={setCustom} placeholder="Custom exercise name"
                 placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} accessibilityLabel="Custom exercise name" />
               <Cta label="Add" onPress={() => {
-                const nm = custom.trim();
+                const nm = canonicalExerciseName(custom, cat.rows);
                 if (!nm) return;
                 addExercise(nm);
-                // Remembered for next time, exactly as the program builder does.
+                // Remembered for next time, exactly as the program builder does
+                // — and remembered under the catalogue's spelling, so the saved
+                // list stops accumulating a second name for a movement that
+                // already has one.
                 void coachEx.remember(nm);
               }} />
             </View>

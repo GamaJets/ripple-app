@@ -39,7 +39,7 @@
 // written through the same `logWorkouts` as the row below it, with the same
 // three outcomes said out loud, the same bodyweight and timed flags, the same
 // personal-record guards the guided runner in app/(client)/workouts.tsx uses,
-// and the runner's rest countdown. What it does NOT know is the programme —
+// and the runner's rest countdown. What it does NOT know is the program —
 // this screen is opened by a movement's name, so the sets and reps it prints
 // are the ones handed to it on the route (`sets`, `reps`), and when nothing was
 // handed over it says what the member did last time rather than inventing a
@@ -97,8 +97,8 @@ import { exerciseIndex, exerciseOutings } from '../../src/lib/exerciseHistory';
 import { bestSetLabel } from '../../src/lib/bestSet';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 // What this member's own coach says about this movement, every time, to
-// everybody they train. Separate from the note on a particular programme day,
-// which is about this member on that day and arrives with the programme.
+// everybody they train. Separate from the note on a particular program day,
+// which is about this member on that day and arrives with the program.
 import { fetchCoachCue, cueFor, type CueRead } from '../../src/lib/coachCues';
 import { reportError } from '../../src/lib/reportError';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -129,7 +129,7 @@ export default function ExerciseScreen() {
   const t = useTheme();
   const router = useRouter();
   // `sets` and `reps` are the prescription, when the screen that opened this
-  // one had a programme to hand over. They are strings off the route and are
+  // one had a program to hand over. They are strings off the route and are
   // only ever printed or counted — never written into a set. Absent means "no
   // prescription", not "0 sets", and the screen then says what was done last
   // time instead.
@@ -319,7 +319,7 @@ export default function ExerciseScreen() {
 
   /* ── the prescription, if one arrived ────────────────────────────────────
      Counted only when it is a positive whole number; "3 sets" is a promise the
-     page makes about the programme, and a route carrying "abc" or "0" has not
+     page makes about the program, and a route carrying "abc" or "0" has not
      made it. `reps` is left as the coach wrote it — "8-12", "AMRAP", "45 sec"
      — because rewriting it is how a hold became forty-five repetitions once
      already (src/lib/timedSets.ts). */
@@ -753,7 +753,7 @@ export default function ExerciseScreen() {
 
   /* ── the demonstration as the page's hero ────────────────────────────────
      The mockups open a training page on a picture in a 24pt card under the
-     hero shadow (ClientTrain's programme image), and the demonstration is this
+     hero shadow (ClientTrain's program image), and the demonstration is this
      page's picture. Only a PICTURE gets the card: the loading line and the
      three "there is nothing to show, and why" notices are sentences, and a
      sentence in a hero frame reads as a demonstration that failed to load —

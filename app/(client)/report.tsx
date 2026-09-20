@@ -236,8 +236,8 @@ export default function WeeklyReport() {
   // numbers, and the second one is the one their coach reads.
   //
   // The calendar week wins, for a reason beyond consistency: Home's goal is
-  // `planDays.length`, the number of days the PROGRAMME runs in a week, and a
-  // programme week is a calendar week. A rolling seven days cannot be compared
+  // `planDays.length`, the number of days the PROGRAM runs in a week, and a
+  // program week is a calendar week. A rolling seven days cannot be compared
   // against it at all — and `startOfWeek` honours the member's own configured
   // week start, which a rolling window silently ignores.
   const weekStart = startOfWeek(today);

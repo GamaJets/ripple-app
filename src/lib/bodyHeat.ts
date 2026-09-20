@@ -187,7 +187,7 @@ export interface LitLayer {
  *    a decode, an upload to the GPU and a composited layer even at opacity 0 —
  *    React Native does not skip a zero-opacity view, it composites it. The
  *    realistic case is far smaller: `drawnIntensity` over one week of a normal
- *    programme lights on the order of 6–12 layer NAMES, which is 12–24 files
+ *    program lights on the order of 6–12 layer NAMES, which is 12–24 files
  *    once both halves of the body are counted, so dropping the zeroes is
  *    typically a two-thirds cut and never a cost. The cap on the bad case is the
  *    manifest's own size, which is why nothing here needs a limit of its own.

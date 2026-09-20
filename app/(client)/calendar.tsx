@@ -1360,14 +1360,14 @@ export default function Calendar() {
               them — so the program is not rewritten and the mark is not
               overruled. Nothing is claimed while the program is unread; see
               selScheduled. */}
-          {/* ── whose copy of the programme that disagreement was drawn
+          {/* ── whose copy of the program that disagreement was drawn
               against ──────────────────────────────────────────────────────
               `getProgram` consults this device's copy when no read has landed,
               and `planUnknown` cannot see that: the cache makes `coachProgram`
               non-null, so `program` is built and every "your program has Push
               on this day" above is computed against whatever was on the phone
               — for up to THIRTY DAYS (src/lib/programCache.ts). A member told
-              their programme clashes with the rest day they just marked, on the
+              their program clashes with the rest day they just marked, on the
               strength of a block their coach replaced a fortnight ago, either
               changes a plan they did not need to or stops believing the notice.
 

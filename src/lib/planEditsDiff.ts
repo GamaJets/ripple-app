@@ -1,14 +1,14 @@
-// The member's rewrite of their programme, as a DIFF against what the coach
+// The member's rewrite of their program, as a DIFF against what the coach
 // assigned — which is the one thing the member's own copy of this could not be.
 //
 // ── The half that shipped, and the half this is ───────────────────────────
 //
 // `client_plan_edits` holds every swap, removal, addition and corrected set a
-// member makes to the programme they were given. src/lib/planEditsReadBack.ts
+// member makes to the program they were given. src/lib/planEditsReadBack.ts
 // reads it back TO THE MEMBER, and it deliberately does not name the movement:
 // `swaps`, `exEdits` and `removed` are keyed `dayIdx:exerciseKey` where the key
 // is a slug ('bench', 'ohp', 'rdl'), the member's screen does not hold the
-// programme those slugs belong to, and printing a slug at somebody as though it
+// program those slugs belong to, and printing a slug at somebody as though it
 // were the name of an exercise is worse than saying nothing. So that module
 // says the day and the kind of change, and stops.
 //
@@ -23,7 +23,7 @@
 // calling `planEditItems` and printing what the member sees. A coach reading
 // "Day 1: they swapped a movement for another one" learns nothing they can act
 // on. A coach reading "Mon · Push — you wrote Bench Press, they do Machine
-// Chest Press" has next week's programme in front of them.
+// Chest Press" has next week's program in front of them.
 //
 // ── One enumeration of the blob, not two ──────────────────────────────────
 //
@@ -37,7 +37,7 @@
 // them.
 //
 // What this adds is resolution: the stored key out of the item's id, the day and
-// the movement out of the programme, and the coach's own figures beside the
+// the movement out of the program, and the coach's own figures beside the
 // member's. `storedKeyOf` is the join, and `planEditsDiff.test.ts` asserts it
 // round-trips for all four kinds so that a change to that id format fails here
 // loudly rather than silently resolving nothing.
@@ -56,18 +56,18 @@
 // 2. IT WILL NOT TREAT AN UNRESOLVED KEY AS A CHANGE TO NOTHING. A key naming a
 //    movement the current assignment does not contain is the ordinary
 //    consequence of the coach having rewritten the block since: the member's
-//    correction is about the programme they were on. `resolved: false` says
+//    correction is about the program they were on. `resolved: false` says
 //    which rows those are, and they are still listed, because "they have been
 //    correcting the load on something for a month" is worth a coach's attention
 //    even when the something has since been replaced.
 //
-// 3. IT WILL NOT CALL A FAILED READ AN UNCHANGED PROGRAMME. `state` carries
+// 3. IT WILL NOT CALL A FAILED READ AN UNCHANGED PROGRAM. `state` carries
 //    'unreadable' for exactly that, and `planEditsCoachNote` writes a different
 //    sentence for it. See src/ui/loadStatus.ts: an empty list under anything but
 //    'ready' is a silence, and the obvious thing a coach takes from "they have
 //    changed nothing" is that the block is being followed as written.
 //
-// Kilograms stay kilograms. Every load below is the figure the programme and the
+// Kilograms stay kilograms. Every load below is the figure the program and the
 // blob hold, and the screen converts through `liftLabel` — the convention
 // src/lib/planVsActual.ts states at `LoadCheck.plannedKg` and the reason a
 // pounds coach's 225 has never been stored as 225 kg.
@@ -95,7 +95,7 @@ export const KEY_HAS_NO_WEEK =
 /** Two figures for one thing: what the coach wrote, and what the member set. */
 export interface NumberPair<T> {
   /**
-   * The coach's own figure, out of the assignment. Null where the programme
+   * The coach's own figure, out of the assignment. Null where the program
    * names none, and null for every row the current assignment cannot resolve —
    * which is not the same as the coach having written nothing, and is why
    * `resolved` is on the row.
@@ -105,7 +105,7 @@ export interface NumberPair<T> {
   theirs: T;
 }
 
-/** One change the member made, against the programme the coach assigned. */
+/** One change the member made, against the program the coach assigned. */
 export interface PlanEditDiffRow {
   /** `planEditItems`' own id, carried through unchanged so a list key here and
    *  a list key on the member's screen are the same string. */
@@ -113,7 +113,7 @@ export interface PlanEditDiffRow {
   kind: PlanEditItem['kind'];
   /**
    * The day index the key carries, counted from ZERO — an index into the
-   * programme week's `days`, which is what it was written as.
+   * program week's `days`, which is what it was written as.
    *
    * `PlanEditItem.day` counts from one because it is printed. This does not,
    * because it is subscripted. The two are deliberately different types of
@@ -121,7 +121,7 @@ export interface PlanEditDiffRow {
    * wrong movement in a coach's face.
    */
   dayIdx: number | null;
-  /** 'Mon · Push', out of the programme. Null where there is no day to name —
+  /** 'Mon · Push', out of the program. Null where there is no day to name —
    *  an added movement, or a day index the assignment does not have. Never a
    *  dash: a caller with no label gets a sentence written without one. */
   dayLabel: string | null;
@@ -136,7 +136,7 @@ export interface PlanEditDiffRow {
    *  corrected set. */
   theirs: string | null;
   /** Whether the assignment now on screen still contains this key. False is a
-   *  fact about the programme, never about the member. */
+   *  fact about the program, never about the member. */
   resolved: boolean;
   /** Sets, where the member set their own. Absent where they did not — which is
    *  the distinction `readPlanEdits` keeps and the reason these are null rather
@@ -150,7 +150,7 @@ export interface PlanEditDiffRow {
    * How many rows are in the member's own set-by-set table, or null where they
    * wrote none.
    *
-   * A count and not the table. The coach's programme has no per-set equivalent
+   * A count and not the table. The coach's program has no per-set equivalent
    * to compare it against — `ProgramExercise` carries one `sets` and one `reps`
    * for the whole movement — so printing the rows side by side would put a
    * column of dashes against a column of numbers and call it a comparison.
@@ -184,7 +184,7 @@ export interface PlanEditsDiff {
  * The stored key out of a `PlanEditItem`, or null for an added movement.
  *
  * This is the join between the member's enumeration of the blob and the coach's
- * programme, and it is derived rather than re-walked so that there is exactly
+ * program, and it is derived rather than re-walked so that there is exactly
  * one place the blob is turned into a list. The ids are built in
  * `planEditItems` as `swap:<key>`, `numbers:<key>`, `removed:<key>` and
  * `custom:<index>`; none of the four prefixes contains a colon, so the key is
@@ -230,7 +230,7 @@ function customOf(it: PlanEditItem, edits: PlanEdits): ProgramExercise | null {
   return edits.custom[Number(tail)] ?? null;
 }
 
-/** How a day of the programme reads: 'Mon · Push', or just 'Mon'. Null when
+/** How a day of the program reads: 'Mon · Push', or just 'Mon'. Null when
  *  the day names neither, so no caller prints a separator with nothing either
  *  side of it. */
 function labelOfDay(d: ProgramDay | null | undefined): string | null {
@@ -241,7 +241,7 @@ function labelOfDay(d: ProgramDay | null | undefined): string | null {
   return day || focus || null;
 }
 
-/** A finite positive load, or null. A programme naming 0 kg has not prescribed
+/** A finite positive load, or null. A program naming 0 kg has not prescribed
  *  a load, which is the same judgement `loadCheck` makes in planVsActual.ts. */
 function loadOf(v: number | null | undefined): number | null {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
@@ -252,7 +252,7 @@ function loadOf(v: number | null | undefined): number | null {
  *
  * `days` is the week of the block the client's own Train tab is showing them,
  * which app/(trainer)/client-training.tsx already resolves through
- * `clientWeek` for `planVsActual`. Null is "no programme to compare against"
+ * `clientWeek` for `planVsActual`. Null is "no program to compare against"
  * and covers all three of its causes — none assigned, the read failed, and one
  * assigned by another coach that this coach's policy will not show — none of
  * which is a statement about the member.
@@ -331,7 +331,7 @@ export function planEditsDiff(args: {
       // movement. A removal and a corrected set name nothing and get null.
       theirs: it.kind === 'swap' || it.kind === 'custom' ? it.name : null,
       // A custom movement resolves against nothing by construction — it is the
-      // member adding what the programme does not contain — so it is not
+      // member adding what the program does not contain — so it is not
       // counted as a stray. Only a keyed change the assignment cannot find is.
       resolved: it.kind === 'custom' ? true : assignedEx != null,
       sets,
@@ -375,15 +375,15 @@ export function planEditDiffLine(
   const where = r.dayLabel ? `${r.dayLabel} — ` : '';
   if (r.kind === 'custom') {
     // No day and nothing of the coach's to compare it against: the member added
-    // a movement the programme does not contain, which is the one kind whose
+    // a movement the program does not contain, which is the one kind whose
     // sentence is complete without resolving anything.
     return r.theirs
-      ? `${who} added ${r.theirs}, which this programme does not contain.`
-      : `${who} added a movement this programme does not contain.`;
+      ? `${who} added ${r.theirs}, which this program does not contain.`
+      : `${who} added a movement this program does not contain.`;
   }
   if (r.kind === 'swap') {
     if (r.assigned && r.theirs) return `${where}you wrote ${r.assigned}; ${who} does ${r.theirs} instead.`;
-    if (r.theirs) return `${where}${who} does ${r.theirs} instead of what this programme names here.`;
+    if (r.theirs) return `${where}${who} does ${r.theirs} instead of what this program names here.`;
     if (r.assigned) return `${where}${who} swapped ${r.assigned} for something else.`;
     return `${where}${who} swapped a movement for another one.`;
   }
@@ -445,7 +445,7 @@ export interface EditAge {
  * Twenty-eight days, and the number is argued rather than picked: it is
  * `WINDOW_DAYS` in src/lib/planVsActual.ts and the longest block most coaches
  * on this platform write. A set of corrections last touched longer ago than the
- * block they were made against is very likely about a programme that has since
+ * block they were made against is very likely about a program that has since
  * been rewritten, and a coach acting on it would be rewriting next week around
  * a complaint the member stopped making.
  */
@@ -472,7 +472,7 @@ export function editAge(updatedAt: string | null | undefined, nowMs: number): Ed
  *
  * Six situations, and the two that must not collapse into each other are the
  * failed read and the member who changed nothing. A coach shown "they have
- * followed the programme as written" over a refused read reads it as a fact
+ * followed the program as written" over a refused read reads it as a fact
  * about their client and writes next week's block on it.
  *
  * `whenWords` is `updated_at` in the READER's locale, already formatted,
@@ -489,16 +489,16 @@ export function planEditsCoachNote(args: {
 }): string {
   const { diff, who, whenWords, ageWords, stale } = args;
   if (diff.state === 'unreadable') {
-    return `What ${who} has changed about this programme could not be read, so nothing here says they have `
+    return `What ${who} has changed about this program could not be read, so nothing here says they have `
       + 'followed it as written. Pull to refresh when you have signal.';
   }
   const n = diff.rows.length;
   if (n === 0) {
-    return `${who} has not changed anything about the programme you assigned them.`;
+    return `${who} has not changed anything about the program you assigned them.`;
   }
-  const head = `${who} has changed ${n} thing${n === 1 ? '' : 's'} about the programme you assigned them`;
+  const head = `${who} has changed ${n} thing${n === 1 ? '' : 's'} about the program you assigned them`;
   if (diff.state === 'unmatched') {
-    return `${head}. Their programme could not be read on this screen, so these say which day and what kind `
+    return `${head}. Their program could not be read on this screen, so these say which day and what kind `
       + 'of change and cannot name the movement.';
   }
   const when = whenWords && ageWords
@@ -506,11 +506,11 @@ export function planEditsCoachNote(args: {
     : whenWords ? `, last changed on ${whenWords}`
     : ageWords ? `, last changed ${ageWords}` : '';
   const stray = diff.strayCount
-    ? ` ${diff.strayCount} of them ${diff.strayCount === 1 ? 'names a movement' : 'name movements'} this programme no longer `
+    ? ` ${diff.strayCount} of them ${diff.strayCount === 1 ? 'names a movement' : 'name movements'} this program no longer `
       + 'contains, which is what happens when you rewrite a block they had already corrected.'
     : '';
   const old = stale
-    ? ' That is longer ago than the block it was made against, so some of it may be about a programme you have since replaced.'
+    ? ' That is longer ago than the block it was made against, so some of it may be about a program you have since replaced.'
     : '';
   return `${head}${when}.${stray}${old}`;
 }

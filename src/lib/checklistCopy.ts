@@ -14,7 +14,7 @@
 //
 // ── WHAT MAKES THIS DIFFERENT FROM THE OTHER FOUR BULK ACTIONS ────────────
 //
-// A bulk assign REPLACES a programme and `overwriteGuard` withholds the control
+// A bulk assign REPLACES a program and `overwriteGuard` withholds the control
 // until it can say who is about to be written over. A bulk message writes one
 // row per thread and cannot be taken back. This one is neither: it ADDS rows,
 // and the failure it can produce is duplication.

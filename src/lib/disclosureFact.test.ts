@@ -4,7 +4,7 @@
 // out of the roster, found them, called the disclosures 'ready', flattened
 // `injuries: undefined` to `[]` with a `??`, and handed that to `guardInjuries`
 // — which returns ALLOWED on an empty list. A person with no account who has
-// never been asked about injuries opened the programme gate as though they had
+// never been asked about injuries opened the program gate as though they had
 // been asked and had said there was nothing wrong.
 //
 // Every assertion below is written so that deleting the branch it covers fails

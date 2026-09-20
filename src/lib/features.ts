@@ -83,12 +83,12 @@ export const CLIENT_FEATURES: Feature[] = [
   // one question and a member who found only the first has been handed six
   // hundred movements with no order to do them in. `workout_templates` had been
   // live and populated since supabase/parts/2600 and was read by nothing, so
-  // this row is the whole difference between fifteen programmes existing and
-  // fifteen programmes being reachable.
+  // this row is the whole difference between fifteen programs existing and
+  // fifteen programs being reachable.
   //
   // Not `soloHide`. A member training themselves is the person these are FOR;
   // the note is what keeps them from reading as a coach's work.
-  { key: 'programmes', label: 'Programmes', note: 'Ready-made plans to follow — not written by your coach', route: '/(client)/programmes', icon: 'grid', area: 'train', keywords: 'programme programmes program plan plans routine routines workout plan template templates split ppl push pull legs upper lower full body 5x5 stronglifts beginner strength hypertrophy bodyweight home dumbbell kettlebell hiit mobility core ready made follow' },
+  { key: 'programs', label: 'Programs', note: 'Ready-made plans to follow — not written by your coach', route: '/(client)/programmes', icon: 'grid', area: 'train', keywords: 'program programs program plan plans routine routines workout plan template templates split ppl push pull legs upper lower full body 5x5 stronglifts beginner strength hypertrophy bodyweight home dumbbell kettlebell hiit mobility core ready made follow' },
   { key: 'tools', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools', icon: 'settings', area: 'train', keywords: 'calculator 1rm plates macros' },
   { key: 'recovery', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery', icon: 'water', area: 'train', keywords: 'sleep hydration mobility rest' },
   { key: 'habits', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits', icon: 'check', area: 'train', keywords: 'water streak daily' },
@@ -391,7 +391,7 @@ export const TRAINER_NAV: NavItem[] = [
   // beats landing them nowhere.
   { key: 'my-register', label: 'Your Register', note: 'What the registers you took actually say', route: '/(trainer)/my-register', icon: 'check', keywords: 'register attendance check in checkin checked in turned up showed up show rate fill rate headcount how many came walk in walkins waitlist my classes classes i taught taught teaching pay payroll per attendee per head paid right am i owed numbers from my check ins' },
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
-  { key: 'library', label: 'Exercise Library', note: 'What you can programme, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
+  { key: 'library', label: 'Exercise Library', note: 'What you can program, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
   { key: 'checklists', label: 'Client Checklists', note: 'The daily lines you set one client', route: '/(trainer)/checklists', icon: 'check', keywords: 'checklist checklists daily tasks habits client adherence ticked' },
   { key: 'client-goals', label: 'Working Toward', note: 'What a client is aiming at, and how it is going', route: '/(trainer)/client-goals', icon: 'target', keywords: 'goal goals target working toward client aim weight measurement' },
   { key: 'client-nutrition', label: "A Client's Nutrition", note: 'Their targets, and the week of meals you write them', route: '/(trainer)/client-nutrition', icon: 'meals', keywords: 'nutrition meals macros calories diet plan client food week allergens targets deltas' },
@@ -406,7 +406,7 @@ export const TRAINER_NAV: NavItem[] = [
   // have they logged" finds their training, "par-q" and "readiness" find the
   // intake.
   { key: 'client-body', label: "A Client's Body", note: 'Their scans, their measurements and which way they are going', route: '/(trainer)/client-body', icon: 'scale', keywords: 'body composition scan scans inbody dexa body fat bodyfat percent muscle mass skeletal lean weight kg lbs measurements tape waist trend gaining losing progress' },
-  { key: 'client-training', label: 'What They Have Logged', note: 'Their sessions against the programme you wrote', route: '/(trainer)/client-training', icon: 'dumbbell', keywords: 'training log logged workouts sessions what have they done did they train volume sets reps weights lifted plan vs actual adherence stuck to the plan off plan swapped exercises' },
+  { key: 'client-training', label: 'What They Have Logged', note: 'Their sessions against the program you wrote', route: '/(trainer)/client-training', icon: 'dumbbell', keywords: 'training log logged workouts sessions what have they done did they train volume sets reps weights lifted plan vs actual adherence stuck to the plan off plan swapped exercises' },
   { key: 'client-week', label: 'Their Week', note: 'The days they have marked, against what you programmed', route: '/(trainer)/client-week', icon: 'calendar', keywords: 'their week planned days rest day deload travelling holiday marked ahead clash conflict schedule what are they doing this week day plan' },
   { key: 'client-photos', label: 'Photos They Sent', note: 'Progress photographs a client shared with you', route: '/(trainer)/client-photos', icon: 'camera', keywords: 'photos photographs progress pics pictures shared sent me front back side comparison before after gallery images' },
   { key: 'client-intake', label: 'Their Intake', note: 'What they told you before you trained them', route: '/(trainer)/client-intake', icon: 'pencil', keywords: 'intake onboarding form questionnaire par q parq readiness health screening history injuries surgery medication availability when can they train emergency contact next of kin what did they tell me' },
@@ -497,7 +497,7 @@ export const TRAINER_NAV: NavItem[] = [
   // "graphic". Nobody searches "brand"; they search "my logo" or "my colour".
   { key: 'share-kit', label: 'Share Kit', note: 'Your real numbers as a card you can post', route: '/(trainer)/share-kit', icon: 'share', keywords: 'share kit card graphic poster image story post instagram facebook social marketing promo advert testimonial results numbers screenshot' },
   { key: 'brand', label: 'Your Branding', note: 'The name and colour your clients see around your coaching', route: '/(trainer)/brand', icon: 'sparkle', keywords: 'brand branding logo colour color accent trading name business name my brand white label look identity theme' },
-  { key: 'group', label: 'Program Groups', note: 'One programme, assigned to a whole group at once', route: '/(trainer)/group', icon: 'people', keywords: 'group groups bootcamp cohort squad team program programme assign many bulk class block eight week challenge' },
+  { key: 'group', label: 'Program Groups', note: 'One program, assigned to a whole group at once', route: '/(trainer)/group', icon: 'people', keywords: 'group groups bootcamp cohort squad team program program assign many bulk class block eight week challenge' },
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
   // Under Analytics, because it answers the same figures in sentences. Reached
   // from one card at the bottom of that screen and from nowhere else, while the
@@ -616,7 +616,7 @@ export const TRAINER_NAV: NavItem[] = [
   // conversation with somebody, which is the wrong moment to be editing a
   // template — see the header of templates-messages.tsx.
   //
-  // Not keyworded 'template' alone: that word already belongs to the PROGRAMME
+  // Not keyworded 'template' alone: that word already belongs to the PROGRAM
   // library two rows from the top, and a coach who types it wants whichever of
   // the two they were thinking of. Both rows carry it and their notes are what
   // separate them.

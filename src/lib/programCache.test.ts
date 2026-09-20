@@ -1,4 +1,4 @@
-// The coach's programme on the device. Compile with tsc, run with node.
+// The coach's program on the device. Compile with tsc, run with node.
 //
 // Five ways this makes a member's training worse rather than better, and one
 // way it is simply not worth having:
@@ -10,7 +10,7 @@
 //
 //   2. A PREFIX KEPT AS THE ANSWER. The read is capped. A coach with a large
 //      book gets a page, and a page written to the device as the whole truth is
-//      a member whose row was past the cap being told they have no programme —
+//      a member whose row was past the cap being told they have no program —
 //      by their own phone, offline, with nothing left to say otherwise.
 //
 //   3. A CORRUPT FILE READ AS AN EMPTY ONE. src/lib/readCache.ts's rule 1. If
@@ -22,9 +22,9 @@
 //      this week's on the wire.
 //
 //   5. TWO PEOPLE, ONE PHONE. A shared device must not hand one member the
-//      other's programme.
+//      other's program.
 //
-//   6. AND: a copy so old that the generic programme is the better answer.
+//   6. AND: a copy so old that the generic program is the better answer.
 import {
   PROGRAM_HORIZON_MS, mayCache, mayServeCached, packPrograms, programCacheKey,
   readPrograms, toCachedRows,
@@ -59,7 +59,7 @@ const stamp = (msAgo: number) => new Date(NOW - msAgo).toISOString();
 /* ── 3 · unreadable is not empty ──────────────────────────────────────── */
 {
   for (const bad of ['', 'not json', '{}', '{"rows":"nope","at":"x"}', '[]', 'null']) {
-    eq(readPrograms(bad, NOW).found, false, `unreadable bytes (${JSON.stringify(bad)}) are not an empty programme list`);
+    eq(readPrograms(bad, NOW).found, false, `unreadable bytes (${JSON.stringify(bad)}) are not an empty program list`);
   }
   // A stamp that cannot be parsed is refused too: without one there is no way
   // to age the copy, and an unaged copy is the failure readCache.ts exists for.
@@ -86,7 +86,7 @@ const stamp = (msAgo: number) => new Date(NOW - msAgo).toISOString();
   const bytes = packPrograms({ c1: prog('Block A') }, {}, stamp(PROGRAM_HORIZON_MS - 60_000));
   eq(readPrograms(bytes, NOW).found, true, 'a copy inside the horizon is served');
   const old = packPrograms({ c1: prog('Block A') }, {}, stamp(PROGRAM_HORIZON_MS + 60_000));
-  eq(readPrograms(old, NOW).found, false, 'and one past it is not — after a month the generic programme is the better answer');
+  eq(readPrograms(old, NOW).found, false, 'and one past it is not — after a month the generic program is the better answer');
   // The number itself, stated: a training block runs weeks, so a week-long
   // horizon would take somebody's plan away in week two of an eight-week block.
   ok(PROGRAM_HORIZON_MS > 21 * 24 * 60 * 60 * 1000, 'the horizon outlasts a normal training block');
@@ -97,7 +97,7 @@ const stamp = (msAgo: number) => new Date(NOW - msAgo).toISOString();
   const programs = { c2: prog('Second'), c1: prog('First') };
   const startsOn = { c1: '2026-09-07' };
   const back = readPrograms(packPrograms(programs, startsOn, stamp(60_000)), NOW);
-  eq(back.programs.c1?.title, 'First', 'the programme survives the round trip');
+  eq(back.programs.c1?.title, 'First', 'the program survives the round trip');
   eq(back.programs.c2?.title, 'Second', 'for every client on it');
   eq(back.startsOn.c1, '2026-09-07', 'and so does the start date the coach set');
   eq(Object.prototype.hasOwnProperty.call(back.startsOn, 'c2'), false, 'a client with no start date has no entry, which is how "the coach did not say" is spelled');
@@ -109,7 +109,7 @@ const stamp = (msAgo: number) => new Date(NOW - msAgo).toISOString();
   eq(rows.map((r) => r.clientId).join(','), 'a,b', 'rows are ordered by client id, so identical data writes identical bytes');
   eq(rows[0]?.startsOn, '2026-01-01', 'a start date rides with the assignment it belongs to');
   eq(rows[1]?.startsOn, null, 'and is explicitly null rather than absent, because undefined does not survive JSON');
-  eq(rows.length, 2, 'a start date for somebody with no programme is not a row — there is no block for it to be week one of');
+  eq(rows.length, 2, 'a start date for somebody with no program is not a row — there is no block for it to be week one of');
 }
 
 /* ── a row this build cannot read costs only itself ───────────────────── */

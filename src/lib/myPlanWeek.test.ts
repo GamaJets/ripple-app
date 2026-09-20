@@ -1,7 +1,7 @@
 // The member's own half of the comparison their coach has been reading.
 // Compile with tsc, run with node.
 //
-// src/lib/planVsActual.ts reconciles the programme against the log and its only
+// src/lib/planVsActual.ts reconciles the program against the log and its only
 // importer is app/(trainer)/client-training.tsx. app/(client)/week.tsx marks a
 // day "Logged" when anything at all was logged on it — so a member can be
 // marked Logged on every training day for a month without having touched a
@@ -36,14 +36,14 @@ const note = (r: ReturnType<typeof myPlanWeek>) => r.note;
     'and it refuses the reading a silent empty list would produce');
 }
 {
-  const r = myPlanWeek(pva({ state: 'no-programme' }), 28);
-  eq(r.kind, 'no-programme', 'no coach programme is a real state, not a failure');
+  const r = myPlanWeek(pva({ state: 'no-program' }), 28);
+  eq(r.kind, 'no-program', 'no coach program is a real state, not a failure');
   ok(/this app builds from your goal/.test(note(r)),
     'and the member is told what the plan above them actually is');
 }
 {
   const r = myPlanWeek(pva({ movements: [] }), 28);
-  eq(r.kind, 'empty', 'a programme naming no movements has nothing to compare');
+  eq(r.kind, 'empty', 'a program naming no movements has nothing to compare');
 }
 {
   // The log came back at the row cap before reaching the start of the window,
@@ -98,7 +98,7 @@ const note = (r: ReturnType<typeof myPlanWeek>) => r.note;
   const r = myPlanWeek(pva({ movements: [mv('Back Squat', 'logged'), mv('Bench Press', 'logged')] }), 7);
   if (r.kind !== 'ready') { errors.push('an all-logged week compares'); } else {
     eq(r.missingNote, null, 'nothing is listed when nothing is missing');
-    eq(allLoggedNote(r, 7), 'Every movement your programme names has been logged in the last 7 days.',
+    eq(allLoggedNote(r, 7), 'Every movement your program names has been logged in the last 7 days.',
       'and the good state is said out loud rather than left as an absent list');
   }
 }
@@ -187,7 +187,7 @@ eq(allLoggedNote(myPlanWeek(pva({ state: 'unreadable' }), 7), 7), null,
   const r = myPlanWeek(out, 28);
   if (r.kind !== 'ready') { errors.push('the real reconciler produces a comparison'); } else {
     eq(r.logged, 1, 'one prescribed movement was logged');
-    eq(r.total, 2, 'out of the two the programme names');
+    eq(r.total, 2, 'out of the two the program names');
     eq(r.missing.names.join(), 'Romanian Deadlift', 'and the other is named');
     ok(/Leg Press/.test(r.offPlanNote ?? ''), 'with the movement they did instead reported as their own');
   }

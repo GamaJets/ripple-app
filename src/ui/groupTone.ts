@@ -8,7 +8,7 @@
 // never instead of it, which is also why two groups sharing a hue is
 // survivable: five hues, more than five groups, and the word is always there.
 //
-// Keyed on the group as the programme's own rows spell it (the coach's builder
+// Keyed on the group as the program's own rows spell it (the coach's builder
 // writes it from the catalogue's `muscle_group` when a movement is added),
 // lower-cased so 'Legs' and 'legs' agree.
 import type { Tone } from './kit';
