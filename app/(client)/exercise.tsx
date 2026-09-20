@@ -59,10 +59,11 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Section, SectionHead, Notice, Ghost, PageHead, Flag, Cta, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, value } from '../../src/theme/scale';
+import { Section, SectionHead, Notice, Ghost, PageHead, Flag, fig, TonedChip, IconPlate, HeroRing, CtaBright, Spark, ChartShell, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, font, type as ty, value } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
-import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
+import { ExerciseMuscles, groupTone } from '../../src/ui/ExerciseMuscles';
+import { BACK_ICON } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
@@ -92,7 +93,8 @@ import { useScrollPad } from '../../src/ui/keyboardPad';
 import { pickFormClip, sendFormClip, fetchFormClip, deleteFormClip, type FormClip } from '../../src/ui/formClips';
 import { MEMBER_CONSENT_NOTE, clipRefusal, clipRefusalLine } from '../../src/lib/formCheck';
 import { useSettings } from '../../src/ui/settings';
-import { exerciseIndex } from '../../src/lib/exerciseHistory';
+import { exerciseIndex, exerciseOutings } from '../../src/lib/exerciseHistory';
+import { bestSetLabel } from '../../src/lib/bestSet';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 // What this member's own coach says about this movement, every time, to
 // everybody they train. Separate from the note on a particular programme day,
@@ -109,7 +111,7 @@ import { tapLight } from '../../src/ui/haptics';
 // be a second answer to "what is a personal record", and the runner's own
 // comments explain at length why there must be exactly one.
 import { isWhole } from '../../src/ui/loadStatus';
-import { plain, liftIn, liftLabel, readLift } from '../../src/lib/units';
+import { plain, liftIn, liftLabel, readLift, est1RMIn } from '../../src/lib/units';
 import { readHold, setListLabel, isTimedPrescription } from '../../src/lib/timedSets';
 import { est1RM } from '../../src/lib/streaks';
 import { priorBest1RM } from '../../src/lib/progression';
@@ -266,6 +268,26 @@ export default function ExerciseScreen() {
       : null),
     [log, weightSeries, slug, logStatus],
   );
+  /* ── the movement's best set, day by day ─────────────────────────────────
+     The picture over the trail: each dated day's best set as its estimated
+     1RM — `best1RMKg`, the figure src/lib/exerciseHistory.ts already folds per
+     outing through the app's one Epley — oldest first, in the member's unit.
+     A bodyweight or held day has no such figure and stays NULL, which Spark
+     draws as a gap rather than a dip to nought. An undated outing is left out:
+     a point needs a place on the axis and src/lib/chartAxis.ts will not invent
+     one. Whether any of this is drawn at all is ChartShell's decision below,
+     on `logStatus` — a line through half a log is a wrong line. */
+  const bestSeries = useMemo(() => {
+    const days = exerciseOutings(log, name, weightSeries).filter((o) => o.day != null).reverse();
+    let top: (typeof days)[number] | null = null;
+    for (const o of days) if (o.best1RMKg != null && (top == null || o.best1RMKg > (top.best1RMKg ?? 0))) top = o;
+    return {
+      data: days.map((o) => est1RMIn(o.best1RMKg, wu)),
+      labels: days.map((o) => o.day as string),
+      points: days.filter((o) => o.best1RMKg != null).length,
+      top: top?.bestSet ?? null,
+    };
+  }, [log, name, weightSeries, wu]);
   const [saving, setSaving] = useState(false);
 
   // The identity a set is written under: the catalogue's spelling once the
@@ -567,13 +589,30 @@ export default function ExerciseScreen() {
      that picture does and does not claim. */
   const guide = detail ? (
     <>
+      {/* The picture leads the written guide: WHERE the movement lands is
+          read at a glance and the steps are read once. Gated on the catalogue
+          naming SOMETHING. A row that names no muscles is a gap in the
+          catalogue, and a heading over an empty body would state the movement
+          works nothing. */}
+      {detail.primaryMuscles.length || detail.secondaryMuscles.length ? (
+        <Section>
+          <SectionHead title="Muscles Worked" />
+          <ExerciseMuscles primary={detail.primaryMuscles} secondary={detail.secondaryMuscles} status={status} />
+        </Section>
+      ) : null}
+
       {detail.instructions.length ? (
         <Section>
           <SectionHead title="Instructions" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
           {detail.instructions.map((step, n) => (
-            <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-              <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
-              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{step}</Text>
+            <View key={n} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, marginBottom: sp.md }}>
+              {/* The numeral on the accent's plate, in Sora: the step number is
+                  how somebody finds their place again after looking up at the
+                  bar, and a grey 15pt digit was the quietest thing in the row. */}
+              <View style={{ minWidth: 30, minHeight: 30, borderRadius: radius.sm, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.xs }}>
+                <Text style={{ ...value(15), color: t.brandText }}>{n + 1}</Text>
+              </View>
+              <Text style={{ ...ty.body, color: t.ink2, flex: 1, marginTop: 3 }}>{step}</Text>
             </View>
           ))}
         </Section>
@@ -594,26 +633,17 @@ export default function ExerciseScreen() {
           Kept apart from the numbered steps rather than appended to them. A
           client following the sequence needs it in order; a client who
           already knows the movement wants the cue, and a cue buried at step
-          six is a cue they have stopped reading before they reach. */}
+          six is a cue they have stopped reading before they reach. Amber
+          plates, so the two lists are told apart before either is read. */}
       {detail.tips.length ? (
         <Section>
           <SectionHead title="Tips" note={`${detail.tips.length}`} />
           {detail.tips.map((tip, n) => (
-            <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.sm }}>
-              <Text style={{ ...ty.body, color: t.brand }}>·</Text>
-              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{tip}</Text>
+            <View key={n} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, marginBottom: sp.md }}>
+              <IconPlate icon="sparkle" tone="amber" size={30} />
+              <Text style={{ ...ty.body, color: t.ink2, flex: 1, marginTop: 3 }}>{tip}</Text>
             </View>
           ))}
-        </Section>
-      ) : null}
-
-      {/* Gated on the catalogue naming SOMETHING. A row that names no muscles
-          is a gap in the catalogue, and a heading over an empty body would
-          state the movement works nothing. */}
-      {detail.primaryMuscles.length || detail.secondaryMuscles.length ? (
-        <Section>
-          <SectionHead title="Muscles Worked" />
-          <ExerciseMuscles primary={detail.primaryMuscles} secondary={detail.secondaryMuscles} status={status} />
         </Section>
       ) : null}
     </>
@@ -716,6 +746,36 @@ export default function ExerciseScreen() {
           : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your program, ask them how they want it done.'} />
   );
 
+  /* ── the demonstration as the page's hero ────────────────────────────────
+     The mockups open a training page on a picture in a 24pt card under the
+     hero shadow (ClientTrain's programme image), and the demonstration is this
+     page's picture. Only a PICTURE gets the card: the loading line and the
+     three "there is nothing to show, and why" notices are sentences, and a
+     sentence in a hero frame reads as a demonstration that failed to load —
+     the exact claim those notices exist to refuse. */
+  // whole-ok: this only mirrors `demonstration`'s own first two arms to decide
+  // whether a FRAME goes round it — no figure, count or "nothing here" hangs
+  // off it, and a 'partial' detail read still holds a real picture to frame.
+  const hasMedia = status !== 'loading' && status !== 'error' && !!(clip || animUrl || frames.length || equipmentUrl);
+  const heroMedia = hasMedia ? (
+    <View style={{ marginTop: sp.lg, backgroundColor: t.surface, borderRadius: radius.xl, padding: sp.sm, ...elevation.hero }}>
+      {demonstration}
+    </View>
+  ) : (
+    <View style={{ marginTop: sp.lg }}>{demonstration}</View>
+  );
+
+  /* ── how the catalogue files it, as chips ────────────────────────────────
+     The muscle group in ITS tone — the same one the library's filter row and
+     rows use, from src/ui/ExerciseMuscles.tsx — and the attributes in the
+     neutral plate, so the one coloured chip is the one that names a group. */
+  const chipRow = detail && (detail.group || chips.length) ? (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+      {detail.group ? <TonedChip label={detail.group} tone={groupTone(detail.group)} /> : null}
+      {chips.map((c) => <TonedChip key={c} label={c} tone="neutral" />)}
+    </View>
+  ) : null;
+
   /* ── what your coach says about this one ─────────────────────────────────
      Drawn only when there IS a cue. Absence is silent on purpose:
      a member whose coach has written none, and a member whose gym has
@@ -725,10 +785,18 @@ export default function ExerciseScreen() {
      different and does say so, because the alternative is a member
      standing at the machine who is not shown the one thing their coach
      wanted them to remember and has no way to know. */
-  const cueBlock = coachCue ? (
-    <View style={{ marginTop: sp.lg, padding: sp.lg, borderRadius: radius.md, backgroundColor: t.surface2 }}>
-      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>From your coach</Text>
-      <Text style={{ ...ty.body, color: t.ink }} accessibilityLabel={`From your coach: ${coachCue}`}>{coachCue}</Text>
+  // `onGround`: on the page's grey ground it is a card of its own, with the
+  // card shadow, because surface2 is two points of grey from the ground and the
+  // coach's one sentence was the faintest block on the page. Inside the set
+  // view's card it stays the inset block it was.
+  const cueBlock = (onGround: boolean) => coachCue ? (
+    <View style={{ marginTop: sp.lg, padding: sp.lg, borderRadius: radius.lg, flexDirection: 'row', alignItems: 'flex-start', gap: sp.md,
+      ...(onGround ? { backgroundColor: t.surface, ...elevation.card } : { backgroundColor: t.surface2 }) }}>
+      <IconPlate icon="message" tone="blue" size={36} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>From your coach</Text>
+        <Text style={{ ...ty.body, color: t.ink }} accessibilityLabel={`From your coach: ${coachCue}`}>{coachCue}</Text>
+      </View>
     </View>
   ) : cueFailed ? (
     <View style={{ marginTop: sp.lg }}>
@@ -786,7 +854,7 @@ export default function ExerciseScreen() {
           return <Text style={{ ...ty.label, color: t.ink3 }}>{clipRefusalLine(stop)}</Text>;
         }
         return (<>
-          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>Send your coach a form check</Text>
+          <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>Send your coach a form check</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{MEMBER_CONSENT_NOTE}</Text>
           <TextInput
             value={clipNote}
@@ -897,9 +965,14 @@ export default function ExerciseScreen() {
   );
 
   const shownName = display?.name.text || exName || 'Exercise';
+  // The day names carrying the night values, for the one shared control the
+  // set view draws on the night ground (`SetKindChip` reads `t.ink`, `t.ink3`,
+  // `t.ring` and the accent pair). A spread, not a second theme: every value in
+  // it is a token the palette already measured against `night`.
+  const nightTheme = { ...t, ink: t.nightInk, ink3: t.nightInk2, ring: t.nightInk2, brand: t.brandBright, brandInk: t.brandDeep };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: inSet ? t.night : t.bg }} edges={['top']}>
       {/* `automaticallyAdjustKeyboardInsets` and a dismissable keyboard, because
           this scroller now holds a text field — the form-check question — and
           check:keyboard caught it sitting behind the keyboard.
@@ -915,75 +988,109 @@ export default function ExerciseScreen() {
         keyboardDismissMode="interactive"
       >
         {view === 'set' ? (
-          /* ── page 6: Workout Tracking ─────────────────────────────────── */
+          /* ── page 6: Workout Tracking, in night focus mode ────────────────
+             The approved ClientWorkout mockup: the whole screen on the night
+             ground, the clock inside a ring, the movement in Sora, a pip per
+             prescribed set, reps and load as two night tiles, the bright
+             button and a plain Skip. Everything on the ground uses the night
+             inks; what is left over — a record, the injury line, the coach's
+             cue, the form check — sits in ONE ordinary card under the button,
+             where the day tokens are right again. */
           <>
-            {nav('Workout Tracking', leaveSets, 'Back to the exercise')}
-            {/* The clock is the figure. One Text, one spoken sentence, and
-                which clock it is said in words above the digits — a resting
-                member and a working member are looking at the same digits. */}
-            <View accessible accessibilityLabel={`${rest > 0 ? 'Rest' : 'Set'} ${restClock(rest > 0 ? rest : elapsed)}`}
-              style={{ alignItems: 'center', marginTop: sp.xl }}>
-              <Text style={{ ...ty.micro, color: rest > 0 ? t.brand : t.ink3 }}>{rest > 0 ? 'Rest' : 'Set'}</Text>
-              <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(56), color: t.ink, marginTop: sp.xs }}>
-                {restClock(rest > 0 ? rest : elapsed)}
-              </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+              {/* PageHead's shape, rebuilt on night: the kit's head draws its
+                  title in `t.ink`, which is near-black on this ground. */}
+              <Pressable accessibilityRole="button" accessibilityLabel="Back to the exercise" onPress={leaveSets}
+                style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: t.night2, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={BACK_ICON} size={18} color={t.nightInk} />
+              </Pressable>
+              <Text accessibilityRole="header" style={{ ...ty.page, color: t.nightInk, flex: 1, minWidth: 0, textAlign: 'center' }}>Workout Tracking</Text>
+              <View style={{ width: 44 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
+            </View>
+            {/* The clock is the figure. One ring, one spoken sentence, and
+                which clock it is said in words under the digits — a resting
+                member and a working member are looking at the same digits.
+                The ARC is the rest running down against the rest it started
+                from. A set being done has no target to be a fraction of, so it
+                is handed null and draws the track alone: an arc there would be
+                progress towards nothing. */}
+            <View style={{ alignItems: 'center', marginTop: sp.lg }}>
+              <HeroRing size={196}
+                value={rest > 0 ? rest / DEFAULT_REST_SEC : null}
+                figure={restClock(rest > 0 ? rest : elapsed)}
+                sub={rest > 0 ? 'Rest' : 'Set'}
+                spoken={`${rest > 0 ? 'Rest' : 'Set'} ${restClock(rest > 0 ? rest : elapsed)}`} />
             </View>
             {rest > 0 ? (
-              <View style={{ alignItems: 'center' }}>
+              <View style={{ alignItems: 'center', marginTop: sp.xs }}>
                 {/* Whose number this is. Nobody has set a rest for a movement
                     opened by name, so the fallback names itself rather than
                     borrowing a coach's authority. */}
-                <Text style={{ ...ty.caption, color: t.ink3 }}>App default of {DEFAULT_REST_SEC} seconds</Text>
+                <Text style={{ ...ty.caption, color: t.nightInk2 }}>App default of {DEFAULT_REST_SEC} seconds</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={skipRest}
                   hitSlop={8} style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Skip rest</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.nightInk3 }}>Skip rest</Text>
                 </Pressable>
               </View>
             ) : null}
-            <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.lg }}>{shownName}</Text>
-            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
-              {pastPlan
-                ? `All ${plannedSets} sets done`
-                : plannedSets != null ? `Set ${setNo} of ${plannedSets}` : `Set ${setNo}`}
-            </Text>
+            <Text style={{ ...ty.title, color: t.nightInk, textAlign: 'center', marginTop: sp.md }}>{shownName}</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: sp.sm, marginTop: sp.sm }}>
+              {/* A pip per PRESCRIBED set, lit up to the one being done. Only
+                  when a prescription arrived on the route: without one there
+                  is no total to draw pips towards, and the words alone say
+                  "Set 2". Decoration — the sentence beside them is the fact. */}
+              {plannedSets != null && plannedSets <= 10 ? (
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flexDirection: 'row', gap: 6 }}>
+                  {Array.from({ length: plannedSets }, (_, i) => (
+                    <View key={i} style={{ width: 30, height: 8, borderRadius: 4, backgroundColor: i < setNo ? t.brandBright : t.night2 }} />
+                  ))}
+                </View>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.nightInk2 }}>
+                {pastPlan
+                  ? `All ${plannedSets} sets done`
+                  : plannedSets != null ? `Set ${setNo} of ${plannedSets}` : `Set ${setNo}`}
+              </Text>
+            </View>
 
             {/* Reps and load as the two figures. They are boxes, not labels,
                 because they are what gets written: a figure a member cannot
                 correct is a figure they will log wrong rather than not log. */}
             <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.xl }}>
-              <Section style={{ flex: 1, marginTop: 0, alignItems: 'center' }}>
+              <View style={{ flex: 1, alignItems: 'center', backgroundColor: t.night2, borderRadius: radius.lg, paddingVertical: sp.lg, paddingHorizontal: sp.sm }}>
                 <TextInput
                   value={repsText}
                   onChangeText={setRepsText}
                   keyboardType="numeric"
                   placeholder={fig(null)}
-                  placeholderTextColor={t.ink3}
+                  placeholderTextColor={t.nightInk2}
                   accessibilityLabel={timedOn ? 'How long you held it, in seconds' : 'How many reps you did'}
-                  style={{ ...value(34), color: t.ink, textAlign: 'center', minWidth: 64, padding: 0 }}
+                  style={{ ...value(36), color: t.nightInk, textAlign: 'center', minWidth: 64, padding: 0 }}
                 />
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{timedOn ? 'Seconds' : 'Reps'}</Text>
-              </Section>
-              <Section style={{ flex: 1, marginTop: 0, alignItems: 'center' }}>
+                <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.xs }}>{timedOn ? 'Seconds' : 'Reps'}</Text>
+              </View>
+              <View style={{ flex: 1, alignItems: 'center', backgroundColor: t.night2, borderRadius: radius.lg, paddingVertical: sp.lg, paddingHorizontal: sp.sm }}>
                 <TextInput
                   value={loadText}
                   onChangeText={setLoadText}
                   keyboardType="decimal-pad"
                   placeholder={fig(null)}
-                  placeholderTextColor={t.ink3}
+                  placeholderTextColor={t.nightInk2}
                   accessibilityLabel={bwOn
                     ? (wu === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight')
                     : (wu === 'kg' ? 'Load in kilograms' : 'Load in pounds')}
-                  style={{ ...value(34), color: t.ink, textAlign: 'center', minWidth: 64, padding: 0 }}
+                  style={{ ...value(36), color: t.nightInk, textAlign: 'center', minWidth: 64, padding: 0 }}
                 />
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{bwOn ? `Added ${wu}` : wu}</Text>
-              </Section>
+                <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.xs }}>{bwOn ? `Added ${wu}` : wu}</Text>
+              </View>
             </View>
             {/* The same two answers about a set, in the same words, as the
                 row below the fold and the runner — one drawing of the
-                control, three keyboards. */}
-            <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap', justifyContent: 'center' }}>
+                control, three keyboards. It draws from the theme it is HANDED,
+                so on night it is handed the night inks under the day names. */}
+            <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap', justifyContent: 'center', marginTop: sp.sm }}>
               <SetKindChip
-                t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)}
+                t={nightTheme} on={bwOn} onToggle={() => setBwOn((v) => !v)}
                 label="Bodyweight set"
                 onLabel={`Bodyweight set — the box is what you added, in ${wu}`}
                 a11yHint={bwOn
@@ -991,7 +1098,7 @@ export default function ExerciseScreen() {
                   : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'}
               />
               <SetKindChip
-                t={t} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
+                t={nightTheme} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
                 label="Timed set"
                 onLabel="Timed set — the first box is seconds held"
                 a11yHint={timedOn
@@ -1002,32 +1109,32 @@ export default function ExerciseScreen() {
 
             <View style={{ marginTop: sp.xl }}>
               {pastPlan ? (
-                <Cta wide label="Finish" a11yLabel="Finish, back to the exercise" onPress={leaveSets} />
+                <CtaBright label="Finish" a11yLabel="Finish, back to the exercise" onPress={leaveSets} />
               ) : (
-                <Cta wide label="Complete Set" disabled={saving}
+                <CtaBright label="Complete Set" disabled={saving}
                   a11yLabel={`Complete set ${setNo}${plannedSets != null ? ` of ${plannedSets}` : ''}`}
                   onPress={() => { void completeSet(); }} />
               )}
             </View>
             {!pastPlan ? (
-              // Plain, under the green one, as the board draws it. Nothing is
+              // Plain, under the bright one, as the mockup draws it. Nothing is
               // written by a skip, so nothing is asked first; it moves the
               // count on and starts the next set's clock.
               <Pressable accessibilityRole="button" accessibilityLabel={`Skip set ${setNo}`} onPress={() => advance(false)}
-                style={{ alignSelf: 'stretch', alignItems: 'center', paddingVertical: sp.md, marginTop: sp.sm, minHeight: 44, justifyContent: 'center' }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Skip</Text>
+                style={{ alignSelf: 'stretch', alignItems: 'center', paddingVertical: sp.md, marginTop: sp.xs, minHeight: 46, justifyContent: 'center' }}>
+                <Text style={{ ...ty.head, ...font('600'), color: t.nightInk2 }}>Skip</Text>
               </Pressable>
             ) : null}
 
-            {prMsg ? (
-              <View style={{ marginTop: sp.md }}>
-                <Flag tone={t.brand}>{prMsg}</Flag>
-              </View>
+            {prMsg || injuryLine || coachCue || cueFailed || clipOffer || unsentLine ? (
+              <Section>
+                {prMsg ? <Flag tone={t.brand}>{prMsg}</Flag> : null}
+                {injuryLine}
+                {cueBlock(false)}
+                {clipOffer}
+                {unsentLine}
+              </Section>
             ) : null}
-            {injuryLine}
-            {cueBlock}
-            {clipOffer}
-            {unsentLine}
           </>
         ) : view === 'demo' ? (
           /* ── page 5: Exercise Demo ────────────────────────────────────── */
@@ -1043,7 +1150,7 @@ export default function ExerciseScreen() {
             {display?.note ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{display.note}</Text>
             ) : null}
-            <View style={{ marginTop: sp.lg }}>{demonstration}</View>
+            {heroMedia}
             {FRAMES_ARE_UNHOSTED && frames.length ? (
               <View style={{ marginTop: sp.sm }}>
                 <Flag tone={t.warn}>Reference frames are served from the source dataset — not for release.</Flag>
@@ -1068,18 +1175,7 @@ export default function ExerciseScreen() {
                   {display?.description ? (
                     <Text style={{ ...ty.body, color: t.ink, marginBottom: sp.md }}>{display.description.text}</Text>
                   ) : null}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                    {detail.group ? (
-                      <View style={{ backgroundColor: t.brand, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{detail.group}</Text>
-                      </View>
-                    ) : null}
-                    {chips.map((c) => (
-                      <View key={c} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{c}</Text>
-                      </View>
-                    ))}
-                  </View>
+                  {chipRow}
                 </Section>
 
                 {/* What the movement is FOR, and how it is filed. Last, because it is
@@ -1090,11 +1186,7 @@ export default function ExerciseScreen() {
                       <>
                         <SectionHead title="Good For" />
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: detail.tags.length ? sp.lg : 0 }}>
-                          {detail.goals.map((g) => (
-                            <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{cap(g)}</Text>
-                            </View>
-                          ))}
+                          {detail.goals.map((g) => <TonedChip key={g} label={cap(g)} tone="brand" />)}
                         </View>
                       </>
                     ) : null}
@@ -1102,11 +1194,7 @@ export default function ExerciseScreen() {
                       <>
                         <SectionHead title="Tags" />
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                          {detail.tags.map((g) => (
-                            <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                              <Text style={{ ...ty.caption, color: t.ink3 }}>{cap(g)}</Text>
-                            </View>
-                          ))}
+                          {detail.tags.map((g) => <TonedChip key={g} label={cap(g)} tone="neutral" />)}
                         </View>
                       </>
                     ) : null}
@@ -1118,82 +1206,109 @@ export default function ExerciseScreen() {
         ) : (
           /* ── page 4: Workout View ─────────────────────────────────────── */
           <>
-            {nav(shownName, goBack, 'Back')}
-            {/* The reader's own language where the catalogue has it, English
+            {nav('Exercise', goBack, 'Back')}
+            {/* HERO: the demonstration in the hero card, then the movement's
+                name in Sora at the leading edge with how it is filed as chips.
+                The reader's own language where the catalogue has it, English
                 where it does not — and `display.note` says which, so an
                 English name among German ones is never passed off as the German
                 one. The identity is still `name`: that is what this screen was
                 opened with and what a logged set is written under. */}
-            <View style={{ alignItems: 'center', marginTop: sp.xl }}>
-              <Text style={{ ...ty.title, color: t.ink, textAlign: 'center' }}>{shownName}</Text>
-              {prescription ? (
-                <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 2 }}>{prescription}</Text>
-              ) : null}
-              {display?.note ? (
-                <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{display.note}</Text>
-              ) : null}
-            </View>
-
-            <View style={{ marginTop: sp.lg }}>{demonstration}</View>
+            {heroMedia}
             {FRAMES_ARE_UNHOSTED && frames.length ? (
               <View style={{ marginTop: sp.sm }}>
                 <Flag tone={t.warn}>Reference frames are served from the source dataset — not for release.</Flag>
               </View>
             ) : null}
-
-            {/* The board's three round controls: start, in the accent; the
-                demo and another movement in ink. The third is the Exercise
-                Library this screen has always linked to at its foot, moved up
-                to where the board puts it. Every one of them is named, since
-                none has a word on it. */}
-            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: sp.xl, marginTop: sp.xl }}>
-              <Pressable accessibilityRole="button" accessibilityLabel="Start a set"
-                accessibilityHint="Opens the set tracker with a clock, reps and load"
-                onPress={startSets}
-                style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                <View style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: t.brandInk }} />
-              </Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel="Exercise demo"
-                accessibilityHint="The demonstration with the written steps"
-                onPress={() => setView('demo')}
-                style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.ink, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="play" size={20} color={t.bg} />
-              </Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel="Another exercise"
-                accessibilityHint="Opens the exercise library"
-                onPress={() => router.push('/(client)/library')}
-                style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.ink, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="swap" size={20} color={t.bg} />
-              </Pressable>
+            <View style={{ marginTop: sp.lg }}>
+              <Text accessibilityRole="header" style={{ ...ty.display, color: t.ink }}>{shownName}</Text>
+              {prescription ? (
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{prescription}</Text>
+              ) : null}
+              {display?.note ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{display.note}</Text>
+              ) : null}
+              {chipRow ? <View style={{ marginTop: sp.md }}>{chipRow}</View> : null}
             </View>
 
-            {cueBlock}
+            {/* The three round controls, on a night plate: start in the bright
+                accent, the demo and another movement on night2. The third is
+                the Exercise Library this screen has always linked to at its
+                foot, moved up to where the board put it. Each now carries its
+                word under it — three unlabelled circles were three guesses —
+                and keeps the fuller spoken name it always had. */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-start', marginTop: sp.lg,
+              backgroundColor: t.night, borderRadius: radius.xl, paddingVertical: sp.lg, paddingHorizontal: sp.md, ...elevation.hero }}>
+              {([
+                { key: 'start', word: 'Start Set', said: 'Start a set', hint: 'Opens the set tracker with a clock, reps and load', icon: 'dumbbell', go: startSets },
+                { key: 'demo', word: 'Demo', said: 'Exercise demo', hint: 'The demonstration with the written steps', icon: 'play', go: () => setView('demo') },
+                { key: 'swap', word: 'Library', said: 'Another exercise', hint: 'Opens the exercise library', icon: 'swap', go: () => router.push('/(client)/library') },
+              ] as const).map((c) => {
+                const lead = c.key === 'start';
+                return (
+                  <Pressable key={c.key} accessibilityRole="button" accessibilityLabel={c.said} accessibilityHint={c.hint}
+                    onPress={c.go} style={{ flex: 1, alignItems: 'center', gap: sp.sm }}>
+                    <View style={{ width: lead ? 64 : 56, height: lead ? 64 : 56, marginTop: lead ? 0 : 4, borderRadius: radius.pill,
+                      backgroundColor: lead ? t.brandBright : t.night2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name={c.icon} size={lead ? 26 : 22} color={lead ? t.brandDeep : t.nightInk} />
+                    </View>
+                    <Text style={{ ...ty.micro, color: lead ? t.nightInk : t.nightInk2, textAlign: 'center' }}>{c.word}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {cueBlock(true)}
             {injuryLine}
 
-            {/* ── how to do it, without opening the demo ───────────────────
-                The steps, the tips and the body, straight under the controls
-                — the board's page 4 stops at the three round controls, and a
-                member standing at the machine was pressing "demo" to find out
-                how the movement goes. The coach's cue and the injury caution
-                keep their place ABOVE the catalogue's steps: one is the person
-                who trains them and the other is a safety line, and both are a
-                few lines where the steps are a page. */}
+            {/* ── INFOGRAPHICS: the body, then the member's own line ─────────
+                `guide` opens on the muscle picture and carries the steps and
+                the tips under it. The coach's cue and the injury caution keep
+                their place ABOVE the catalogue's words: one is the person who
+                trains them and the other is a safety line, and both are a few
+                lines where the steps are a page. */}
             {guide}
+
+            {/* ── the best set, over time ───────────────────────────────────
+                Drawn only on a WHOLE read with a movement on record; every
+                other state of the log already has its sentence in the trail's
+                card below, and saying it twice on one page reads as two
+                faults. Inside that, ChartShell holds the two-point rule: one
+                loaded day is a sentence, not a line. */}
+            {isWhole(logStatus) && summary ? (
+              <Section>
+                <SectionHead title="Best Set Over Time" note={`Est. 1RM · ${wu}`} />
+                <ChartShell status={logStatus} points={bestSeries.points}
+                  emptyLine="No set of this with a load on the bar is on record yet, so there is no best set to chart."
+                  onePointLine="One day with a loaded set so far. The line appears from the second.">
+                  <Spark area data={bestSeries.data} labels={bestSeries.labels} unit={wu} />
+                  {bestSeries.top ? (
+                    <View style={{ marginTop: sp.md }}>
+                      <TonedChip icon="trophy" label={`Best ${bestSetLabel({ reps: bestSeries.top.reps }, liftLabel(bestSeries.top.loadKg, wu), null)}`} />
+                    </View>
+                  ) : null}
+                </ChartShell>
+              </Section>
+            ) : null}
 
             {/* ── log a set of it, here ─────────────────────────────────────
                 The quick row, for a set already done: the whole point of this
                 screen being reachable from a machine, and still here under the
-                tracker for the member who did not start a clock. */}
+                tracker for the member who did not start a clock. How it logs
+                is folded away — the row's own boxes and ticks say it, and the
+                paragraph was pushing them down the page. */}
             {name ? (
               <Section>
-                <SectionHead title="Log a Set" />
-                <Text style={{ ...ty.label, color: t.ink3 }}>
-                  Straight into today, without going back to Train. Leave the load box empty for a
-                  bodyweight set, or tick Timed for a hold.
-                </Text>
+                <SectionHead title="Log a Set" note="Into today" />
                 <LogSetRow t={t} unit={wu} onLog={(set) => { void logOne(set); }} />
                 {clipOffer}
                 {unsentLine}
+                <Expandable title="How This Logs">
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    Straight into today, without going back to Train. Leave the load box empty for a
+                    bodyweight set, or tick Timed for a hold.
+                  </Text>
+                </Expandable>
               </Section>
             ) : null}
 
@@ -1233,8 +1348,7 @@ export default function ExerciseScreen() {
                 </Flag>
               ) : (
                 <Text style={{ ...ty.body, color: t.ink2 }}>
-                  You have not logged this movement yet. The first set you log above starts the trail —
-                  every day you do it, the sets, the reps and the load as they were recorded.
+                  You have not logged this movement yet. The first set you log starts the trail.
                 </Text>
               )}
             </Section>

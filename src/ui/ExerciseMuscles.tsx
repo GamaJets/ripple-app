@@ -48,14 +48,42 @@
 import { useMemo } from 'react';
 import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from './components';
-import { Flag } from './kit';
+import { Flag, type Tone } from './kit';
 import { isWhole, type LoadStatus } from './loadStatus';
 import { MuscleBody } from './MuscleBody';
 import { layerNames, type BodySide } from './muscleArt';
-import { sp, radius, type as ty } from '../theme/scale';
+import { sp, radius, grown, font, type as ty } from '../theme/scale';
 import { rampFor } from '../lib/bodyHeat';
 import { approximations, drawnIntensity, unmapped } from '../lib/muscleMap';
 import { catalogueValue as cap } from '../lib/format';
+
+/**
+ * The tone a muscle GROUP is drawn in, wherever a group is a chip.
+ *
+ * One map, here, because the group chip sits beside this file's picture on
+ * both screens that draw it — the library's filter row, its rows, and the
+ * exercise's own chips — and a Chest that is blue in the filter and purple on
+ * the row it filtered to is two groups to the eye. The hues are the approved
+ * mockup's (Chest blue, Back teal, Shoulders purple, arms orange); the rest are
+ * spread over what is left so neighbours in the alphabetical row differ.
+ *
+ * The BODY is not recoloured by this. Its ramp is src/lib/bodyHeat.ts's and
+ * means "leads" and "assists" on every body in the app; a chip's hue names the
+ * group and says nothing about intensity.
+ *
+ * A group nobody has listed — a coach types the clip's group by hand — is
+ * 'neutral', never a guess at the nearest one.
+ */
+const GROUP_TONES: Readonly<Record<string, Tone>> = {
+  chest: 'blue', back: 'teal', shoulders: 'purple',
+  arms: 'orange', biceps: 'orange', triceps: 'orange', forearms: 'amber',
+  legs: 'pink', quads: 'pink', quadriceps: 'pink', hamstrings: 'purple', glutes: 'red', calves: 'teal',
+  core: 'amber', abs: 'amber', abdominals: 'amber',
+  cardio: 'red', 'full body': 'brand', neck: 'blue',
+};
+export function groupTone(group: string | null | undefined): Tone {
+  return GROUP_TONES[(group || '').trim().toLowerCase()] ?? 'neutral';
+}
 
 /** Intensity a primary mover is drawn at: the top of the ramp. */
 const PRIMARY = 1;
@@ -199,15 +227,19 @@ export function ExerciseMuscles({ primary, secondary, status, compact = false, s
           'partial' the body draws every muscle in one band, and a key to two
           bands beside it would describe a picture that is not there. */}
       {drawBodies && graded && lit ? (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: sp.md, marginTop: sp.md }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: sp.sm, marginTop: sp.md }}>
           {([
             { label: 'Primary', said: 'Primary movers, the darker band', color: bands[3].color },
             { label: 'Also', said: 'Also worked, the lighter band', color: bands[1].color },
           ] as const).map((k) => (
-            <View key={k.label} accessible accessibilityLabel={k.said}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs }}>
-              <View style={{ width: 10, height: 10, borderRadius: radius.sm, backgroundColor: k.color }} />
-              <Text style={{ ...ty.micro, color: t.ink2 }}>{k.label}</Text>
+            // The kit's chip — TonedChip's height, radius and bold micro label —
+            // built here because its plate is a Tone's and this swatch is the
+            // body ramp's own band, which is not one. The plate stays neutral
+            // so the only colour on the chip is the colour on the body.
+            <View key={k.label} accessible accessibilityRole="text" accessibilityLabel={k.said}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3, borderRadius: grown(26) / 2, backgroundColor: t.surface3 }}>
+              <View style={{ width: 10, height: 10, borderRadius: radius.pill, backgroundColor: k.color }} />
+              <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: t.ink2 }}>{k.label}</Text>
             </View>
           ))}
         </View>
@@ -218,11 +250,11 @@ export function ExerciseMuscles({ primary, secondary, status, compact = false, s
       {primaryWords || secondaryWords ? (
         <Text style={{ ...ty.body, color: t.ink2, marginTop: drawBodies ? sp.md : 0 }}>
           {primaryWords ? (
-            <Text style={{ color: t.ink }}><Text style={{ fontWeight: '600' }}>Primary: </Text>{primaryWords}</Text>
+            <Text style={{ color: t.ink }}><Text style={font('600')}>Primary: </Text>{primaryWords}</Text>
           ) : null}
           {primaryWords && secondaryWords ? ' · ' : null}
           {secondaryWords ? (
-            <><Text style={{ fontWeight: '600' }}>Also: </Text>{secondaryWords}</>
+            <><Text style={font('600')}>Also: </Text>{secondaryWords}</>
           ) : null}
         </Text>
       ) : null}

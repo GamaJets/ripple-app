@@ -60,9 +60,9 @@ import { clipOwner, type ClipOwner } from '../../src/lib/clipOwner';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useClientData } from '../../src/ui/clientData';
 import { tapLight, notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead, Field } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead, Field, PageHead, IconPlate, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
-import { ExerciseMuscles } from '../../src/ui/ExerciseMuscles';
+import { ExerciseMuscles, groupTone } from '../../src/ui/ExerciseMuscles';
 import { catalogueValue as cap, num } from '../../src/lib/format';
 // expo-image is required through src/ui/nativeModules.ts, never imported. Its
 // entry point resolves to `requireNativeModule('ExpoImage')`, which THROWS on a
@@ -71,14 +71,14 @@ import { catalogueValue as cap, num } from '../../src/lib/format';
 // takes today's bundle and has no ExpoImage in it. A bare import would take
 // this whole screen down while it loaded. React Native's own <Image> is the
 // fallback and is in every binary ever built.
-import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, elevation, grown, font, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, readLift } from '../../src/lib/units';
 // The sentence a bodyweight set reads as, in the one place it is written.
 import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
-import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * `level` is a ladder, not a tally.
@@ -131,6 +131,35 @@ const HIDDEN_TAGS = new Set(['knee_safe', 'shoulder_safe', 'lower_back_safe', 'n
  * says which, and the spoken label says what the tap will DO, because "Beginner,
  * selected" does not tell a screen-reader user that the next double-tap clears it.
  */
+/**
+ * A filter chip: a TonedChip's plate that can be pressed.
+ *
+ * Off, it is the tone's pale plate under the tone's INK — the muscle-group row
+ * hands each group the tone src/ui/ExerciseMuscles.tsx gives it, so Chest is
+ * the same blue here, on the row it filters to and on the exercise's own page;
+ * a facet value has no hue of its own and is neutral. ON, it is ink on the
+ * ground colour, which is how the kit's Segmented says "selected": a lit chip
+ * that kept its hue would be one pastel among twelve, and a filter a member
+ * cannot see is on is the failure FacetRow's header describes. The kit's
+ * TonedChip is not pressable and its `toneOf` is not exported, so the two
+ * colours are read off the theme here by the same rule.
+ */
+function FilterChip({ label, tone, on, onPress, a11yLabel, t }: {
+  label: string; tone: Tone; on: boolean; onPress: () => void; a11yLabel: string; t: Theme;
+}) {
+  const c = tone === 'brand' ? { soft: t.brandSoft, ink: t.brandText }
+    : tone === 'neutral' ? { soft: t.surface3, ink: t.ink2 }
+    : { soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={a11yLabel} accessibilityState={{ selected: on }}
+      // 36pt tall; the slop makes it 44 without moving the rows round it.
+      hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+      style={{ minHeight: grown(36), paddingHorizontal: sp.lg, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: on ? t.ink : c.soft }}>
+      <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: on ? t.surface : c.ink }}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function FacetRow({ label, options, value, onPick, t }: {
   label: string;
   options: string[];
@@ -147,13 +176,8 @@ function FacetRow({ label, options, value, onPick, t }: {
           const on = value === o;
           const shown = cap(o);
           return (
-            <Pressable key={o} onPress={() => onPick(on ? null : o)}
-              accessibilityRole="button"
-              accessibilityLabel={on ? `${shown}. Tap to stop filtering by ${label.toLowerCase()}` : `Show ${shown} movements only`}
-              accessibilityState={{ selected: on }}
-              style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-              <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{shown}</Text>
-            </Pressable>
+            <FilterChip key={o} t={t} label={shown} tone="neutral" on={on} onPress={() => onPick(on ? null : o)}
+              a11yLabel={on ? `${shown}. Tap to stop filtering by ${label.toLowerCase()}` : `Show ${shown} movements only`} />
           );
         })}
       </ScrollView>
@@ -553,33 +577,27 @@ export default function Library() {
   <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
    <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-     <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
-     <View style={{ flex: 1 }}>
-      <Text style={{ ...ty.micro, color: t.ink3 }}>How-to clips from your coach</Text>
-      <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
-     </View>
-    </View>
+    <PageHead title="Exercise Library" onBack={goBack} />
 
-    {/* ── the field is the screen ────────────────────────────────────── */}
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg }}>
-     <Icon name="search" size={16} color={t.ink3} />
+    {/* ── the field is the screen ──────────────────────────────────────
+        A pill on the grey ground, so it is a white one under the card shadow:
+        surface2 is two points of grey from the ground and the one control the
+        page is built round was the faintest thing on it. */}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(50), backgroundColor: t.surface, borderRadius: radius.pill, paddingHorizontal: sp.lg, marginTop: sp.lg, ...elevation.card }}>
+     <Icon name="search" size={18} color={t.ink3} />
      <TextInput value={q} onChangeText={setQ} placeholder="Search exercises…" placeholderTextColor={t.ink3}
-      accessibilityLabel="Search exercises"
+      accessibilityLabel="Search exercises" returnKeyType="search"
       style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
      {q ? <Pressable onPress={() => setQ('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search"><Text style={{ ...ty.head, color: t.ink3 }}>×</Text></Pressable> : null}
     </View>
 
+    {/* One tone per muscle group, the same one the rows below wear. */}
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.md }} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.xs }}>
-     {groups.map((g) => {
-      const on = group.toLowerCase() === g.toLowerCase();
-      return (
-       <Pressable key={g} onPress={() => setGroup(g)} accessibilityRole="button" accessibilityLabel={g === 'All' ? 'Show every muscle group' : `Show ${g} only`} accessibilityState={{ selected: on }}
-        style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-        <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{g}</Text>
-       </Pressable>
-      );
-     })}
+     {groups.map((g) => (
+      <FilterChip key={g} t={t} label={g} tone={g === 'All' ? 'neutral' : groupTone(g)}
+       on={group.toLowerCase() === g.toLowerCase()} onPress={() => setGroup(g)}
+       a11yLabel={g === 'All' ? 'Show every muscle group' : `Show ${g} only`} />
+     ))}
     </ScrollView>
 
     <Section>
@@ -592,9 +610,6 @@ export default function Library() {
          is broken rather than that it is about something else. */}
      <SectionHead title={group === 'All' ? 'Clips from Your Coach' : `${group} Clips`}
       note={status === 'ready' && list.length ? `${list.length} clip${list.length === 1 ? '' : 's'}` : undefined} />
-     {status === 'ready' && list.length ? (
-      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap one to watch it — and to log the sets you just did.</Text>
-     ) : null}
 
      {/* The read failed, so nothing below this line is a statement about what
          the coach has uploaded. Anything the phone already had is still shown
@@ -609,23 +624,29 @@ export default function Library() {
      ) : null}
 
      {status === 'loading' && videos.length === 0 ? (
-      <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
-       <Icon name="video" size={26} color={t.ink3} />
-       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>Loading your coach's clips…</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+       <IconPlate icon="video" tone="neutral" />
+       <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Loading your coach's clips…</Text>
       </View>
      ) : list.length === 0 ? (
       // On 'error' the notice above has already said why the list is empty;
       // repeating it here as "no clips yet" would be the old lie again.
       status === 'error' ? null : (
-       <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
-        <Icon name="video" size={26} color={t.ink3} />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
+       // A plate and one line, not a tall centred block: with no clips filmed
+       // anywhere yet this is what most members see, and it was holding the
+       // catalogue — the part of the page that has something in it — below
+       // the first screenful.
+       <View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+        <IconPlate icon="video" tone="neutral" />
+        <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>
          {videos.length === 0
           ? 'No clips yet — they appear here as your coach uploads them.'
           : term && group !== 'All' ? `No clip in ${group} matches “${q.trim()}”.`
           : term ? `No clip matches “${q.trim()}”.`
           : `No clips filed under ${group}. Every ${group} movement we know is listed further down.`}
         </Text>
+        </View>
         {videos.length > 0 && filtering ? (
          <View style={{ marginTop: sp.md }}>
           <Ghost label="Clear Filters" onPress={() => { setQ(''); setGroup('All'); }} />
@@ -636,13 +657,12 @@ export default function Library() {
      ) : list.map((v, i) => (
       <View key={v.id}>
        {i > 0 ? <Rule /> : null}
-       <ListRow icon="video" title={v.name} note={rowNote(v)} onPress={() => show(v)} />
+       <ListRow icon="video" tone="blue" title={v.name} note={rowNote(v)} onPress={() => show(v)} />
       </View>
      ))}
     </Section>
 
     {/* ── every movement we know, clip or no clip ────────────────────────── */}
-    <Rule />
     <Section>
      <SectionHead
       title="All Exercises"
@@ -671,13 +691,13 @@ export default function Library() {
         ? `Show the filters. ${facetsOn} ${facetsOn === 1 ? 'is' : 'are'} on`
         : 'Show filters for difficulty, movement, direction, goal and label'}
        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
-       <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>
+       <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>
         {/* The count is in the closed label as well as the open panel. A
             filter a member forgot they set is indistinguishable, from a
             folded panel, from a catalogue that is missing movements. */}
         Filters{facetsOn > 0 ? ` · ${facetsOn} on` : ''}
        </Text>
-       <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>{facetsOpen ? 'Hide' : 'Show'}</Text>
+       <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>{facetsOpen ? 'Hide' : 'Show'}</Text>
       </Pressable>
       {facetsOpen ? (<>
        <FacetRow label="Difficulty" options={facets.levels} value={level} onPick={setLevel} t={t} />
@@ -785,7 +805,7 @@ export default function Library() {
           accessibilityLabel={[e.display.text, via ? `matched ${via}` : null, [e.group, e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' \u00b7 ')].filter(Boolean).join('. ')}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
          >
-          <View style={{ width: 52, height: 52, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: 60, height: 60, borderRadius: radius.md, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
            {thumb ? (
             <GuardedImage source={{ uri: thumb }} contentFit="contain" cachePolicy="disk"
              style={{ width: '100%', height: '100%' }} />
@@ -799,14 +819,20 @@ export default function Library() {
            {/* The reader's language where we have it. `e.name` is untouched
                and is still what the row navigates by — the exercise screen
                resolves a movement by the slug of its ENGLISH name. */}
-           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{e.display.text}</Text>
-           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
-            {/* The marker is on the row and not only on the detail screen,
-                because in a list of six hundred an unmarked English name among
-                German ones simply reads as the German name. Null, and so
-                absent, for a reader whose language the catalogue is in. */}
-            {[e.group, e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' · ')}
-           </Text>
+           <Text style={{ ...ty.head, color: t.ink }} numberOfLines={1}>{e.display.text}</Text>
+           {/* The group as a chip in its own tone — the filter row's tone —
+               and the rest of the line beside it. The chip never shrinks; the
+               caption does, because the group is what the row is scanned by. */}
+           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+            {e.group ? <TonedChip label={e.group} tone={groupTone(e.group)} /> : null}
+            <Text style={{ ...ty.caption, color: t.ink3, flex: 1, minWidth: 0 }} numberOfLines={1}>
+             {/* The marker is on the row and not only on the detail screen,
+                 because in a list of six hundred an unmarked English name among
+                 German ones simply reads as the German name. Null, and so
+                 absent, for a reader whose language the catalogue is in. */}
+             {[e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' · ')}
+            </Text>
+           </View>
            {/* Its OWN line, not another item on the one above. This is the
                sentence that stops a result reading as a bug — a member types
                "butt kicks", gets back a row titled Heel Flicks, and without
@@ -853,11 +879,11 @@ export default function Library() {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={close}
      accessibilityRole="button" accessibilityLabel="Close the clip" />
-    <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%', ...elevation.e2 }}>
+    <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: 20, paddingBottom: 30, maxHeight: '90%', ...elevation.e2 }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
       <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={1}>{open?.name}</Text>
       <Pressable onPress={close} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
-       <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Close</Text>
+       <Text style={{ ...ty.label, ...font('600'), color: t.ink3 }}>Close</Text>
       </Pressable>
      </View>
 
@@ -934,14 +960,18 @@ export default function Library() {
       <View style={{ marginTop: sp.md }}>
        <Cta label={saving ? 'Logging…' : 'Log to Today'} wide disabled={saving} onPress={logIt} />
       </View>
-      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-       Goes into today's log alongside your programme, so your calendar, streak and records all count it. Leave the weight blank for a bodyweight set.
-      </Text>
      </View>
 
-     <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.lg }}>
-      The clip plays here rather than in the browser, so a set you have already typed is still there when you go back. If a lift bothers you, use “Swap” on the workout screen for an alternative.
-     </Text>
+     {/* The two explanations, folded: the form above them says what it does,
+         and on a small phone they were what pushed Log to Today off the sheet. */}
+     <Expandable title="How This Works">
+      <Text style={{ ...ty.caption, color: t.ink3 }}>
+       Goes into today's log alongside your programme, so your calendar, streak and records all count it. Leave the weight blank for a bodyweight set.
+      </Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+       The clip plays here rather than in the browser, so a set you have already typed is still there when you go back. If a lift bothers you, use “Swap” on the workout screen for an alternative.
+      </Text>
+     </Expandable>
      </ScrollView>
     </View>
     </KeyboardAvoidingView>
