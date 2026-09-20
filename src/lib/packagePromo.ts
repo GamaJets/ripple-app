@@ -651,7 +651,7 @@ export const PROMO_IS_A_PERCENTAGE =
  * "does not work".
  */
 export const PROMO_IS_TYPED_AT_CHECKOUT =
-  'Your client types the code in the app, on the package itself, before the payment page opens. Give them the code and tell them to tap Have A Code when they subscribe.';
+  'Your client types the code in the app, on the package itself, before the payment page opens. Give them the code and tell them to tap Have a Code when they subscribe.';
 
 /**
  * That Stripe holds these and this app does not.

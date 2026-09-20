@@ -297,8 +297,8 @@ export function linkActionLabel(f: LinkFacts, accountName?: string): string {
 /** The section's status word, or undefined when there is nothing to say. */
 export function linkStatusNote(f: LinkFacts): string | undefined {
   const s = linkState(f);
-  if (s === 'refused') return 'Signed out';
-  if (s === 'scopes_stale') return 'Needs permission';
+  if (s === 'refused') return 'Signed Out';
+  if (s === 'scopes_stale') return 'Needs Permission';
   if (s === 'live') return 'Connected';
   return undefined;
 }

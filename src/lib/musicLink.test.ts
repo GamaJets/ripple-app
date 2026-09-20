@@ -30,7 +30,7 @@ ok(linkActionLabel(never) === 'Connect', 'nothing granted offers Connect');
 ok(linkActionLabel(expired, 'Tim') === 'Reconnect', 'a refused token offers Reconnect');
 ok(linkActionLabel(expired, 'Tim') !== 'Tim', 'a refused token is NEVER labelled with the account name');
 ok(linkStatusNote(never) === undefined, 'nothing granted claims no status');
-ok(linkStatusNote(expired) === 'Signed out', 'a refusal is reported as Spotify signing them out');
+ok(linkStatusNote(expired) === 'Signed Out', 'a refusal is reported as Spotify signing them out');
 ok(linkStatusNote(expired) !== 'Connected', 'a refused token must not read Connected');
 
 // ── the remembered flag alone may not open a Web API path ───────────────────
@@ -53,7 +53,7 @@ ok(linkState(facts({ remembersToken: true, refusal: '' })) === 'live', 'an empty
 const stale = facts({ remembersToken: true, scopesStale: true });
 ok(linkState(stale) === 'scopes_stale', 'a live token missing scopes is scopes_stale');
 ok(!canReachSpotify(stale), 'a token missing scopes may not be treated as usable');
-ok(linkStatusNote(stale) === 'Needs permission', 'a scope gap says so');
+ok(linkStatusNote(stale) === 'Needs Permission', 'a scope gap says so');
 const both = facts({ remembersToken: true, scopesStale: true, refusal: 'Spotify signed you out. Connect Spotify again.' });
 ok(linkState(both) === 'refused', 'a dead token is dead whatever its scopes claimed');
 ok(linkActionLabel(both, 'Tim') === 'Reconnect', 'a dead token asks for a sign-in, not for more permissions');

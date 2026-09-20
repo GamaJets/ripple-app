@@ -237,9 +237,9 @@ export function splitAgainstExisting(
 
 /** What the button says, so the count is a decision and not a surprise. */
 export function addButtonLabel(fresh: number, duplicates: number): string {
-  if (fresh === 0 && duplicates > 0) return 'You already offer all of these';
-  if (fresh === 0) return 'Nothing to add';
-  return `Add ${fresh} slot${fresh === 1 ? '' : 's'}`;
+  if (fresh === 0 && duplicates > 0) return 'You Already Offer All of These';
+  if (fresh === 0) return 'Nothing to Add';
+  return `Add ${fresh} Slot${fresh === 1 ? '' : 's'}`;
 }
 
 /** A plain summary of what is about to happen, for the line under the button. */

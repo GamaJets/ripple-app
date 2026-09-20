@@ -34,6 +34,12 @@ export interface WorkoutRow {
   /** Set by a coach logging a session for their client. The insert policy
    *  requires it to equal the coach's own id, so it cannot be forged. */
   logged_by?: string | null;
+  /** The booked PT session this training was done in, when it was done in one.
+   *  Null is the ordinary case — see supabase/parts/890. Read-only from here:
+   *  `entryToRow` deliberately does not write it, because it is a fact about a
+   *  WRITE and not about an entry, and src/ui/floorQueue.ts spreads it onto the
+   *  insert itself for exactly that reason. */
+  session_id?: string | null;
   /** Stamped by the guard_workout_attribution trigger when the client edits a
    *  workout their coach logged. Read-only from the app. */
   amended_at?: string | null;
@@ -72,6 +78,7 @@ export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   zones: r.zones ?? undefined,
   sessionMins: r.session_mins ?? undefined,
   loggedBy: r.logged_by ?? undefined,
+  sessionId: r.session_id ?? undefined,
   amendedAt: r.amended_at ?? undefined,
 });
 
@@ -98,3 +105,10 @@ export const PERSISTED_FIELDS: (keyof WorkoutEntry)[] =
   ['t', 'exercise', 'sets', 'bw', 'timed', 'feel', 'cardio', 'kcal', 'zones', 'sessionMins', 'loggedBy'];
 // `amendedAt` is deliberately absent, for the same reason `id` is: the server
 // assigns it. It comes back on the way in and is never sent on the way out.
+//
+// `sessionId` is absent on the same accounting and a slightly different one.
+// It is not the server's to assign, but it is not the ENTRY's either: it says
+// which booked hour a particular WRITE was made against, so a client logging
+// the same movement tomorrow must not inherit it, and the offline queue must
+// not re-send it onto a row it was never true of. src/ui/floorQueue.ts spreads
+// it onto the insert where it belongs, and says so in the same words.

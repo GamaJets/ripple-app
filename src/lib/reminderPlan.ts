@@ -70,7 +70,7 @@ export interface FixedReminder {
 
 export const FIXED_LABEL: Record<FixedKind, { title: string; body: string; route: string }> = {
   training: {
-    title: 'Time to train',
+    title: 'Time to Train',
     body: 'Your session is waiting. Even a short one keeps the week honest.',
     route: '/(client)/workouts',
   },
@@ -80,7 +80,7 @@ export const FIXED_LABEL: Record<FixedKind, { title: string; body: string; route
     route: '/(client)/scans',
   },
   photo: {
-    title: 'Progress photo',
+    title: 'Progress Photo',
     body: 'Same spot, same light, same time of day. That is what makes them comparable.',
     route: '/(client)/scans',
   },

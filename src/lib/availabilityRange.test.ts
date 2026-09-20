@@ -199,15 +199,15 @@ function HHMM_(min: number): string {
   const { fresh, duplicates } = splitAgainstExisting(all, all);
   eq(fresh.length, 0, 'a range entirely already offered adds nothing');
   eq(duplicates, 48, 'and every one is counted as a duplicate');
-  eq(addButtonLabel(0, 48), 'You already offer all of these', 'the button says so rather than "Add 0 slots"');
+  eq(addButtonLabel(0, 48), 'You Already Offer All of These', 'the button says so rather than "Add 0 Slots"');
   ok(rangeSummary(base, 0, 48)!.includes('nothing would change'), 'and so does the summary');
 }
 
 /* ── the count is on the button ─────────────────────────────────────────── */
 
-eq(addButtonLabel(48, 0), 'Add 48 slots', 'the number is a decision, not a surprise');
-eq(addButtonLabel(1, 0), 'Add 1 slot', 'and one reads as English');
-eq(addButtonLabel(0, 0), 'Nothing to add', 'and nothing reads as nothing');
+eq(addButtonLabel(48, 0), 'Add 48 Slots', 'the number is a decision, not a surprise');
+eq(addButtonLabel(1, 0), 'Add 1 Slot', 'and one reads as English');
+eq(addButtonLabel(0, 0), 'Nothing to Add', 'and nothing reads as nothing');
 
 /* ── what actually landed ───────────────────────────────────────────────── */
 

@@ -107,6 +107,16 @@ export interface WorkoutEntry {
    *  client. Absent means they logged it themselves. Attribution is not
    *  editable from either app — the database trigger refuses a change. */
   loggedBy?: string;
+  /** The booked PT session this training was logged against, when it was
+   *  logged against one. Absent is the ordinary case — a client's own workout,
+   *  a coach's own training, or an hour written up from a client's record
+   *  rather than from the session (supabase/parts/890).
+   *
+   *  Read-only here, like `amendedAt` and for a related reason: it is a fact
+   *  about the WRITE that made the row, so it is not in `PERSISTED_FIELDS` and
+   *  `entryToRow` does not send it. src/ui/floorQueue.ts puts it on the insert.
+   *  src/lib/loggedSession.ts is what reads it back. */
+  sessionId?: string;
   /** When the client changed something their coach had logged. Absent means
    *  untouched since. Server-set: the trigger stamps it, the app only reads it,
    *  which is why it is not in PERSISTED_FIELDS. */

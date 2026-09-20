@@ -1028,8 +1028,8 @@ ok(none.classes === 0 && none.fill === null && none.show === null, 'no classes y
 
 // ── one status vocabulary ──
 {
-ok(riskLabel('high') === 'At risk', '"Not delivering" is gone from the product');
-ok(riskLabel('ok') === 'On track', 'trainer "Healthy" and client "On track" are now the same word');
+ok(riskLabel('high') === 'At Risk', '"Not delivering" is gone from the product');
+ok(riskLabel('ok') === 'On Track', 'trainer "Healthy" and client "On Track" are now the same word');
 ok(riskLabel('watch') === 'Watch', 'the shared middle word survives');
 ok(riskLabel('idle') === 'Idle', 'idle is its own state');
 ok(riskLabel('something-new') === 'Idle', 'an unknown risk key reads as no assessment, not as a verdict');

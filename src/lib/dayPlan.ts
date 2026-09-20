@@ -62,10 +62,10 @@ export type PlannedDayType = 'training' | 'off' | 'rest' | 'deload';
 export const PLANNED_DAY_TYPES: readonly PlannedDayType[] = ['training', 'off', 'rest', 'deload'];
 
 export const DAY_TYPE_LABEL: Record<PlannedDayType, string> = {
-  training: 'Training day',
+  training: 'Training Day',
   off: 'Standard',
-  rest: 'Rest day',
-  deload: 'Deload day',
+  rest: 'Rest Day',
+  deload: 'Deload Day',
 };
 
 /** The first three are `DAY_TYPES` in app/(client)/nutrition.tsx, unchanged.

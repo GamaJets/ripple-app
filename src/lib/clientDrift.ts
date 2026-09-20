@@ -485,9 +485,9 @@ export function summariseDrift(list: Drift[] | null): DriftSummary | null {
 export function bandTitle(status: StatusLevel): string {
   switch (status) {
     case 'at_risk': return 'Drifting';
-    case 'idle': return 'Nothing recorded';
+    case 'idle': return 'Nothing Recorded';
     case 'watch': return 'Slipping';
-    default: return 'Holding their pattern';
+    default: return 'Holding Their Pattern';
   }
 }
 
