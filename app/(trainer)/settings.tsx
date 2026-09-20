@@ -78,11 +78,11 @@ import { useRouter } from 'expo-router';
 import { useTheme, useThemeControls } from '../../src/ui/components';
 import { metaByKey, paletteForScheme, type Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ListRow, PageHead, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, PageHead, Flag, IconPlate, Expandable, fig } from '../../src/ui/kit';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
 import { fmtDay } from '../../src/lib/format';
-import { sp, layout, hairline, type as ty, radius, elevation } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, radius, elevation, font } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import { useAuth, useSignOutAndSay } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
@@ -784,41 +784,21 @@ export default function TrainerSettings() {
             board's sample captions ("Pro Plan", "Apple Health, MyFitnessPal")
             are not reproduced as text. */}
         <Section>
-          <ListRow icon="me" title="Profile"
+          <ListRow icon="me" tone="brand" title="Profile"
             note={auth.loading ? 'Checking…' : (auth.user?.name || 'How clients see you')}
             onPress={() => router.push('/(trainer)/profile')} />
-          <ListRow icon="bell" title="Notifications"
+          <ListRow icon="bell" tone="amber" title="Notifications"
             note="Push, what you are told about, and quiet hours"
             onPress={jumpToNotifications} />
-          <ListRow icon="chart" title="Subscription"
+          <ListRow icon="chart" tone="orange" title="Subscription"
             note={plan ? `${plan} Plan` : 'Your plan, payment method and invoices'}
             onPress={() => router.push('/(trainer)/billing')} />
-          <ListRow icon="heart" title="Integrations"
+          <ListRow icon="heart" tone="pink" title="Integrations"
             note="Your watch and the apps that feed your day"
             onPress={() => router.push('/(trainer)/devices')} />
-          <ListRow icon="message" title="Help & Support"
+          <ListRow icon="message" tone="blue" title="Help & Support"
             note="Tell us what to improve, or ask for help"
             onPress={() => router.push('/(trainer)/feedback')} />
-        </Section>
-
-
-        {/* ── Log Out, in its own card under the rows ───────────────────────
-            Where the board puts it, and the same `useSignOutAndSay` fate the
-            Ghost at the foot of the old Signed-in card went through — the
-            confirmation and the "could not be ended" sentence are unchanged.
-            The board draws the words in red. This app does not: `t.crit` as
-            ink measures 3.03–4.05:1 on every palette (scripts/check-contrast.mjs),
-            so the mark carries the colour and the label stays ink, the same
-            split every Flag on this screen makes. No chevron, because it is an
-            action and not a screen. */}
-        <Section>
-          <Pressable onPress={signOut} accessibilityRole="button" accessibilityLabel="Log out"
-            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-            <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="lock" size={17} color={t.crit} />
-            </View>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>Log Out</Text>
-          </Pressable>
         </Section>
 
 
@@ -841,11 +821,9 @@ export default function TrainerSettings() {
                 accessibilityRole="radio" accessibilityState={{ selected: on }}
                 accessibilityLabel={`${row.label} appearance`}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={row.icon} size={17} color={on ? t.brand : t.ink3} />
-                </View>
-                <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: t.ink, flex: 1 }}>{row.label}</Text>
-                {on ? <Icon name="check" size={19} color={t.brand} /> : null}
+                <IconPlate icon={row.icon} tone={on ? 'brand' : 'neutral'} />
+                <Text style={{ ...ty.head, ...font(on ? '700' : '500'), color: t.ink, flex: 1 }}>{row.label}</Text>
+                {on ? <Icon name="check" size={19} color={t.brandText} /> : null}
               </Pressable>
             );
           })}
@@ -867,7 +845,7 @@ export default function TrainerSettings() {
             item on that list, which is the other reason it belongs here. */}
         <Section>
           <SectionHead title="Getting Started" />
-          <ListRow icon="sparkle" title="Getting Started"
+          <ListRow icon="sparkle" tone="purple" title="Getting Started"
             note="What is set up, and what is still worth doing"
             onPress={() => router.push('/(trainer)/getting-started')} />
         </Section>
@@ -944,7 +922,7 @@ export default function TrainerSettings() {
                 "Client Messages" had no gap at all between them and read as one
                 two-line title, with the first switch apparently belonging to
                 nothing. The same is true of the heading below. */}
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginBottom: sp.md }}>What you are told about</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginBottom: sp.md }}>What you are told about</Text>
             {channelNote ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{channelNote}</Text>
             ) : null}
@@ -989,7 +967,7 @@ export default function TrainerSettings() {
               which they will not trust the switches above either. Three states,
               three sentences: available, not yet, and could-not-find-out. */}
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginBottom: sp.md }}>When you will not be buzzed</Text>
+            <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginBottom: sp.md }}>When you will not be buzzed</Text>
 
             {quiet.status === 'loading' ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Reading your quiet hours…</Text>
@@ -1132,7 +1110,7 @@ export default function TrainerSettings() {
                   <Pressable key={u} onPress={() => st.set({ weightUnit: u })}
                     accessibilityRole="radio" accessibilityState={{ selected: on }}
                     style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{u}</Text>
+                    <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{u}</Text>
                   </Pressable>
                 );
               })}
@@ -1238,7 +1216,7 @@ export default function TrainerSettings() {
               to change their password had to sign out and trigger a reset email
               for a password they had not forgotten — and had no route at all to
               a new address, which is the only way back in if they lose it. */}
-          <ListRow icon="lock" title="Change Password or Email"
+          <ListRow icon="lock" tone="neutral" title="Change Password or Email"
             note="The password you sign in with, and the address a reset would go to"
             onPress={() => router.push('/(trainer)/account')} />
         </Section>
@@ -1246,7 +1224,7 @@ export default function TrainerSettings() {
 
         <Section>
           <SectionHead title="Your Data" />
-          <ListRow icon="share" title={exporting ? 'Preparing Export…' : 'Export My Data'}
+          <ListRow icon="share" tone="blue" title={exporting ? 'Preparing Export…' : 'Export My Data'}
             note="Your account and your coaching business — your price list, invoices, receipts, payouts, costs and enquiries — as a JSON file you can keep, plus a list of every file you hold"
             onPress={exportData} />
           {/* Only after an export, because the manifest is what the export
@@ -1256,16 +1234,16 @@ export default function TrainerSettings() {
               message attachment is up to 64 MB of video and base64 in a string
               is a third larger again — so the files are saved one at a time. */}
           {files !== null ? (
-            <ListRow icon="camera" title="Save My Files"
+            <ListRow icon="camera" tone="teal" title="Save My Files"
               note={filesRowNote(files.length, filesComplete)}
               onPress={() => { if (files.length > 0) setFilesOpen(true); }} />
           ) : null}
           {pending?.requestedAt ? (
-            <ListRow icon={BACK_ICON} title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
+            <ListRow icon={BACK_ICON} tone="amber" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
               note="Keep your account. You can withdraw right up until the deletion is carried out."
               onPress={withdraw} />
           ) : (
-            <ListRow icon="minus" tone={t.crit} title={deleting ? 'Requesting…' : 'Delete My Account'}
+            <ListRow icon="minus" tone="red" title={deleting ? 'Requesting…' : 'Delete My Account'}
               note="Ask for your account and your data to be erased permanently"
               onPress={deleteAccount} />
           )}
@@ -1283,9 +1261,33 @@ export default function TrainerSettings() {
         <Section>
           <SectionHead title="Build" />
           <BuildInfo />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+        </Section>
+        {/* What the Build card is FOR, behind a fold: it is an instruction to
+            whoever is diagnosing an update, not something a coach reads. */}
+        <Expandable title="About the Build Card">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
             Which bundle this phone is running. If a fix was published but isn't here, compare Channel and Update against the EAS dashboard before assuming it's a code bug.
           </Text>
+        </Expandable>
+
+        {/* ── Log Out, in its own card, LAST ────────────────────────────────
+            The last thing on the page, under Build: the approved look ends
+            every settings page on it, and the one control that ends the
+            session does not belong between two rows a thumb is aiming for.
+            The same `useSignOutAndSay` fate the
+            Ghost at the foot of the old Signed-in card went through — the
+            confirmation and the "could not be ended" sentence are unchanged.
+            The board draws the words in red. This app does not: `t.crit` as
+            ink measures 3.03–4.05:1 on every palette (scripts/check-contrast.mjs),
+            so the red PLATE carries the colour (its glyph is the red's measured ink) and the label stays ink, the same
+            split every Flag on this screen makes. No chevron, because it is an
+            action and not a screen. */}
+        <Section>
+          <Pressable onPress={signOut} accessibilityRole="button" accessibilityLabel="Log out"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+            <IconPlate icon="lock" tone="red" />
+            <Text style={{ ...ty.head, color: t.ink, flex: 1 }}>Log Out</Text>
+          </Pressable>
         </Section>
 
       </ScrollView>
@@ -1296,7 +1298,7 @@ export default function TrainerSettings() {
       <Modal visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
           <Text style={{ ...ty.title, color: t.ink }}>Your files</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>
             {filesRowNote(files?.length ?? 0, filesComplete)} Tap one to save it to your phone.
@@ -1319,7 +1321,7 @@ export default function TrainerSettings() {
             <Pressable onPress={() => setFilesOpen(false)} accessibilityRole="button"
               accessibilityLabel="Close your files"
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Done</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Done</Text>
             </Pressable>
           </ScrollView>
         </View>

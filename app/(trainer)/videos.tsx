@@ -68,8 +68,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Rule, Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, FigureCard, Meter, TonedChip, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem, type Visibility } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -199,7 +199,7 @@ function VisibilityChoice({ value, onChange, subject, disabled }: {
               paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.pill,
               backgroundColor: on ? t.brand : t.surface2,
             }}>
-            <Text style={{ ...ty.caption, fontWeight: on ? '600' : '400', color: on ? t.brandInk : t.ink2 }}>{c.label}</Text>
+            <Text style={{ ...ty.caption, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{c.label}</Text>
           </Pressable>
         );
       })}
@@ -393,7 +393,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
                 }}>
                 {busy ? <ActivityIndicator size="small" color={on ? t.brandInk : t.ink3} />
                   : on ? <Icon name="check" size={13} color={t.brandInk} /> : null}
-                <Text style={{ ...ty.caption, fontWeight: on ? '600' : '400', color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{p.name}</Text>
+                <Text style={{ ...ty.caption, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{p.name}</Text>
               </Pressable>
             );
           })}
@@ -757,7 +757,7 @@ export default function TrainerVideos() {
   const perMovement = useMemo(() => clipsPerMovement(vids), [vids]);
   const done = vids.filter((v) => v.uploaded).length;
   const G = layout.gutter;
-  const sheet = { backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: 30, ...elevation.e2 };
+  const sheet = { backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: 30, ...elevation.e2 };
   const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginBottom: sp.md };
 
   return (
@@ -783,29 +783,54 @@ export default function TrainerVideos() {
             line of context under. Same figure, same rules: a dash unless the
             read was whole, because `vids.length` under 'error' or 'partial' is
             the size of a prefix, not of the library. */}
-        <Section>
-          <SectionHead title="In Your Library" />
-          <View accessible
-            accessibilityLabel={`In your library, ${known ? `${vids.length} ${vids.length === 1 ? 'clip' : 'clips'}` : 'not counted'}`}
-            style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-            <Text style={{ ...ty.hero, ...numeric, color: t.ink }}>{known ? fig(vids.length) : fig(null)}</Text>
-            {known ? <Text style={{ ...ty.head, color: t.ink3, marginStart: 6 }}>{vids.length === 1 ? 'clip' : 'clips'}</Text> : null}
-          </View>
-          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
-            {status === 'loading' ? 'Reading your library…'
-              : status === 'error' ? 'Your library could not be read, so we cannot tell you what is in it.'
-                // 'partial' had no branch, so it fell through to the counting
-                // one — "8 of 12 recorded" over a page of a longer library,
-                // with the hero figure beside it already showing a dash for the
-                // same reason. Both halves of that sentence are counts, and a
-                // count over a prefix is not a smaller number, it is a wrong
-                // one: a coach reading it concludes four clips are missing that
-                // they have already filmed. src/ui/loadStatus.ts.
-                : status === 'partial' ? 'Your library came back at the row limit, so these are some of your clips rather than all of them, and they cannot be counted.'
-                  : vids.length ? `${done} of ${vids.length} recorded · shared with whoever you chose`
-                    : 'Record a clip or paste a link, then choose who gets to watch it.'}
-          </Text>
-        </Section>
+        <FigureCard title="In Your Library"
+          figure={known ? fig(vids.length) : null}
+          unit={known ? (vids.length === 1 ? 'clip' : 'clips') : undefined}
+          spoken={`In your library, ${known ? `${vids.length} ${vids.length === 1 ? 'clip' : 'clips'}` : 'not counted'}`}
+          detail={status === 'loading' ? 'Reading your library…'
+            : status === 'error' ? 'Your library could not be read, so we cannot tell you what is in it.'
+              // 'partial' had no branch, so it fell through to the counting
+              // one — "8 of 12 recorded" over a page of a longer library,
+              // with the hero figure beside it already showing a dash for the
+              // same reason. Both halves of that sentence are counts, and a
+              // count over a prefix is not a smaller number, it is a wrong
+              // one: a coach reading it concludes four clips are missing that
+              // they have already filmed. src/ui/loadStatus.ts.
+              : status === 'partial' ? 'Your library came back at the row limit, so these are some of your clips rather than all of them, and they cannot be counted.'
+                : vids.length ? `${done} of ${vids.length} recorded · shared with whoever you chose`
+                  : 'Record a clip or paste a link, then choose who gets to watch it.'}>
+          {/* ── coverage, as meters ─────────────────────────────────────────
+              Filmed OF PROGRAMMED: every bar is a share of the distinct
+              movements in this coach's own saved programmes, which is the
+              denominator `coverageFor` reports. `coverage` is null unless the
+              library, the templates AND the ownership of each clip were read
+              whole, and a null draws one bar with no fill and the words "Not
+              counted", never an empty bar that reads as "nothing filmed". A
+              coach with no saved programmes has nothing to be a share of, and
+              gets no bars at all.
+
+              Green is the coach's own clip, blue the Academy's, purple the
+              catalogue's animation, red the movements a client has nothing for.
+              The last two are withheld when the catalogue was not read
+              (`unknownCover`): without it nobody can say which of the unfilmed
+              movements are bare. */}
+          {coverage === null && status !== 'loading' && tplStatus !== 'loading' ? (
+            <Meter label="Filmed of Programmed" val={null} target={1} note="Not counted" />
+          ) : coverage && coverage.all.length ? (
+            <>
+              <Meter label="Filmed by You" tone="brand" val={coverage.mine.length} target={coverage.all.length}
+                note={`${num(coverage.mine.length)} of ${num(coverage.all.length)}`} />
+              <Meter label="Academy Clip" tone="blue" val={coverage.academyOnly.length} target={coverage.all.length}
+                note={`${num(coverage.academyOnly.length)} of ${num(coverage.all.length)}`} />
+              <Meter label="Catalogue Animation" tone="purple" target={coverage.all.length}
+                val={coverage.unknownCover ? null : coverage.illustratedOnly.length}
+                note={coverage.unknownCover ? 'Not known' : `${num(coverage.illustratedOnly.length)} of ${num(coverage.all.length)}`} />
+              <Meter label="Nothing to Show" tone="red" target={coverage.all.length}
+                val={coverage.unknownCover ? null : coverage.missing.length}
+                note={coverage.unknownCover ? 'Not known' : `${num(coverage.missing.length)} of ${num(coverage.all.length)}`} />
+            </>
+          ) : null}
+        </FigureCard>
 
 
         {/* ── what you programme but nobody has filmed ────────────────────
@@ -831,9 +856,8 @@ export default function TrainerVideos() {
                   {coverage.missing.slice(0, 8).map((nm, i) => (
                     <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
                       paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
                       <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>nothing to show</Text>
+                      <TonedChip tone="red" label="Nothing to Show" />
                     </View>
                   ))}
                   {coverage.missing.length > 8 ? (
@@ -852,9 +876,8 @@ export default function TrainerVideos() {
                   {coverage.academyOnly.slice(0, 6).map((nm, i) => (
                     <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
                       paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
                       <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>Academy</Text>
+                      <TonedChip tone="blue" label="Academy" />
                     </View>
                   ))}
                 </View>
@@ -876,16 +899,14 @@ export default function TrainerVideos() {
                   {coverage.localOnly.slice(0, 6).map((nm, i) => (
                     <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
                       paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
                       <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>this phone only</Text>
+                      <TonedChip tone="amber" label="This Phone Only" />
                     </View>
                   ))}
                 </View>
               ) : null}
             </Section>
 
-            <Rule />
           </>
         ) : null}
 
@@ -899,10 +920,9 @@ export default function TrainerVideos() {
           <>
             <Section>
               <SectionHead title="Film This Movement" />
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(askedToFilm)}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
-                You have not filmed this one. Whatever you record here is filed against it by name, so your
-                clients see it on this exercise and nowhere else — and you choose who before it goes.
+              <Text style={{ ...ty.section, color: t.ink }}>{movement(askedToFilm)}</Text>
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: 4, marginBottom: sp.md }}>
+                Not filmed yet. Your clip is filed against this exercise, and you choose who sees it.
               </Text>
               <Cta label="Record This" wide
                 onPress={() => upload(true, { name: askedToFilm, group: params.group || '' })} />
@@ -916,7 +936,6 @@ export default function TrainerVideos() {
                 </View>
               </View>
             </Section>
-            <Rule />
           </>
         ) : null}
 
@@ -938,10 +957,10 @@ export default function TrainerVideos() {
               the builder's "Add Exercise" sheet — so looking one up, or seeing
               which of them nobody has filmed, meant opening a programme you
               did not want to write. */}
-          <ListRow icon="grid" title="Browse the Exercise Library" note="Every movement you can programme, and whether you have filmed it"
+          <ListRow icon="grid" tone="blue" title="Browse the Exercise Library" note="Every movement, and whether you have filmed it"
             onPress={() => router.push('/(trainer)/library')} />
           <Rule />
-          <ListRow icon="share" title="Share a Session" note="Your clip and caption, into any app you post from"
+          <ListRow icon="share" tone="purple" title="Share a Session" note="Your clip and caption, into any app you post from"
             onPress={() => router.push('/(trainer)/broadcast-session')} />
         </Section>
 
@@ -1028,13 +1047,18 @@ export default function TrainerVideos() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <Pressable onPress={() => tapRow(v)} hitSlop={6} accessibilityRole="button"
                     accessibilityLabel={v.uploaded ? (open ? `Stop watching ${movement(v.name)}` : `Play ${movement(v.name)}`) : `Add a clip for ${movement(v.name)}`}
-                    style={({ pressed }) => ({ width: 46, height: 36, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
-                    {v.uploaded ? <Icon name={open ? 'minus' : 'play'} size={17} color={t.brand} /> : <Icon name="plus" size={17} color={t.ink3} />}
+                    // The mockups' clip thumbnail: a night tile with the bright
+                    // play mark. It is a TILE and not a frame of the clip: no
+                    // poster image is stored for an exercise video, and a
+                    // generated picture would be a thumbnail of nothing. A
+                    // movement with no clip yet keeps the quiet grey plate.
+                    style={({ pressed }) => ({ width: 64, height: 48, borderRadius: radius.sm, backgroundColor: v.uploaded ? t.night : t.surface3, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
+                    {v.uploaded ? <Icon name={open ? 'minus' : 'play'} size={20} color={t.brandBright} /> : <Icon name="plus" size={20} color={t.ink3} />}
                   </Pressable>
 
                   <Pressable onPress={() => tapRow(v)} style={{ flex: 1 }} accessibilityRole="button"
                     accessibilityLabel={[`${movement(v.name)}, ${v.group}.`, v.uploaded ? (mine ? `Seen by: ${vis.label}` : 'Recorded') : 'Not recorded yet', collision].filter(Boolean).join(' ')}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{movement(v.name)}</Text>
+                    <Text style={{ ...ty.head, color: t.ink }} numberOfLines={1}>{movement(v.name)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
                       {v.group}{v.uploaded ? '' : ' · not recorded yet'}{localOnly ? ' · this phone only' : ''}
                     </Text>
@@ -1064,10 +1088,7 @@ export default function TrainerVideos() {
                       <Icon name="minus" size={16} color={t.ink3} />
                     </Pressable>
                   ) : (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: v.uploaded ? t.brand : t.s3 }} />
-                      <Text style={{ ...ty.caption, color: t.ink2 }}>{v.uploaded ? 'Live' : 'To do'}</Text>
-                    </View>
+                    <TonedChip tone={v.uploaded ? 'brand' : 'neutral'} label={v.uploaded ? 'Live' : 'To Do'} />
                   )}
                 </View>
 
@@ -1163,7 +1184,7 @@ export default function TrainerVideos() {
                   as a raw Pressable rather than a Cta so it can carry the
                   spinner, which is also why scripts/check-caps.mjs — which reads
                   the kit's own slots — never saw these two. */}
-              <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to Library' : 'Save Clip')}</Text>
+              <Text style={{ ...ty.label, ...font('600'), color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to Library' : 'Save Clip')}</Text>
             </Pressable>
             <View style={{ height: sp.sm }} />
             <Ghost label="Cancel" onPress={() => { if (!upBusy) setPendUri(null); }} />

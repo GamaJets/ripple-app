@@ -73,7 +73,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, PageHead } from '../../src/ui/kit';
+import { Section, SectionHead, Cta, Ghost, Notice, PartialRead, PageHead, Meter, Expandable } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { supabase } from '../../src/lib/supabase';
@@ -654,11 +654,15 @@ export default function CoachChecklists() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <PageHead title="Their Checklists" subtitle="Your book" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Lines you add appear on that client&rsquo;s daily list, marked as set by you, beside the
-          ones worked out from their own plan and targets. You can&rsquo;t tick them — that stays
-          with them.
-        </Text>
+        {/* What this screen does, behind a fold. It was the paragraph every
+            visit opened on, above the client picker it explains. */}
+        <Expandable title="How Checklists Work" note="You set the lines. They do the ticking">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            Lines you add appear on that client&rsquo;s daily list, marked as set by you, beside the
+            ones worked out from their own plan and targets. You can&rsquo;t tick them. That stays
+            with them.
+          </Text>
+        </Expandable>
 
         {r.status === 'error' ? (
           <Section>
@@ -702,7 +706,6 @@ export default function CoachChecklists() {
              will refuse whatever they do, and the copy panel would offer to
              give somebody else a list that does not exist. */
           <View>
-            <Rule />
             <Section>
               <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
                 note={`You added ${who} to your book by hand. A checklist is a list on somebody's phone and a tick is something they do on it, so there is nothing here to set and nothing to count — and none of that is a read that failed. Invite them from your client list; from the day they accept, this screen works like everybody else's.`} />
@@ -710,7 +713,6 @@ export default function CoachChecklists() {
           </View>
         ) : picked ? (
           <View>
-            <Rule />
             <Section>
               {/* `isWhole(status)`, not `shown ?`. The array being non-null
                   says a read RETURNED; it does not say it returned everything,
@@ -735,7 +737,19 @@ export default function CoachChecklists() {
                 <PartialRead what="lines on their list" onPress={() => { if (uid && picked) void load(uid, picked); }} />
               ) : adhStatus === 'loading' ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>Reading their ticks…</Text>
-              ) : summary ? (
+              ) : summary ? (<>
+                {/* The window as a bar: days that carry a tick of anything, of
+                    the days in the window. `summary` exists only when the
+                    list AND the ticks were read whole, so the bar is never a
+                    share of part of a record. It is the picture of the
+                    sentence under it and scores nothing per line; the quiet
+                    days are SET ASIDE, as the note says, not counted as
+                    misses, which is why this is a bar of active days and not
+                    of adherence. */}
+                <Meter label="Days With a Tick" tone="teal"
+                  val={summary.window.days - summary.silentDays} target={summary.window.days}
+                  note={`${summary.window.days - summary.silentDays} of ${summary.window.days} days`} />
+                <View style={{ height: sp.md }} />
                 <Notice
                   kicker={`Last ${summary.window.days} days, to ${dayLabel(summary.window.end)}`}
                   title={summary.silentDays === 0
@@ -743,7 +757,7 @@ export default function CoachChecklists() {
                     : `Nothing at all was logged on ${summary.silentDays} of the last ${summary.window.days} days`}
                   note={`A line counts from the day you added it and stops the day you take it off, so nothing here is measured over days it was not on their list. ${summary.silentDays === 0 ? 'Every day carries a tick of something, so a line left unticked on one of them is a line they saw and left.' : 'On the quiet days a line they skipped and a day they never opened the app look exactly the same, so those days are set aside and never counted as misses.'} Today is in none of it — it is not over.`}
                 />
-              ) : null}
+              </>) : null}
 
               {status === 'error' ? (
                 <Notice tone={t.warn} kicker="Not loaded" title="Their list could not be read"
@@ -830,7 +844,6 @@ export default function CoachChecklists() {
                 nothing under it is read as "they ticked none of it". */}
             {summary ? (
             <View>
-              <Rule />
               <Section>
                 <SectionHead title="From their own plan and targets" />
                 <View>
@@ -879,8 +892,6 @@ export default function CoachChecklists() {
             </View>
             ) : null}
 
-            <Rule />
-
             <Section>
               <SectionHead title="Add a Line" note={`${draft.length}/${LABEL_MAX}`} />
               <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
@@ -909,7 +920,6 @@ export default function CoachChecklists() {
                 is nothing here for a coach to act on until the read lands. */}
             {status === 'ready' && sourceLines.length > 0 ? (
               <View>
-                <Rule />
                 <Section>
                   <SectionHead title="Give These To Somebody Else"
                     note={sourceLines.length === 1 ? '1 line' : `${sourceLines.length} lines`} />

@@ -61,9 +61,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
-import Svg, { Circle } from 'react-native-svg';
+import { Section, SectionHead, PageHead, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, Field, Ring, Meter, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { signedInUid } from '../../src/lib/signedInUid';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -463,22 +462,24 @@ export default function MyNutrition() {
         : !gate.ok && gate.reason === 'reading' ? 'no target yet — still reading'
         : 'no target, because nothing here has measured you'}`;
 
-  const macroRow = (label: string, eaten: number, tg: number | null) => {
-    const pct = tg ? Math.max(0, Math.min(100, Math.round((eaten / tg) * 100))) : 0;
+  /**
+   * One macro as the kit's <Meter>, in the hue the whole app gives it: protein
+   * blue, carbs orange, fat purple. The words at the trailing edge are the ones
+   * this row always printed (eaten, target, and what is left or over) and they
+   * are what is spoken.
+   *
+   * No fill unless the day's log was read whole AND there is a target: a bar
+   * needs something to be a share of, and a day that was not counted draws the
+   * dash rather than an empty bar that would say nothing was eaten. Over target
+   * the bar turns red and the note says "over" beside it.
+   */
+  const macroRow = (label: string, tone: Tone, eaten: number, tg: number | null) => {
     const rem = tg == null ? null : tg - eaten;
+    const words = `${whole ? num(eaten) : num(null)}${tg == null ? ' g' : ` / ${num(tg)} g`}`
+      + (rem != null && whole ? (rem >= 0 ? ` · ${num(rem)} g left` : ` · ${num(-rem)} g over`) : '');
     return (
-      <View key={label} style={{ marginTop: sp.md }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-            {whole ? num(eaten) : num(null)}{tg == null ? ' g' : ` / ${num(tg)} g`}
-            {rem != null && whole ? (rem >= 0 ? ` · ${num(rem)} g left` : ` · ${num(-rem)} g over`) : ''}
-          </Text>
-        </View>
-        <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-          <View style={{ height: 3, borderRadius: 2, width: `${whole && tg ? pct : 0}%`, backgroundColor: rem != null && rem < 0 ? t.crit : t.brand }} />
-        </View>
-      </View>
+      <Meter key={label} label={label} tone={rem != null && rem < 0 && whole ? 'red' : tone}
+        val={whole && tg ? eaten : null} target={tg ?? 1} note={words} />
     );
   };
 
@@ -521,7 +522,6 @@ export default function MyNutrition() {
             </Section>
           ) : null}
 
-          <Rule />
 
           {/* ── the day ──────────────────────────────────────────────────────
               The ring card the client's Meals tab draws, so coach and client
@@ -534,23 +534,20 @@ export default function MyNutrition() {
               ring drawn for a target we do not have is a figure invented to
               fill a slot. */}
           <Section>
-            <Text style={{ ...ty.micro, color: t.ink3, textAlign: 'center' }}>Nutrition Today</Text>
-            <View accessible
-              accessibilityLabel={whole
-                ? `${num(fl.consumed.kcal)} calories eaten today${target ? ` of ${num(target.kcal)}` : ''}. ${heroLabel}, ${heroFigure} kcal. ${heroNote}`
-                : `Today’s calories could not be counted. ${heroNote}`}
-              style={{ width: 156, height: 156, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginTop: sp.md }}>
-              <Svg width={156} height={156} viewBox="0 0 156 156" style={{ position: 'absolute' }}
-                accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                <Circle cx="78" cy="78" r="68" fill="none" stroke={t.surface3} strokeWidth={11} />
-                {whole && target && target.kcal ? (
-                  <Circle cx="78" cy="78" r="68" fill="none" stroke={left && left.net < 0 ? t.crit : t.brand} strokeWidth={11} strokeLinecap="round"
-                    strokeDasharray={2 * Math.PI * 68} strokeDashoffset={2 * Math.PI * 68 * (1 - Math.min(1, fl.consumed.kcal / target.kcal))}
-                    transform="rotate(-90 78 78)" />
-                ) : null}
-              </Svg>
-              <Text numberOfLines={1} adjustsFontSizeToFit style={{ ...value(30), color: t.ink }}>{whole ? num(fl.consumed.kcal) : fig(null)}</Text>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{target ? `of ${num(target.kcal)} kcal` : 'kcal eaten'}</Text>
+            <SectionHead title="Nutrition Today" />
+            {/* The kit's <Ring>, the one the client's own Meals screen draws.
+                `null` while the day is not whole or there is no target: the
+                track and a dash, never an empty arc round a full allowance.
+                Calories are orange everywhere in the app; over the target the
+                arc is red, and the line under the ring says "over" in words. */}
+            <View style={{ alignItems: 'center', marginTop: sp.md }}>
+              <Ring size={156} tone={left && left.net < 0 ? 'red' : 'orange'}
+                value={whole && target && target.kcal ? fl.consumed.kcal / target.kcal : null}
+                figure={whole ? num(fl.consumed.kcal) : null}
+                sub={target ? `of ${num(target.kcal)} kcal` : 'kcal eaten'}
+                spoken={whole
+                  ? `${num(fl.consumed.kcal)} calories eaten today${target ? ` of ${num(target.kcal)}` : ''}. ${heroLabel}, ${heroFigure} kcal. ${heroNote}`
+                  : `Today’s calories could not be counted. ${heroNote}`} />
             </View>
             <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
               {!whole ? 'Calories not counted' : left ? `${heroFigure} kcal ${left.net >= 0 ? 'left' : 'over'}` : `${heroFigure} kcal eaten`}
@@ -583,14 +580,13 @@ export default function MyNutrition() {
             </Notice>
           ) : null}
 
-          <Rule />
 
           {/* ── macros ───────────────────────────────────────────────────── */}
           <Section>
             <SectionHead title="Today’s Macros" note={target ? 'against your target' : undefined} />
-            {macroRow('Protein', fl.consumed.protein, target ? target.protein : null)}
-            {macroRow('Carbs', fl.consumed.carbs, target ? target.carbs : null)}
-            {macroRow('Fat', fl.consumed.fat, target ? target.fat : null)}
+            {macroRow('Protein', 'blue', fl.consumed.protein, target ? target.protein : null)}
+            {macroRow('Carbs', 'orange', fl.consumed.carbs, target ? target.carbs : null)}
+            {macroRow('Fat', 'purple', fl.consumed.fat, target ? target.fat : null)}
             {target ? (
               /* What the number was built from, said beside it. A target a
                  person eats against all day should carry its own assumptions —
@@ -643,7 +639,7 @@ export default function MyNutrition() {
                           accessibilityRole="button" accessibilityState={{ selected: on }}
                           accessibilityLabel={`${a.label}. ${a.note}`}
                           style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                          <Text style={{ ...ty.label, fontWeight: on ? '600' : '400', color: on ? t.brand : t.ink }}>{a.label}</Text>
+                          <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.brandText : t.ink }}>{a.label}</Text>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{a.note}</Text>
                         </Pressable>
                       );
@@ -704,7 +700,6 @@ export default function MyNutrition() {
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── what the target itself is, when there is one ─────────────── */}
           <Section>
@@ -748,7 +743,6 @@ export default function MyNutrition() {
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── log a meal ───────────────────────────────────────────────── */}
           <Section>
@@ -813,7 +807,6 @@ export default function MyNutrition() {
             </>)}
           </Section>
 
-          <Rule />
 
           {/* ── today's entries ──────────────────────────────────────────── */}
           <Section>
@@ -822,7 +815,7 @@ export default function MyNutrition() {
               fl.entries.map((e) => (
                 <View key={e.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{e.name}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                       {num(e.kcal)} kcal · {num(e.protein)}p {num(e.carbs)}c {num(e.fat)}f
                     </Text>
@@ -856,7 +849,6 @@ export default function MyNutrition() {
             )}
           </Section>
 
-          <Rule />
 
           {/* ── where a CLIENT's nutrition goes instead ──────────────────── */}
           <Section>
@@ -867,7 +859,7 @@ export default function MyNutrition() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
               <Icon name="people" size={14} color={t.ink3} />
               <Pressable onPress={() => router.push('/(trainer)/dashboard')} hitSlop={8} accessibilityRole="button">
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Go to Clients</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.brandText }}>Go to Clients</Text>
               </Pressable>
             </View>
           </Section>

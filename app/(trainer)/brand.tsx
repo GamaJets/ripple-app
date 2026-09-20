@@ -61,8 +61,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Ghost, Cta, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Ghost, Cta, Flag, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { brandInkFor } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -205,8 +205,7 @@ export default function CoachBrand() {
 
         {/* The board's page head, with a back control this screen never had:
             it is reached from Profile and had no way back but the tab bar. */}
-        <PageHead title="Your Branding" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>What your clients see around your coaching — saved to your account, not to this phone</Text>
+        <PageHead title="Your Branding" subtitle="Saved to your account, not this phone" />
 
         {status === 'error' ? (
           <Section>
@@ -221,6 +220,30 @@ export default function CoachBrand() {
         ) : status === 'loading' ? (
           <Section><Text style={{ ...ty.label, color: t.ink3 }}>Reading your branding…</Text></Section>
         ) : (<>
+
+          {/* ── live preview, FIRST: exactly what a client of theirs sees ─────
+              The page opens on the picture the three forms below change. It
+              was the fourth card down, under the form that feeds it, so a
+              coach saved a colour and scrolled to find out what it did. */}
+          <Section>
+            <SectionHead title="Live Preview" />
+            <View style={{ backgroundColor: t.surface2, borderRadius: radius.lg, overflow: 'hidden' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface3 }}>
+                <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: preview }} />
+                {/* Their trading name where they have one, their own name
+                    otherwise — never a placeholder standing in for a real one. */}
+                <Text style={{ ...ty.head, color: t.ink }}>{previewName}</Text>
+              </View>
+              <View style={{ padding: sp.lg }}>
+                <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.lg }}>As seen by a client who trains only with you.</Text>
+                <View style={{ backgroundColor: preview, borderRadius: radius.md, minHeight: 52, justifyContent: 'center', alignItems: 'center' }}>
+                  {/* brandInkFor MEASURES rather than guessing, which is why a
+                      bright green here gets black and not white at 1.59:1. */}
+                  <Text style={{ ...ty.button, color: brandInkFor(preview) }}>Start Today's Workout</Text>
+                </View>
+              </View>
+            </View>
+          </Section>
 
           {/* ── the trading name ───────────────────────────────────────────── */}
           <Section>
@@ -240,7 +263,6 @@ export default function CoachBrand() {
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── the logo ───────────────────────────────────────────────────── */}
           <Section>
@@ -311,7 +333,6 @@ export default function CoachBrand() {
             </Text>
           </Section>
 
-          <Rule />
 
           {/* ── the colour, with the measurement in front of the coach ─────── */}
           <Section>
@@ -366,30 +387,7 @@ export default function CoachBrand() {
             </View>
           </Section>
 
-          <Rule />
 
-          {/* ── live preview: exactly what a client of theirs sees ─────────── */}
-          <Section>
-            <SectionHead title="Live Preview" />
-            <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, overflow: 'hidden', ...elevation.e1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
-                <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: preview }} />
-                {/* Their trading name where they have one, their own name
-                    otherwise — never a placeholder standing in for a real one. */}
-                <Text style={{ ...ty.head, color: t.ink }}>{previewName}</Text>
-              </View>
-              <View style={{ padding: sp.lg }}>
-                <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>How your coaching looks to a client who trains with you and with nobody else.</Text>
-                <View style={{ backgroundColor: preview, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
-                  {/* brandInkFor MEASURES rather than guessing, which is why a
-                      bright green here gets black and not white at 1.59:1. */}
-                  <Text style={{ ...ty.label, fontWeight: '600', color: brandInkFor(preview) }}>Start today's workout</Text>
-                </View>
-              </View>
-            </View>
-          </Section>
-
-          <Rule />
 
           <Section>
             <View style={{ alignSelf: 'flex-start' }}>
@@ -398,19 +396,24 @@ export default function CoachBrand() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
               Puts you back to having chosen no colour, and your clients back to the app’s own.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          </Section>
+
+          {/* Who sees what, behind a fold: four paragraphs of scope that stood
+              at the foot of the page in caption type. */}
+          <Expandable title="Who Sees Your Branding">
+            <Text style={{ ...ty.label, color: t.ink2 }}>
               The name and the colour are what your clients see inside the app. They reach the clients you are actively coaching, and they stop when the coaching does.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
               Your logo is not part of that. It goes on the documents and cards you make and hand over yourself, which is why the preview above does not show it.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
               A client who trains at a gym sees that gym's branding instead of yours. Membership is what the gym holds about them; you are their coach, not their club.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
               This does not change the app itself — its name in the store, its icon, or who published it. Repple makes the app; the coaching inside it is yours.
             </Text>
-          </Section>
+          </Expandable>
         </>)}
       </ScrollView>
     </SafeAreaView>

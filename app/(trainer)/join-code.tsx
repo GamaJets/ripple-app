@@ -59,8 +59,8 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, PartialRead, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, Ghost, Cta, Notice, PartialRead, Flag, PageHead, IconPlate } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fetchMyJoinCode, fetchMyJoinCodes, fetchJoinCodeStats, type JoinCodesRead } from '../../src/ui/joinCode';
 import { shareText } from '../../src/lib/exportShare';
@@ -212,13 +212,15 @@ export default function CoachJoinCode() {
               accessible
               accessibilityRole="text"
               accessibilityLabel={`Your coaching code, ${give.hand.spoken}`}
+              // The night plate, the look's hero surface: the code is the one
+              // thing this page exists to show, in the hero's own inks.
               style={{
-                backgroundColor: t.surface2, borderRadius: radius.md,
-                paddingVertical: sp.xl, paddingHorizontal: sp.lg, alignItems: 'center',
+                backgroundColor: t.night, borderRadius: radius.xl,
+                paddingVertical: sp.xl, paddingHorizontal: sp.lg, alignItems: 'center', ...elevation.hero,
               }}
             >
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Your main code</Text>
-              <Text selectable style={{ ...value(40), color: t.ink, letterSpacing: 6 }}>
+              <Text style={{ ...ty.eyebrow, color: t.nightInk3, marginBottom: sp.sm }}>Your Main Code</Text>
+              <Text selectable adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.5} style={{ ...value(40), color: t.nightInk, letterSpacing: 6 }}>
                 {give.hand.code}
               </Text>
             </View>
@@ -363,8 +365,9 @@ export default function CoachJoinCode() {
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                <IconPlate icon="share" tone="purple" />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.label}</Text>
+                  <Text style={{ ...ty.head, color: t.ink }}>{r.label}</Text>
                   <Text selectable style={{ ...ty.head, ...numeric, color: t.ink2, letterSpacing: 2, marginTop: 2 }}>{r.code}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{codeCountLine(codes.status, r)}</Text>
                 </View>

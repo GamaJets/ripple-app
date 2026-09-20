@@ -42,7 +42,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModules';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, elevation, type as ty, font } from '../../src/theme/scale';
 import { peerHeading, type PeerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { attachmentNoun } from '../../src/lib/messageAttachments';
@@ -398,10 +398,13 @@ export default function CoachChat() {
             and the monogram is taken from the name the roster passed — never
             from the coach's own profile, which is the readable one on this app
             and therefore the one TF-32 would have reached for. */}
-        <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {/* The mockups' monogram: the message blue's pale plate with its INK
+            for a real name (the inbox row this thread was opened from wears
+            the same pair), the grey of "nothing to report" for a withheld one. */}
+        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: head.isName ? t.data.blueSoft : t.surface3, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
           {peer.avatar
-            ? <Image source={{ uri: peer.avatar }} style={{ width: 38, height: 38 }} accessibilityIgnoresInvertColors />
-            : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? t.brand : t.ink3 }}>{peerMonogram(head)}</Text>}
+            ? <Image source={{ uri: peer.avatar }} style={{ width: 40, height: 40 }} accessibilityIgnoresInvertColors />
+            : <Text style={{ ...ty.label, ...font('700'), color: head.isName ? t.data.blueInk : t.ink3 }}>{peerMonogram(head)}</Text>}
         </View>
         {/* The name is the way to the record, as the board's chevron beside it
             says (page 9). Only when there is a client to open: a thread reached
@@ -427,8 +430,8 @@ export default function CoachChat() {
         <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
           accessibilityLabel={blockActionLabel(safety.state, OTHER)}
           accessibilityHint="Block this conversation, or report a message in it"
-          style={{ width: 34, height: 34, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="lock" size={16} color={t.ink2} />
+          style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
+          <Icon name="lock" size={18} color={t.ink2} />
         </Pressable>
       </View>
 
@@ -529,7 +532,9 @@ export default function CoachChat() {
                 {/* A clip needs no caption, and an empty bubble under one is a
                     thing the sender did not say. */}
                 {m.body ? (
-                  <View style={{ backgroundColor: mine ? t.brand : t.surface2, borderRadius: radius.md, paddingHorizontal: sp.md, paddingVertical: sp.sm + 2 }}>
+                  // Theirs is a white surface lifted off the grey ground, the way
+                  // every card in the app now is; the coach's own stays the accent.
+                  <View style={{ backgroundColor: mine ? t.brand : t.surface, borderRadius: radius.lg, paddingHorizontal: sp.lg, paddingVertical: sp.sm + 2, ...(mine ? null : elevation.card) }}>
                     <Text style={{ ...ty.body, color: mine ? t.brandInk : t.ink }}>{m.body}</Text>
                   </View>
                 ) : null}
@@ -555,13 +560,13 @@ export default function CoachChat() {
           // Drawn as the board's attachment card (page 9's "Week 4 Plan.pdf"):
           // a bordered card with the file at its start and its name beside it.
           // The same row it always was — nothing is uploaded until Send.
-          <View style={{ marginHorizontal: G, marginTop: sp.md, flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.md, backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring }}>
+          <View style={{ marginHorizontal: G, marginTop: sp.md, flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.md, backgroundColor: t.surface, borderRadius: radius.md, ...elevation.card }}>
             {pending.kind === 'image'
               ? <Image source={{ uri: pending.uri }} style={{ width: 44, height: 44, borderRadius: radius.sm, backgroundColor: t.surface2 }} resizeMode="cover" accessibilityIgnoresInvertColors />
               : <View style={{ width: 44, height: 44, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="video" size={18} color={t.ink3} />
                 </View>}
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>
               {pending.kind === 'image' ? 'Photo ready to send' : 'Video ready to send'}
             </Text>
             <Pressable onPress={() => setPending(null)} accessibilityRole="button"
@@ -585,7 +590,7 @@ export default function CoachChat() {
             pill at its end, which is where the board draws its attach glyph;
             they do the same two things they always did. */}
         <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'center' }}>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 46, paddingStart: sp.lg, paddingEnd: sp.xs, backgroundColor: t.surface2, borderRadius: radius.pill, opacity: canSend ? 1 : 0.6 }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 48, paddingStart: sp.lg, paddingEnd: sp.xs, backgroundColor: t.surface, borderRadius: radius.pill, opacity: canSend ? 1 : 0.6, ...elevation.card }}>
             <TextInput value={text} onChangeText={setText} editable={canSend}
               // The placeholder is the only thing naming this box, and a placeholder
               // is drawn only while it is EMPTY — so from the first keystroke it was
@@ -617,10 +622,14 @@ export default function CoachChat() {
           <Pressable onPress={onSend} disabled={busy || !canSend}
             accessibilityRole="button" accessibilityLabel={busy ? 'Sending' : 'Send'}
             accessibilityState={{ disabled: busy || !canSend, busy }}
-            style={{ width: 46, height: 46, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: canSend ? t.brand : t.surface2, borderWidth: canSend ? 0 : hairline, borderColor: t.ring }}>
+            // The BRIGHT accent under its deep ink, the pair the hero's button
+            // wears (`CtaBright`): the one thing on this screen to press. A send
+            // that cannot go is the grey of "nothing to do", with no fill to
+            // promise otherwise.
+            style={{ width: 48, height: 48, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: canSend ? t.brandBright : t.surface3, ...(canSend ? elevation.float : null) }}>
             {busy
-              ? <ActivityIndicator size="small" color={t.brandInk} />
-              : <Icon name={FORWARD_ICON} size={20} color={canSend ? t.brandInk : t.ink3} />}
+              ? <ActivityIndicator size="small" color={t.brandDeep} />
+              : <Icon name={FORWARD_ICON} size={22} color={canSend ? t.brandDeep : t.ink3} />}
           </Pressable>
         </View>
         {/* The state, in words, under the box. `blockedComposerNote` returns
@@ -641,7 +650,7 @@ export default function CoachChat() {
       <Modal visible={tplOpen} transparent animationType="slide" onRequestClose={() => setTplOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, maxHeight: '70%' }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, maxHeight: '70%' }}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
             Tapping one puts it in your box, with {firstName ? firstName + '’s' : 'the'} name filled in. Nothing is sent until you press Send.
@@ -653,7 +662,7 @@ export default function CoachChat() {
               <Pressable key={tpl.id ?? tpl.title} onPress={() => useTemplate(tpl.body)}
                 accessibilityRole="button" accessibilityLabel={`Use the ${tpl.title} message`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
                   {applyTemplate(tpl.body, firstName ?? null, coachName ?? null)}
                 </Text>
@@ -673,7 +682,7 @@ export default function CoachChat() {
       <Modal visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>
               {reportFor?.messageId ? 'Report this message' : 'Report this conversation'}
@@ -687,7 +696,7 @@ export default function CoachChat() {
                   accessibilityRole="button" accessibilityLabel={o.label} accessibilityHint={o.note}
                   accessibilityState={{ disabled: reportBusy }}
                   style={{ paddingVertical: sp.md, opacity: reportBusy ? 0.5 : 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{o.label}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{o.label}</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{o.note}</Text>
                 </Pressable>
               </View>
@@ -702,7 +711,7 @@ export default function CoachChat() {
             <Pressable onPress={() => setReportFor(null)} accessibilityRole="button"
               accessibilityLabel="Close without reporting anything"
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
             </Pressable>
           </ScrollView>
         </View>

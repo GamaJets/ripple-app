@@ -74,8 +74,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag, PageHead, IconPlate, TonedChip, Meter, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -112,10 +112,10 @@ import { FORWARD_ICON } from '../../src/ui/direction';
 /** What a member's chip says. Never "not assigned yet" off an unread
  *  `assigned_programs` — that is the sentence a coach acts on by assigning. */
 const STATE_LABEL: Record<MemberState, string> = {
-  on: 'on this programme',
-  diverged: 'on a different programme',
-  none: 'no programme assigned',
-  unknown: 'what they are on could not be read',
+  on: 'On This Programme',
+  diverged: 'On a Different Programme',
+  none: 'No Programme Assigned',
+  unknown: 'Could Not Be Read',
 };
 
 export default function Groups() {
@@ -559,9 +559,12 @@ export default function Groups() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <PageHead title="Program Groups" subtitle="Write it once" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          A bootcamp, a 6am class, a beginners' block. One programme goes to everybody in the group — and any one of them can be changed afterwards without touching the rest.
-        </Text>
+        {/* What a group is, behind a fold; it was the paragraph above the list. */}
+        <Expandable title="How Groups Work" note="One programme, everybody in the group">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            A bootcamp, a 6am class, a beginners' block. One programme goes to everybody in the group, and any one of them can be changed afterwards without touching the rest.
+          </Text>
+        </Expandable>
 
         {/* An empty list under a failed read is not an empty list, and this is
             the screen where that mistake sends a coach looking for work they
@@ -592,11 +595,10 @@ export default function Groups() {
                 style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                   {/* A circle, as the board draws every row's icon. */}
-                  <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name="people" size={18} color={t.brand} />
-                  </View>
+                  {/* Purple is a class everywhere in the app, and a group is one. */}
+                  <IconPlate icon="people" tone="purple" />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{g.name}</Text>
+                    <Text style={{ ...ty.head, color: t.ink }}>{g.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {/* The member count is a figure like any other: only
                           sayable off a whole read of the membership. */}
@@ -626,7 +628,6 @@ export default function Groups() {
 
         {open ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title={open.name} note={cover.countable ? `${num(cover.on)}/${num(cover.total)}` : undefined} />
 
@@ -684,6 +685,13 @@ export default function Groups() {
               <View style={{ marginTop: sp.lg }}>
                 <Text style={{ ...ty.micro, color: t.ink3 }}>Who has it</Text>
                 <Text style={{ ...ty.body, color: cover.countable ? t.ink : t.ink3, marginTop: 4 }}>{coverLine}</Text>
+                {/* The same sentence as a bar. `cover.countable` is the guard
+                    the sentence and the heading's fraction already use: without
+                    it the bar has no fill and says "Not counted", never an empty
+                    bar that reads as nobody being on the programme. */}
+                <Meter label="On This Programme" tone="purple" target={cover.total}
+                  val={cover.countable ? cover.on : null}
+                  note={cover.countable ? `${num(cover.on)} of ${num(cover.total)}` : 'Not counted'} />
                 {!cover.countable ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
                     {groupStatus !== 'ready'
@@ -734,16 +742,19 @@ export default function Groups() {
                 const noListLine = held && fact.why === 'no-list' ? fact.note : null;
                 // Read once, not once per branch: this walks the roster.
                 const lastSeen = lastSeenLineFor(id);
-                const tone = held ? t.warn : st === 'on' ? t.good : st === 'unknown' ? t.ink3 : t.ink3;
+                const tone = held ? 'amber' : st === 'on' ? 'brand' : 'neutral';
                 return (
                   <View key={id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                      <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{m.name.slice(0, 2)}</Text>
+                      <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ ...ty.label, ...font('700'), color: t.brandText, textTransform: 'uppercase' }}>{m.name.slice(0, 2)}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{m.name}</Text>
-                        <Text style={{ ...ty.caption, color: tone, marginTop: 2 }}>{STATE_LABEL[st]}</Text>
+                        <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>{m.name}</Text>
+                        {/* The state as a chip in its own colour, in the words it
+                            always had. It was caption type DRAWN in the status
+                            colour, which is a mark colour doing a text job. */}
+                        <View style={{ marginTop: 4 }}><TonedChip label={STATE_LABEL[st]} tone={tone} /></View>
                         {/* Named only where the record supports it. A version
                             number beside somebody whose assignment could not be
                             read would be a fact invented out of a failure, and
@@ -893,7 +904,7 @@ export default function Groups() {
       <Modal visible={pickTpl} transparent animationType="slide" onRequestClose={() => setPickTpl(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPickTpl(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '80%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
             <Text style={{ ...ty.title, color: t.ink }}>Choose a programme</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
@@ -917,7 +928,7 @@ export default function Groups() {
               }} accessibilityRole="button"
                 accessibilityLabel={`${tpl.name}. ${tpl.program.days.length} days, ${tpl.program.days.reduce((a, d) => a + d.exercises.length, 0)} exercises`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.name}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                   {tpl.program.days.length} days · {tpl.program.days.reduce((a, d) => a + d.exercises.length, 0)} exercises
                 </Text>
@@ -931,7 +942,7 @@ export default function Groups() {
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '80%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
             <Text style={{ ...ty.title, color: t.ink }}>Add to “{open?.name ?? ''}”</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
@@ -955,7 +966,7 @@ export default function Groups() {
                     {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal}</Text>
                   </View>
                 </Pressable>

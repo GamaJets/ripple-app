@@ -43,8 +43,8 @@ import { View, Text, TextInput, ScrollView, Alert, Pressable } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, PageHead, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, Cta, PageHead, Flag, fig, IconPlate, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -52,7 +52,6 @@ import { reportError } from '../../src/lib/reportError';
 import {
   MIN_PASSWORD, changeEmail, changePassword, emailProblem, endOtherSessions, passwordProblem, pendingEmail,
 } from '../../src/lib/accountSecurity';
-import { END_ALIGN } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
@@ -225,27 +224,30 @@ export default function CoachAccount() {
 
         {/* The header the board gives every Settings-family page (17, 20): a
             back chevron at the leading edge, the title centred. The one-line
-            description stays, centred under it, because "Account & Sign-in"
-            alone does not say which of the two this is. */}
-        <PageHead title="Account & Sign-in" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
-          The password you sign in with, and the address a reset would go to
-        </Text>
+            description stays, as the head's own subtitle, because "Account &
+            Sign-in" alone does not say which of the two this is. */}
+        <PageHead title="Account & Sign-in" subtitle="Your password and reset address" />
 
 
         {/* ── email ──────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Email Address" />
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingBottom: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-            <Text style={{ ...ty.label, color: t.ink3 }}>On your account</Text>
-            <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={1}>
+          {/* The address as an identity row, the kit's shape: a toned plate, the
+              value in the heading weight and what it is under it. It wraps
+              rather than truncating; an address cut to fit is a different
+              address. */}
+          <View accessible accessibilityLabel={`On your account, ${auth.loading ? 'checking' : (email || 'no address read')}`}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingBottom: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+            <IconPlate icon="message" tone="blue" />
+            <View style={{ flex: 1, minWidth: 0 }}>
               {/* `|| null` and not the empty string `email` already is: `fig('')`
                   is the empty string, so an unread address would leave this slot
                   blank under its label — indistinguishable from an account with
                   no email at all. The dash is how the rest of the app says
                   "not read". */}
-              {auth.loading ? 'Checking…' : fig(email || null)}
-            </Text>
+              <Text style={{ ...ty.head, color: t.ink }}>{auth.loading ? 'Checking…' : fig(email || null)}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>On your account. A reset link can only go here.</Text>
+            </View>
           </View>
 
           {/* The four states of "is there a change outstanding", kept apart.
@@ -262,7 +264,7 @@ export default function CoachAccount() {
               <Pressable onPress={() => { void loadPending(); }} hitSlop={8} accessibilityRole="button"
                 accessibilityLabel="Check again for an outstanding email change"
                 style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
+                <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
           ) : pending.email ? (
@@ -277,9 +279,6 @@ export default function CoachAccount() {
             autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress"
             accessibilityLabel="New email address" style={inp} />
           {emNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{emNote}</Flag> : null}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Your clients see the name and photo on your coaching profile, not this. This is the address you sign in with and the only place a password reset can be sent — so keep it one you can open.
-          </Text>
           <View style={{ height: sp.md }} />
           <Cta label={emBusy ? 'Sending…' : 'Change Email Address'} wide disabled={emBusy} onPress={() => { void submitEmail(); }} />
         </Section>
@@ -308,19 +307,26 @@ export default function CoachAccount() {
 
           {pwNote ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{pwNote}</Flag> : null}
 
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            We ask for your current password so that a phone left unlocked on the gym floor can’t be used to lock you out of your own account — and out of every client record on it.
-          </Text>
           <View style={{ height: sp.md }} />
           <Cta label={pwBusy ? 'Changing…' : 'Change Password'} wide disabled={pwBusy} onPress={() => { void submitPassword(); }} />
         </Section>
 
 
-        <Section>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Forgotten the current one? Sign out and use “Forgot password” on the sign-in screen — that sends a link to {signInAddress(email)}.
+        {/* The three explanations that stood under the two forms, behind one
+            fold. None of them is a state or a refusal (those are the Flags
+            above, which stay where they are); each says why the form is the
+            way it is. */}
+        <Expandable title="About Your Sign-in" note="Forgotten your password, and why we ask for it">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            Forgotten the current one? Sign out and use “Forgot password” on the sign-in screen. That sends a link to {signInAddress(email)}.
           </Text>
-        </Section>
+          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+            Your clients see the name and photo on your coaching profile, not this. This is the address you sign in with and the only place a password reset can be sent, so keep it one you can open.
+          </Text>
+          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+            We ask for your current password so that a phone left unlocked on the gym floor can’t be used to lock you out of your own account, and out of every client record on it.
+          </Text>
+        </Expandable>
       </ScrollView>
     </SafeAreaView>
   );

@@ -63,9 +63,9 @@ import { useTheme } from '../../src/ui/components';
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Notice, Flag, Ghost, PageHead } from '../../src/ui/kit';
+import { Notice, Flag, Ghost, PageHead, IconPlate } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { useRoster } from '../../src/ui/roster';
 import { useSessions } from '../../src/ui/sessions';
@@ -490,8 +490,8 @@ export default function TrainerAssistant() {
             subtitle={figuresWhole ? 'Working from your own figures' : 'Waiting on your figures'}
             trailing={
               <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-                style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="sparkle" size={17} color={t.brandInk} />
+                style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: t.data.purpleSoft, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="sparkle" size={19} color={t.data.purpleInk} />
               </View>
             } />
         </View>
@@ -542,7 +542,9 @@ export default function TrainerAssistant() {
 
           {msgs.map((m, i) => (
             <View key={i} style={{ flexDirection: 'row', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: sp.md }}>
-              <View style={{ maxWidth: '82%', backgroundColor: m.role === 'user' ? t.brand : t.surface2, borderRadius: radius.md, paddingHorizontal: sp.md, paddingVertical: sp.sm + 2 }}>
+              {/* The answer is a white surface lifted off the grey ground, as
+                  every card now is; the coach's own question stays the accent. */}
+              <View style={{ maxWidth: '82%', backgroundColor: m.role === 'user' ? t.brand : t.surface, borderRadius: radius.lg, paddingHorizontal: sp.lg, paddingVertical: sp.sm + 2, ...(m.role === 'user' ? null : elevation.card) }}>
                 <Text style={{ ...ty.body, color: m.role === 'user' ? t.brandInk : t.ink }}>{m.content}</Text>
               </View>
             </View>
@@ -576,8 +578,9 @@ export default function TrainerAssistant() {
             <View style={{ marginTop: sp.md, gap: sp.sm }}>
               {SUGGESTIONS.map((s) => (
                 <Pressable key={s} onPress={() => { void send(s); }} accessibilityRole="button" accessibilityLabel={s}
-                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{s}</Text>
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface, borderRadius: radius.lg, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 56, ...elevation.card }}>
+                  <IconPlate icon="sparkle" tone="purple" size={36} />
+                  <Text style={{ ...ty.label, ...font('600'), color: t.ink, flex: 1 }}>{s}</Text>
                 </Pressable>
               ))}
             </View>
@@ -617,11 +620,10 @@ export default function TrainerAssistant() {
             coach can type into is a promise that send will do something. */}
         {figuresWhole ? (
           <View>
-            <Rule />
             <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
               <TextInput value={input} onChangeText={setInput} placeholder="Ask about your book…" placeholderTextColor={t.ink3} multiline
                 accessibilityLabel="Ask about your book"
-                style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
+                style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface, borderRadius: radius.xl, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120, ...elevation.card }} />
               {/* The refusal is drawn — the circle goes to `surface3` with an
                   empty box — and drawing is the only place it was said. A
                   screen reader was handed "Send question, button" whether the
@@ -632,8 +634,11 @@ export default function TrainerAssistant() {
               <Pressable onPress={() => { void send(input); }} disabled={!input.trim() || busy}
                 accessibilityRole="button" accessibilityLabel="Send question"
                 accessibilityState={{ disabled: !input.trim() || busy, busy }}
-                style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: input.trim() && !busy ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.head, color: t.brandInk }}>↑</Text>
+                // The bright accent under its deep ink, the pair the hero's
+                // button wears. With nothing to send it is grey, and the arrow
+                // takes the quiet ink so it is not white on pale grey.
+                style={{ width: 48, height: 48, borderRadius: radius.pill, backgroundColor: input.trim() && !busy ? t.brandBright : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.head, color: input.trim() && !busy ? t.brandDeep : t.ink3 }}>↑</Text>
               </Pressable>
             </View>
           </View>

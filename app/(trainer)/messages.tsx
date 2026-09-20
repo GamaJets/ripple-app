@@ -85,8 +85,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Ghost, PartialRead, Flag, PageHead, ListRow } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Ghost, PartialRead, Flag, PageHead, ListRow, AttentionRow, type Tone } from '../../src/ui/kit';
+import type { PeerHeading } from '../../src/lib/threadPeer';
+import { sp, layout, radius, elevation, type as ty, font } from '../../src/theme/scale';
 import { useCoachThreads } from '../../src/ui/coachThreads';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { peerHeading } from '../../src/lib/threadPeer';
@@ -183,17 +184,15 @@ function ThreadRow({ t, now, queued, refused, onPress }: {
       {/* The face, under the rule src/lib/peerAvatar.ts states: only ever what
           came back from the read for THIS client's id, and a monogram when there
           is none. There is no branch here that can reach the coach's own. */}
-      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: th.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {t.avatar
-          ? <Image source={{ uri: t.avatar }} style={{ width: 44, height: 44 }} accessibilityIgnoresInvertColors />
-          : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? th.brand : th.ink3 }}>{peerMonogram(head)}</Text>}
-      </View>
+      {/* Blue is the app's colour for a message, and it is spent on the rows
+          that HOLD one nobody has opened; a read thread keeps the accent. */}
+      <Monogram head={head} avatar={t.avatar} tone={counted ? 'blue' : 'brand'} size={44} />
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           {/* Casing and full ink for a real name only; a dash gets neither, so
               a placeholder never reads as somebody called "—". */}
           <Text numberOfLines={1}
-            style={{ ...ty.body, fontWeight: '600', flex: 1, color: head.isName ? th.ink : th.ink3, textTransform: head.isName ? 'capitalize' : 'none' }}>
+            style={{ ...ty.head, flex: 1, color: head.isName ? th.ink : th.ink3, textTransform: head.isName ? 'capitalize' : 'none' }}>
             {head.text}
           </Text>
           {when ? <Text style={{ ...ty.caption, color: th.ink3 }}>{when}</Text> : null}
@@ -202,16 +201,18 @@ function ThreadRow({ t, now, queued, refused, onPress }: {
           {/* The coach's own last word recedes; a client's does not. This is not
               a read receipt — nothing in this app measures whether the client
               opened it — only who wrote it. */}
-          <Text numberOfLines={1} style={{ ...ty.caption, flex: 1, color: preview.mine ? th.ink3 : th.ink2 }}>
+          <Text numberOfLines={1} style={{ ...ty.label, flex: 1, color: preview.mine ? th.ink3 : th.ink2 }}>
             {preview.text}
           </Text>
           {badge !== null ? (
+            // The count chip: the message blue's pale plate with its ink, the
+            // same pair the monogram beside it wears. The unread dash keeps the
+            // quiet surface, for the reason given above.
             <View style={{
-              minWidth: 22, paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.pill,
-              backgroundColor: counted ? th.brand : th.surface3,
-              borderWidth: counted ? 0 : hairline, borderColor: th.ring, alignItems: 'center',
+              minWidth: 26, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill,
+              backgroundColor: counted ? th.data.blueSoft : th.surface3, alignItems: 'center',
             }}>
-              <Text style={{ ...ty.micro, fontWeight: '700', color: counted ? th.brandInk : th.ink3 }}>{badge}</Text>
+              <Text style={{ ...ty.micro, ...font('700'), color: counted ? th.data.blueInk : th.ink3 }}>{badge}</Text>
             </View>
           ) : null}
         </View>
@@ -250,6 +251,33 @@ function ThreadRow({ t, now, queued, refused, onPress }: {
   );
 }
 
+/** A name as a person writes it. Roster names arrive in whatever case they
+ *  were typed; the rows used `textTransform: 'capitalize'`, which a kit part
+ *  that draws the name itself cannot be handed. Unicode letters, so "émile"
+ *  is cased too. */
+const cased = (name: string) => name.replace(/(^|[\s-])\p{L}/gu, (m) => m.toUpperCase());
+
+/**
+ * The face on a row, under the rule src/lib/peerAvatar.ts states: only ever
+ * what came back from the read for THIS client's id, and a monogram when there
+ * is none. The monogram is the mockups': a pale plate of one hue with the
+ * initials in that hue's INK (the mark colour is for fills and fails as text).
+ * A withheld name gets the grey of "nothing to report", never a hue.
+ */
+function Monogram({ head, avatar, tone, size }: { head: PeerHeading; avatar?: string | null; tone: Tone; size: number }) {
+  const th = useTheme();
+  const c = !head.isName ? { soft: th.surface3, ink: th.ink3 }
+    : tone === 'brand' || tone === 'neutral' ? { soft: th.brandSoft, ink: th.brandText }
+    : { soft: th.data[`${tone}Soft`], ink: th.data[`${tone}Ink`] };
+  return (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c.soft, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      {avatar
+        ? <Image source={{ uri: avatar }} style={{ width: size, height: size }} accessibilityIgnoresInvertColors />
+        : <Text style={{ ...ty.label, ...font('700'), color: c.ink }}>{peerMonogram(head)}</Text>}
+    </View>
+  );
+}
+
 /**
  * One row of the queue at the top: who is waiting, and how long they have been.
  *
@@ -265,9 +293,9 @@ function ThreadRow({ t, now, queued, refused, onPress }: {
  * this is a short queue worked from the top, that is the whole book scanned by
  * recency, and both taps land on the same conversation.
  */
-function WaitingRow({ w, now, queued, refused, onPress }: {
+function WaitingRow({ w, now, queued, refused, onPress, divider }: {
   w: Waiting; now: number; queued?: QueuedForThread | null;
-  refused?: RefusedForThread | null; onPress: () => void;
+  refused?: RefusedForThread | null; onPress: () => void; divider?: boolean;
 }) {
   const th = useTheme();
   const head = peerHeading(w.thread.name ? { kind: 'named', name: w.thread.name } : { kind: 'withheld' }, 'client');
@@ -282,43 +310,28 @@ function WaitingRow({ w, now, queued, refused, onPress }: {
   // stays up — with nothing on it saying why, the coach retypes the same
   // message into the same refusal.
   const refusedNote = refusedThreadNote(refused, now);
+  // The kit's AttentionRow, which is what a "needs you" row is everywhere else
+  // in the coach app: identity, the reason in a sentence, the age, one mark.
+  // The monogram is AMBER, the app's colour for "slipping, and yours to catch",
+  // and it is never the only signal: the row sits under a heading that says
+  // these people are waiting, and the wait itself is written beside the name.
+  //
+  // What this phone is holding (queued) and what the server refused go in the
+  // row's `status`, so they are drawn under the reason AND spoken with it;
+  // AttentionRow says name, reason, status and age as one sentence, which is
+  // what the hand-built label here did.
+  const held = [refusedNote, queuedNote].filter(Boolean).join(' ');
   return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Open the conversation with ${head.isName ? head.text : 'this client'}. ${line}${queuedNote ? ` ${queuedNote}` : ''}${refusedNote ? ` ${refusedNote}` : ''}`}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
-    >
-      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: th.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {w.thread.avatar
-          ? <Image source={{ uri: w.thread.avatar }} style={{ width: 36, height: 36 }} accessibilityIgnoresInvertColors />
-          : <Text style={{ ...ty.caption, fontWeight: '600', color: head.isName ? th.brand : th.ink3 }}>{peerMonogram(head)}</Text>}
-      </View>
-      <View style={{ flex: 1 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-          <Text numberOfLines={1}
-            style={{ ...ty.body, fontWeight: '600', flex: 1, color: head.isName ? th.ink : th.ink3, textTransform: head.isName ? 'capitalize' : 'none' }}>
-            {head.text}
-          </Text>
-          {/* The wait, as words rather than as a coloured dot. A queue ordered
-              by something the reader cannot see is one they have to take on
-              trust. */}
-          <Text style={{ ...ty.caption, color: th.ink2 }}>{waitedLabel(w.waitedMs)}</Text>
-        </View>
-        <Text style={{ ...ty.caption, color: th.ink3, marginTop: 2 }}>{line}</Text>
-        {queuedNote ? (
-          <View style={{ marginTop: 3 }}>
-            <Flag tone={th.warn}>{queuedNote}</Flag>
-          </View>
-        ) : null}
-        {refusedNote ? (
-          <View style={{ marginTop: 3 }}>
-            <Flag tone={th.crit}>{refusedNote}</Flag>
-          </View>
-        ) : null}
-      </View>
-      <Icon name={FORWARD_ICON} size={16} color={th.ink3} />
-    </Pressable>
+    <AttentionRow divider={divider}
+      avatar={<Monogram head={head} avatar={w.thread.avatar} tone="amber" size={42} />}
+      // A real name is cased; a withheld one is said in words, never drawn as a
+      // dash in full ink where it would read as somebody called "—".
+      name={head.isName ? cased(head.text) : 'Unnamed Client'}
+      reason={line}
+      age={waitedLabel(w.waitedMs)}
+      status={held || undefined}
+      tone={refusedNote ? th.crit : th.warn}
+      onPress={onPress} />
   );
 }
 
@@ -649,8 +662,10 @@ export default function Messages() {
             the number written on it. */}
         {status !== 'loading' ? (
           <View style={{ paddingTop: sp.lg }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
-              <Icon name="search" size={16} color={t.ink3} />
+            {/* A white pill on the grey ground with the card shadow: the
+                mockups' search, not a grey box on grey. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface, borderRadius: radius.pill, paddingHorizontal: sp.lg, ...elevation.card }}>
+              <Icon name="search" size={18} color={t.ink3} />
               <TextInput
                 value={filter.query}
                 onChangeText={(q) => setFilter((f) => ({ ...f, query: q }))}
@@ -683,10 +698,9 @@ export default function Messages() {
                 hitSlop={hitSlopFor(32)}
                 style={{
                   paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill,
-                  backgroundColor: filter.mode === 'unread' ? t.brand : t.surface2,
-                  borderWidth: filter.mode === 'unread' ? 0 : hairline, borderColor: t.ring,
+                  backgroundColor: filter.mode === 'unread' ? t.brand : t.surface,
                 }}>
-                <Text style={{ ...ty.micro, fontWeight: '600', color: filter.mode === 'unread' ? t.brandInk : t.ink2 }}>
+                <Text style={{ ...ty.micro, ...font('600'), color: filter.mode === 'unread' ? t.brandInk : t.ink2 }}>
                   {unreadChipLabel(unreadKnown, !unreadCountKnowable)}
                 </Text>
               </Pressable>
@@ -719,11 +733,9 @@ export default function Messages() {
           <Section>
             <SectionHead title={WAITING_TITLE} note={waitingCountNote(waiting, status) ?? undefined} />
             {waiting.rows.map((w, i) => (
-              <View key={w.thread.clientId}>
-                {i > 0 ? <Rule inset={48} /> : null}
-                <WaitingRow w={w} now={now} queued={queuedThreads.get(w.thread.clientId)}
-                  refused={refusedThreads.get(w.thread.clientId)} onPress={() => open(w.thread)} />
-              </View>
+              <WaitingRow key={w.thread.clientId} w={w} now={now} divider={i > 0}
+                queued={queuedThreads.get(w.thread.clientId)}
+                refused={refusedThreads.get(w.thread.clientId)} onPress={() => open(w.thread)} />
             ))}
             {/* Said once, under the list. It carries the doubt about the read
                 first and then the rows that could not say who spoke last — and
@@ -760,7 +772,6 @@ export default function Messages() {
 
         {otherThreads.length ? (
           <>
-            {waitingThreads.length ? <Rule /> : null}
             <Section>
               <SectionHead
                 title={waitingThreads.length || inReplyQueue.size ? 'Other Conversations' : 'Conversations'}
@@ -796,7 +807,6 @@ export default function Messages() {
             them tap twice for it would be a hub with one row in it. */}
         {shownUnstarted.length ? (
           <>
-            <Rule />
             <Section>
               <SectionHead
                 title="Message Someone Else"
@@ -848,11 +858,10 @@ export default function Messages() {
             sheet that sends through the ordinary thread. */}
         {status !== 'loading' ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Write to Many" />
-              <ListRow icon="people" title="Broadcast"
-                note="One message into each client’s own thread. You pick who, and see how many, before it goes."
+              <ListRow icon="people" tone="purple" title="Broadcast"
+                note="One message into each client’s own thread"
                 onPress={() => router.push('/(trainer)/broadcast')} />
             </Section>
           </>
@@ -863,14 +872,13 @@ export default function Messages() {
             for a client's message in the wrong one. */}
         {status !== 'loading' ? (
           <>
-            <Rule />
             <Section>
-              <Text style={{ ...ty.caption, color: t.ink3 }}>
-                This is people talking. Bookings, cancellations and anything else sent to you are in Notifications.
-              </Text>
-              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
-                <Ghost label="Notifications" icon="bell" onPress={() => router.push('/(trainer)/notifications')} />
-              </View>
+              {/* A row in the kit's own shape, with the sentence as its note:
+                  the paragraph and the button under it were one fact and one
+                  way onward, which is what a row is. */}
+              <ListRow icon="bell" tone="amber" title="Notifications"
+                note="Bookings and cancellations are there, not here"
+                onPress={() => router.push('/(trainer)/notifications')} />
             </Section>
           </>
         ) : null}

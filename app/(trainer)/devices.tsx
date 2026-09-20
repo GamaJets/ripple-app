@@ -67,7 +67,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { BRAND } from '../../src/lib/brands';
 import { num, num1 } from '../../src/lib/format';
-import { Icon, type IconName } from '../../src/ui/Icon';
+import { type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { tapLight } from '../../src/ui/haptics';
@@ -75,7 +75,7 @@ import { tapLight } from '../../src/ui/haptics';
 // are the ones that get printed as fact. `isWhole` is the gate; see
 // src/ui/loadStatus.ts and scripts/check-whole.mjs.
 import { isWhole } from '../../src/ui/loadStatus';
-import { Section, SectionHead, PageHead, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, Cta, Ghost, Flag, IconPlate, TonedChip, type Tone } from '../../src/ui/kit';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
@@ -84,7 +84,7 @@ import { forgetLink, linkFor, useLinkRevision } from '../../src/lib/wearableLink
 import { useDeviceHrv } from '../../src/ui/deviceHrv';
 import { hrvBuildingLine, hrvTrendLine } from '../../src/lib/hrvTrend';
 import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/wearables/liveNotes';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { ProviderMark } from '../../src/ui/wearables/ProviderMark';
 
 /** "3m ago" for the last sync stamp. */
@@ -111,21 +111,19 @@ function ago(ts?: number): string {
  * own header gives: "Heart Rate", "62 bpm", "from WHOOP" is one fact, and
  * three stops with a swipe between them is three fragments.
  */
-function Reading({ icon, title, note, lit }: { icon: IconName; title: string; note: string; lit: boolean }) {
+function Reading({ icon, title, note, lit, tone }: { icon: IconName; title: string; note: string; lit: boolean; tone: Tone }) {
   const t = useTheme();
   return (
     <View accessible accessibilityLabel={`${title}. ${note}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-      {/* A 36pt circle, as the board draws every row's icon and as the kit's
-          ListRow draws its own. */}
-      <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-        {/* The tile dims when there is no figure. Colour is never the only
-            channel here — the note beside it says, in words, that nothing has
-            come in and which device owes it. */}
-        <Icon name={icon} size={17} color={lit ? t.brand : t.ink3} />
-      </View>
+      {/* The kit's toned plate, in the metric's own colour everywhere in the
+          app: calories orange, steps purple, heart pink, HRV teal. The plate
+          goes grey when there is no figure. Colour is never the only channel
+          here — the note beside it says, in words, that nothing has come in
+          and which device owes it. */}
+      <IconPlate icon={icon} tone={lit ? tone : 'neutral'} />
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{title}</Text>
+        <Text style={{ ...ty.head, color: t.ink }}>{title}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text>
       </View>
     </View>
@@ -349,7 +347,9 @@ export default function TrainerDevices() {
               accessibilityLabel={`${energy.kind === 'total' ? 'Energy today' : 'Active today'}, ${energy.kcal == null ? 'not measured' : `${num(energy.kcal)} kcal`}`}
               style={{ flexDirection: 'row', alignItems: 'baseline' }}>
               <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
-                style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{num(energy.kcal)}</Text>
+                // Calories are orange wherever this app draws them; the INK
+                // of that hue, because a figure is type. The dash stays ink.
+                style={{ ...ty.hero, ...numeric, color: energy.kcal == null ? t.ink : t.data.orangeInk, flexShrink: 1 }}>{num(energy.kcal)}</Text>
               <Text style={{ ...ty.head, color: t.ink3, marginStart: 6, flexShrink: 0 }}>kcal</Text>
             </View>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
@@ -373,7 +373,7 @@ export default function TrainerDevices() {
                 just not current, and that is a third sentence. */}
             {staleNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote}</Flag> : null}
 
-            <Reading icon="flame"
+            <Reading icon="flame" tone="orange"
               title={energy.kind === 'total' ? 'Energy Burned' : 'Active Calories'}
               lit={energy.kcal != null}
               note={energy.kcal == null
@@ -382,19 +382,19 @@ export default function TrainerDevices() {
                   ? `${num(energy.kcal)} kcal across the whole day from ${energy.from}, resting metabolism included`
                   : `${num(energy.kcal)} kcal above rest, from ${energy.from}`} />
 
-            <Reading icon="heart" title="Average Heart Rate"
+            <Reading icon="heart" tone="pink" title="Average Heart Rate"
               lit={w.today.heartRateAvg != null}
               note={w.today.heartRateAvg == null
                 ? awaitingNote('heartRate', connectedMeta)
                 : `${num(w.today.heartRateAvg)} bpm across today's samples, from ${named('heartRateAvg')}`} />
 
-            <Reading icon="heart" title="Resting Heart Rate"
+            <Reading icon="heart" tone="pink" title="Resting Heart Rate"
               lit={resting != null}
               note={resting == null
                 ? awaitingNote('heartRate', connectedMeta)
                 : `${num(resting.bpm)} bpm, from ${resting.from}`} />
 
-            <Reading icon="trending" title="Steps"
+            <Reading icon="trending" tone="purple" title="Steps"
               lit={w.today.steps != null}
               note={w.today.steps == null
                 ? awaitingNote('steps', connectedMeta)
@@ -407,7 +407,7 @@ export default function TrainerDevices() {
                 zero, and there is nothing useful to say about a measurement
                 nothing measured. */}
             {hrv.tonight ? (
-              <Reading icon="heart" title="Heart Rate Variability" lit
+              <Reading icon="heart" tone="teal" title="Heart Rate Variability" lit
                 note={`${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · ${hrvLine}`} />
             ) : null}
 
@@ -464,7 +464,7 @@ export default function TrainerDevices() {
                       the name beside it does the speaking. */}
                   <ProviderMark id={p.meta.id} size={40} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.meta.name}</Text>
+                    <Text style={{ ...ty.head, color: t.ink }}>{p.meta.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>
                   </View>
                   {busy ? (
@@ -486,9 +486,10 @@ export default function TrainerDevices() {
                     // the state now, said in a word as well as a colour. The
                     // button that ends the connection is below, labelled with
                     // what pressing it does.
-                    <View accessible accessibilityLabel={`${p.meta.name} is connected`}
-                      style={{ paddingVertical: 11, paddingHorizontal: sp.lg, borderRadius: radius.sm, backgroundColor: t.brand }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Connected</Text>
+                    // A STATE, so it is the kit's chip and not a filled button
+                    // shape that reads as something to press.
+                    <View accessible accessibilityLabel={`${p.meta.name} is connected`}>
+                      <TonedChip icon="check" label="Connected" />
                     </View>
                   ) : on ? (
                     // Remembered, and unreadable in this build. Grey, so a
@@ -497,9 +498,8 @@ export default function TrainerDevices() {
                     // every remembered id connected before it asks whether
                     // this binary can read it. The flag under the row says
                     // why, and Disconnect below is how the coach clears it.
-                    <View accessible accessibilityLabel={`${p.meta.name} cannot be read on this phone`}
-                      style={{ paddingVertical: 11, paddingHorizontal: sp.lg, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Not Readable</Text>
+                    <View accessible accessibilityLabel={`${p.meta.name} cannot be read on this phone`}>
+                      <TonedChip tone="amber" label="Not Readable" />
                     </View>
                   ) : blocked ? (
                     <Ghost label="Unavailable" a11yLabel={`${p.meta.name} is unavailable — try connecting again`} onPress={() => onConnect(p)} />

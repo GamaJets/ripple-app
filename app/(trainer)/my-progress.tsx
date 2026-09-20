@@ -69,8 +69,8 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Spark, Cta, Notice, PartialRead, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value as valueType } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Spark, Cta, Notice, PartialRead, Flag, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value as valueType, font } from '../../src/theme/scale';
 import { useCheckIns, type CheckIn } from '../../src/ui/checkins';
 import { useMeasurements, METRICS, type MeasureEntry } from '../../src/ui/measurements';
 import { useClientData } from '../../src/ui/clientData';
@@ -122,7 +122,7 @@ const TREND_POINTS = 24;
 function Rating({ t, label, score, onChange }: { t: Theme; label: string; score: number; onChange: (v: number) => void }) {
   return (
     <View style={{ marginBottom: sp.md }}>
-      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2, marginBottom: sp.sm }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font('500'), color: t.ink2, marginBottom: sp.sm }}>{label}</Text>
       <View style={{ flexDirection: 'row', gap: sp.sm }}>
         {[1, 2, 3, 4, 5].map((n) => (
           <Pressable key={n} onPress={() => onChange(n)} accessibilityRole="button"
@@ -476,7 +476,6 @@ export default function MyProgress() {
             </Section>
           ) : null}
 
-          <Rule />
 
           {/* ── the hero: the last weight you recorded ─────────────────────
               The figure goes through `plain` rather than num1: `weightIn` has
@@ -517,9 +516,12 @@ export default function MyProgress() {
                 {/* One stop for the ear: label, figure, movement. */}
                 <View accessible accessibilityLabel={`Your latest weight, ${shownWeight == null ? 'no reading' : `${figure} ${wu}`}. ${moved}`}>
                   <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                    <Text style={{ ...valueType(32), color: t.ink }}>{figure}</Text>
+                    {/* The kit's hero size, shrunk to fit before it wraps: a
+                        weight broken over two lines is a figure read wrong. */}
+                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
+                      style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
                     {shownWeight != null ? (
-                      <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{wu}</Text>
+                      <Text style={{ ...ty.head, ...numeric, color: t.ink3, marginStart: 6 }}>{wu}</Text>
                     ) : null}
                   </View>
                   <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{moved}</Text>
@@ -532,7 +534,6 @@ export default function MyProgress() {
             );
           })()}
 
-          <Rule />
 
           {/* ── the trend ────────────────────────────────────────────────── */}
           <Section>
@@ -541,7 +542,10 @@ export default function MyProgress() {
                 a count. */}
             <SectionHead title="Your Weight Trend" note={weighWhole && weighed.length ? `${weighed.length} weigh-ins` : undefined} />
             {trend.length >= 2 ? (
-              <Spark
+              // The filled area chart the client's own body screens draw.
+              // Weight takes the accent, as it does there (fat is orange and
+              // muscle blue; see app/(client)/body-trends.tsx).
+              <Spark area tone="brand"
                 data={trend.map((c) => weightIn(c.weightKg, wu) ?? c.weightKg)}
                 labels={trend.map((c) => c.at)}
                 unit={` ${wu}`}
@@ -577,7 +581,6 @@ export default function MyProgress() {
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── log a weigh-in ───────────────────────────────────────────── */}
           <Section>
@@ -607,7 +610,6 @@ export default function MyProgress() {
             </Text>
           </Section>
 
-          <Rule />
 
           {/* ── the tape ─────────────────────────────────────────────────── */}
           <Section>
@@ -627,7 +629,7 @@ export default function MyProgress() {
                   <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                     <Text style={{ ...ty.label, color: t.ink2 }}>{label}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                      <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
+                      <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
                       {d != null && d !== 0 ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 62, justifyContent: 'flex-end' }}>
                           {/* A neutral mark. This painted every falling tape
@@ -662,14 +664,13 @@ export default function MyProgress() {
             )}
           </Section>
 
-          <Rule />
 
           {/* ── log tape measurements ────────────────────────────────────── */}
           <Section>
             <SectionHead title="Log New Measurements" note={lu} />
             {METRICS.map(({ key, label }) => (
               <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>{label}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink2 }}>{label}</Text>
                 <TextInput value={tape[key] ?? ''} onChangeText={(v) => setTapeVal(key, v)} keyboardType="decimal-pad"
                   accessibilityLabel={`${label} in ${lu === 'cm' ? 'centimetres' : 'inches'}`}
                   placeholder={lastTape(key) ?? lu} placeholderTextColor={t.ink3} style={tapeInp} />
@@ -692,13 +693,12 @@ export default function MyProgress() {
                   accessibilityRole="radio" accessibilityState={{ selected: lu === u }}
                   accessibilityLabel={u === 'cm' ? 'Centimetres' : 'Inches'}
                   style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: lu === u ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: lu === u ? '600' : '500', color: lu === u ? t.brandInk : t.ink2 }}>{u}</Text>
+                  <Text style={{ ...ty.label, ...font(lu === u ? '600' : '500'), color: lu === u ? t.brandInk : t.ink2 }}>{u}</Text>
                 </Pressable>
               ))}
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── history ──────────────────────────────────────────────────── */}
           <Section>
@@ -714,7 +714,7 @@ export default function MyProgress() {
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg, marginTop: 5 }}>
                   {METRICS.map(({ key, label }) => e[key] != null ? (
                     <Text key={key} style={{ ...ty.caption, color: t.ink3 }}>
-                      {label} <Text style={{ ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(lengthIn(e[key], lu))}</Text>
+                      {label} <Text style={{ ...numeric, ...font('500'), color: t.ink2 }}>{fig(lengthIn(e[key], lu))}</Text>
                     </Text>
                   ) : null)}
                 </View>
@@ -746,7 +746,6 @@ export default function MyProgress() {
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── body composition scans ───────────────────────────────────── */}
           <Section>
@@ -765,6 +764,20 @@ export default function MyProgress() {
                 subject={{ they: 'you', have: 'have' }}
               />
             </View>
+            {/* Body fat across the scans, as the area chart the client's own
+                body screens draw it, in the orange body fat wears everywhere.
+                Only from a WHOLE read of at least two scans: a line through a
+                truncated list starts wherever the page happened to, and one
+                scan is a reading, not a trend (the row below states it). Every
+                point is a scan's own figure; nothing is interpolated. */}
+            {isWhole(cd.scansStatus) && cd.scans.length >= 2 ? (
+              <View style={{ marginBottom: sp.md }}>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>Body Fat</Text>
+                <Spark area tone="orange" unit="%"
+                  data={cd.scans.map((s) => s.bodyFatPct)}
+                  labels={cd.scans.map((s) => s.takenAt)} />
+              </View>
+            ) : null}
             {cd.scans.length ? (
               [...cd.scans].reverse().map((s, i) => (
                 <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -811,7 +824,6 @@ export default function MyProgress() {
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── log a body scan ──────────────────────────────────────────── */}
           <Section>
@@ -827,7 +839,7 @@ export default function MyProgress() {
               { key: 'sm', label: 'Muscle', unit: wu, value: scanSm, set: setScanSm, a11y: `Your skeletal muscle mass in ${wu === 'kg' ? 'kilograms' : 'pounds'}, optional` },
             ].map((f) => (
               <View key={f.key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink2 }}>
                   {f.label}
                   {/* The unit belongs on the row, not in the placeholder. Two of
                       these three are in the coach's weight unit and the middle
@@ -858,7 +870,6 @@ export default function MyProgress() {
             </Text>
           </Section>
 
-          <Rule />
 
           {/* ── where a CLIENT's body record goes instead ────────────────── */}
           <Section>
@@ -869,7 +880,7 @@ export default function MyProgress() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
               <Icon name="people" size={14} color={t.ink3} />
               <Pressable onPress={() => router.push('/(trainer)/dashboard')} hitSlop={8} accessibilityRole="button">
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Go to Clients</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.brandText }}>Go to Clients</Text>
               </Pressable>
             </View>
           </Section>

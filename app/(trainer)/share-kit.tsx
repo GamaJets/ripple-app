@@ -116,8 +116,8 @@ import { useRouter } from 'expo-router';
 import Svg, { Rect, Text as SvgText, Line, Image as SvgImage, Defs, ClipPath } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, Notice, Cta, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, Ghost, Notice, Cta, Flag, PageHead } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -732,10 +732,43 @@ export default function ShareKit() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <PageHead title="Share Kit" subtitle="Marketing" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          A card from your real numbers. You post it — Repple never posts for you.
-        </Text>
+        <PageHead title="Share Kit" subtitle="Your real numbers. You post it" />
+
+        {/* ── the card, FIRST ─────────────────────────────────────────────────
+            The page opens on the thing it makes. It stood under four sections
+            of settings, so a coach chose a mode, a period and a shape before
+            seeing what any of them did; now every control below changes a
+            picture that is already on screen. Nothing about how it is built
+            moved: the same `build`, the same refusals in the same words. */}
+        <Section>
+          <SectionHead title="Your Card" note={build.ok ? `${size.w} × ${size.h}` : undefined} />
+          {build.ok ? (
+            <View style={{ alignItems: 'center' }}>
+              <View style={{ width: previewW, height: previewH, overflow: 'hidden', borderRadius: radius.lg, ...elevation.card }}>
+                {/* Drawn at export size and scaled about its centre, so the
+                    bitmap `toDataURL` takes is the full 1080-wide one whether or
+                    not the native side honours the size options. */}
+                <View style={{ position: 'absolute', start: (previewW - size.w) / 2, top: (previewH - size.h) / 2, width: size.w, height: size.h, transform: [{ scale }] }}>
+                  <CardArt ref={svgRef} card={build.card} w={size.w} h={size.h} accent={t.brand} />
+                </View>
+              </View>
+            </View>
+          ) : (
+            // A pending read is not a failed one. `build.reason` is 'unread'
+            // for both, because to the CARD they are the same refusal — but to
+            // the coach they are not, and this is the line they read.
+            build.reason === 'unread' && sessionsPending ? (
+              <Notice kicker="Reading your sessions" title="No card yet"
+                note="Still reading what you have delivered. Nothing has failed — the figures for a card appear here once the read lands." />
+            ) : (
+            <Notice tone={build.reason === 'unread' ? undefined : t.brand}
+              kicker={build.reason === 'unread' ? 'Could not read your sessions' : build.reason === 'consent' ? 'Their call, not yours' : 'Nothing to put on it yet'}
+              title="No card"
+              note={build.why} />
+            )
+          )}
+        </Section>
+
 
         {/* ── what the card is about ─────────────────────────────────────── */}
         <Section>
@@ -757,9 +790,8 @@ export default function ShareKit() {
           </Section>
         ) : (
           <>
-            <Rule />
             <Section>
-              <SectionHead title="The result" note="You type it" />
+              <SectionHead title="The Result" note="You type it" />
               <TextInput value={spanText} onChangeText={setSpanText} placeholder="12 weeks in" placeholderTextColor={t.ink3} style={field} accessibilityLabel="The period, in your words" />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>The headline on the card — the period, in your words.</Text>
 
@@ -782,10 +814,9 @@ export default function ShareKit() {
                 style={{ ...field, marginTop: sp.lg, minHeight: 72, textAlignVertical: 'top' }} />
             </Section>
 
-            <Rule />
 
             <Section>
-              <SectionHead title="Their permission" />
+              <SectionHead title="Their Permission" />
               <Check
                 on={okFigures}
                 onPress={() => setOkFigures((v) => !v)}
@@ -813,7 +844,6 @@ export default function ShareKit() {
               </Text>
             </Section>
 
-            <Rule />
 
             {/* ── the photograph, on the client's own say-so ───────────────
                 Built the opposite way round to the figures above: the coach
@@ -842,8 +872,8 @@ export default function ShareKit() {
                       return (
                         <Pressable key={c.id} onPress={() => setSubject(on ? null : c.id)}
                           accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={c.name}
-                          style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2, borderWidth: hairline, borderColor: on ? t.brand : t.ring }}>
-                          <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink }}>{c.name}</Text>
+                          style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                          <Text style={{ ...ty.label, ...font('600'), color: on ? t.brandInk : t.ink }}>{c.name}</Text>
                         </Pressable>
                       );
                     })}
@@ -954,36 +984,6 @@ export default function ShareKit() {
         </Section>
 
 
-        {/* ── the card ───────────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Your card" note={build.ok ? `${size.w} × ${size.h}` : undefined} />
-          {build.ok ? (
-            <View style={{ alignItems: 'center' }}>
-              <View style={{ width: previewW, height: previewH, overflow: 'hidden', borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring }}>
-                {/* Drawn at export size and scaled about its centre, so the
-                    bitmap `toDataURL` takes is the full 1080-wide one whether or
-                    not the native side honours the size options. */}
-                <View style={{ position: 'absolute', start: (previewW - size.w) / 2, top: (previewH - size.h) / 2, width: size.w, height: size.h, transform: [{ scale }] }}>
-                  <CardArt ref={svgRef} card={build.card} w={size.w} h={size.h} accent={t.brand} />
-                </View>
-              </View>
-            </View>
-          ) : (
-            // A pending read is not a failed one. `build.reason` is 'unread'
-            // for both, because to the CARD they are the same refusal — but to
-            // the coach they are not, and this is the line they read.
-            build.reason === 'unread' && sessionsPending ? (
-              <Notice kicker="Reading your sessions" title="No card yet"
-                note="Still reading what you have delivered. Nothing has failed — the figures for a card appear here once the read lands." />
-            ) : (
-            <Notice tone={build.reason === 'unread' ? undefined : t.brand}
-              kicker={build.reason === 'unread' ? 'Could not read your sessions' : build.reason === 'consent' ? 'Their call, not yours' : 'Nothing to put on it yet'}
-              title="No card"
-              note={build.why} />
-            )
-          )}
-        </Section>
-
         {/* The logo is set and its picture did not arrive. Said HERE, on the
             screen that publishes, because this is the only surface where an
             unbranded card is permanent — app/(trainer)/brand.tsx has drawn the
@@ -996,7 +996,6 @@ export default function ShareKit() {
 
         {build.ok ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Caption" note="Copied when you share" />
               <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
@@ -1015,12 +1014,12 @@ export default function ShareKit() {
               The state is now announced as well as coloured. */}
           <Pressable onPress={share} disabled={busy || !build.ok} accessibilityRole="button" accessibilityLabel="Share this card"
             accessibilityState={{ disabled: busy || !build.ok, busy }}
-            style={{ backgroundColor: build.ok ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
-            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={build.ok ? t.brandInk : t.ink3} />}
-            <Text style={{ ...ty.label, fontWeight: '600', color: build.ok ? t.brandInk : t.ink3 }}>{busy ? 'Preparing…' : 'Share this card'}</Text>
+            style={{ backgroundColor: build.ok ? t.brand : t.surface3, borderRadius: radius.md, minHeight: 56, paddingVertical: sp.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
+            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={20} color={build.ok ? t.brandInk : t.ink3} />}
+            <Text style={{ ...ty.button, color: build.ok ? t.brandInk : t.ink3 }}>{busy ? 'Preparing…' : 'Share This Card'}</Text>
           </Pressable>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Opens your phone's share sheet — Instagram, TikTok, WhatsApp, or anywhere else you post. You choose the destination and you confirm the post.
+            Opens your phone's share sheet. You choose where, and you confirm the post.
           </Text>
         </Section>
 
@@ -1049,8 +1048,8 @@ export default function ShareKit() {
                 <Pressable key={p.id} onPress={() => { void choose(p); }} disabled={igBusy}
                   accessibilityRole="button" accessibilityLabel={`Post to ${p.igUsername ? `@${p.igUsername}` : p.name}`}
                   accessibilityState={{ disabled: igBusy, busy: igBusy }}
-                  style={{ paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{p.igUsername ? `@${p.igUsername}` : p.name}</Text>
+                  style={{ paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{p.igUsername ? `@${p.igUsername}` : p.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.name}</Text>
                 </Pressable>
               ))}
@@ -1273,7 +1272,7 @@ function Segmented({ options, value, onChange }: {
             accessibilityLabel={o.note ? `${o.label}. ${o.note}` : o.label}
             style={{ flex: 1, minHeight: 40, paddingVertical: sp.sm, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
-              style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{o.label}</Text>
+              style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{o.label}</Text>
             {o.note ? <Text style={{ ...ty.caption, color: on ? t.bg : t.ink3, marginTop: 2, opacity: on ? 0.8 : 1 }}>{o.note}</Text> : null}
           </Pressable>
         );
@@ -1296,7 +1295,7 @@ function Check({ on, onPress, title, note }: { on: boolean; onPress: () => void;
         {on ? <Icon name="check" size={13} color={t.brandInk} /> : null}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{title}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{title}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text>
       </View>
     </Pressable>

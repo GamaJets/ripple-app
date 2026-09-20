@@ -41,14 +41,14 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, PageHead } from '../../src/ui/kit';
+import { Section, SectionHead, Ghost, PageHead, HeroCard, HeroRing } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useCoachSetup } from '../../src/ui/coachSetup';
 import { useCoachDelivery, useDeliveryFact } from '../../src/ui/coachDelivery';
 import { DeliveryModeChoice } from '../../src/ui/DeliveryModeChoice';
 import { deliveryAskLine, deliveryNote } from '../../src/lib/coachDelivery';
 import {
-  coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, NOT_YOUR_SETUP,
+  coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, coachSetupDone, coachSetupNa, coachSetupUnknown, NOT_YOUR_SETUP,
   type CoachSetupRow,
 } from '../../src/lib/coachFirstRun';
 import { FORWARD_ICON } from '../../src/ui/direction';
@@ -126,17 +126,34 @@ export default function CoachGettingStarted() {
 
   const rows = coachSetupRows(facts, delivery.shape);
   const next = coachSetupNext(rows);
+  const done = coachSetupDone(rows);
+  const applicable = rows.length - coachSetupNa(rows);
+  // Null is "cannot be drawn": a read still in flight, a row nothing could
+  // read, or a list with no step that applies. Never a nought.
+  const ringValue = status === 'loading' || coachSetupUnknown(rows) > 0 || applicable <= 0 ? null : done / applicable;
   const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
-        <PageHead title={coachSetupHeading(rows)} subtitle="Getting started" />
+        <PageHead title="Getting Started" />
 
-        <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-          {coachSetupNote(rows, status)}
-        </Text>
+        {/* ── the state, and the one action ────────────────────────────────────
+            The night hero: how far along, as a ring, and the first step still
+            outstanding as the bright button. The ring's arithmetic is the
+            heading's own (`coachSetupHeading`): done over the steps that APPLY
+            to this coach, and no fraction at all while any row is unread or
+            the reads are still landing. An arc over a partly unread list
+            would be the denominator that heading refuses to print, drawn as
+            a picture instead of written as a number. The note is unchanged
+            and says why when the ring is empty. */}
+        <HeroCard eyebrow="Your Setup" title={coachSetupHeading(rows)} meta={coachSetupNote(rows, status)}
+          ring={<HeroRing value={ringValue}
+            figure={ringValue == null ? null : `${done}/${applicable}`}
+            sub={ringValue == null ? 'Not Known' : 'Steps'}
+            spoken={ringValue == null ? 'Setup progress, not known yet' : `${done} of ${applicable} steps done`} />}
+          cta={next ? { label: `Open ${next.title}`, onPress: () => router.push(next.route as any) } : undefined} />
 
         <Section>
           {rows.map((r) => (
@@ -149,7 +166,7 @@ export default function CoachGettingStarted() {
             >
               <View style={{ paddingTop: 2 }}>{tick(r.state, t)}</View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' || r.state === 'na' ? t.ink3 : t.ink }}>{r.item.title}</Text>
+                <Text style={{ ...ty.head, color: r.state === 'done' || r.state === 'na' ? t.ink3 : t.ink }}>{r.item.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.item.note}</Text>
                 {/* Why it is worth doing, on the rows that are not done. This is
                     the half a checklist usually leaves out and the reason a
@@ -200,24 +217,15 @@ export default function CoachGettingStarted() {
           </Text>
         </Section>
 
-        {next ? (
-          <Section>
-            <SectionHead title="Start Here" />
-            <Text style={{ ...ty.body, color: t.ink2 }}>
-              {next.title} is the first one still outstanding, and the rest of the list is easier once it is done.
-            </Text>
-            <View style={{ marginTop: sp.lg }}>
-              <Ghost label="Open It" onPress={() => router.push(next.route as any)} />
-            </View>
-          </Section>
-        ) : null}
+        {/* "Start Here" was a card at the foot of the page. It is the hero's
+            bright button now: the first outstanding step, offered before the
+            list rather than after it. */}
 
 
         <Section>
           <SectionHead title="If Something Does Not Make Sense" />
-          <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
-            Several screens carry a row at the top saying what they are showing you. Open it, read it, and close
-            it — it does not come back.
+          <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.lg }}>
+            Many screens open with a row saying what they show. Read it once and it goes.
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.md, flexWrap: 'wrap' }}>
             <Ghost label="Search Every Screen" onPress={() => router.push('/(trainer)/explore')} />

@@ -96,8 +96,8 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PageHead, Scrim } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, Cta, Ghost, Notice, PageHead, Scrim, FigureCard, Meter } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useTenant } from '../../src/ui/tenant';
 import { useClientTags } from '../../src/ui/clientTags';
@@ -527,8 +527,8 @@ export default function Broadcast() {
 
   const chip = (label: string, active: boolean, onPress: () => void) => (
     <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }}
-      style={{ paddingHorizontal: sp.md + 2, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: active ? t.brand : t.surface2 }}>
-      <Text style={{ ...ty.label, fontWeight: '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
+      style={{ minHeight: 40, justifyContent: 'center', paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: active ? t.brand : t.surface2 }}>
+      <Text style={{ ...ty.label, ...font(active ? '700' : '500'), color: active ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 
@@ -538,8 +538,25 @@ export default function Broadcast() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        <PageHead title="Broadcast" subtitle="Your clients" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Send one message to a whole segment of your clients.</Text>
+        <PageHead title="Broadcast" subtitle="One message, each client’s own thread" />
+
+        {/* ── who this goes to, as a figure ───────────────────────────────────
+            The page opens on the one number that matters before an irreversible
+            send: how many people. It is `countable`'s number and no other: the
+            same guard that withholds the count on the button withholds it here,
+            so the card draws a dash and the guard's own reason rather than the
+            length of a list that is part of a book. The meter is the share of
+            the whole roster, under the same guard; with no whole read it has no
+            fill at all, never an empty bar that reads as "nobody". */}
+        <FigureCard title="Going To"
+          figure={countable ? String(recipients.length) : null}
+          unit={countable ? (recipients.length === 1 ? 'client' : 'clients') : undefined}
+          period={sel.kind === 'all' ? 'All clients' : sel.kind === 'tag' ? `Tag: ${sel.tag}` : def?.title}
+          detail={countable ? undefined : claim.reason ?? 'Not counted until your client list has loaded in full.'}>
+          <Meter label="Of Your Book" tone="blue" target={roster.length}
+            val={countable ? recipients.length : null}
+            note={countable ? `${recipients.length} of ${roster.length}` : 'Not counted'} />
+        </FigureCard>
 
         {/* ── the segment ──────────────────────────────────────────────────
             Two rows, because they are two different kinds of claim. The top row
@@ -750,7 +767,7 @@ export default function Broadcast() {
           somebody edits the template while meaning to edit the message. */}
       <Modal visible={savedOpen} transparent animationType="slide" onRequestClose={() => setSavedOpen(false)}>
         <Scrim onPress={() => setSavedOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '70%' }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: sp.xxl, maxHeight: '70%' }}>
           <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
             Tapping one puts it in your box. Nothing is sent until you press Send, and a client’s name is not filled in — everybody gets the same words.
@@ -762,7 +779,7 @@ export default function Broadcast() {
               <Pressable key={tpl.id ?? tpl.title} onPress={() => useSaved(tpl.body)}
                 accessibilityRole="button" accessibilityLabel={`Use the ${tpl.title} message`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{tpl.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
                   {applyTemplate(tpl.body, null, coachName ?? null)}
                 </Text>

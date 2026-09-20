@@ -21,8 +21,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, PageHead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, value, fontScale } from '../../src/theme/scale';
+import { Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, PageHead, KpiTile, TonedChip, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, value, fontScale, font } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 // The three figures under the name — board page 19's "Clients · Rating ·
 // Years" — each from the read that owns it, and each withheld to a dash until
@@ -31,7 +31,11 @@ import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 // the years are counted from the day the account was made.
 import { useRoster } from '../../src/ui/roster';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
-import { fetchRatingSummaries } from '../../src/ui/reviews';
+import { fetchRatingSummaries, fetchCoachCredentials } from '../../src/ui/reviews';
+// The medal chips under the three tiles: the coach's own stated credentials,
+// judged against today by the same `credentialState` the Credentials screen and
+// the directory use, so a chip here cannot call current what they call lapsed.
+import { credentialState, sortCredentials, type Credential, type CredentialState } from '../../src/lib/coachCredentials';
 import { ratingDisplay, formatAverage, ratingLine, type RatingSummary } from '../../src/lib/reviews';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -98,6 +102,11 @@ function wholeYearsSince(iso: string | null, todayKey: string): number | null {
   return Math.max(0, years);
 }
 
+/** A medal's colour by the credential's state, and the word that goes with it.
+ *  Colour never stands alone: a chip that is not simply current says why. */
+const MEDAL_TONE: Record<CredentialState, Tone> = { current: 'brand', 'no-expiry': 'brand', expiring: 'amber', expired: 'red' };
+const MEDAL_WORD: Record<CredentialState, string> = { current: '', 'no-expiry': '', expiring: 'Expiring', expired: 'Expired' };
+
 function Field({ t, label, value: val, onChangeText, placeholder, multiline, keyboardType }: { t: Theme; label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'numeric' | 'decimal-pad' }) {
   return (
     <View style={{ marginBottom: sp.lg }}>
@@ -132,7 +141,7 @@ function ChipEditor({ t, items, onAdd, onRemove, value: val, setValue, placehold
           {items.map((it, i) => (
             <Pressable key={i} onPress={() => onRemove(i)} accessibilityRole="button" accessibilityLabel={'Remove ' + it}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{it}</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{it}</Text>
               <Icon name="minus" size={12} color={t.ink3} />
             </Pressable>
           ))}
@@ -228,7 +237,15 @@ export default function CoachProfile() {
     }
     setSince({ at: typeof data?.created_at === 'string' ? data.created_at : null, status: 'ready' });
   }, [uid]);
-  useEffect(() => { void loadRating(); void loadSince(); }, [loadRating, loadSince]);
+  // `rows: null` is the failed read and `[]` is a coach who has stated nothing;
+  // the two draw different sentences below, never the same empty card.
+  const [creds, setCreds] = useState<{ rows: Credential[] | null; status: LoadStatus }>({ rows: null, status: 'loading' });
+  const loadCreds = useCallback(async () => {
+    if (!uid) return;
+    const r = await fetchCoachCredentials(uid);
+    setCreds({ rows: r.rows, status: r.status });
+  }, [uid]);
+  useEffect(() => { void loadRating(); void loadSince(); void loadCreds(); }, [loadRating, loadSince, loadCreds]);
 
   const clientsFig = isWhole(roster.status) ? String(roster.roster.length) : fig(null);
   const ratingShown = ratingDisplay(rating.summary, rating.status);
@@ -262,8 +279,8 @@ export default function CoachProfile() {
    * lands on top of the coach's own values rather than on top of a debounced
    * edit that had not gone out yet. */
   const pull = usePullToRefresh(useCallback(
-    () => Promise.all([p.reload(), Promise.resolve(lc.reload()), Promise.resolve(payTerms.refresh()), loadRating(), loadSince()]),
-    [p, lc, payTerms, loadRating, loadSince],
+    () => Promise.all([p.reload(), Promise.resolve(lc.reload()), Promise.resolve(payTerms.refresh()), loadRating(), loadSince(), loadCreds()]),
+    [p, lc, payTerms, loadRating, loadSince, loadCreds],
   ));
   const [newOffer, setNewOffer] = useState('');
   const [newSpec, setNewSpec] = useState('');
@@ -409,9 +426,12 @@ export default function CoachProfile() {
             <Image source={{ uri: avatarSource(p.photo) as string }} accessibilityIgnoresInvertColors
               style={{ width: 96, height: 96, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
           ) : (
-            <View style={{ width: 96, height: 96, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+            // The mockup's monogram: the accent's pale plate with the initials
+            // in the accent AS TEXT (`brandText` is ink where a gym's own
+            // colour cannot be read on its plate).
+            <View style={{ width: 96, height: 96, borderRadius: radius.pill, backgroundColor: initials ? t.brandSoft : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
               {initials
-                ? <Text style={{ ...value(30), color: t.brand }}>{initials}</Text>
+                ? <Text style={{ ...value(34), color: t.brandText }}>{initials}</Text>
                 : <Icon name="me" size={40} color={t.ink3} />}
             </View>
           )}
@@ -430,20 +450,58 @@ export default function CoachProfile() {
             its state: "not read" for a dash, the rating sentence where there
             is a count but no average, and "years on the app" so the third
             figure is not heard as years of coaching. */}
+        {/* Three tiles on the ground, the mockup's row under an identity:
+            Clients blue, Rating amber, Years in the accent. `KpiTile` directly
+            and not `KpiRow tiles`, because the row builds its own spoken
+            sentence from label and value and these three need the ones above
+            ("not read", "on the app"). The layout is the row's: three across,
+            two and one once the reader's text is large.
+
+            The star stands beside the rating ONLY when `ratingDisplay` allows
+            an average to be stated. A star over a dash, or over a count too
+            small to average, is a rating nobody gave. */}
+        <View style={{ flexDirection: 'row', flexWrap: fontScale >= 1.35 ? 'wrap' : 'nowrap', gap: sp.md, marginTop: sp.sm }}>
+          {([
+            { label: 'Clients', value: clientsFig, tone: 'blue', spoken: clientsFig === fig(null) ? 'not read' : clientsFig },
+            { label: 'Rating', value: ratingFig, unit: ratingShown.kind === 'average' ? '★' : undefined, tone: 'amber', spoken: ratingLine(ratingShown) ?? 'not read' },
+            { label: 'Years', value: yearsFig, tone: 'brand', spoken: years == null ? 'on the app, not read' : `on the app, ${years}` },
+          ] as { label: string; value: string; unit?: string; tone: Tone; spoken: string }[]).map((item) => (
+            <View key={item.label} style={{ flexGrow: 1, flexBasis: fontScale >= 1.35 ? '40%' : 0, minWidth: 0, flexDirection: 'row' }}>
+              <KpiTile label={item.label} value={item.value} unit={item.unit} tone={item.tone}
+                spoken={`${item.label}, ${item.spoken}`} />
+            </View>
+          ))}
+        </View>
+
+        {/* ── credentials, as medals ──────────────────────────────────────────
+            What the coach has STATED, one chip each, coloured by the state the
+            Credentials screen would give it and carrying that state as a word
+            wherever it is not simply current: green stands, amber is inside
+            the expiring window, red has lapsed. The heading is the way in to
+            the full list, the dates and the right of reply to reviews — it
+            stays reachable whatever `p.access` says, because a coach whose
+            profile row failed is exactly the coach who needs to check whether
+            a client can see a review they have not answered.
+
+            A failed read says so and an empty one says that instead; neither
+            draws an empty row of medals. */}
         <Section>
-          <View style={{ flexDirection: 'row' }}>
-            {[
-              { label: 'Clients', value: clientsFig, spoken: clientsFig === fig(null) ? 'not read' : clientsFig },
-              { label: 'Rating', value: ratingFig, spoken: ratingLine(ratingShown) ?? 'not read' },
-              { label: 'Years', value: yearsFig, spoken: years == null ? 'on the app, not read' : `on the app, ${years}` },
-            ].map((item, index) => (
-              <View key={item.label} accessible accessibilityLabel={`${item.label}, ${item.spoken}`}
-                style={{ flex: 1, alignItems: 'center', borderStartWidth: index ? hairline : 0, borderStartColor: t.ring }}>
-                <Text style={{ ...value(22), color: t.ink }}>{item.value}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{item.label}</Text>
-              </View>
-            ))}
-          </View>
+          <SectionHead title="Credentials" note="Manage" onPress={() => router.push('/(trainer)/credentials')} />
+          {creds.status === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your credentials…</Text>
+          ) : !isWhole(creds.status) || creds.rows === null ? (
+            <Text style={{ ...ty.label, color: t.ink2 }}>Your credentials could not be read. Pull down to try again.</Text>
+          ) : creds.rows.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>None stated yet. Add a qualification or your insurance.</Text>
+          ) : (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+              {sortCredentials(creds.rows, today).map((c) => {
+                const state = credentialState(c, today);
+                return <TonedChip key={c.id} icon="trophy" tone={MEDAL_TONE[state]}
+                  label={MEDAL_WORD[state] ? `${c.title} · ${MEDAL_WORD[state]}` : c.title} />;
+              })}
+            </View>
+          )}
         </Section>
 
         {/* ── the four rows ───────────────────────────────────────────────────
@@ -456,17 +514,16 @@ export default function CoachProfile() {
             the Schedule tab, where `trainer_availability` is set; Share
             Profile is the Share Kit, and the page link is in the editor. */}
         <Section>
-          <ListRow icon="pencil" title="Edit Profile"
-            note={editing ? 'Open below — tap to fold it away' : 'Photo, name, bio, rate and your page on the web'}
+          {/* Credentials was the second row here. It is the medal card above
+              now, whose heading opens the same screen — one way in, not two. */}
+          <ListRow icon="pencil" tone="brand" title="Edit Profile"
+            note={editing ? 'Open below. Tap to fold it away' : 'Photo, bio, rate and your web page'}
             onPress={() => setEditing((v) => !v)} />
-          <ListRow icon="trophy" title="Credentials"
-            note="Your qualifications and insurance, and your right of reply to reviews"
-            onPress={() => router.push('/(trainer)/credentials')} />
-          <ListRow icon="calendar" title="Availability"
-            note="The hours clients can book you, on your schedule"
+          <ListRow icon="calendar" tone="blue" title="Availability"
+            note="The hours clients can book you"
             onPress={() => router.push('/(trainer)/calendar')} />
-          <ListRow icon="share" title="Share Profile"
-            note="A graphic to post, and the link to your page on the web"
+          <ListRow icon="share" tone="purple" title="Share Profile"
+            note="A graphic to post and your page link"
             onPress={() => router.push('/(trainer)/share-kit')} />
         </Section>
 
@@ -519,7 +576,7 @@ export default function CoachProfile() {
             ].map((item, index) => (
               <View key={item.label} accessible accessibilityLabel={`${item.label}, ${item.value === fig(null) ? 'not set' : item.value}`}
                 style={{ flex: 1, alignItems: 'center', borderStartWidth: index ? hairline : 0, borderStartColor: t.ring }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{item.value}</Text>
+                <Text style={{ ...ty.label, ...font('600'), color: t.ink }}>{item.value}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{item.label}</Text>
               </View>
             ))}
@@ -529,7 +586,7 @@ export default function CoachProfile() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: sp.lg }}>
               {p.specialties.map((s, i) => (
                 <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                  <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>{s}</Text>
+                  <Text style={{ ...ty.caption, ...font('500'), color: t.ink2 }}>{s}</Text>
                 </View>
               ))}
             </View>
@@ -896,15 +953,15 @@ export default function CoachProfile() {
             accessibilityState={{ checked: lc.applies }}
             style={{
               flexDirection: 'row', alignItems: 'center', gap: sp.md,
-              backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg, ...elevation.e1,
+              backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.lg,
               ...(lc.applies ? { borderWidth: hairline, borderColor: t.brand } : null),
             }}
           >
-            <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="calendar" size={17} color={lc.applies ? t.brand : t.ink3} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Charge for late cancellations</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Charge for late cancellations</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {lc.applies
                   ? `Cancelling inside ${noticeLabel(lc.noticeHours)} records a fee against the client. Repple does not take it — you settle it with them.`
@@ -927,7 +984,7 @@ export default function CoachProfile() {
                 <Pressable key={h} onPress={() => lc.setNoticeHours(h)}
                   accessibilityRole="button" accessibilityState={{ selected: lc.noticeHours === h }}
                   style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: lc.noticeHours === h ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: lc.noticeHours === h ? '500' : '400', color: lc.noticeHours === h ? t.brandInk : t.ink2 }}>{noticeLabel(h)}</Text>
+                  <Text style={{ ...ty.label, ...font(lc.noticeHours === h ? '500' : '400'), color: lc.noticeHours === h ? t.brandInk : t.ink2 }}>{noticeLabel(h)}</Text>
                 </Pressable>
               ))}
             </View>
@@ -999,15 +1056,15 @@ export default function CoachProfile() {
             accessibilityState={{ checked: p.listed }}
             style={{
               flexDirection: 'row', alignItems: 'center', gap: sp.md,
-              backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg, ...elevation.e1,
+              backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.lg,
               ...(p.listed ? { borderWidth: hairline, borderColor: t.brand } : null),
             }}
           >
-            <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="search" size={17} color={p.listed ? t.brand : t.ink3} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>List me in Find a Trainer</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>List me in Find a Trainer</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.listed ? 'Clients browsing Repple can see your name, tagline, bio, specialties and rate, and can request coaching.' : 'Off — you are not visible to clients browsing for a coach.'}</Text>
             </View>
             <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: p.listed ? t.brand : t.surface3, borderWidth: hairline, borderColor: p.listed ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
@@ -1036,12 +1093,12 @@ export default function CoachProfile() {
           <SectionHead title="Your Page on the Web" />
 
           <Card>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>A link for your bio</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>A link for your bio</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
               A page anybody can open, with your name, what you do, what you are qualified in and a
               button that brings somebody into the app already attached to you.
             </Text>
-            <Text style={{ ...ty.caption, color: pageState === 'live' ? t.brand : t.ink3, marginTop: sp.md }}>
+            <Text style={{ ...ty.caption, color: pageState === 'live' ? t.brandText : t.ink3, marginTop: sp.md }}>
               {publicPageStateNote(pageState)}
             </Text>
           </Card>
@@ -1053,7 +1110,7 @@ export default function CoachProfile() {
           <Pressable onPress={() => setPageOpen(!pageOpen)} accessibilityRole="button"
             accessibilityLabel={pageOpen ? 'Hide what is on your page' : 'Show what is on your page'}
             style={{ marginTop: sp.md, paddingVertical: sp.sm }}>
-            <Text style={{ ...ty.label, color: t.brand }}>
+            <Text style={{ ...ty.label, color: t.brandText }}>
               {pageOpen ? 'Hide what goes on it' : 'What goes on it, and what never does'}
             </Text>
           </Pressable>
@@ -1143,12 +1200,16 @@ export default function CoachProfile() {
             are two lists with two different answers. Filing them together is
             what makes a coach look for a client's message among their booking
             confirmations. */}
+        {/* One card, "With Your Clients", where there were three cards of one
+            row each under a heading that repeated the row. The reasoning above
+            and below still decides the ORDER and what is kept apart from
+            Account; the toned plate and the row's own title now do the job
+            each heading did. */}
         <Section>
-          <SectionHead title="Messages" />
-          <ListRow icon="message" title="Messages"
-            note="Every client conversation in one list, newest first, with who is waiting on a reply"
+          <SectionHead title="With Your Clients" />
+          <ListRow icon="message" tone="blue" title="Messages"
+            note="Every conversation, and who is waiting on you"
             onPress={() => router.push('/(trainer)/messages')} />
-        </Section>
 
 
         {/* ── what a stranger judges you on ──────────────────────────────── */}
@@ -1167,12 +1228,9 @@ export default function CoachProfile() {
             Branding screen does its own three-state read and tells a coach
             when it failed, rather than showing an empty form that would
             silently save nothing. */}
-        <Section>
-          <SectionHead title="Your Branding" />
-          <ListRow icon="sparkle" title="Your Branding"
-            note="The name and colour your clients see around your coaching"
+          <ListRow icon="sparkle" tone="pink" title="Your Branding"
+            note="The name and colour your clients see"
             onPress={() => router.push('/(trainer)/brand')} />
-        </Section>
 
 
         {/* ── your paperwork, not Repple's ───────────────────────────────── */}
@@ -1181,10 +1239,8 @@ export default function CoachProfile() {
             Repple's and the coach cannot read it, and these are the coach's own
             — a studio waiver, a par-form, house rules. Filing them together
             under one heading is how the two get confused. */}
-        <Section>
-          <SectionHead title="Your Paperwork" />
-          <ListRow icon="pencil" title="Your Documents"
-            note="Waivers and forms you ask clients to accept, and who has accepted them"
+          <ListRow icon="pencil" tone="teal" title="Your Documents"
+            note="Your waivers and forms, and who accepted them"
             onPress={() => router.push('/(trainer)/documents')} />
         </Section>
 
@@ -1196,12 +1252,14 @@ export default function CoachProfile() {
             to log a session of their own — a coach who lifts had to keep a
             second account in the client app. It sits above Account because it
             is something a coach does weekly; signing out is not. */}
+        {/* The heading names BOTH rows, for the reason the devices note below
+            gives: somebody hunting for their watch does not read "Your
+            Training". */}
         <Section>
-          <SectionHead title="Your Training" />
-          <ListRow icon="dumbbell" title="My Training"
-            note="Log and review your own workouts — separate from every client's record"
+          <SectionHead title="Your Training & Devices" />
+          <ListRow icon="dumbbell" tone="orange" title="My Training"
+            note="Your own workouts, apart from every client's"
             onPress={() => router.push('/(trainer)/my-training')} />
-        </Section>
 
 
         {/* ── the coach's own devices ────────────────────────────────────── */}
@@ -1219,10 +1277,8 @@ export default function CoachProfile() {
             devices reported. It mirrors the client's Watch & Devices row on
             app/(client)/profile.tsx, deliberately — coaches self-track on the
             same hooks, and the two screens share every rule that matters. */}
-        <Section>
-          <SectionHead title="Your Devices" />
-          <ListRow icon="clock" title="Watch & Devices"
-            note="Connect your own Apple Watch, WHOOP or Oura — and see what they read today"
+          <ListRow icon="clock" tone="teal" title="Watch & Devices"
+            note="Your own Apple Watch, WHOOP or Oura"
             onPress={() => router.push('/(trainer)/devices')} />
         </Section>
 
@@ -1237,9 +1293,9 @@ export default function CoachProfile() {
               and a coach hunting for "notifications" will otherwise find only
               the toggle and conclude there is no inbox. There is: the Clients
               tab has no bell, so this row and Explore are the only ways in. */}
-          <ListRow icon="bell" title="Notifications" note="Bookings, cancellations and anything sent to you"
+          <ListRow icon="bell" tone="amber" title="Notifications" note="Bookings, cancellations and what was sent to you"
             onPress={() => router.push('/(trainer)/notifications')} />
-          <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
+          <ListRow icon="settings" tone="neutral" title="Settings" note="Your sign-in, your data and deleting your account"
             onPress={() => router.push('/(trainer)/settings')} />
           {/* Reported as "there is no sign out button on the coach app". There
               was one — three levels down, at the foot of Settings, which is the
@@ -1247,10 +1303,9 @@ export default function CoachProfile() {
               expect to find on a profile screen without hunting, so it is on
               the profile screen. Settings keeps its copy; this is a second way
               in, not a move, because somebody who has learned the old path
-              should not find it gone. */}
-          <View style={{ marginTop: sp.md }}>
-            <Ghost label="Sign Out" onPress={signOut} />
-          </View>
+              should not find it gone. It is drawn LAST on the page, under
+              Credits: the one destructive control does not sit between two
+              rows a thumb is aiming for. */}
         </Section>
 
 
@@ -1259,7 +1314,7 @@ export default function CoachProfile() {
               that does not describe the rows beneath it is worse than none —
               somebody looking for help does not read a section called Money. */}
           <SectionHead title="Help" />
-          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
+          <ListRow icon="search" tone="blue" title="User Guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
         </Section>
 
@@ -1272,9 +1327,9 @@ export default function CoachProfile() {
               making them visit five screens and add up in their head. It writes
               nothing and owns nothing — every section on it ends in a row that
               opens one of the three below. */}
-          <ListRow icon="chart" title="Money" note="What came in and what went out, kept apart"
+          <ListRow icon="chart" tone="brand" title="Money" note="What came in and what went out, kept apart"
             onPress={() => router.push('/(trainer)/money')} />
-          <ListRow icon="people" title="Payments" note="Get paid by clients — memberships & packs"
+          <ListRow icon="people" tone="blue" title="Payments" note="Get paid by clients: memberships and packs"
             onPress={() => router.push('/(trainer)/payments')} />
           {/* Under Payments and above Billing, in that order, because the three
               rows are three different people's money and the order says whose:
@@ -1282,9 +1337,9 @@ export default function CoachProfile() {
               what you pay Repple. The row above takes the money and produces
               nothing anybody can be given — that gap is the whole reason
               invoices.tsx exists, and the two belong next to each other. */}
-          <ListRow icon="grid" title="Invoices" note="Issue a document for what somebody paid you, and see what you have issued"
+          <ListRow icon="grid" tone="purple" title="Invoices" note="A document for what somebody paid you"
             onPress={() => router.push('/(trainer)/invoices')} />
-          <ListRow icon="chart" title="Billing & Subscription" note="Your plan, payment method & invoices"
+          <ListRow icon="chart" tone="orange" title="Billing & Subscription" note="Your plan, payment method and invoices"
             onPress={() => router.push('/(trainer)/billing')} />
           {/* Last in the section, because it is the one row that is about all
               three of the rows above at once: it is a period summary of what
@@ -1292,7 +1347,7 @@ export default function CoachProfile() {
               not called a tax export — it calculates no tax and says so on its
               own face — and the note says what it is for so nobody has to open
               it to find out. */}
-          <ListRow icon="grid" title="Statement of Record" note="What this app recorded in a year or a quarter, to hand to an accountant"
+          <ListRow icon="grid" tone="teal" title="Statement of Record" note="A year or a quarter, to hand to an accountant"
             onPress={() => router.push('/(trainer)/statement')} />
         </Section>
 
@@ -1311,6 +1366,12 @@ export default function CoachProfile() {
           <SectionHead title="Credits" />
           <RepdbAttribution />
         </Section>
+
+        {/* Last on the page. See the note under Account on why it is on this
+            screen at all. */}
+        <View style={{ marginTop: layout.section }}>
+          <Ghost label="Sign Out" onPress={signOut} />
+        </View>
 
         {/* ── the stranded footer that used to be here ────────────────────
             "Changes save automatically and appear on your clients' booking

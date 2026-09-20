@@ -38,8 +38,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost, PageHead, Flag } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, PageHead, Flag, KpiRow, IconPlate, fig } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
@@ -606,6 +606,20 @@ export default function CoachDocumentsScreen() {
           <>
             {/* The failed read is a Flag, not warn-coloured ink: warn as text is
                 3.87–4.08:1 on the three light palettes, below AA. */}
+            {/* ── the paperwork at a glance ───────────────────────────────────
+                Three tiles on the ground before the sentence that qualifies
+                them. Counted under a 'ready' read ONLY: under 'partial' the
+                rows are the most recent page and a count of them is a floor
+                printed as a total, and under 'error' they are not what is on
+                file, so all three draw the dash and the sentence below says
+                why. Amber on Required because those are the ones a client is
+                being asked to act on. */}
+            <KpiRow tiles items={[
+              { label: 'In Circulation', value: status === 'ready' ? String(live.length) : fig(null), tone: 'teal' },
+              { label: 'Must Accept', value: status === 'ready' ? String(live.filter((d) => d.required).length) : fig(null), tone: 'amber' },
+              { label: 'Retired', value: status === 'ready' ? String(retired.length) : fig(null), tone: 'neutral' },
+            ]} />
+
             {status === 'error' ? (
               <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
                 Your documents could not be read just now, so this list is not what is on file. Nothing here has changed.
@@ -653,24 +667,30 @@ export default function CoachDocumentsScreen() {
                   roster. Addressing it to one person is a separate act, on the
                   document itself, and it takes the document away from everybody
                   else — see sendWarning in src/lib/coachDocAudience.ts. */}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Everyone you coach can read what you add. To put one in front of a single client, use Send
-                to a Client on the document once it is here.
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+                Everyone you coach can read what you add. Send to a Client narrows one document.
               </Text>
             </Section>
 
             {live.length ? (
               <Section>
-                <SectionHead title="IN CIRCULATION" />
+                <SectionHead title="In Circulation" />
                 {live.map((d, i) => (
                   <View key={d.id}>
                     {i ? <Rule /> : null}
                     <View style={{ paddingVertical: sp.md }}>
-                      <Pressable onPress={() => open(d)} accessibilityRole="button" accessibilityLabel={`Open ${d.title}`}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{d.title}</Text>
-                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                          {sizeLabel(d.bytes)} · added {fmtDay(d.createdAt)}
-                        </Text>
+                      <Pressable onPress={() => open(d)} accessibilityRole="button" accessibilityLabel={`Open ${d.title}`}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                        {/* Amber where a client is asked to accept it, teal where
+                            it is only there to be read. The switch under the row
+                            says the same in words. */}
+                        <IconPlate icon="pencil" tone={d.required ? 'amber' : 'teal'} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ ...ty.head, color: t.ink }}>{d.title}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                            {sizeLabel(d.bytes)} · added {fmtDay(d.createdAt)}
+                          </Text>
+                        </View>
                       </Pressable>
 
                       {/* The answer to "is this signed?", on the document, so
@@ -768,7 +788,7 @@ export default function CoachDocumentsScreen() {
                                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{memberLine(m, fmtDay)}</Text>
                                   </View>
                                   {m.sentAt == null ? (
-                                    <Text style={{ ...ty.caption, fontWeight: '600', color: sendingTo === m.clientId ? t.ink3 : t.brand }}>
+                                    <Text style={{ ...ty.caption, ...font('600'), color: sendingTo === m.clientId ? t.ink3 : t.brandText }}>
                                       {sendingTo === m.clientId ? 'Sending…' : 'Send'}
                                     </Text>
                                   ) : null}
@@ -822,7 +842,7 @@ export default function CoachDocumentsScreen() {
 
             {retired.length ? (
               <Section>
-                <SectionHead title="RETIRED" note="still readable to whoever accepted them" />
+                <SectionHead title="Retired" note="Still readable to whoever accepted them" />
                 {retired.map((d, i) => (
                   <View key={d.id}>
                     {i ? <Rule /> : null}

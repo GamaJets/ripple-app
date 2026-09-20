@@ -39,9 +39,8 @@ import { View, Text, ScrollView, TextInput, Alert, ActivityIndicator, Pressable,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Cta, Ghost, PageHead, Notice, Flag, KpiRow, IconPlate, TonedChip, Expandable, fig, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import {
@@ -52,7 +51,7 @@ import {
 // the screen is open rather than fixed at the moment it mounted.
 import { useToday } from '../../src/ui/today';
 import {
-  credentialBadge, credentialLine, credentialState, expiryLine, sortCredentials,
+  credentialBadge, credentialLine, credentialState, credentialCounts, expiryLine, sortCredentials,
   validateDraft, draftProblemText, referenceAllowed, insuranceClaim,
   CLAIM_NOTE_COACH, MAX_TITLE, MAX_ISSUER, MAX_REFERENCE,
   type Credential, type CredentialDraft, type CredentialKind,
@@ -87,6 +86,12 @@ function when(iso: string): string {
     ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
     : '—';
 }
+
+/** A credential's colour by its state. `no-expiry` is a lifetime qualification
+ *  and stands like a current one; only a lapsed row is red. */
+const STATE_TONE: Record<ReturnType<typeof credentialState>, Tone> = {
+  current: 'brand', 'no-expiry': 'brand', expiring: 'amber', expired: 'red',
+};
 
 export default function TrainerCredentials() {
   const t = useTheme();
@@ -237,6 +242,8 @@ export default function TrainerCredentials() {
   // a whole read; passing the flag honestly is the other half of that.
   const expiry = expirySummary(creds, today, isWhole(credStatus));
   const expiryLineText = expirySummaryLine(expiry);
+  // Null unless the list was READ: see the tiles this feeds.
+  const counts = credStatus === 'ready' ? credentialCounts(creds, today) : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -244,16 +251,30 @@ export default function TrainerCredentials() {
 
         {/* The header the board gives the Profile family: a back chevron at
             the leading edge and the title centred. */}
-        <PageHead title="Credentials & Reviews" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
-          What you are qualified to do, and what your clients have said.
-        </Text>
+        <PageHead title="Credentials & Reviews" subtitle="What you hold, and what clients said" />
 
-        {/* ── the honesty notice, first, before anything is typed ───────── */}
-        <View style={{ marginTop: sp.lg }}>
-          <Notice tone={t.ink3} kicker="Read this first" title="Repple does not check these"
-            note={CLAIM_NOTE_COACH} />
-        </View>
+        {/* ── the honesty notice, first, before anything is typed ─────────
+            Still first, and its first fact is still on the page: the fold's
+            own two lines say that Repple does not check these and that
+            clients see them as the coach's statement. The paragraph is behind
+            the fold, where the approved look puts every paragraph. */}
+        <Expandable title="Repple Does Not Check These" note="Clients see them as your own statement">
+          <Text style={{ ...ty.label, color: t.ink2 }}>{CLAIM_NOTE_COACH}</Text>
+        </Expandable>
+
+        {/* ── what is on the profile, as three tiles ──────────────────────────
+            `credentialCounts` is the directory row's own arithmetic, so the
+            figures here are the ones a stranger's summary is built from. It
+            answers null for an unread list and the tiles then draw the dash:
+            a failed read is not a coach with no insurance. Red is spent on
+            Expired only when something HAS expired, because that is the tile
+            that needs the coach; the word is under the figure, so the colour
+            never stands alone. */}
+        <KpiRow tiles items={[
+          { label: 'Qualifications', value: counts ? String(counts.certifications) : fig(null), tone: 'blue' },
+          { label: 'Insurance', value: counts ? String(counts.insurance) : fig(null), tone: 'teal' },
+          { label: 'Expired', value: counts ? String(counts.expired) : fig(null), tone: counts && counts.expired > 0 ? 'red' : 'neutral' },
+        ]} />
 
         {/* ── has anything lapsed? ───────────────────────────────────────
             Above the list, because the list is sorted with the expired ones
@@ -318,14 +339,15 @@ export default function TrainerCredentials() {
                   {/* A circle at the leading edge, as the board draws every
                       row's icon (page 13) and as `ListRow` draws it. Lapsed
                       cover is a mark in the Flag below, not a red icon. */}
-                  <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name="trophy" size={17} color={t.brand} />
-                  </View>
+                  {/* The medal, in the state's colour: green stands, amber is
+                      inside the expiring window, red has lapsed. The chip beside
+                      it says the same thing in `expiryLine`'s words. */}
+                  <IconPlate icon="trophy" tone={STATE_TONE[state]} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                    <Text style={{ ...ty.head, color: t.ink }}>{c.title}</Text>
                     {detail ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{detail}</Text> : null}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 6, flexWrap: 'wrap' }}>
-                      <Flag tone={state === 'expired' ? t.warn : t.ink3}>{expiryLine(c, today)}</Flag>
+                      <TonedChip tone={STATE_TONE[state]} label={expiryLine(c, today)} />
                       {/* Shown to the coach as well, so nobody is surprised by
                           what a client sees next to their certificate. */}
                       <Text style={{ ...ty.caption, color: t.ink3 }}>
@@ -427,7 +449,7 @@ export default function TrainerCredentials() {
                     {/* `reviewScoreLabel`, not `{r.rating} / {MAX_RATING}`: the rating can come
                         back unreadable, and the old form printed "0 / 5" against this
                         coach — a score no client is allowed to give. */}
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{reviewScoreLabel(r)}</Text>
+                    <TonedChip tone={r.rating == null ? 'neutral' : 'amber'} label={reviewScoreLabel(r)} />
                     <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
                       {reviewerLabel(r)} · {when(r.createdAt)}{r.edited ? ' · edited' : ''}
                     </Text>
@@ -437,7 +459,7 @@ export default function TrainerCredentials() {
 
                   {r.coachReply ? (
                     <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
-                      <Text style={{ ...ty.micro, color: t.ink3 }}>YOUR REPLY</Text>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>Your Reply</Text>
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: 3 }}>{r.coachReply}</Text>
                     </View>
                   ) : null}
@@ -472,7 +494,7 @@ export default function TrainerCredentials() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFormOpen(false)}
             accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '88%' }}>
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '88%' }}>
             <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
               <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.md }}>
                 {editing ? 'Edit' : 'Add'} a credential
@@ -607,7 +629,7 @@ export default function TrainerCredentials() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReplyTo(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '88%' }}>
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '88%' }}>
             {replyTo ? (
               <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
                 <Text style={{ ...ty.title, color: t.ink }}>Reply</Text>
@@ -725,7 +747,7 @@ function ReviewAsks() {
           {worth.map((r, i) => (
             <View key={r.clientId}
               style={{ paddingVertical: sp.md, borderTopWidth: i ? 1 : 0, borderTopColor: t.ring }}>
-              <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{r.name ?? 'Unnamed client'}</Text>
+              <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{r.name ?? 'Unnamed client'}</Text>
               <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{askMomentNote(r.moment, r.candidate)}</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
                 <Ghost label="Write the Ask"

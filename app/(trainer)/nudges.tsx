@@ -66,7 +66,7 @@ import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, ActivityInd
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Card, PageHead } from '../../src/ui/kit';
+import { Section, SectionHead, Ghost, Cta, Notice, Flag, Card, PageHead, KpiRow, TonedChip, Expandable, fig, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useNudges } from '../../src/ui/nudges';
@@ -83,16 +83,18 @@ import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { OvernightChecks } from '../../src/ui/OvernightChecks';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
-/** The mark beside a verdict. A coloured dot beside ink text, never coloured
- *  text: the scale reserves status colour for status and none of these clears
- *  AA as type. Matches driftTone on the Clients tab so one client does not
- *  change colour between two screens. */
-function driftTone(t: ReturnType<typeof useTheme>, d: Drift): string {
+/** The mark beside a verdict, as a NAMED tone for the chip that carries the
+ *  verdict's word: red needs you, amber is slipping, grey is "could not tell"
+ *  (`idle` is labelled Unknown, and an unknown must not wear a warning). The
+ *  chip draws the tone's INK on its pale plate, never the mark colour as type,
+ *  which is the rule the dot this replaced existed to keep. The word is
+ *  `DRIFT_LABEL`'s, so the colour never stands alone. */
+function driftChipTone(d: Drift): Tone {
   switch (d.status) {
-    case 'at_risk': return t.crit;
-    case 'idle': return t.warn;
-    case 'watch': return t.serious;
-    default: return t.good;
+    case 'at_risk': return 'red';
+    case 'watch': return 'amber';
+    case 'idle': return 'neutral';
+    default: return 'brand';
   }
 }
 
@@ -162,10 +164,9 @@ export default function Nudges() {
   const nudgeCard = (item: Nudge, i: number) => (
     <View key={item.clientId}
       style={{ paddingVertical: sp.lg, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: driftTone(t, item.drift) }} />
-        <Text style={{ ...ty.head, color: t.ink, flex: 1 }}>{item.name ?? 'Unnamed client'}</Text>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>{DRIFT_LABEL[item.drift.status]}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
+        <Text style={{ ...ty.head, color: t.ink, flexGrow: 1, flexShrink: 1 }}>{item.name ?? 'Unnamed client'}</Text>
+        <TonedChip label={DRIFT_LABEL[item.drift.status]} tone={driftChipTone(item.drift)} />
       </View>
 
       {/* What was OBSERVED. clientDrift's own sentence, so this screen and the
@@ -215,12 +216,34 @@ export default function Nudges() {
 
         <PageHead title="Quiet Clients" subtitle="Your book" />
 
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Clients whose training record has gone quiet, with a message drafted for you. Nothing here
-          sends: you read it, change it, and send it yourself. Nobody is suggested twice.
-        </Text>
+        {/* ── the book at a glance ────────────────────────────────────────────
+            Three tiles on the ground, the mockups' row under a page head: who
+            is worth a message (red, needs you), who is late against their own
+            rhythm (amber) and who is slipping (orange). Drawn only from a
+            `board`, which exists only over a whole read, so none of the three
+            can be a count of part of a book; `dueBack` is its own read and
+            draws the dash while it has no answer. Each figure is the length of
+            the list under the heading of the same name below. */}
+        {USE_SUPABASE && board ? (
+          <KpiRow tiles items={[
+            { label: 'Worth a Message', value: String(board.nudges.length), tone: 'red' },
+            { label: 'Due Back', value: n.dueBack ? String(n.dueBack.length) : fig(null), tone: 'amber' },
+            { label: 'Slipping', value: String(board.watching.length), tone: 'orange' },
+          ]} />
+        ) : null}
 
-        <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{n.note}</Text>
+        {/* The read's own sentence: what was assessed and when. Data, so it
+            stays on the page, one line under the figures it qualifies. */}
+        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>{n.note}</Text>
+
+        {/* What this screen is, behind a fold. It was the first paragraph on
+            the page, above every figure. */}
+        <Expandable title="How This List Works">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            Clients whose training record has gone quiet, with a message drafted for you. Nothing here
+            sends: you read it, change it, and send it yourself. Nobody is suggested twice.
+          </Text>
+        </Expandable>
 
         {/* What "quiet" is measured against, in one dismissible row. The banners
             below already say what a failed read means; this says what the word
@@ -292,8 +315,6 @@ export default function Nudges() {
                 to justify a message written for somebody, and a per-client
                 prompt at this sensitivity is the nagging src/lib/nudge.ts
                 refuses. What this offers is the client's own screen. */}
-            <Rule />
-
             {n.dueBack && n.dueBack.length ? (
               <Section>
                 <SectionHead title="Due Back" note={`${n.dueBack.length}`} />
@@ -302,14 +323,12 @@ export default function Nudges() {
                   {n.dueBack.map((d, i) => (
                     <View key={d.clientId}
                       style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.serious }} />
-                        <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flexWrap: 'wrap' }}>
+                        <Text style={{ ...ty.head, color: t.ink, flexGrow: 1, flexShrink: 1 }}>
                           {d.name ?? 'Unnamed client'}
                         </Text>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>
-                          {d.cadence.overdueDays} day{d.cadence.overdueDays === 1 ? '' : 's'} late
-                        </Text>
+                        <TonedChip tone="amber" icon="clock"
+                          label={`${d.cadence.overdueDays} Day${d.cadence.overdueDays === 1 ? '' : 's'} Late`} />
                       </View>
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{cadenceLine(d.cadence)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHAT_IT_CANNOT_SEE}</Text>
@@ -324,7 +343,6 @@ export default function Nudges() {
               </Section>
             ) : null}
 
-            {n.dueBack && n.dueBack.length ? <Rule /> : null}
 
             <Section>
               <SectionHead title="Worth a Message"
@@ -360,7 +378,6 @@ export default function Nudges() {
                 vanishes is worse than one that arrives a frame late. */}
             {board.watching.length ? (
               <>
-                <Rule />
                 <Section>
                   {/* One expression, used by the heading and by the rows, so
                       the word on the control and what the control does cannot
@@ -378,12 +395,9 @@ export default function Nudges() {
                       {board.watching.map((w, i) => (
                         <View key={w.clientId}
                           style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.serious }} />
-                            <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }}>
-                              {w.name ?? 'Unnamed client'}
-                            </Text>
-                          </View>
+                          <Text style={{ ...ty.head, color: t.ink }}>
+                            {w.name ?? 'Unnamed client'}
+                          </Text>
                           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{w.observed}</Text>
                           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
                             <Ghost label="Open Their Record"
@@ -412,7 +426,6 @@ export default function Nudges() {
                 is the difference between a record and a nag. */}
             {board.muted.length ? (
               <>
-                <Rule />
                 <Section>
                   <SectionHead
                     title="Set Aside"
@@ -428,7 +441,7 @@ export default function Nudges() {
                       {board.muted.map((m, i) => (
                         <View key={m.clientId}
                           style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-                          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+                          <Text style={{ ...ty.head, color: t.ink }}>
                             {m.name ?? 'Unnamed client'}
                           </Text>
                           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>
@@ -751,7 +764,6 @@ function WhySheet({ name, drift, evidence, onClose }: {
 
         {evidence && evidence.baselineDays.length ? (
           <>
-            <Rule />
             <Section>
               <SectionHead title="Every Day on Record" note="In the window read" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>

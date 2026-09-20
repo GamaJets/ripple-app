@@ -79,9 +79,9 @@ import { hitSlopFor } from '../lib/a11y';
 import type { AppVariant } from '../lib/variant';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
-import { Section, Ghost, PageHead, Notice, PartialRead } from './kit';
+import { Section, Ghost, PageHead, Notice, PartialRead, Segmented, IconPlate, TonedChip, type Tone } from './kit';
 import { SkeletonList } from './Skeleton';
-import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
+import { sp, layout, radius, hairline, type as ty, font } from '../theme/scale';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 // The two auth reads this file makes, each classified once rather than
@@ -121,6 +121,36 @@ export interface InboxItem {
  *  share a phone at the gym and must not see each other's inbox in the gap
  *  before the server answers. */
 const cacheKey = (uid: string) => `repple.notifications:${uid}`;
+
+/**
+ * The colour of a row's plate, by what the row is about.
+ *
+ * The same meanings the rest of the app spends these hues on: a payment is
+ * green (the accent), a message blue, a booking purple, a check-in teal, and
+ * anything that warns (an injury, a notice) amber. Decided from the two values
+ * `rowToItem` has already validated and from nothing else: the ICON, which is
+ * derived from the route and survives the legacy-message override, and the
+ * ROUTE, which has been through `safeRoute`. The stored icon string is a
+ * caller-supplied value and is not read here, for the reason it is not drawn.
+ *
+ * A row that matches nothing takes the accent rather than a guess. The plate
+ * is decoration beside a heading and a body that say what happened in words,
+ * so a colour nobody can name costs the reader nothing.
+ */
+function inboxTone(item: Pick<InboxItem, 'icon' | 'route'>): Tone {
+  const r = item.route ?? '';
+  if (/\/(invoices|packages|payments|billing|money)\b/.test(r)) return 'brand';
+  if (/\/(checkin|check-ins?|intake|habits)\b/.test(r)) return 'teal';
+  switch (item.icon) {
+    case 'message': return 'blue';
+    case 'calendar': return 'purple';
+    case 'heart': case 'info': return 'amber';
+    case 'trophy': case 'dumbbell': return 'orange';
+    case 'sparkle': return 'pink';
+    case 'people': return 'blue';
+    default: return 'brand';
+  }
+}
 
 /**
  * How big the two icon buttons on a row actually are: a 16pt glyph inside 4pt
@@ -724,7 +754,7 @@ export function NotificationBell({ group }: { group: AppVariant }) {
       >
         {badge.kind === 'count' ? (
           <View style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: radius.pill, backgroundColor: t.brand, borderWidth: 2, borderColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.micro, fontWeight: '700', color: t.brandInk }} numberOfLines={1}>{badge.label}</Text>
+            <Text style={{ ...ty.micro, ...font('700'), color: t.brandInk }} numberOfLines={1}>{badge.label}</Text>
           </View>
         ) : badge.kind === 'some' ? (
           // Truncated read: there IS something unread, and the number would be
@@ -1018,12 +1048,10 @@ export function NotificationInbox(f: InboxFraming) {
             is no pill PageHead's own blank holds the title in the middle. */}
         <View style={{ marginBottom: sp.lg }}>
           <PageHead title={f.title} trailing={badge.kind === 'count' ? (
-            <View style={{ paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: t.brand }}>
-              {/* caption, not micro: micro uppercases, and "3 NEW" is the same
-                  defect as the "2H" timestamp below — a word beside a figure,
-                  shouted. */}
-              <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{badge.label} new</Text>
-            </View>
+            // The kit's chip: the accent's pale plate under its text colour,
+            // in the case it was given. Not uppercased, for the reason the
+            // "2H" timestamp below gives: a word beside a figure, shouted.
+            <TonedChip label={`${badge.label} New`} />
           ) : undefined} />
         </View>
 
@@ -1065,30 +1093,17 @@ export function NotificationInbox(f: InboxFraming) {
                 equal segments in a surface2 pill, the lit one filled with ink.
                 The chips themselves are unchanged: same set, same order, same
                 labels and spoken lines from `inboxChips`. */}
-            <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3 }}>
-              {chips.map((c) => {
-                const on = c.mode === mode;
-                return (
-                  <Pressable
-                    key={c.mode}
-                    onPress={() => setMode(c.mode)}
-                    accessibilityRole="tab"
-                    // Both halves. `selected` is what a screen reader uses to
-                    // say which of four is on; the label is what the control
-                    // DOES, and it carries the figure, or the reason there is
-                    // not one, because a number drawn on a chip that nobody can
-                    // hear is the same defect as a number that is wrong.
-                    accessibilityState={{ selected: on }}
-                    accessibilityLabel={c.a11y}
-                    style={{ flex: 1, minHeight: 40, paddingHorizontal: sp.sm, paddingVertical: sp.xs, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}
-                  >
-                    {/* Wraps rather than truncates: "Sessions · 12" at the
-                        largest text size is a figure, and a figure is never cut. */}
-                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2, textAlign: 'center' }}>{c.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {/* The kit's bar now, not a hand-built copy of it: the tablist
+                and tab roles, `selected` on each, and the large-text behaviour
+                are Segmented's. `a11yLabel` is the chip's own spoken line, which
+                carries the figure, or the reason there is not one, because a
+                number drawn on a chip that nobody can hear is the same defect
+                as a number that is wrong. With four chips the bar SCROLLS, its
+                segments as wide as their words: "Sessions · 12" is a figure,
+                and a figure is never cut to fit a quarter of the screen. */}
+            <Segmented
+              options={chips.map((c) => ({ key: c.mode, label: c.label, a11yLabel: c.a11y }))}
+              value={mode} onChange={setMode} scroll={chips.length > 3} />
             {/* What the narrowing did, and what it is holding back. The only
                 thing on this screen allowed to state an absence, and only under
                 a whole read — see src/lib/inboxFilter.ts. The unread rows a chip
@@ -1107,7 +1122,7 @@ export function NotificationInbox(f: InboxFraming) {
 
         {status === 'ready' && !items.length ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
-            <Icon name="bell" size={26} color={t.ink3} />
+            <IconPlate icon="bell" tone="neutral" size={56} />
             <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>{f.emptyTitle}</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, textAlign: 'center' }}>{f.emptyNote}</Text>
           </View>
@@ -1137,16 +1152,14 @@ export function NotificationInbox(f: InboxFraming) {
               accessibilityState={{ selected: !item.read }}
               style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}
             >
-              {/* The board's mark: a filled circle, green for something that
-                  happened and near-black for a message, grey once the row has
-                  been read. The fill IS the unread state — the 7pt dot that
+              {/* The mockups' mark: a toned plate that names what KIND of
+                  thing happened (see `inboxTone`), and the grey of "nothing to
+                  report" once the row has been read. The fill IS the unread state — the 7pt dot that
                   used to sit beside the age said the same thing twice. It is
                   per row and needs no whole-list read to be true: this row came
                   back with read=false, whatever the status of the set it
                   arrived in. */}
-              <View style={{ width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: item.read ? t.surface2 : item.kind === 'message' ? t.ink : t.brand }}>
-                <Icon name={item.icon} size={17} color={item.read ? t.ink3 : item.kind === 'message' ? t.bg : t.brandInk} />
-              </View>
+              <IconPlate icon={item.icon} tone={item.read ? 'neutral' : inboxTone(item)} />
               <View style={{ flex: 1 }}>
                 {/* NOT `item.title ?? f.title`. That drew the SCREEN's name —
                     "Notifications" — over every untitled row, which reads as
@@ -1154,11 +1167,11 @@ export function NotificationInbox(f: InboxFraming) {
                     returns a true one or none at all; when it is none the
                     body moves up into this line's place. */}
                 {item.heading ? (
-                  <Text style={{ ...ty.body, fontWeight: item.read ? '500' : '700', color: t.ink }}>
+                  <Text style={{ ...ty.head, ...font(item.read ? '500' : '700'), color: t.ink }}>
                     {item.heading}
                   </Text>
                 ) : null}
-                <Text style={{ ...ty.caption, color: item.read ? t.ink3 : t.ink2, marginTop: item.heading ? 2 : 0 }}>{item.body}</Text>
+                <Text style={{ ...ty.label, color: item.read ? t.ink3 : t.ink2, marginTop: item.heading ? 2 : 0 }}>{item.body}</Text>
                 {item.route ? null : (
                   // A row whose stored route this build will not follow. Saying
                   // so is better than a tap that appears to do nothing. Caption

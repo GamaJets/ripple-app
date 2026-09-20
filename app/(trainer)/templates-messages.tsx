@@ -26,7 +26,7 @@ import { View, Text, TextInput, ScrollView, Pressable, Alert, Modal, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PageHead } from '../../src/ui/kit';
+import { Section, SectionHead, Cta, Ghost, Flag, PageHead, FigureCard, IconPlate, Expandable } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useMyTemplates, saveTemplate, deleteTemplate } from '../../src/ui/messageTemplates';
 import {
@@ -105,45 +105,56 @@ export default function SavedMessages() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <PageHead title="Saved Messages" subtitle="Your own words, kept" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          The messages you type every week. Pick one in any thread and it lands in your box with the client’s name filled in. Nothing is ever sent for you.
-        </Text>
+
+        {/* The page opens on its figure: how many messages are in the library.
+            Under a read that did not come back it is the dash and the read's
+            own sentence, never a nought, because an unread library is not an
+            empty one. The one action sits in the same card. */}
+        <FigureCard title="In Your Library"
+          figure={lib.status === 'ready' ? String(rows.length) : null}
+          unit={lib.status === 'ready' ? (rows.length === 1 ? 'message' : 'messages') : undefined}
+          // The failed read's sentence is the red flag in the list below; said
+          // once, there, in the tone it needs.
+          detail={lib.status === 'ready' || lib.status === 'error' ? undefined : templatesEmptyLine(lib.status)}>
+          <View style={{ marginTop: sp.lg }}>
+            <Cta label="Write A New One" wide onPress={() => open(null)} />
+          </View>
+        </FigureCard>
 
         <Section>
-          <SectionHead title="Your Messages" note={lib.status === 'ready' && rows.length ? String(rows.length) : undefined} />
+          <SectionHead title="Your Messages" />
           {rows.length === 0 ? (
             lib.status === 'error'
               ? <Flag tone={t.crit}>{templatesEmptyLine(lib.status)}</Flag>
               : <Text style={{ ...ty.label, color: t.ink3 }}>{templatesEmptyLine(lib.status)}</Text>
           ) : rows.map((tpl, i) => (
-            <View key={tpl.id ?? tpl.title} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tpl.body}</Text>
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                <Ghost label="Edit" onPress={() => open(tpl)} />
-                <Ghost label="Delete" onPress={() => remove(tpl)} />
+            <View key={tpl.id ?? tpl.title} style={{ flexDirection: 'row', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <IconPlate icon="message" tone="blue" />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.head, color: t.ink }}>{tpl.title}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{tpl.body}</Text>
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                  <Ghost label="Edit" onPress={() => open(tpl)} />
+                  <Ghost label="Delete" onPress={() => remove(tpl)} />
+                </View>
               </View>
             </View>
           ))}
-          <View style={{ marginTop: sp.lg }}>
-            <Cta label="Write A New One" wide onPress={() => open(null)} />
-          </View>
         </Section>
 
         {offers.length ? (<>
-          <Rule />
           <Section>
-            <SectionHead title="Ones To Start From" />
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-              Nothing here is in your library until you add it, and every one of them is meant to be rewritten in your own voice. Only the ones you do not already have are offered.
-            </Text>
+            <SectionHead title="Ones To Start From" note="Not yours until you add one" />
             {offers.map((tpl, i) => (
-              <View key={tpl.title} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tpl.body}</Text>
-                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <Ghost label="Add It" onPress={() => { void save({ id: null, title: tpl.title, body: tpl.body, position: nextPosition(rows) }); }} />
-                  <Ghost label="Edit First" onPress={() => open({ ...tpl, position: nextPosition(rows) })} />
+              <View key={tpl.title} style={{ flexDirection: 'row', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <IconPlate icon="sparkle" tone="purple" />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.head, color: t.ink }}>{tpl.title}</Text>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{tpl.body}</Text>
+                  <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                    <Ghost label="Add It" onPress={() => { void save({ id: null, title: tpl.title, body: tpl.body, position: nextPosition(rows) }); }} />
+                    <Ghost label="Edit First" onPress={() => open({ ...tpl, position: nextPosition(rows) })} />
+                  </View>
                 </View>
               </View>
             ))}
@@ -151,10 +162,20 @@ export default function SavedMessages() {
         </>) : null}
 
 
-        <Section>
-          <Notice tone={t.brand} kicker="Placeholders" title="Two words the app fills in"
-            note={TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ') + '. Anything else in curly brackets is sent to your client exactly as you typed it, so it is worth checking before you send.'} />
-        </Section>
+        {/* The two explanations, behind folds. The first was the paragraph
+            that opened the page; the second was a notice at its foot. Neither
+            is a figure, a caveat about money or a safety fact, so neither is
+            owed a place above the library itself. */}
+        <Expandable title="How Saved Messages Work">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            The messages you type every week. Pick one in any thread and it lands in your box with the client’s name filled in. Nothing is ever sent for you. The ones to start from are meant to be rewritten in your own voice, and only the ones you do not already have are offered.
+          </Text>
+        </Expandable>
+        <Expandable title="Placeholders" note="Two words the app fills in">
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            {TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ') + '. Anything else in curly brackets is sent to your client exactly as you typed it, so it is worth checking before you send.'}
+          </Text>
+        </Expandable>
 
       </ScrollView>
 
@@ -163,7 +184,7 @@ export default function SavedMessages() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)}
             accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             {/* The message box alone is 120pt, and Save sits under it. Writing into
                 that box is exactly when the keyboard is up, and that is exactly when
                 Save was off the bottom of the window with no way to reach it. */}

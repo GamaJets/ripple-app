@@ -47,8 +47,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Notice, PartialRead, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Notice, PartialRead, Field, DayBars, Expandable, fig } from '../../src/ui/kit';
+import { isoDay } from '../../src/lib/weekStart';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
@@ -118,6 +119,9 @@ import { appLocale } from '../../src/lib/locale';
 // Collapsed by default, with a line of their own subject still readable while
 // they are shut. A coach opening this screen mid-session to log a lift must not
 // have to scroll past five boards to reach the box they came for.
+// Still the fold for Lifting Tools, which is a tool and not a picture. The
+// four record, trend, consistency and recovery folds are the kit's Expandable
+// now: a card with its note kept on it, where this one is a bare heading.
 import { Disclosure } from '../../src/ui/Disclosure';
 import { LiftingToolsPanel } from '../../src/ui/LiftingToolsPanel';
 import { OwnRecordsPanel } from '../../src/ui/OwnRecordsPanel';
@@ -243,6 +247,19 @@ export default function MyTraining() {
    * exactly 168 hours old is still inside it. So `nowMs` would make this figure
    * slightly staler and nothing else, which is the opposite of the repair. */
   const wk = weekStats(log, Date.now(), myWeights);
+  /** The last seven local days, oldest first, for the bars under the tiles.
+   *  Null when `todayKey` does not parse, which draws nothing rather than a
+   *  week anchored on a day nobody can name. */
+  const weekBars = (() => {
+    const base = localDate(todayKey);
+    if (!base) return null;
+    const counts = new Map<string, number>();
+    for (const l of log) { const k = isoDay(new Date(l.t)); counts.set(k, (counts.get(k) ?? 0) + 1); }
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(base); d.setDate(base.getDate() - (6 - i));
+      return { label: d.toLocaleDateString(undefined, { weekday: 'short' }), value: counts.get(isoDay(d)) ?? 0 };
+    });
+  })();
   /** The sets this week's total could not price, in the words every other
    *  screen uses for them. Null when there are none. */
   const unpricedNote = tonnageNote({ kg: wk.volumeKg, unknownSets: wk.unpricedSets });
@@ -549,7 +566,7 @@ export default function MyTraining() {
     return (
       <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
         <View style={{ flex: 1 }}>
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(e.exercise)}</Text>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{movement(e.exercise)}</Text>
           {/* No line rather than an invented one. A cardio row carries no sets,
               and "0 × 0" would be a session nobody did. */}
           {line ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line}</Text> : null}
@@ -599,19 +616,35 @@ export default function MyTraining() {
             </Section>
           ) : null}
 
-          <Rule />
 
           {/* ── the week, and only when the week is knowable ──────────────── */}
+          {/* Three tiles on the ground, the language the client's own screens
+              open in: days in the accent, exercises blue, load orange. The
+              same three figures under the same guard; only the packaging
+              moved out of the card. */}
+          <KpiRow tiles items={[
+            { label: 'Days Trained', value: whole ? fig(wk.days) : fig(null), tone: 'brand' },
+            { label: 'Exercises', value: whole ? fig(wk.workouts) : fig(null), tone: 'blue' },
+            // A total over a truncated or unread log is not a total. `num`
+            // gives it a thousands separator; a week of lifting passes 999 in
+            // either unit long before it passes anything else.
+            { label: 'Lifted', value: whole ? num(volumeIn(wk.volumeKg, wu)) : fig(null), unit: whole ? wu : undefined, tone: 'orange' },
+          ]} />
           <Section>
-            <SectionHead title="Your Last 7 Days" />
-            <KpiRow items={[
-              { label: 'Days Trained', value: whole ? fig(wk.days) : fig(null) },
-              { label: 'Exercises', value: whole ? fig(wk.workouts) : fig(null) },
-              // A total over a truncated or unread log is not a total. `num`
-              // gives it a thousands separator; a week of lifting passes 999 in
-              // either unit long before it passes anything else.
-              { label: 'Lifted', value: whole ? num(volumeIn(wk.volumeKg, wu)) : fig(null), unit: whole ? wu : undefined },
-            ]} />
+            <SectionHead title="Your Last 7 Days" note="Exercises each day" />
+            {/* Seven bars, one per LOCAL day ending today, each the number of
+                exercises the log holds for that day: the client's /week bars,
+                over the coach's own log. Only from a whole log. Under anything
+                else the sentence below says why there is no week, and a row of
+                grey stubs over it would say "you did not train" about days
+                this screen could not see. A day with nothing logged is a
+                counted nought and draws the stub; that is a rest day, and a
+                fact. The day is `todayKey`'s, so the bars roll over at the
+                coach's own midnight with the rest of the screen. */}
+            {whole && weekBars ? (
+              <DayBars days={weekBars}
+                spoken={`Exercises logged each day, last seven days. ${weekBars.map((d) => `${d.label} ${d.value === 0 ? 'none' : num(d.value)}`).join(', ')}.`} />
+            ) : null}
             {/* The sets that are not in the number above it. Every client
                 screen and the coach's view of a CLIENT print this; the coach's
                 own week did not. */}
@@ -631,7 +664,6 @@ export default function MyTraining() {
             ) : null}
           </Section>
 
-          <Rule />
 
           {/* ── log by text ──────────────────────────────────────────────── */}
           <Section>
@@ -652,7 +684,6 @@ export default function MyTraining() {
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── log one lift by hand ─────────────────────────────────────── */}
           <Section>
@@ -716,7 +747,7 @@ export default function MyTraining() {
                     : `Take the tick off all ${ladder.length} sets`}
                   hitSlop={8}
                   style={{ paddingVertical: 11, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>
                     {ladderDone(ladder) < ladder.length ? 'All done' : 'Clear ticks'}
                   </Text>
                 </Pressable>
@@ -751,7 +782,6 @@ export default function MyTraining() {
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── the arithmetic a coach does at the rack ───────────────────
               n=93. Right under the logging form, because that is where it is
@@ -759,12 +789,14 @@ export default function MyTraining() {
               plates make 102.5, between two sets — not on a screen they have
               to go and find. Nothing in it reads or writes anything, so it can
               never show a stale answer. */}
-          <Disclosure title="Lifting Tools"
-            note="Estimated 1RM, training percentages, plate maths and a warm-up ramp. Nothing here is logged.">
-            <LiftingToolsPanel unit={wu} />
-          </Disclosure>
+          {/* A heading on the ground, so it takes the gap a card would. */}
+          <View style={{ marginTop: layout.section }}>
+            <Disclosure title="Lifting Tools"
+              note="Estimated 1RM, training percentages, plate maths and a warm-up ramp. Nothing here is logged.">
+              <LiftingToolsPanel unit={wu} />
+            </Disclosure>
+          </View>
 
-          <Rule />
 
           {/* ── today ────────────────────────────────────────────────────── */}
           <Section>
@@ -816,7 +848,6 @@ export default function MyTraining() {
             )}
           </Section>
 
-          <Rule />
 
           {/* ── recent ───────────────────────────────────────────────────── */}
           <Section>
@@ -855,7 +886,6 @@ export default function MyTraining() {
             )}
           </Section>
 
-          <Rule />
 
           {/* ── what the log adds up to ───────────────────────────────────
               n=97, in three parts, because they answer three questions and one
@@ -869,7 +899,7 @@ export default function MyTraining() {
               record board is the one thing a record board must never present
               as current. Null is the only value that makes a panel say it
               could not read. */}
-          <Disclosure title="Your Records"
+          <Expandable title="Your Records"
             note="Your best set for every movement you have logged — barbell, bodyweight and holds.">
             <OwnRecordsPanel
               log={status === 'error' ? null : log}
@@ -877,11 +907,10 @@ export default function MyTraining() {
               weights={myWeights}
               weightsKnown={weighInsKnown}
               unit={wu} />
-          </Disclosure>
+          </Expandable>
 
-          <Rule />
 
-          <Disclosure title="Your Trends"
+          <Expandable title="Your Trends"
             note="Ten weeks of your own volume, and one lift at a time over the days you did it.">
             <OwnTrendsPanel
               log={status === 'error' ? null : log}
@@ -889,19 +918,17 @@ export default function MyTraining() {
               weights={myWeights}
               unit={wu}
               nowMs={nowMs} />
-          </Disclosure>
+          </Expandable>
 
-          <Rule />
 
-          <Disclosure title="Your Consistency"
+          <Expandable defaultOpen title="Your Consistency"
             note="Your streak, your totals, and twelve weeks of your own training days.">
             <OwnConsistencyPanel
               log={status === 'error' ? null : log}
               status={status}
               nowMs={nowMs} />
-          </Disclosure>
+          </Expandable>
 
-          <Rule />
 
           {/* ── which muscles the coach's own work landed on ───────────────
               The same four blocks a coach reads about a client, about
@@ -950,7 +977,6 @@ export default function MyTraining() {
             />
           </Section>
 
-          <Rule />
 
           {/* ── the other half of training ────────────────────────────────
               n=96. Placed after the muscle board and not before it, because
@@ -959,12 +985,11 @@ export default function MyTraining() {
               one claim. They are not: the map is about which muscles were
               worked and when, and this is sleep, water and the readiness score
               built from them. */}
-          <Disclosure title="Your Recovery"
+          <Expandable title="Your Recovery"
             note="Your readiness score taken apart, today’s water, and the nights you have logged.">
             <OwnRecoveryPanel noGoalNote={noWaterGoal} />
-          </Disclosure>
+          </Expandable>
 
-          <Rule />
 
           {/* ── the unit these loads are read in ─────────────────────────── */}
           <Section>
@@ -990,13 +1015,12 @@ export default function MyTraining() {
                     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
                     backgroundColor: wu === u ? t.brand : t.surface2,
                   }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: wu === u ? t.brandInk : t.ink2 }}>{u}</Text>
+                  <Text style={{ ...ty.label, ...font('600'), color: wu === u ? t.brandInk : t.ink2 }}>{u}</Text>
                 </Pressable>
               ))}
             </View>
           </Section>
 
-          <Rule />
 
           {/* ── where a CLIENT's session goes instead ────────────────────── */}
           <Section>
@@ -1007,7 +1031,7 @@ export default function MyTraining() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
               <Icon name="people" size={14} color={t.ink3} />
               <Pressable onPress={() => router.push('/(trainer)/dashboard')} hitSlop={8} accessibilityRole="button">
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Go to Clients</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.brandText }}>Go to Clients</Text>
               </Pressable>
             </View>
           </Section>
