@@ -102,14 +102,20 @@ import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWearables } from '../../src/ui/wearables';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, type as ty, numeric, hairline } from '../../src/theme/scale';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, ListRow, Flag, Field, KpiRow, fig, Ring, Meter, Segmented, IconPlate, TonedChip, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 
 /** How a logged meal came in, as a word for its row. 'manual' is everything
  *  typed or taken from the plan — described meals are logged under it too, see
  *  the note on `via` in logNL — so it says no more than that. */
 const VIA_LABEL: Record<FoodEntry['via'], string> = { photo: 'Photo', barcode: 'Barcode', search: 'Search', manual: 'Entered' };
+// The plate on a logged row, by how the meal came in. The tone is a second
+// channel for the word beside it (VIA_LABEL), never the only one: a figure read
+// off a photograph and one read off a packet are not equally sure.
+const VIA_PLATE: Record<FoodEntry['via'], { icon: 'camera' | 'grid' | 'pencil' | 'search'; tone: Tone }> = {
+  photo: { icon: 'camera', tone: 'purple' }, barcode: { icon: 'grid', tone: 'blue' },
+  manual: { icon: 'pencil', tone: 'amber' }, search: { icon: 'search', tone: 'teal' },
+};
 
 /**
  * The four ways in, as the board's segmented bar lists them. One is open at a
@@ -1007,20 +1013,13 @@ export default function FoodLog() {
  // no permission, no hardware and no model, so it is the one that always works.
  const [way, setWay] = useState<WayIn>('search');
 
- const macroRow = (label: string, cur: number, tg: number, dim?: boolean) => {
+ /* The kit's <Meter> in the macro's own hue — protein blue, carbs orange, fat
+  * purple, as on Meals. Over target the bar turns red AND the note says
+  * "over": the colour is never the only channel. */
+ const macroRow = (label: string, cur: number, tg: number, tone: Tone) => {
  const rem = tg - cur;
- const pct = Math.max(0, Math.min(100, Math.round((cur / (tg || 1)) * 100)));
- return (
- <View key={label} style={{ marginTop: sp.md }}>
- <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
- <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
- <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{cur} / {tg}g · {rem >= 0 ? `${rem}g left` : `${-rem}g over`}</Text>
- </View>
- <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
- <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: rem < 0 ? t.crit : t.brand, opacity: dim && rem >= 0 ? 0.45 : 1 }} />
- </View>
- </View>
- );
+ return <Meter key={label} label={label} tone={rem < 0 ? 'red' : tone} val={cur} target={tg}
+  note={`${num(cur)} / ${num(tg)} g · ${rem >= 0 ? `${num(rem)} g left` : `${num(-rem)} g over`}`} />;
  };
 
  const G = layout.gutter;
@@ -1036,8 +1035,8 @@ export default function FoodLog() {
   ? (dayReading
    ? 'Reading today’s food log…'
    : fl.status === 'partial'
-   ? 'You have logged more today than this screen can read in one go, so what is left in the day cannot be worked out from it. What is listed below is real.'
-   : "We couldn't read all of today's log, so anything already eaten may be missing from this. What is listed below is real; the number left in the day is not something we can work out yet.")
+   ? 'More is logged today than can be read in one go, so what is left is unknown. What is listed below is real.'
+   : 'Today’s log could not be read in full, so what is left is unknown. What is listed below is real.')
   : (target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}`
    : adjustUnknown ? `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · we couldn’t read your coach’s adjustment, so there is no target to show`
    : foodRulesUnknown ? `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · ${foodRulesReading ? 'reading what you are training for and how you eat' : 'we couldn’t read what you are training for or how you eat, and the target is worked out from both'}`
@@ -1053,7 +1052,11 @@ export default function FoodLog() {
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
- <PageHead title="Food Log" />
+ {/* The sentences that explain the screen rather than qualify a figure live
+     behind this — a native alert, because they are three short lines and a
+     fourth sheet on this screen would be a fourth modal to keep right. */}
+ <PageHead title="Food Log" trailing={<Ghost icon="info" a11yLabel="How the food log works" onPress={() => Alert.alert('How The Food Log Works',
+  'Tap a logged meal to correct what it was worth.\n\nUnder Log It Again, tap a food to log the same again — the sheet still asks how much — and tap the heart to keep one at the top.\n\nCommon and restaurant figures are typical portions, not a measurement of yours. A branded row is the product’s own label.')} />} />
 
  {/* ── the figure: what is left in the day ────────────────────────────
      The board's figure card where the old Hero block was: the label as the
@@ -1072,59 +1075,50 @@ export default function FoodLog() {
    // Not said twice: over a whole day with a target the row of named
    // figures under this speaks eaten, target and burned one at a time.
    ...(dayWhole && target ? [] : [dayNote]),
+   // The ring is inside this one stop, so its percentage is said here.
+   ...(pctEaten != null ? [`${pctEaten}% of today's calories eaten`] : []),
  ].join(', ')}>
- <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
- {/* Shrunk to fit and never wrapped, for the same reason the Hero did it:
-     a figure broken across two lines is a figure read wrong. */}
- <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-  style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>
-  {!dayWhole ? fig(null) : remK == null ? fig(tot.k) : fig(Math.abs(remK))}
- </Text>
- <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>kcal</Text>
+ {/* The ring IS the figure now: what is left (or over, or — with no target —
+     what was eaten) in the hole, the arc how far through the day's calories.
+     `null` for both under anything but a whole read, and no arc without a
+     target: the kit draws a dash on a bare track, never an empty circle round
+     a full allowance. Red once the day is over, beside the word "over". */}
+ <View style={{ alignItems: 'center', marginTop: sp.xs }}>
+ <Ring size={156} tone={remK != null && remK < 0 ? 'red' : 'brand'}
+  value={pctEaten != null ? pctEaten / 100 : null}
+  figure={!dayWhole ? null : remK == null ? num(tot.k) : num(Math.abs(remK))}
+  sub={remK == null ? 'kcal eaten' : remK >= 0 ? 'kcal left' : 'kcal over'}
+  spoken={pctEaten != null ? `${pctEaten}% of today's calories eaten` : 'Today’s calories against target, not drawn'} />
  </View>
- {dayWhole && target ? null : <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{dayNote}</Text>}
+ {dayWhole && target ? null : <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md, textAlign: 'center' }}>{dayNote}</Text>}
  </View>
- {/* How far through the day, as the board draws it under a figure: a thin
-     bar, brand-coloured until the day is over its target and then the alarm
-     colour. Only over a whole read of a day with a target — the same gate
-     as the figure, because the two say the same thing. */}
- {pctEaten != null ? (
- <View accessible accessibilityRole="progressbar"
-  accessibilityLabel={`${pctEaten}% of today's calories eaten`}
-  accessibilityValue={{ min: 0, max: 100, now: pctEaten }}
-  style={{ height: 4, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
- <View style={{ height: 4, borderRadius: 2, width: `${pctEaten}%`, backgroundColor: remK != null && remK < 0 ? t.crit : t.brand }} />
- </View>
- ) : null}
- {/* Target, eaten and burned as three named figures under the one that is
-     left, because they are three different facts and the sentence above runs
-     them together. Same gate as the figure: a whole read of a day that has a
-     target. Burned only where a device reported one — no column for a zero
-     nobody measured — and it is shown, not subtracted: `caloriesLeft` never
-     adds it back. */}
- {dayWhole && target ? (
- <View style={{ marginTop: sp.lg }}>
- <KpiRow items={[
-  { label: 'Eaten', value: num(tot.k), unit: 'kcal' },
-  { label: 'Target', value: num(target.kcal), unit: 'kcal' },
-  ...(burned ? [{ label: 'Burned', value: num(burned), unit: 'kcal' }] : []),
- ]} />
- {targetSource ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{targetSource}</Text> : null}
- </View>
- ) : null}
+ {dayWhole && target && targetSource ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>{targetSource}</Text> : null}
 
  {/* The burn named in the note above is the last thing the device told us
      rather than a current reading. Same sentence as the Meals tab and the two
      Devices screens, so a member who reads more than one of them is told one
      thing. */}
  {burnStale ? (
- <Flag tone={t.warn}>
- The calories burned above are the last figures we had, not a current reading — your device could not be reached just now. Pull down to try again.
+ <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+ Calories burned is the last figure we had — your device could not be reached. Pull down to try again.
  </Flag>
  ) : null}
  </Section>
 
- <Rule />
+ {/* Target, eaten and burned as three named figures under the one that is
+     left, because they are three different facts and the sentence above runs
+     them together. Same gate as the figure: a whole read of a day that has a
+     target. Burned only where a device reported one — no tile for a zero
+     nobody measured — and it is shown, not subtracted: `caloriesLeft` never
+     adds it back. Tiles, on the ground between the cards, each in its hue
+     beside its word. */}
+ {dayWhole && target ? (
+ <KpiRow tiles items={[
+  { label: 'Eaten', value: num(tot.k), unit: 'kcal', tone: 'orange' },
+  { label: 'Target', value: num(target.kcal), unit: 'kcal', tone: 'blue' },
+  ...(burned ? [{ label: 'Burned', value: num(burned), unit: 'kcal', tone: 'teal' as const }] : []),
+ ]} />
+ ) : null}
 
  {/* ── log a meal ─────────────────────────────────────────────────── */}
  <Section>
@@ -1160,7 +1154,7 @@ export default function FoodLog() {
     backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.sm,
     paddingHorizontal: sp.md, paddingVertical: sp.sm, minHeight: 44, justifyContent: 'center',
    }}>
-  <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>
+  <Text style={{ ...ty.caption, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink }}>
    {dayLabel(d, today)}
   </Text>
   </Pressable>
@@ -1179,17 +1173,7 @@ export default function FoodLog() {
      Barcode the camera, Describe the text model — Search needs nothing,
      which is why the bar opens on it. Every route below is the same code
      it was; the bar only chooses which one is on screen. */}
- <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginBottom: sp.md }}>
- {WAYS_IN.map((w) => {
-  const on = way === w.key;
-  return (
-  <Pressable key={w.key} onPress={() => setWay(w.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
-   style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
-  <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>{w.label}</Text>
-  </Pressable>
-  );
- })}
- </View>
+ <Segmented style={{ marginBottom: sp.md }} value={way} onChange={setWay} options={WAYS_IN} />
 
  {way === 'photo' ? (<>
  {/* Two ways to get a frame, the camera first. The question about where the
@@ -1198,7 +1182,6 @@ export default function FoodLog() {
  <View style={{ height: sp.sm }} />
  <Ghost label="Choose From Library" a11yLabel="Add meal photo from library" onPress={() => takeMealPhoto(false)} />
  </>) : way === 'barcode' ? (<>
- <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>A packet's own label, looked up from its barcode.</Text>
  <Cta label="Scan a Barcode" a11yLabel="Scan barcode" wide onPress={() => setBcOpen(true)} />
  </>) : way === 'search' ? (<>
 
@@ -1214,8 +1197,7 @@ export default function FoodLog() {
      two identically is how a generic average comes to be read as somebody's
      own packet, so the difference is said once here and shown on each row. */}
  <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
- Common and restaurant figures are typical portions, not a measurement of yours.
- A branded row is the product's own label — use it when there is one.
+ Common and restaurant figures are typical portions; a branded row is the product’s own label.
  </Text>
  {q.trim().length > 0 && q.trim().length < 3 ? (
  <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>Keep typing — three letters or more.</Text>
@@ -1260,8 +1242,8 @@ export default function FoodLog() {
  accessibilityRole="button" accessibilityLabel={mark ? `Log ${r.name} — ${r.label}. ${mark}` : `Log ${r.name} — ${r.label}`} accessibilityHint="Opens a sheet to say how much of it you had"
  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
  <View style={{ flex: 1 }}>
- <Text style={{ ...ty.body, color: t.ink }} numberOfLines={2}>{r.name}</Text>
- <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{r.label}</Text>
+ <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{r.name}</Text>
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.label}</Text>
  {mark ? (
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
@@ -1269,7 +1251,7 @@ export default function FoodLog() {
  </View>
  ) : null}
  </View>
- <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(r.kcal)} kcal</Text>
+ <TonedChip tone="orange" label={`${num(r.kcal)} kcal`} />
  <Icon name="plus" size={16} color={t.brand} />
  </Pressable>
  </View>
@@ -1287,7 +1269,6 @@ export default function FoodLog() {
  ) : null}
  </>) : (<>
 
- <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>In your own words — the AI reads it into macros</Text>
  <View style={{ flexDirection: 'row', gap: sp.sm }}>
  <TextInput value={nl} onChangeText={setNl} placeholder='"chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={logNL} returnKeyType="done"
  accessibilityLabel="Describe what you ate"
@@ -1297,15 +1278,13 @@ export default function FoodLog() {
  accessibilityLabel={nlBusy ? 'Reading what you typed' : 'Log what you typed'}
  accessibilityState={{ disabled: nlBusy || !nl.trim(), busy: nlBusy }}
  style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
- {nlBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
+ {nlBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, ...font('600'), color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
  </Pressable>
  </View>
  </>)}
 
  <ListRow icon="meals" title="Eating Out?" note="Estimate a restaurant meal" onPress={() => router.push('/(client)/restaurant')} />
  </Section>
-
- <Rule />
 
  {/* ── today's entries, or an honest empty state ──────────────────── */}
  <Section>
@@ -1331,7 +1310,6 @@ export default function FoodLog() {
   : 'We couldn’t read today’s log just now, so we don’t know what is in it. Anything you add here is kept and goes up when you have signal.'}
  </Text>
  ) : (<>
- <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap a meal to correct what it was worth.</Text>
  {entries.map((fe, i) => (
  <View key={fe.id}>
  {i > 0 ? <Rule /> : null}
@@ -1344,12 +1322,10 @@ export default function FoodLog() {
      log keeps no picture of a meal — the photo route reads the frame and
      does not store it — so the circle carries the way the meal came in,
      and no photography is invented. */}
- <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
- <Icon name={fe.via === 'photo' ? 'camera' : fe.via === 'barcode' ? 'grid' : fe.via === 'manual' ? 'pencil' : 'meals'} size={20} color={t.brand} />
- </View>
+ <IconPlate size={48} icon={VIA_PLATE[fe.via].icon} tone={VIA_PLATE[fe.via].tone} />
  <View style={{ flex: 1, minWidth: 0 }}>
- <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }} numberOfLines={2}>{fe.name}</Text>
- <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>{num(fe.kcal)} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
+ <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{fe.name}</Text>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{fe.protein} · C{fe.carbs} · F{fe.fat}</Text>
  {/* When, and how it came in — the icon says the second in a picture and
      this says it in a word, because a figure read off a photograph and one
      read off a packet are not equally sure and the row should say which it
@@ -1357,7 +1333,10 @@ export default function FoodLog() {
      reached the server. */}
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{fmtTime(fe.at)} · {VIA_LABEL[fe.via]}</Text>
  </View>
- <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+ {/* Calories are orange across the app, and the chip took the chevron's
+     place: the row is a button by role and by hint, and five things across
+     390pt left the dish's name a column. */}
+ <TonedChip tone="orange" label={`${num(fe.kcal)} kcal`} />
  </Pressable>
  <Pressable onPress={() => removeMeal(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}
   style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center' }}>
@@ -1369,23 +1348,21 @@ export default function FoodLog() {
  </>)}
  </Section>
 
- <Rule />
-
  {/* ── macros against target ──────────────────────────────────────── */}
  <Section>
  <SectionHead title="Macros" />
  {/* Same rule as the hero: these bars are "how much of your protein have you
      had", and a sum over a day we could not read whole answers a question
      nobody asked. The meals themselves are still listed further down. */}
- {target && dayWhole ? macroRow('Protein', tot.p, target.protein) : null}
- {target && dayWhole ? macroRow('Carbs', tot.c, target.carbs, true) : null}
- {target && dayWhole ? macroRow('Fat', tot.f, target.fat, true) : null}
+ {target && dayWhole ? macroRow('Protein', tot.p, target.protein, 'blue') : null}
+ {target && dayWhole ? macroRow('Carbs', tot.c, target.carbs, 'orange') : null}
+ {target && dayWhole ? macroRow('Fat', tot.f, target.fat, 'purple') : null}
  {/* The other half of the same rule, for the other missing side of the sum.
      A member whose coach's adjustment could not be read had three bars simply
      not drawn, under a heading, with nothing said. */}
  {!target && adjustUnknown ? (
   <Text style={{ ...ty.label, color: t.ink3 }}>
-   We couldn’t read your coach’s adjustment to your macros, so these bars would be measuring you against the generic figures rather than your plan. They are left out rather than shown as yours.
+   Your coach’s adjustment to your macros could not be read, so these bars are left out rather than drawn against generic figures.
   </Text>
  ) : null}
  {/* And the member's own half of the same sum. Their goal and their diet are
@@ -1396,7 +1373,7 @@ export default function FoodLog() {
   <Text style={{ ...ty.label, color: t.ink3 }}>
    {foodRulesReading
     ? 'Reading what you are training for and how you eat — your protein, carb and fat targets are worked out from both.'
-    : 'We couldn’t read what you are training for or how you eat, and your protein, carb and fat targets are worked out from both. Bars drawn without them would be somebody else’s split, so they are left out rather than shown as yours. Pull down to try again.'}
+    : 'Your goal and diet could not be read, and your macro targets are worked out from both, so the bars are left out. Pull down to try again.'}
   </Text>
  ) : null}
  {target && !dayWhole ? (
@@ -1408,20 +1385,14 @@ export default function FoodLog() {
  ) : null}
  </Section>
 
- <Rule />
-
  {/* ── again, please ──────────────────────────────────────────────── */}
  {/* Nothing at all until there is something to offer. An empty "Quick Add"
      heading over three empty lists is a control that looks broken on the one
      screen somebody opens four times a day. */}
  {favs.length || remembered.recent.length || remembered.frequent.length ? (<>
- <Rule />
  <Section>
  <SectionHead title="Log It Again"
    note={favs.length ? `${favs.length} pinned` : undefined} />
- <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
- Tap to log the same again — the sheet still asks how much. Tap the heart to keep one at the top.
- </Text>
  {/* Said when the lists are drawn from less than the whole log. A food
      missing from a short read has not been "never eaten"; it is a food we
      could not see. */}
@@ -1443,7 +1414,7 @@ export default function FoodLog() {
 
  {favRows.map((g) => (g.rows.length ? (
  <View key={g.title} style={{ marginTop: sp.md }}>
- <Text style={{ ...ty.micro, color: t.ink3 }}>{g.title}</Text>
+ <Text accessibilityRole="header" style={{ ...ty.caption, ...font('700'), color: t.ink }}>{g.title}</Text>
  {g.rows.map((f, i) => (
  <View key={f.key}>
  {i > 0 ? <Rule /> : null}
@@ -1453,12 +1424,12 @@ export default function FoodLog() {
    accessibilityHint="Opens a sheet to say how much of it you had"
    style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
  <View style={{ flex: 1 }}>
- <Text style={{ ...ty.body, color: t.ink }} numberOfLines={1}>{f.name}</Text>
- <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>
+ <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{f.name}</Text>
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
  {`P ${num(f.protein)} · C ${num(f.carbs)} · F ${num(f.fat)}`}{f.count > 1 ? ` · logged ${num(f.count)} times` : ''}
  </Text>
  </View>
- <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(f.kcal)} kcal</Text>
+ <TonedChip tone="orange" label={`${num(f.kcal)} kcal`} />
  <Icon name="plus" size={16} color={t.brand} />
  </Pressable>
  {/* Withheld rather than disabled when there is nobody to pin for, or
@@ -1485,8 +1456,6 @@ export default function FoodLog() {
  </Section>
  </>) : null}
 
- <Rule />
-
  {/* ── the days behind today ──────────────────────────────────────── */}
  {/* This screen read exactly one day and offered no way to see any other.
      A member could log meals for a fortnight and had no picker, no week and
@@ -1507,13 +1476,12 @@ export default function FoodLog() {
    { label: 'Fat', value: fig(hist.average.fat), unit: 'g' },
   ]} />
   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-   Averaged over the {hist.average.overDays} day{hist.average.overDays === 1 ? '' : 's'} in the last fortnight you logged
-   something. Days with nothing logged are left out rather than counted as nothing eaten.
+   Over the {hist.average.overDays} day{hist.average.overDays === 1 ? '' : 's'} you logged in the last fortnight — empty days are left out, not counted as nothing eaten.
   </Text>
  </>) : (
   <Text style={{ ...ty.label, color: t.ink3 }}>
    {hist.status === 'loading' ? 'Reading the last fortnight…'
-    : hist.status === 'partial' ? 'You have logged more in the last fortnight than this screen can read in one go, so there is no honest average to take over it. The days below are real, and the earliest one this read reached is left out rather than shown half-counted.'
+    : hist.status === 'partial' ? 'More is logged in the last fortnight than can be read in one go, so no average is taken. The days below are real; the earliest is left out rather than half-counted.'
     : hist.status === 'error' ? 'We couldn’t read the last fortnight, so we can’t say what you have been eating. Nothing has been lost.'
     : 'Nothing logged in the last fortnight yet — a few days of meals and your average shows up here.'}
   </Text>
@@ -1535,11 +1503,10 @@ export default function FoodLog() {
        accessibilityHint={open ? 'Hides the meals for this day' : 'Shows the meals for this day'}
        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
        <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{pretty}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{pretty}</Text>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>P{d.protein} C{d.carbs} F{d.fat} · {d.entries.length} meal{d.entries.length === 1 ? '' : 's'}</Text>
        </View>
-       <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{num(d.kcal)}</Text>
-       <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
+       <TonedChip tone="orange" label={`${num(d.kcal)} kcal`} />
       </Pressable>
       {open ? (
        <View style={{ paddingBottom: sp.md }}>
@@ -1646,7 +1613,7 @@ export default function FoodLog() {
      nothing happening after the shutter reads as a button that did not work. */}
  <Modal visible={reading} transparent animationType="fade" onRequestClose={() => setReading(false)}>
   <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: G }}>
-   <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: 20, alignItems: 'center', gap: sp.md, ...elevation.e2 }}>
+   <View style={{ backgroundColor: t.surface, borderRadius: radius.lg, padding: 20, alignItems: 'center', gap: sp.md, ...elevation.e2 }}>
     {photoUri ? <Image source={{ uri: photoUri }} accessible accessibilityLabel="The meal you photographed" style={{ width: 180, height: 120, borderRadius: radius.sm, backgroundColor: t.surface2 }} resizeMode="cover" /> : null}
     <ActivityIndicator color={t.brand} />
     <Text style={{ ...ty.label, color: t.ink3 }}>Reading your meal&hellip;</Text>
@@ -1662,7 +1629,7 @@ export default function FoodLog() {
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
  <Text style={{ ...ty.title, color: t.ink }}>Correct This Meal</Text>
  <Pressable onPress={() => setEditing(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel">
- <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+ <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
  </Pressable>
  </View>
  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
@@ -1683,7 +1650,7 @@ export default function FoodLog() {
  <Pressable onPress={saveEdit} disabled={edBusy} accessibilityState={{ disabled: edBusy, busy: edBusy }} accessibilityRole="button"
  accessibilityLabel={edBusy ? 'Saving the correction' : 'Save the correction'}
  style={{ backgroundColor: edBusy ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
- {edBusy ? <ActivityIndicator color={t.ink2} /> : <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>Save the correction</Text>}
+ {edBusy ? <ActivityIndicator color={t.ink2} /> : <Text style={{ ...ty.body, ...font('600'), color: t.brandInk }}>Save the correction</Text>}
  </Pressable>
  {/* Deleting is here as well as in the list, because "this was not a meal at
      all" is the correction somebody arrives at while they have the sheet
@@ -1697,7 +1664,7 @@ export default function FoodLog() {
      without the colour. */}
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
  <Icon name="minus" size={14} color={t.crit} />
- <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Remove this meal</Text>
+ <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Remove this meal</Text>
  </View>
  </Pressable>
  </View>

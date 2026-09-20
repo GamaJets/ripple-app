@@ -93,10 +93,20 @@ import type { FoodFacts } from '../../src/lib/foodPortion';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, ListRow, fig, Segmented, Ring, Meter } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, ListRow, Segmented, Ring, Meter, PageHead, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font, fontScale } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
-import { ScreenHelp } from '../../src/ui/ScreenHelp';
+// The words of the help row, read straight from their source. Round five moves
+// the explanation off the page and behind an info control in the head; the
+// kit's <ScreenHelp> is a ROW with a "Got It" that removes it for good, which
+// is the wrong shape for a control that stays — so the head's info button opens
+// these same lines in a sheet. Reconcile in the kit if it grows an action form.
+import { SCREEN_HELP } from '../../src/lib/screenHelp';
+// The water count and the member's own goal live in one store (see its header:
+// the count used to be kept twice and disagree). The note decides what may be
+// drawn — a count, a bar, or neither — so this card and Recovery say one thing.
+import { useHabits } from '../../src/ui/habits';
+import { hydrationNote } from '../../src/lib/hydrationHero';
 import { weightLabel, kgToLb, type WeightUnit } from '../../src/lib/units';
 import { BACK_ICON, FORWARD_ICON, turn } from '../../src/ui/direction';
 import { appLocale } from '../../src/lib/locale';
@@ -119,6 +129,12 @@ const DAY_TYPES = [
   { key: 'off', label: 'Standard', blurb: 'A normal day with no session: work, walking, ordinary movement. This is the baseline target.' },
   { key: 'rest', label: 'Rest Day', blurb: 'A full day off training. Fuel comes down, because there is no session to feed.' },
 ] as const;
+
+// The plate behind a dish's glyph, by slot. A generated dish has no photograph
+// and none is invented; the tone is what tells four rows of emoji apart at a
+// glance. None of these is a metric's colour (protein blue, carbs orange, fat
+// purple, water teal), so a plate never reads as a macro.
+const SLOT_TONE: Record<Slot, Exclude<Tone, 'brand' | 'neutral'>> = { Breakfast: 'amber', Lunch: 'pink', Dinner: 'purple', Snack: 'teal' };
 
 // ── where the calorie target came from (TF-29) ───────────────────────────────
 //
@@ -526,6 +542,8 @@ export default function Nutrition() {
   const [showAvoid, setShowAvoid] = useState(false);
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
   const [dayInfo, setDayInfo] = useState(false);
+  // The head's info control. See the SCREEN_HELP import.
+  const [helpOpen, setHelpOpen] = useState(false);
   const [batch, setBatch] = useState(1);
   const [cook, setCook] = useState(false);
   const [cookStep, setCookStep] = useState(0);
@@ -543,9 +561,11 @@ export default function Nutrition() {
   // app/(client)/restaurant.tsx carries a paragraph about.
   const wear = useWearables();
   const syncDevices = wear.syncAll;
+  const habits = useHabits();
+  const reloadHabits = habits.reload;
   const pull = usePullToRefresh(useCallback(() => {
-    c.reload(); void coachNutrition.reload(); goalTracker.reload(); fl.reload(); syncDevices();
-  }, [c.reload, coachNutrition, goalTracker.reload, fl.reload, syncDevices]));
+    c.reload(); void coachNutrition.reload(); goalTracker.reload(); fl.reload(); syncDevices(); reloadHabits();
+  }, [c.reload, coachNutrition, goalTracker.reload, fl.reload, syncDevices, reloadHabits]));
   /**
    * Take a meal off today's record, and say so when it did not come off.
    *
@@ -1105,6 +1125,14 @@ export default function Nutrition() {
   const targetSource = energyPlan.kind === 'derived'
     ? 'Targets built from your weight goal and date'
     : `Targets from your measurements and general goal (${GOAL_LABEL[c.goal]})`;
+  // ── water ──────────────────────────────────────────────────────────────
+  // Two reads, as on Recovery: the count is the habits store's, the goal is
+  // `clients.water_goal_glasses` and rides on the profile read. `hydrationNote`
+  // decides what may be drawn from the pair — see src/lib/hydrationHero.ts.
+  // (The profile read is whole by the time this is on screen: `foodRulesUnknown`
+  // is a door above. It is passed anyway, so the rule is asked and not assumed.)
+  const hydration = hydrationNote(habits.waterStatus, c.profileStatus, habits.water, habits.waterGoal);
+  const waterGoal = hydration.showRing ? habits.waterGoal : null;
   const cycleNote = dayType === 'training' ? `+${CYCLE_KCAL} kcal, more carbs` : dayType === 'rest' ? `−${CYCLE_KCAL} kcal, fewer carbs` : undefined;
 
   // The same door for the same reason, and `adjustUnknown` goes through it
@@ -1133,29 +1161,24 @@ export default function Nutrition() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Today</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Nutrition</Text>
-              {/* The measurements arms are asked first and only of the case
-                  they are about, so the food-rules arms below cannot answer
-                  over the top of "you have never been scanned". */}
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{adjustUnknown
-                ? 'We couldn’t read your coach’s adjustment to your targets, so the plan below it can’t be worked out. The generic figures are not your coach’s plan and are not shown as though they were — check back in a moment.'
-                : !hasBody
-                ? (looking
-                  ? 'Reading your latest measurements…'
-                  : c.status === 'error'
-                    ? 'Your measurements could not be read just now, so the targets below them cannot be worked out. This is a connection problem, not a missing scan.'
-                    : 'Your targets and meal plan are scaled to your body, so they need a weight and body fat to work from.')
-                : c.profileStatus === 'loading'
-                ? 'Reading your diet and the foods you asked to avoid…'
-                : 'Your diet and the foods you asked to avoid could not be read, so there is no plan to build from them. A week of meals put together without your exclusions is not a caveat on your plan — it is the wrong food — so it is not shown. Pull down to try again.'}</Text>
-            </View>
-            <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
-          </View>
-          <Rule />
+          <PageHead title="Nutrition" />
           <Section>
+            {/* The measurements arms are asked first and only of the case
+                they are about, so the food-rules arms below cannot answer
+                over the top of "you have never been scanned". Each is the
+                reason the plan is withheld, so each stays on the page — cut
+                to the one line that says what was not read and what to do. */}
+            <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.md }}>{adjustUnknown
+              ? 'Your coach’s adjustment to your targets could not be read, so no plan is shown — generic figures are not your coach’s plan. Check back in a moment.'
+              : !hasBody
+              ? (looking
+                ? 'Reading your latest measurements…'
+                : c.status === 'error'
+                  ? 'Your measurements could not be read just now, so no targets are shown. This is a connection problem, not a missing scan.'
+                  : 'Your targets and meal plan are scaled to your body, so they need a weight and body fat.')
+              : c.profileStatus === 'loading'
+              ? 'Reading your diet and the foods you asked to avoid…'
+              : 'Your diet and the foods you avoid could not be read, so no plan is shown — meals built without your exclusions would be the wrong food. Pull down to try again.'}</Text>
             {/* No button on the error path. "Add Your Measurements" is the
                 wrong thing to offer somebody whose measurements exist and
                 could not be fetched — it invites them to type in a duplicate
@@ -1197,7 +1220,10 @@ export default function Nutrition() {
   /** One row of today's list — a generated dish or a real recipe, drawn alike.
    *  `dim` is the recipe rows while the next search is out: the old answer
    *  stays put, faded, rather than flashing away and back. */
-  const mealRow = (m: PlannedMeal, ruled: boolean, dim = false) => {
+  /** `inToday` is the Today’s Meals card, where every row is the plan’s: the
+   *  words "In your plan" would be said of all of them, so only WHOSE pick it
+   *  is survives there. */
+  const mealRow = (m: PlannedMeal, ruled: boolean, dim = false, inToday = false) => {
     const real = isRecipeMeal(m) ? m : null;
     // Read once and used twice — for the mark and for the sentence.
     // Two reads is how the two come to disagree.
@@ -1207,7 +1233,9 @@ export default function Nutrition() {
     // word for it, and not the `flagged` the dish was read with either, which
     // is as old as the read.
     const inIt = real ? recipeAllergens(real, c.avoid) : mealAllergens(m, c.avoid);
-    const planned = slotMeals.some((x) => sameDish(x, m));
+    const planned = inToday || slotMeals.some((x) => sameDish(x, m));
+    const whose = real ? 'Your recipe' : coachPick(m.pos) ? 'Coach’s pick' : null;
+    const plate = t.data[`${SLOT_TONE[m.slot]}Soft`];
     return (
       <View key={`${m.pos}-${dishKey(m)}`} style={dim ? { opacity: 0.5 } : undefined}>
         {ruled ? <Rule /> : null}
@@ -1220,8 +1248,8 @@ export default function Nutrition() {
             slot: m.slot, coachPick: planned && coachPick(m.pos), name: m.n,
             allergens: inIt, kcal: String(m.K),
           })}${real ? ', a real recipe' : ''}${planned ? ', in your plan' : ''}`}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
-          {/* The dish's own glyph in a circle where the board puts a
+          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 64, paddingVertical: sp.sm }}>
+          {/* The dish's own glyph on a plate where the mockup puts a
               photograph. There is no photography of a generated
               meal, and none is invented.
 
@@ -1230,24 +1258,24 @@ export default function Nutrition() {
               none, and when it fails, the tile underneath is what shows.
               `cachePolicy="memory"` because Spoonacular's terms let the
               image URL be kept and say nothing that lets the bytes be. */}
-          <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: plate, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
             {real?.image ? (
               <GuardedImage source={{ uri: real.image }} contentFit="cover" cachePolicy="memory"
-                style={{ position: 'absolute', width: 48, height: 48 }} />
+                style={{ position: 'absolute', width: 52, height: 52 }} />
             ) : null}
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }} numberOfLines={2}>{m.n}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }} numberOfLines={1}>
-              {m.ing.slice(0, 3).map((x) => x[0]).join(', ')}
-            </Text>
+            <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{m.n}</Text>
+            {/* The slot is the caption, as the mockup draws it, with the macros
+                beside it — the kcal went to the chip. The ingredients are one
+                tap away on the sheet, which is where they can be read whole. */}
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.slot} · P{m.P} · C{m.C} · F{m.F}</Text>
             {/* Which row is the plan's, said in words: the list is
                 the whole catalogue now, and one of them is today's. */}
-            {planned ? (
-              <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand, marginTop: 2 }}>{real ? 'In your plan · Your recipe' : coachPick(m.pos) ? "In your plan · Coach's pick" : 'In your plan'}</Text>
+            {planned && (whose || !inToday) ? (
+              <Text style={{ ...ty.caption, ...font('600'), color: t.brandText, marginTop: 2 }}>{[inToday ? null : 'In your plan', whose].filter(Boolean).join(' · ')}</Text>
             ) : null}
-            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(m.K)} kcal · P{m.P} · C{m.C} · F{m.F}</Text>
             {/* On the row somebody is about to cook, not only at the
                 top of the screen. A warning about the plan does not
                 tell you which dish. crit in the MARK, the words in
@@ -1261,7 +1289,9 @@ export default function Nutrition() {
               </View>
             ) : null}
           </View>
-          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
+          {/* Calories are orange everywhere in the app, and always beside the
+              word. */}
+          <TonedChip tone="orange" label={`${num(m.K)} kcal`} />
         </Pressable>
       </View>
     );
@@ -1292,39 +1322,28 @@ export default function Nutrition() {
         ))}
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
-          <View style={{ flex: 1 }}>
-            {/* Which day the ring under this is counting, as a date and not
-                only the word: the food log is read for the reader's own
-                calendar day, and a screen left open past midnight should say
-                which one it is showing. */}
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Today · {new Date().toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Nutrition</Text>
-          </View>
-          <Pressable onPress={sharePlan} accessibilityRole="button" accessibilityLabel="Share plan"
-            hitSlop={hitSlopFor(38)}
-            style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
-            <Icon name="share" size={17} color={t.ink2} />
-          </Pressable>
-        </View>
+        {/* The mockup's centred head. Which day the ring under this is
+            counting rides as the quiet line, as a date and not only the word:
+            the food log is read for the reader's own calendar day, and a
+            screen left open past midnight should say which one it is showing.
+            A tab root has no back; the leading slot carries Share, and the
+            trailing one is the info control the help row became. */}
+        <PageHead title="Nutrition"
+          subtitle={`Today · ${new Date().toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}`}
+          leading={<Ghost icon="share" a11yLabel="Share plan" onPress={sharePlan} />}
+          trailing={<Ghost icon="info" a11yLabel={SCREEN_HELP.meals.title} onPress={() => setHelpOpen(true)} />} />
 
         {/* Plan, Targets and Recipes as the board draws them. Targets is the
             Goal screen, which owns the figures; Recipes opens the first meal
             of the plan in the sheet every meal row below already opens, and
-            is off until there is a plan to open. */}
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
-          <View accessibilityRole="tab" accessibilityState={{ selected: true }} style={{ flex: 1, minHeight: 38, borderRadius: radius.sm, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Plan</Text>
-          </View>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Targets" onPress={() => router.push('/(client)/goal')}
-            style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.label, color: t.ink3 }}>Targets</Text>
-          </Pressable>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: false, disabled: plan.length === 0 }} accessibilityLabel="Recipes" disabled={plan.length === 0}
-            onPress={() => { if (todayPlan[0]) setRecipe(todayPlan[0]); }} style={{ flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.label, color: plan.length ? t.ink3 : t.ring }}>Recipes</Text>
-          </Pressable>
-        </View>
+            is off until there is a plan to open. Both GO somewhere, so
+            neither ever draws as selected — see `Segment.onPress`. */}
+        <Segmented style={{ marginTop: sp.lg }} value="plan" onChange={() => {}}
+          options={[
+            { key: 'plan', label: 'Plan' },
+            { key: 'targets', label: 'Targets', onPress: () => router.push('/(client)/goal') },
+            { key: 'recipes', label: 'Recipes', disabled: plan.length === 0, onPress: () => { if (todayPlan[0]) setRecipe(todayPlan[0]); } },
+          ]} />
 
         {/* ── the hero: what is left to eat today ──────────────────────────
             `Calories Left` is `target − eaten`, so an unread log does not make
@@ -1347,33 +1366,27 @@ export default function Nutrition() {
             for a whole read, and the line under the figure says which read
             is short. undefined arc, not 0: an empty ring drawn for a target
             we do not have is a figure invented to fill a slot. */}
-        <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg, marginTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3, textAlign: 'center' }}>Nutrition Today</Text>
+        <Section>
+          {/* The mockup's hero: the ring at the leading edge, the three macros
+              beside it. Stacked once the reader's text is large — three
+              "96 / 120 g" meters in what is left of a 390pt card beside a
+              136pt ring is a column of wrapped labels. */}
+          <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
           {/* The ring is the figure: eaten inside it, the target under it, the
               way the board draws it. A tap opens the log. */}
           <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
             accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories could not be counted. Open the food log'}
-            hitSlop={8}
-            style={{ alignSelf: 'center', marginTop: sp.md }}>
+            hitSlop={8}>
             {/* The kit's <Ring>. `null` for both while the day is not whole or
                 there is no target: track only and a dash, never an empty arc
                 round a full allowance. The button's label above replaces the
                 ring's own, so the two say the same thing. */}
-            <Ring size={156}
+            <Ring size={136}
               value={dayWhole && target.kcal ? eaten.kcal / target.kcal : null}
               figure={dayWhole ? num(eaten.kcal) : null}
               sub={`of ${num(target.kcal)} kcal`}
               spoken={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today` : 'Today’s calories could not be counted'} />
           </Pressable>
-          <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
-            {dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'left' : 'over'}` : 'Calories not counted'}
-          </Text>
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: 3 }}>
-            {dayWhole ? caloriesNote(cal)
-              : fl.status === 'loading' ? 'Reading today’s food log…'
-              : fl.status === 'partial' ? 'You have logged more today than this screen can read in one go, so what is left cannot be worked out from it.'
-              : 'We couldn’t read today’s food log. What is left depends on what you have eaten, so this is unknown rather than your whole allowance.'}
-          </Text>
           {/* Intake against target, not the plan's totals: three figures under
               a sentence about what you have eaten mean what you have eaten. */}
           {/* The kit's <Meter>, one per macro, each in its own data hue as the
@@ -1381,11 +1394,23 @@ export default function Nutrition() {
               a dash over the target, spoken as "not read" — not an empty bar,
               which would say nothing had been eaten. Rounded HERE, as the
               strip this replaces did; the meter prints what it is handed. */}
-          <View style={{ marginTop: sp.xs }}>
+          <View style={{ flex: 1, minWidth: 0, alignSelf: 'stretch', justifyContent: 'center', marginTop: -sp.md }}>
             <Meter label="Protein" tone="blue" val={dayWhole ? Math.round(eaten.protein) : null} target={target.protein} />
             <Meter label="Carbs" tone="orange" val={dayWhole ? Math.round(eaten.carbs) : null} target={target.carbs} />
             <Meter label="Fat" tone="purple" val={dayWhole ? Math.round(eaten.fat) : null} target={target.fat} />
           </View>
+          </View>
+          <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.lg }}>
+            {dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'left' : 'over'}` : 'Calories not counted'}
+          </Text>
+          {/* One line: the burn clause when the day is whole, and otherwise
+              WHY the figure above is withheld — which is data, not prose. */}
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: 3 }}>
+            {dayWhole ? caloriesNote(cal)
+              : fl.status === 'loading' ? 'Reading today’s food log…'
+              : fl.status === 'partial' ? 'More is logged today than can be read in one go, so what is left is unknown.'
+              : 'Today’s food log could not be read, so what is left is unknown — not your whole allowance.'}
+          </Text>
           {/* Where the targets above came from, in one line beside them — a
               target with no source reads as a rule nobody set. Three sources
               and they are the three this screen really has: the member's own
@@ -1401,36 +1426,81 @@ export default function Nutrition() {
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', flexShrink: 1 }}>{coachAdjust ? 'Coach-adjusted · ' : ''}{targetSource}</Text>
           </View>
           <View style={{ marginTop: sp.md }}><Cta label="Log Meal" wide onPress={() => router.push('/(client)/foodlog')} /></View>
-        </View>
+        </Section>
 
         {/* The burn named in the sentence above is the last thing the device
             told us rather than a current reading. Said here rather than woven
             into `caloriesNote`, which is shared with screens that know nothing
             about devices — and said in the same words the two Devices screens
             use, so a member who reads both is told one thing. */}
-        <ScreenHelp screen="meals" />
-
         {burnStale ? (
-          <Flag tone={t.warn}>
-            The calories burned above are the last figures we had, not a current reading — your device could not be reached just now. Pull down to try again.
+          <Flag tone={t.warn} style={{ marginTop: 14 }}>
+            Calories burned is the last figure we had — your device could not be reached. Pull down to try again.
           </Flag>
         ) : null}
 
 
-        {/* ── the plan: today or the week ────────────────────────────────── */}
+        {/* ── water ─────────────────────────────────────────────────────────
+            The mockup's tracker: one segment per glass of the member's OWN
+            goal, filled in teal. No goal is no segments — a row of eight
+            drawn for somebody who never set eight is a target invented to
+            fill a card — and the head offers the way to set one instead, only
+            when we KNOW there is none (`offerGoal`). The count is printed
+            whenever it is known; the bar needs both reads. */}
         <Section>
-          {/* The board's page head: the count centred, the week a word to
-              the right rather than a second bar above the list. */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: layout.section, minHeight: 32 }}>
-            <View style={{ flex: 1 }} />
-            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink }}>{view === 'today' ? `${plan.length} Meals` : 'This Week'}</Text>
-            <View style={{ flex: 1, alignItems: 'flex-end' }}>
-              <Pressable onPress={() => setView((v) => (v === 'today' ? 'week' : 'today'))} accessibilityRole="button" hitSlop={hitSlopFor(32)}
-                accessibilityLabel={view === 'today' ? 'Show this week' : 'Show today'}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{view === 'today' ? 'This week' : 'Today'}</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
+            <Text accessibilityRole="header" style={{ ...ty.caption, ...font('700'), color: t.ink }}>Water</Text>
+            {hydration.offerGoal ? (
+              <Pressable onPress={() => router.push('/(client)/habits')} accessibilityRole="button" accessibilityLabel="Set a water goal" hitSlop={hitSlopFor(24)}>
+                <Text style={{ ...ty.caption, ...font('700'), color: t.data.tealInk }}>Set a water goal</Text>
               </Pressable>
+            ) : (
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flexShrink: 1 }}>
+                {!hydration.showCount ? 'Reading…'
+                  : waterGoal != null ? `${num(habits.water)} of ${num(waterGoal)} glasses`
+                  : `${num(habits.water)} ${habits.water === 1 ? 'glass' : 'glasses'} today`}
+              </Text>
+            )}
+          </View>
+          {waterGoal != null ? (
+            <View accessible accessibilityRole="progressbar"
+              accessibilityLabel={`${num(habits.water)} of ${num(waterGoal)} glasses of water today`}
+              accessibilityValue={{ min: 0, max: waterGoal, now: Math.min(habits.water, waterGoal) }}
+              style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
+              {Array.from({ length: waterGoal }, (_, i) => (
+                <View key={i} style={{ flex: 1, height: 22, borderRadius: 6, backgroundColor: i < habits.water ? t.data.teal : t.surface3 }} />
+              ))}
+            </View>
+          ) : hydration.offerGoal ? (
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.xs }}>
+              {num(habits.water)} {habits.water === 1 ? 'glass' : 'glasses'} today
+            </Text>
+          ) : null}
+          {/* Only the two FAULTS get their sentence here: a count this phone
+              could not check, and a goal that could not be read. "3 more to
+              go" is the bar above said again in words. */}
+          {hydration.kind === 'countUnread' || hydration.kind === 'goalUnread' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{hydration.text}</Text>
+          ) : null}
+          {/* Dead until the count has arrived. `addWater` writes an ABSOLUTE
+              count from a ref that is 0 until the read lands, so an early tap
+              writes 1 over a morning's 5 — app/(client)/recovery.tsx carries
+              the long form of this, and the same gate. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
+            <Ghost icon="minus" a11yLabel="Remove a glass" onPress={habits.removeWater} disabled={!hydration.showCount} />
+            <View style={{ flex: 1 }}>
+              <Ghost label="Add a Glass" icon="plus" onPress={habits.addWater} disabled={!hydration.showCount} />
             </View>
           </View>
+        </Section>
+
+        {/* ── the plan: today or the week ────────────────────────────────── */}
+        <Section>
+          {/* The mockup's "Today’s Meals" with its trailing link; the link is
+              the week, which is what "See all" of a day's plan is. */}
+          <SectionHead title={view === 'today' ? 'Today’s Meals' : 'This Week'}
+            note={view === 'today' ? 'This Week' : 'Today'}
+            onPress={() => setView((v) => (v === 'today' ? 'week' : 'today'))} />
 
           {/* An exclusion the engine could not honour, said before the plan
               rather than buried in it. `poolFilter` falls back to the
@@ -1448,8 +1518,53 @@ export default function Nutrition() {
               <Flag tone={t.crit}>{gapNote}</Flag>
             </View>
           ) : null}
-          {view === 'today' ? (
-            <>
+          {/* The day as the plan composed it, every slot, with the member's
+              planned recipes standing in where their dish is in hand. */}
+          {view === 'today' ? todayPlan.map((m, i) => mealRow(m, i > 0, false, true)) : null}
+          {view === 'week' ? weekPlans.map((wp, d) => (
+              <View key={d} style={{ marginBottom: sp.xl }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.sm }}>
+                  <Text accessibilityRole="header" style={{ ...ty.caption, ...font('700'), color: t.ink }}>{WEEKD[d]}</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{wp.tot.K.toLocaleString()} kcal</Text>
+                </View>
+                {wp.plan.map((m) => {
+                  // The same per-row mark the Today list carries. This arm drew
+                  // slot, name and kcal and nothing else, so a dish containing
+                  // the thing the member excluded was unmarked on the tab they
+                  // plan and shop from.
+                  const inIt = mealAllergens(m, c.avoid);
+                  return (
+                  <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button"
+                    // The mark this arm was given is on the row and in the
+                    // sentence. See `mealRowSpoken`.
+                    accessibilityLabel={mealRowSpoken({
+                      slot: m.slot, name: m.n, allergens: inIt, kcal: String(m.K),
+                    })}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
+                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{m.n}</Text>
+                      {inIt.length ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>Contains {inIt.map(allergenLabel).join(' and ')}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <TonedChip tone="orange" label={`${num(m.K)} kcal`} />
+                  </Pressable>
+                  );
+                })}
+              </View>
+          )) : null}
+        </Section>
+
+        {/* The card that CHANGES the day: the slot's catalogue, the search over
+            it, and the real recipe library. Below the day, because the day is
+            read every time and a swap is made now and then. */}
+        {view === 'today' ? (
+        <Section>
+              <SectionHead title="Swap Or Search" note={`${num(plan.length)} meals a day`} />
               {/* One slot at a time, the way the board lists meals. The slots
                   come from the plan itself, so a 4- or 5-meal day shows its
                   snacks as a segment rather than losing them. */}
@@ -1494,7 +1609,7 @@ export default function Nutrition() {
                         : 'Real recipes are listed under your plan’s meals.'}
                     </Text>
                     <Pressable onPress={() => setRecipeSearchOpen(false)} accessibilityRole="button" accessibilityLabel="Hide real recipes" hitSlop={hitSlopFor(24)}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Hide</Text>
+                      <Text style={{ ...ty.label, ...font('600'), color: t.brand }}>Hide</Text>
                     </Pressable>
                   </View>
                 )
@@ -1572,7 +1687,7 @@ export default function Nutrition() {
                   <Pressable onPress={() => openLink('meals.recipeAttribution', RECIPE_ATTRIBUTION.url)} accessibilityRole="link"
                     accessibilityLabel={`${RECIPE_ATTRIBUTION.text}. Opens spoonacular.com`} hitSlop={hitSlopFor(20)}
                     style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
-                    <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand }}>{RECIPE_ATTRIBUTION.text}</Text>
+                    <Text style={{ ...ty.caption, ...font('600'), color: t.brand }}>{RECIPE_ATTRIBUTION.text}</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -1585,7 +1700,7 @@ export default function Nutrition() {
                   honest thing is to say where it stops. */}
               {recipeInPlan ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  A recipe you choose replaces today’s meal in this list. This Week, the Grocery List and the plan you share stay on your plan’s own meals.
+                  Your recipe replaces today’s meal only — This Week, the Grocery List and the shared plan keep your plan’s meals.
                 </Text>
               ) : null}
               {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
@@ -1608,51 +1723,13 @@ export default function Nutrition() {
                       // the macro split behind them.
                       hitSlop={hitSlopFor(28)}
                       style={{ minWidth: 34, paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{n}</Text>
+                      <Text style={{ ...ty.label, ...numeric, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{n}</Text>
                     </Pressable>
                   );
                 })}
               </View>
-            </>
-          ) : (
-            weekPlans.map((wp, d) => (
-              <View key={d} style={{ marginBottom: sp.xl }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>{WEEKD[d]}</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{wp.tot.K.toLocaleString()} kcal</Text>
-                </View>
-                {wp.plan.map((m) => {
-                  // The same per-row mark the Today list carries. This arm drew
-                  // slot, name and kcal and nothing else, so a dish containing
-                  // the thing the member excluded was unmarked on the tab they
-                  // plan and shop from.
-                  const inIt = mealAllergens(m, c.avoid);
-                  return (
-                  <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button"
-                    // The mark this arm was given is on the row and in the
-                    // sentence. See `mealRowSpoken`.
-                    accessibilityLabel={mealRowSpoken({
-                      slot: m.slot, name: m.n, allergens: inIt, kcal: String(m.K),
-                    })}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
-                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{m.n}</Text>
-                      {inIt.length ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>Contains {inIt.map(allergenLabel).join(' and ')}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <Text style={{ ...value(15), color: t.ink2 }}>{m.K}</Text>
-                  </Pressable>
-                  );
-                })}
-              </View>
-            ))
-          )}
         </Section>
+        ) : null}
 
         {/* The order below the plan is the review's: what was eaten and the
             way to add to it, then the coach's word, then why the target is
@@ -1663,23 +1740,22 @@ export default function Nutrition() {
         {/* ── the one card: log what you actually ate ────────────────────── */}
         <Section>
           <SectionHead title="Log What You Ate" note={dayWhole ? `${fl.consumed.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal` : `${target.kcal.toLocaleString()} kcal target`} />
-          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>Eating something off-plan? Add it and it counts toward your day.</Text>
           <Card>
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
               <Pressable accessibilityLabel="Log a meal from a photo" accessibilityRole="button" onPress={photoLog}
                 style={{ flex: 1, backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
                 <Icon name="camera" size={18} color={t.brandInk} />
-                <Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>Photo</Text>
+                <Text style={{ ...ty.caption, ...font('600'), color: t.brandInk }}>Photo</Text>
               </Pressable>
               <Pressable accessibilityLabel="Scan a barcode" accessibilityRole="button" onPress={barcodeLog}
                 style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
                 <Icon name="search" size={18} color={t.ink2} />
-                <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Barcode</Text>
+                <Text style={{ ...ty.caption, ...font('500'), color: t.ink }}>Barcode</Text>
               </Pressable>
               <Pressable accessibilityLabel="Open food log" accessibilityRole="button" onPress={() => router.push('/(client)/foodlog')}
                 style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
                 <Icon name="plus" size={18} color={t.ink2} />
-                <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Search</Text>
+                <Text style={{ ...ty.caption, ...font('500'), color: t.ink }}>Search</Text>
               </Pressable>
             </View>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
@@ -1692,7 +1768,7 @@ export default function Nutrition() {
                 accessibilityLabel={logBusy ? 'Reading what you typed' : 'Log what you typed'}
                 accessibilityState={{ disabled: logBusy || !nl.trim(), busy: logBusy }}
                 style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
-                {logBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
+                {logBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, ...font('600'), color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
               </Pressable>
             </View>
           </Card>
@@ -1716,13 +1792,13 @@ export default function Nutrition() {
                   one is what was eaten, and the two are rows of dishes with
                   kcal beside them. The plan's rows say "In your plan"; these
                   say so once, over the list. */}
-              <Text accessibilityRole="header" style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>Eaten Today</Text>
+              <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginBottom: sp.xs }}>Eaten Today</Text>
               {fl.entries.map((fe, i) => (
                 <View key={fe.id}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <Text style={{ ...ty.body, color: t.ink2, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(fe.kcal)} kcal</Text>
+                    <Text style={{ ...ty.body, ...font('600'), color: t.ink, flex: 1 }} numberOfLines={2}>{fe.name}</Text>
+                    <TonedChip tone="orange" label={`${num(fe.kcal)} kcal`} />
                     <Pressable onPress={() => { void removeMeal(fe.id, fe.name); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
                       <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
                     </Pressable>
@@ -1741,8 +1817,8 @@ export default function Nutrition() {
                   case nobody can get to is the cheap half of the trade;
                   app/(client)/foodlog.tsx splits the same three already. */}
               {fl.status === 'loading' ? 'Reading today’s food log…'
-                : fl.status === 'error' ? 'We couldn’t read today’s food log. This is not a day with nothing in it — it is a day we can’t see.'
-                : fl.status === 'partial' ? 'You have logged more today than this screen can read in one go, so we can’t list it. This is not a day with nothing in it.'
+                : fl.status === 'error' ? 'Today’s food log could not be read — not a day with nothing in it.'
+                : fl.status === 'partial' ? 'More is logged today than can be listed in one go — not a day with nothing in it.'
                 : 'Nothing logged today.'}
             </Text>
           )}
@@ -1757,11 +1833,13 @@ export default function Nutrition() {
         </>) : null}
 
         {/* ── where that target came from ────────────────────────────────── */}
-        <Section>
-          <SectionHead
-            title="Why This Target"
-            note={energyPlan.kind === 'derived' && !energyPlan.onTime ? 'Slower than your date' : undefined}
-          />
+        {/* Folded: the paragraph is the long form of the one line under the
+            macros above, and round five takes paragraphs off the page. What is
+            NOT folded is the clamp — a plan slower than the member's own date
+            is a fact about the figure, so it is the row's note and is read
+            without opening anything. */}
+        <Expandable title="Why This Target"
+          note={energyPlan.kind === 'derived' && !energyPlan.onTime ? 'Slower than your date' : targetSource}>
           <Text style={{ ...ty.label, color: t.ink2 }}>{targetBasis(energyPlan, GOAL_LABEL[c.goal], wu)}</Text>
           {/* Their measured pace, from the same arithmetic the Goals screen
               uses. Absent — not zero — until their weigh-ins span enough days
@@ -1773,9 +1851,7 @@ export default function Nutrition() {
                 : `Your weigh-ins are moving at ${rateIn(observedPace, wu)} ${wu} a week ${observedPace < 0 ? 'down' : 'up'}.`}
             </Text>
           ) : null}
-        </Section>
-
-
+        </Expandable>
 
         {/* ── macro cycling: training vs rest day ────────────────────────── */}
         <Section>
@@ -1785,7 +1861,7 @@ export default function Nutrition() {
               can be labelled and given a touch target of its own. */}
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Today is a…</Text>
+              <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink }}>Today Is A…</Text>
               <Pressable onPress={() => setDayInfo(true)} hitSlop={12} accessibilityRole="button"
                 accessibilityLabel="What training, standard and rest days mean">
                 <Icon name="info" size={17} color={t.ink3} />
@@ -1793,22 +1869,11 @@ export default function Nutrition() {
             </View>
             {cycleNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{cycleNote}</Text> : null}
           </View>
-          {/* Three genuinely different plans, so each label keeps the
-              reader's chosen text size and the group wraps instead of
-              squeezing into three fixed columns. */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-            {DAY_TYPES.map(({ key, label }) => {
-              const on = dayType === key;
-              return (
-                <Pressable key={key} onPress={() => setDayType(key)} accessibilityRole="button" accessibilityState={{ selected: on }}
-                  accessibilityLabel={`${label} meal plan`}
-                  style={{ minHeight: 44, paddingHorizontal: sp.lg, paddingVertical: 11, borderRadius: radius.pill,
-                    alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {/* Three genuinely different plans, one of them chosen: the kit's
+              Segmented, which wraps two to a row at large text rather than
+              squeezing three labels into three fixed columns. */}
+          <Segmented value={dayType} onChange={setDayType}
+            options={DAY_TYPES.map(({ key, label }) => ({ key, label, a11yLabel: `${label} meal plan` }))} />
         </Section>
 
 
@@ -1820,11 +1885,6 @@ export default function Nutrition() {
                 title="Snacks"
                 note={planHasSnacks ? 'On top of the plan' : `About ${Math.round(SNACK_SHARE * 100)}% of your day each`}
               />
-              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                {planHasSnacks
-                  ? 'Your plan already builds snacks into the day. These are extras — log one and it counts toward today.'
-                  : 'Log one and it counts toward today. Nothing here changes your targets until you do.'}
-              </Text>
               {snacks.map((m: PlannedMeal, i: number) => {
                 // The third meal list, and the one that had neither half of the
                 // mark. `snackIdeas` builds out of the FILTERED pools, which is
@@ -1842,7 +1902,7 @@ export default function Nutrition() {
                     accessibilityLabel={mealRowSpoken({ name: m.n, allergens: inIt, kcal: num(m.K) })}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={2}>{m.n}</Text>
+                      <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{m.n}</Text>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
                       {inIt.length ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
@@ -1851,10 +1911,7 @@ export default function Nutrition() {
                         </View>
                       ) : null}
                     </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ ...value(20), color: t.ink }}>{num(m.K)}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
-                    </View>
+                    <TonedChip tone="orange" label={`${num(m.K)} kcal`} />
                     <Pressable onPress={() => { void logPlanned(m); }} hitSlop={10} accessibilityRole="button"
                       accessibilityLabel={`Log ${m.n}`}
                       style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -1865,8 +1922,6 @@ export default function Nutrition() {
                 );
               })}
             </Section>
-
-            <Rule />
           </>
         ) : null}
 
@@ -1874,7 +1929,7 @@ export default function Nutrition() {
         {/* A row, not a second green bar: Log Meal is this screen's one
             action, and a full-width Cta at the foot of it read as a rival. */}
         <Section>
-          <ListRow icon="check" title="Grocery List" note={`${grocCount} ${grocCount === 1 ? 'item' : 'items'} · this week’s plan`} onPress={() => setShowGrocery(true)} />
+          <ListRow icon="check" tone="brand" title="Grocery List" note={`${grocCount} ${grocCount === 1 ? 'item' : 'items'} · this week’s plan`} onPress={() => setShowGrocery(true)} />
         </Section>
 
         {/* ── how you eat, and what to leave out (collapsible) ────────────
@@ -1898,7 +1953,10 @@ export default function Nutrition() {
         <Section>
           <Pressable onPress={() => setShowAvoid((v) => !v)} accessibilityRole="button" accessibilityLabel="Toggle diet and dietary filters"
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{DIET_LABEL[diet]}{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to change'}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ ...ty.head, color: t.ink }}>Diet And Exclusions</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{DIET_LABEL[diet]}{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to change'}</Text>
+            </View>
             <View style={{ transform: [{ rotate: turn(showAvoid ? 90 : 0) }] }}><Icon name={FORWARD_ICON} size={14} color={t.ink3} /></View>
           </Pressable>
           {showAvoid ? (
@@ -1909,7 +1967,7 @@ export default function Nutrition() {
                   <Pressable key={d} onPress={() => c.setDiet(d)}
                     accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={DIET_LABEL[d]}
                     style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '400', color: on ? t.brandInk : t.ink2 }}>{DIET_LABEL[d]}</Text>
+                    <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{DIET_LABEL[d]}</Text>
                   </Pressable>
                 ); })}
               </View>
@@ -1920,7 +1978,7 @@ export default function Nutrition() {
                   accessibilityRole="button" accessibilityState={{ selected: on }}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.surface3 : t.surface2 }}>
                   {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
-                  <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.ink : t.ink2 }}>{al.label}</Text>
+                  <Text style={{ ...ty.label, ...font(on ? '500' : '400'), color: on ? t.ink : t.ink2 }}>{al.label}</Text>
                 </Pressable>
               ); })}
             </View>
@@ -1950,7 +2008,7 @@ export default function Nutrition() {
               step goal. */}
           {c.saveFailed ? (
             <Flag tone={t.crit} style={{ marginTop: sp.lg }}>
-              Your last change to your diet and exclusions has not reached the server, so what is set here may not be what your plan is built from. It keeps retrying — check this list again before you rely on it, and do not treat a meal as safe on the strength of it.
+              Your last diet or exclusion change has not saved, so this plan may not reflect it — do not treat a meal as safe on the strength of it. It keeps retrying.
             </Flag>
           ) : null}
         </Section>
@@ -2007,7 +2065,7 @@ export default function Nutrition() {
               <View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.xl }}>
                   <Text style={{ ...ty.label, color: t.ink3, textTransform: 'capitalize', flex: 1 }} numberOfLines={1}>{recipe.n}</Text>
-                  <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Done</Text></Pressable>
+                  <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Done</Text></Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 5, marginBottom: sp.xxl }}>
                   {recipe.steps.map((_, i) => (
@@ -2020,7 +2078,7 @@ export default function Nutrition() {
               <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.xl }}>
                 <Pressable onPress={() => setCookStep((x) => Math.max(0, x - 1))} disabled={cookStep === 0}
                   style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', opacity: cookStep === 0 ? 0.4 : 1 }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Back</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Back</Text>
                 </Pressable>
                 {cookStep < recipe.steps.length - 1 ? (
                   <View style={{ flex: 2 }}><Cta label="Next Step" wide onPress={() => setCookStep((x) => x + 1)} /></View>
@@ -2135,7 +2193,7 @@ export default function Nutrition() {
               {recipe.ing.map((ing, i) => (
                 <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                   <Text style={{ ...ty.body, color: t.ink2 }}>{ing[0]}</Text>
-                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{Math.round(ing[1] * recipe.servings * batch * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
+                  <Text style={{ ...ty.body, ...numeric, ...font('500'), color: t.ink }}>{Math.round(ing[1] * recipe.servings * batch * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
                 </View>
               ))}
               {/* Ingredients the recipe gives no amount for — "salt, to taste",
@@ -2155,7 +2213,7 @@ export default function Nutrition() {
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.md }}>Method</Text>
               {recipe.steps.map((s, i) => (
                 <View key={i} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-                  <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.brand }}>{i + 1}</Text>
+                  <Text style={{ ...ty.label, ...numeric, ...font('600'), color: t.brand }}>{i + 1}</Text>
                   <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{s}</Text>
                 </View>
               ))}
@@ -2175,7 +2233,7 @@ export default function Nutrition() {
                       <Pressable onPress={() => openLink('meals.recipeCredit', sheetRecipe.credit!.url!)} accessibilityRole="link"
                         accessibilityLabel={`Recipe from ${sheetRecipe.credit.name}. Opens the publisher’s page`} hitSlop={hitSlopFor(20)}
                         style={{ alignSelf: 'flex-start' }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Recipe from {sheetRecipe.credit.name}</Text>
+                        <Text style={{ ...ty.label, ...font('600'), color: t.brand }}>Recipe from {sheetRecipe.credit.name}</Text>
                       </Pressable>
                     ) : <Text style={{ ...ty.label, color: t.ink2 }}>Recipe from {sheetRecipe.credit.name}</Text>
                   ) : null}
@@ -2233,7 +2291,7 @@ export default function Nutrition() {
                       <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: on ? 0 : 1, borderColor: t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={13} color={t.brandInk} /> : null}</View>
                       <Text style={{ ...ty.body, color: on ? t.ink3 : t.ink2, textDecorationLine: on ? 'line-through' : 'none', flex: 1 }}>{it.item}</Text>
                     </View>
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: on ? t.ink3 : t.ink, textDecorationLine: on ? 'line-through' : 'none' }}>{it.qty}{it.unit ? ' ' + it.unit : ''}</Text>
+                    <Text style={{ ...ty.label, ...numeric, ...font('500'), color: on ? t.ink3 : t.ink, textDecorationLine: on ? 'line-through' : 'none' }}>{it.qty}{it.unit ? ' ' + it.unit : ''}</Text>
                   </Pressable>
                 ); })}
               </View>
@@ -2298,6 +2356,36 @@ export default function Nutrition() {
         </View>
       </Modal>
 
+      {/* ── what the numbers mean: the head's info control ───────────────
+          The help row's own lines, and under them the sentences round five
+          took off the page — the ones that explain a card rather than qualify
+          a figure. Nothing here is a withheld reason, an allergen or a sync
+          state; those stayed beside the thing they are about. */}
+      <Modal visible={helpOpen} transparent animationType="slide" onRequestClose={() => setHelpOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setHelpOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: '82%', ...elevation.e2 }}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+            <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>{SCREEN_HELP.meals.title}</Text>
+            {[
+              ...SCREEN_HELP.meals.lines,
+              { term: 'Logging', means: 'anything you eat off-plan counts toward your day once you add it — by photo, barcode, search or a typed description.' },
+              { term: 'Snacks', means: planHasSnacks
+                ? 'your plan already builds snacks into the day. The ideas further down are extras, and count only when you log one.'
+                : 'ideas only. Nothing changes your targets until you log one.' },
+              { term: 'Real Recipes', means: 'searched only when you ask, portioned to the slot, and re-checked against what you avoid.' },
+            ].map((l) => (
+              // One text node, as the help row draws it: the term and its
+              // explanation are one sentence and wrap as one.
+              <Text key={l.term} style={{ ...ty.label, color: t.ink2, marginBottom: sp.md }}>
+                <Text style={{ ...font('700'), color: t.ink }}>{l.term}</Text>{' — '}{l.means}
+              </Text>
+            ))}
+            <Ghost label="Close" onPress={() => setHelpOpen(false)} />
+          </ScrollView>
+        </View>
+      </Modal>
+
       <Modal visible={dayInfo} transparent animationType="slide" onRequestClose={() => setDayInfo(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDayInfo(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
@@ -2318,7 +2406,7 @@ export default function Nutrition() {
                 <View key={d.key} style={{ marginBottom: sp.md }}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, marginTop: i > 0 ? sp.md : 0 }}>
-                    <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{d.label}</Text>
+                    <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{d.label}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{m.kcal.toLocaleString()} kcal · {m.carbs} g carbs</Text>
                   </View>
                   <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{d.blurb}</Text>

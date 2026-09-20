@@ -39,8 +39,8 @@ import { useClientData } from '../../src/ui/clientData';
 import { dishAllergens, dishAllergenMark, dishMarkNotice } from '../../src/lib/foodAllergens';
 import { Flag } from '../../src/ui/kit';
 import { CUISINES, PORTIONS, searchDishes, estimateDish, type Dish } from '../../src/lib/restaurant';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, fig, IconPlate, TonedChip } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 
 export default function Restaurant() {
   const t = useTheme();
@@ -89,12 +89,15 @@ export default function Restaurant() {
         {/* The board's pushed-page head: back, the title centred. */}
         <PageHead title="Eating Out" />
 
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
-          Pick a dish for a macro estimate, set the portion, and log it. These are typical restaurant servings, not label data.
+        {/* The how-to came off the page — a search field over a list of dishes
+            explains itself. What stays is the caveat on every figure below,
+            which is data: an estimate, not a label. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
+          Typical restaurant servings, not label data.
         </Text>
 
         {/* ── the field is the screen ────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.lg, minHeight: 46, marginTop: sp.md }}>
           <Icon name="search" size={16} color={t.ink3} />
           <TextInput value={q} onChangeText={setQ} placeholder="Burrito, ramen, latte…" placeholderTextColor={t.ink3}
             accessibilityLabel="Search dishes"
@@ -105,14 +108,14 @@ export default function Restaurant() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.md }} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.xs }}>
           <Pressable onPress={() => setCuisine(null)} accessibilityRole="button" accessibilityState={{ selected: cuisine === null }}
             style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: cuisine === null ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.label, fontWeight: cuisine === null ? '600' : '500', color: cuisine === null ? t.brandInk : t.ink2 }}>All</Text>
+            <Text style={{ ...ty.label, ...font(cuisine === null ? '600' : '500'), color: cuisine === null ? t.brandInk : t.ink2 }}>All</Text>
           </Pressable>
           {CUISINES.map((cz) => {
             const on = cuisine === cz;
             return (
               <Pressable key={cz} onPress={() => setCuisine(cz === cuisine ? null : cz)} accessibilityRole="button" accessibilityState={{ selected: on }}
                 style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{cz}</Text>
+                <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{cz}</Text>
               </Pressable>
             );
           })}
@@ -138,9 +141,10 @@ export default function Restaurant() {
               {i > 0 ? <Rule /> : null}
               <Pressable onPress={() => { setSel(d); setPortion(1); }} accessibilityRole="button"
                 accessibilityLabel={mark ? `${d.name}. ${mark}` : d.name}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{d.name}</Text>
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 64, paddingVertical: sp.sm }}>
+                <IconPlate icon="meals" tone="amber" />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{d.name}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{d.cuisine} · P{d.protein} C{d.carbs} F{d.fat}</Text>
                   {/* The mark carries the tone; the words carry the meaning. */}
                   {mark ? (
@@ -150,8 +154,8 @@ export default function Restaurant() {
                     </View>
                   ) : null}
                 </View>
-                <Text style={{ ...value(18), color: t.ink }}>{num(d.kcal)}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
+                {/* Calories are orange across the app, beside the word. */}
+                <TonedChip tone="orange" label={`${num(d.kcal)} kcal`} />
               </Pressable>
             </View>
             );
@@ -173,7 +177,7 @@ export default function Restaurant() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
           {sel && est ? (
             <>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>{sel.cuisine} · portion estimate</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{sel.cuisine} · portion estimate</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 4, marginBottom: sp.lg }}>{sel.name}</Text>
               {/* On the sheet with the Add button on it, not only in the list.
                   This is the moment the dish goes into the member's day. */}
@@ -195,7 +199,7 @@ export default function Restaurant() {
                 {PORTIONS.map((p) => { const on = portion === p.mult; return (
                   <Pressable key={p.id} onPress={() => setPortion(p.mult)} accessibilityRole="button" accessibilityState={{ selected: on }}
                     style={{ flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{p.label}</Text>
+                    <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{p.label}</Text>
                   </Pressable>); })}
               </View>
               <KpiRow items={[

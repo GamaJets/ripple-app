@@ -36,13 +36,13 @@ import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Notice, Cta, Ghost, fig, Ring, Spark, ChartShell, KpiRow, TonedChip, Segmented } from '../../src/ui/kit';
+import { sp, layout, hairline, radius, type as ty, value, fontScale } from '../../src/theme/scale';
 import { useGlucose } from '../../src/ui/glucoseData';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import {
-  band, formatGlucose, parseTyped, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL,
+  band, formatGlucose, parseTyped, mmolToMgdl, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL,
   type GlucoseUnit, type GlucoseBand, type GlucoseReadStatus,
 } from '../../src/lib/glucose';
 import { glucoseSource } from '../../src/lib/wearables/glucoseSource';
@@ -213,7 +213,7 @@ export default function Glucose() {
             through, so the range and the figures it judges cannot come out in
             two different units again. */}
         <Notice tone={t.s3} kicker="Not medical advice" title="Readings, not recommendations"
-          note={`${BRAND.label} shows what your monitor recorded. It does not tell you what to eat, and the range shown (${formatGlucose(TYPICAL_LOW_MMOL, unit)}–${formatGlucose(TYPICAL_HIGH_MMOL, unit)} ${unit}) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
+          note={`The range shown (${formatGlucose(TYPICAL_LOW_MMOL, unit)}–${formatGlucose(TYPICAL_HIGH_MMOL, unit)} ${unit}) is the one commonly quoted for adults, not a target set for you — your targets come from your clinician.`} />
 
         {/* ── The window's headline figures ─────────────────────────────── */}
         <Section style={{ marginTop: sp.lg }}>
@@ -222,25 +222,65 @@ export default function Glucose() {
           {unreadable ? (
             <>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-                Your readings could not be read just now. This is not the same as having none — nothing below is confirmed.
+                Your readings could not be read just now — not the same as having none.
               </Text>
               <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                 <Ghost label="Try Again" onPress={() => { void g.refresh(); }} />
               </View>
             </>
           ) : null}
-          <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-            {[
-              { label: 'Latest', v: known && g.summary.latest ? formatGlucose(g.summary.latest.mmol, unit) : null },
-              { label: 'Average', v: known ? formatGlucose(g.summary.averageMmol, unit) : null },
-              { label: 'Highest', v: known ? formatGlucose(g.summary.highestMmol, unit) : null },
-              { label: 'In range', v: known && g.summary.inTypicalPct != null ? `${g.summary.inTypicalPct}%` : null },
-            ].map((k) => (
-              <View key={k.label} style={{ flex: 1 }}>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{k.label}</Text>
-                <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>{fig(k.v)}</Text>
+          {/* The figure card: the share in range as a ring — it is the one
+              figure here that is a fraction of something — beside the latest
+              reading and the word for where it sits. Every value is null
+              unless the read is whole (`known`), and the ring is null again
+              below the floor the summary sets, so it draws a bare track and a
+              dash rather than "100%" off two samples. */}
+          <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg, marginTop: sp.md }}>
+            <Ring size={120}
+              value={known && g.summary.inTypicalPct != null ? g.summary.inTypicalPct / 100 : null}
+              figure={known && g.summary.inTypicalPct != null ? `${g.summary.inTypicalPct}%` : null}
+              sub="in range"
+              spoken={known && g.summary.inTypicalPct != null ? `${g.summary.inTypicalPct}% of readings within the quoted range` : 'Share of readings in range, not shown'} />
+            <View style={{ flex: 1, minWidth: 0, gap: sp.xs }}>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Latest</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...value(34), color: t.ink, flexShrink: 1 }}>
+                  {fig(known && g.summary.latest ? formatGlucose(g.summary.latest.mmol, unit) : null)}
+                </Text>
+                <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{unit}</Text>
               </View>
-            ))}
+              {/* Descriptive, never a verdict: green is "within the quoted
+                  range", amber is outside it, and the words are the lib's. */}
+              {known && g.summary.latest && bandWord(band(g.summary.latest.mmol)) ? (
+                <TonedChip tone={band(g.summary.latest.mmol) === 'typical' ? 'brand' : 'amber'} label={bandWord(band(g.summary.latest.mmol))} />
+              ) : null}
+            </View>
+          </View>
+          <View style={{ marginTop: sp.md }}>
+            <KpiRow items={[
+              { label: 'Average', value: fig(known ? formatGlucose(g.summary.averageMmol, unit) : null), unit },
+              { label: 'Highest', value: fig(known ? formatGlucose(g.summary.highestMmol, unit) : null), unit },
+            ]} />
+          </View>
+          {/* The fortnight as the area chart, oldest first, in the reader's
+              unit. ChartShell decides whether there is a chart at all: a
+              failed or partial read draws nothing, one reading is a sentence.
+              The quoted range rides under it as words — the chart has no band
+              drawn on it, and a band that is not there is not described.
+              ponytail: every reading is a point — a whole read tops out at the
+              row cap (a CGM's fortnight is past it and reads 'partial', so it
+              is not drawn). Downsample here if a denser source ever reads whole. */}
+          <View style={{ marginTop: sp.lg }}>
+            <ChartShell status={g.status} points={g.readings.length}
+              emptyLine="No readings in the last 14 days, so there is no trend to draw."
+              errorLine="Your readings could not be read, so no trend is drawn.">
+              <Spark area tone="pink" unit={` ${unit}`}
+                data={[...g.readings].reverse().map((r) => (unit === 'mg/dL' ? Math.round(mmolToMgdl(r.mmol)) : Math.round(r.mmol * 10) / 10))}
+                labels={[...g.readings].reverse().map((r) => r.at)} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Quoted range {formatGlucose(TYPICAL_LOW_MMOL, unit)}–{formatGlucose(TYPICAL_HIGH_MMOL, unit)} {unit}
+              </Text>
+            </ChartShell>
           </View>
           {/* The percentage is withheld below a floor rather than computed from
               a handful of readings — "100% in range" off two samples is a
@@ -250,11 +290,10 @@ export default function Glucose() {
               Too few readings to give a share in range.
             </Text>
           ) : null}
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-            {UNITS.map((u) => (
-              <Ghost key={u} label={u === unit ? `${u} ✓` : u} onPress={() => setUnit(u)} />
-            ))}
-          </View>
+          {/* The unit is a choice of one from two: the kit's Segmented says
+              which is selected to a screen reader, which a tick typed into a
+              label did not. */}
+          <Segmented style={{ marginTop: sp.md }} value={unit} onChange={setUnit} options={UNITS.map((u) => ({ key: u, label: u }))} />
         </Section>
 
         {/* ── Getting readings in ───────────────────────────────────────── */}
@@ -294,7 +333,7 @@ export default function Glucose() {
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.body, color: t.ink }}>Let my coach see these</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
-                Off by default. Turning it off again hides the history as well as the next reading.
+                Off by default. Turning it off hides the history too.
               </Text>
             </View>
             <Switch
@@ -350,15 +389,15 @@ export default function Glucose() {
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.sm }}>
                   <View>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>Before</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Before</Text>
                     <Text style={{ ...ty.body, color: t.ink }}>{fig(p.before ? formatGlucose(p.before.mmol, unit) : null)}</Text>
                   </View>
                   <View>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>Peak after</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Peak after</Text>
                     <Text style={{ ...ty.body, color: bandColor(band(p.peak?.mmol)) }}>{fig(p.peak ? formatGlucose(p.peak.mmol, unit) : null)}</Text>
                   </View>
                   <View>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>Change</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Change</Text>
                     {/* Null unless BOTH ends are real readings. A peak with no
                         baseline is a number, not a rise. */}
                     <Text style={{ ...ty.body, color: t.ink }}>
@@ -406,7 +445,7 @@ export default function Glucose() {
                 <Text style={{ ...ty.body, color: bandColor(band(r.mmol)), width: 64 }}>{formatGlucose(r.mmol, unit)}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.caption, color: t.ink2 }}>{when(r.at)}</Text>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>{bandWord(band(r.mmol))}{r.sourceName ? ` · ${r.sourceName}` : ''}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{bandWord(band(r.mmol))}{r.sourceName ? ` · ${r.sourceName}` : ''}</Text>
                 </View>
                 {/* The way back out. `useGlucose().remove` was written when the
                     table landed, is documented as "only the owner can, and the
@@ -452,7 +491,7 @@ export default function Glucose() {
 
       <Modal visible={typing} animationType="slide" transparent onRequestClose={() => setTyping(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: t.surface, padding: layout.gutter, paddingBottom: 40 }}>
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: layout.gutter, paddingBottom: 40 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Add a Reading</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>In {unit}, as your meter shows it.</Text>
             <TextInput

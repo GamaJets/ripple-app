@@ -23,10 +23,13 @@
 import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ScreenHelp } from '../../src/ui/ScreenHelp';
+// The help row's words, opened from the head's info control instead of drawn
+// as a row: round five takes explanation off the page. See the note in
+// app/(client)/nutrition.tsx for why this is not the kit's <ScreenHelp>.
+import { SCREEN_HELP } from '../../src/lib/screenHelp';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Cta, Notice, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Cta, Ghost, Notice, fig, Ring, Spark, Meter, TonedChip } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value, font, fontScale } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
@@ -47,7 +50,7 @@ import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
-  progressOf, projectionOf, goalLabel, isMeasured, isOverdue, sortGoals,
+  progressOf, projectionOf, startPoint, goalLabel, isMeasured, isOverdue, sortGoals,
   GOAL_METRIC, MEASURED_KINDS, MIN_TREND_DAYS,
   type GoalKind, type GoalProgress, type GoalTarget, type MeasuredKind, type Point,
 } from '../../src/lib/goalTargets';
@@ -214,8 +217,8 @@ export default function Goal() {
       : c.status === 'loading'
         ? `Reading your ${GOAL_METRIC[k].source}…`
         : c.status === 'partial'
-          ? `You have more ${GOAL_METRIC[k].source} on record than we can read in one go, so how far along this is cannot be worked out from what came back.`
-          : `Your ${GOAL_METRIC[k].source} could not be read, so we can’t say how far along this is. This is not a statement that you have none on record.`;
+          ? `More ${GOAL_METRIC[k].source} on record than can be read in one go, so progress is unknown.`
+          : `Your ${GOAL_METRIC[k].source} could not be read, so progress is unknown — not a statement that you have none.`;
 
   const goals = sortGoals(g.goals);
   const open = goals.filter((x) => !x.achievedAtISO);
@@ -228,6 +231,21 @@ export default function Goal() {
   // for a goal no reading was ever going to measure.
   const measuredOpen = open.some((x) => isMeasured(x));
   const leadProgress = lead ? progressFor(lead) : null;
+  // The readings the hero's chart draws: from the goal's baseline forward, in
+  // the read unit. The SAME window `projectionOf` takes its rate over — first
+  // to last reading since the goal was set — so the line on the card and the
+  // finish date under it are one piece of arithmetic seen twice. Only real
+  // readings: the projection stays a sentence, because a dotted line into
+  // next month is a series nobody measured.
+  const leadSeries = (() => {
+    if (!lead || !isMeasured(lead)) return [];
+    const all = seriesFor(lead.kind);
+    const from = startPoint(all, lead.createdAtISO);
+    if (!from) return [];
+    return [...all].sort((a, b) => Date.parse(a.t) - Date.parse(b.t))
+      .filter((p) => Date.parse(p.t) >= Date.parse(from.t))
+      .map((p) => ({ t: p.t, v: goalValue(p.v, lead.kind, wu) }));
+  })();
 
   const save = async () => {
     if (saving) return;
@@ -337,12 +355,12 @@ export default function Goal() {
         {/* The board's pushed-page head: back, the title centred. The
             eyebrow and the tagline under it were two lines of prose in the
             first viewport that the board does not have. */}
-        <PageHead title="Goals" />
+        <PageHead title="Goals" trailing={<Ghost icon="info" a11yLabel={SCREEN_HELP.goal.title}
+          onPress={() => Alert.alert(SCREEN_HELP.goal.title, SCREEN_HELP.goal.lines.map((l) => `${l.term} — ${l.means}`).join('\n\n'))} />} />
 
         {/* The projected finish is drawn beside a date the member chose, which
-            is exactly what makes it read as a commitment. Said before either
-            date appears. */}
-        <ScreenHelp screen="goal" />
+            is exactly what makes it read as a commitment. What each of the two
+            dates is sits behind the info control above. */}
 
         {g.status === 'error' ? (
           <Section>
@@ -353,7 +371,7 @@ export default function Goal() {
                 mark. It was the only tone= string literal in the tree; every
                 other call passes a theme token. */}
             <Notice tone={t.warn} kicker="Not loaded" title="Your goals could not be read"
-              note="This is not an empty list — it’s an unread one. Nothing below is missing because you haven’t set it. Pull back and open this again once you’re connected." />
+              note="This is an unread list, not an empty one. Pull down to try again." />
           </Section>
         ) : g.status === 'loading' ? (
           <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading your goals…</Text></Section>
@@ -369,29 +387,40 @@ export default function Goal() {
                 <Section>
                   <SectionHead title={goalLabel(lead)} note={['Target', fig(goalValue(leadProgress.target, lead.kind as MeasuredKind, wu)), goalUnit(lead.kind as MeasuredKind, wu)].join(' ')} />
                   {/* Goal, figure, unit and progress are one fact and one stop. */}
-                  <View accessible accessibilityLabel={[goalLabel(lead), [fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu)), goalUnit(lead.kind as MeasuredKind, wu)].join(' '), `${leadProgress.pct}% of the way`, `${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`].join(', ')}>
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                        style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>
-                        {fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu))}
-                      </Text>
-                      <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{goalUnit(lead.kind as MeasuredKind, wu)}</Text>
+                  {/* The ring is the fraction the thin bar used to draw; the
+                      reading it is measured from sits beside it as the figure,
+                      and what is left is a chip with its word. `leadProgress`
+                      exists only over a WHOLE read of the readings (see
+                      `progressFor`), so the arc is never drawn from a
+                      truncated series. */}
+                  <View accessible accessibilityLabel={[goalLabel(lead), [fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu)), goalUnit(lead.kind as MeasuredKind, wu)].join(' '), `${leadProgress.pct}% of the way`, `${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`].join(', ')}
+                    style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
+                    <Ring size={120} value={Math.max(0, Math.min(100, leadProgress.pct)) / 100} figure={`${leadProgress.pct}%`} sub="of the way"
+                      spoken={`${leadProgress.pct}% of the way to your goal`} />
+                    <View style={{ flex: 1, minWidth: 0, gap: sp.sm }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>Now</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
+                          style={{ ...value(34), color: t.ink, flexShrink: 1 }}>
+                          {fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu))}
+                        </Text>
+                        <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{goalUnit(lead.kind as MeasuredKind, wu)}</Text>
+                      </View>
+                      <TonedChip label={`${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`} />
                     </View>
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.brand, marginTop: 3 }}>
-                      {`${leadProgress.pct}% of the way · ${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`}
-                    </Text>
                   </View>
-                  <View accessible accessibilityRole="progressbar"
-                    accessibilityLabel={`${leadProgress.pct}% of the way to your goal`}
-                    accessibilityValue={{ min: 0, max: 100, now: leadProgress.pct }}
-                    style={{ height: 4, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
-                    <View style={{ height: 4, borderRadius: 2, width: `${Math.max(0, Math.min(100, leadProgress.pct))}%`, backgroundColor: t.brand }} />
-                  </View>
+                  {/* The readings since the goal was set, as the area chart.
+                      Two readings or more: one is a dot, and the figure above
+                      already is that dot. */}
+                  {leadSeries.length >= 2 ? (
+                    <View style={{ marginTop: sp.lg }}>
+                      <Spark area data={leadSeries.map((p) => p.v)} labels={leadSeries.map((p) => p.t)} unit={` ${goalUnit(lead.kind as MeasuredKind, wu)}`} />
+                    </View>
+                  ) : null}
                   {projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu) ? (
                     <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>{projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu)}</Text>
                   ) : null}
                 </Section>
-                <Rule />
               </View>
             ) : measuredOpen && !readingsWhole ? (
               // The hero is chosen as the nearest-due open goal that HAS
@@ -404,10 +433,10 @@ export default function Goal() {
                 <Notice tone={t.warn} kicker="Progress"
                   title={c.status === 'loading' ? 'Reading your measurements' : c.status === 'partial' ? 'Not all of your measurements could be read' : 'Your measurements could not be read'}
                   note={c.status === 'loading'
-                    ? 'How far along your goals are is worked out from your weigh-ins and scans, and they are still loading.'
+                    ? 'Progress is worked out from your weigh-ins and scans, which are still loading.'
                     : c.status === 'partial'
-                      ? 'You have more weigh-ins and scans on record than we can read in one go, so how far along your goals are cannot be worked out from what came back.'
-                      : 'How far along your goals are is worked out from your weigh-ins and scans, and those could not be read just now. Your goals and your readings are both intact — this screen simply cannot see them to measure one against the other.'} />
+                      ? 'More weigh-ins and scans are on record than can be read in one go, so progress cannot be worked out.'
+                      : 'Your weigh-ins and scans could not be read just now, so progress cannot be worked out. Nothing is lost.'} />
               </Section>
             ) : null}
 
@@ -430,60 +459,55 @@ export default function Goal() {
                 // gone up and a refusal with no reason reads as a fault.
                 const waiting = isPending(x.id);
                 return (
-                  <View key={x.id} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                  <View key={x.id} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.surface3 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm }}>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, color: x.achievedAtISO ? t.ink3 : t.ink, fontWeight: '600' }}>
+                        <Text style={{ ...ty.head, color: x.achievedAtISO ? t.ink3 : t.ink }}>
                           {goalLabel(x)}{measured && x.targetValue != null ? ` · ${fig(goalValue(x.targetValue, x.kind as MeasuredKind, wu))} ${unit}` : ''}
                         </Text>
-                        {/* The words say "Target date passed"; the dot carries the
-                            tone. warn as micro ink is 3.87–4.08:1 on the three
-                            light palettes, under AA at 11pt. */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                          {overdue ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-                          <Text style={{ ...ty.micro, color: overdue ? t.ink2 : t.ink3, flex: 1 }}>
-                            {x.achievedAtISO
-                              ? `Done ${shortDate(x.achievedAtISO)}`
-                              : x.targetDateISO
-                                ? (overdue ? `Target date passed (${shortDate(x.targetDateISO)})` : `By ${shortDate(x.targetDateISO)}`)
-                                : 'No target date'}
-                          </Text>
+                        {/* A state is a chip with its word: done green, a date
+                            gone by amber. An open goal with time left is not a
+                            state, so it stays a quiet line. */}
+                        <View style={{ marginTop: sp.xs }}>
+                          {x.achievedAtISO ? <TonedChip tone="brand" icon="check" label={`Done ${shortDate(x.achievedAtISO)}`} />
+                            : x.targetDateISO && overdue ? <TonedChip tone="amber" label={`Target date passed (${shortDate(x.targetDateISO)})`} />
+                            : <Text style={{ ...ty.caption, color: t.ink3 }}>{x.targetDateISO ? `By ${shortDate(x.targetDateISO)}` : 'No target date'}</Text>}
                         </View>
                         {waiting ? (
-                          <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
                             Saved on this phone — not sent yet. It goes up on its own when you have signal.
                           </Text>
                         ) : null}
                         {/* What the readings can and cannot say about this goal. */}
                         {measured ? (
-                          <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>
-                            {prog
-                              ? `${prog.pct}% · ${Math.abs(goalDelta(prog.remaining, x.kind as MeasuredKind, wu))} ${unit} to go`
-                              : noReadingLine(x.kind as MeasuredKind)}
-                          </Text>
+                          prog
+                            // The same fraction the hero's ring draws, as a bar on
+                            // the row. Only where `progressFor` gave one — a whole
+                            // read with a baseline — and otherwise the reason.
+                            ? <Meter label="Progress" val={Math.max(0, Math.min(100, prog.pct))} target={100}
+                                note={`${prog.pct}% · ${Math.abs(goalDelta(prog.remaining, x.kind as MeasuredKind, wu))} ${unit} to go`} />
+                            : <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{noReadingLine(x.kind as MeasuredKind)}</Text>
                         ) : (
-                          <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>
-                            Nothing to measure this one against — mark it done when you get there.
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                            Nothing to measure this against — mark it done when you get there.
                           </Text>
                         )}
                       </View>
                       <Pressable onPress={() => toggleAchieved(x)} accessibilityRole="button"
                         accessibilityLabel={x.achievedAtISO ? `Reopen ${goalLabel(x)}` : `Mark ${goalLabel(x)} done`}
                         style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                        <Text style={{ ...ty.micro, color: t.ink2 }}>{x.achievedAtISO ? 'Reopen' : 'Done'}</Text>
+                        <Text style={{ ...ty.micro, ...font('700'), color: t.ink2 }}>{x.achievedAtISO ? 'Reopen' : 'Done'}</Text>
                       </Pressable>
                       <Pressable onPress={() => confirmRemove(x)} accessibilityRole="button"
                         accessibilityLabel={`Remove ${goalLabel(x)}`}
                         style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                        <Text style={{ ...ty.micro, color: t.ink3 }}>Remove</Text>
+                        <Text style={{ ...ty.micro, ...font('700'), color: t.ink3 }}>Remove</Text>
                       </Pressable>
                     </View>
                   </View>
                 );
               })}
             </Section>
-
-            <Rule />
 
             <Section>
               <SectionHead title="Set a Goal" />
@@ -493,7 +517,7 @@ export default function Goal() {
                     accessibilityState={{ selected: kind === k.kind }} accessibilityLabel={k.label}
                     style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
                              backgroundColor: kind === k.kind ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.micro, color: kind === k.kind ? t.brandInk : t.ink2 }}>{k.label}</Text>
+                    <Text style={{ ...ty.label, ...font('600'), color: kind === k.kind ? t.brandInk : t.ink2 }}>{k.label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -521,7 +545,7 @@ export default function Goal() {
                     accessibilityState={{ selected: days === d }} accessibilityLabel={label}
                     style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center',
                              backgroundColor: days === d ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: days === d ? t.brandInk : t.ink2 }}>{label}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: days === d ? t.brandInk : t.ink2 }}>{label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -536,14 +560,14 @@ export default function Goal() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }} accessibilityLiveRegion="polite">
                 {targetDay
                   ? `That is ${shortDate(targetDay)}.`
-                  : 'No date. The goal stays open until you mark it done, and nothing will call it overdue.'}
+                  : 'No date — it stays open until you mark it done, and is never overdue.'}
               </Text>
 
               <View style={{ marginTop: sp.lg }}>
                 <Cta label={saving ? 'Saving…' : 'Save Goal'} wide disabled={saving} onPress={save} />
               </View>
               {kind !== 'custom' ? (
-                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                   Tracked from your {GOAL_METRIC[kind as MeasuredKind].source}. Saving replaces any {GOAL_METRIC[kind as MeasuredKind].label.toLowerCase()} you already have.
                 </Text>
               ) : null}
