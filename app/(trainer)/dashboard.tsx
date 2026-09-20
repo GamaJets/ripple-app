@@ -38,6 +38,7 @@ import type { PtSession } from '../../src/lib/gymSessions';
 import { BOOKED_AHEAD_DAYS, bookedAhead } from '../../src/lib/bookedAhead';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
+import { appLocale } from '../../src/lib/locale';
 import { useAuth } from '../../src/ui/auth';
 import {
   compareDrift, bandTitle,
@@ -59,9 +60,9 @@ import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag, AttentionRow, TonedChip, Donut, Legend, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag, AttentionRow, TonedChip, Donut, Legend, Segmented, IconPlate, type Tone } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
-import { sp, layout, radius, hairline, elevation, grown, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
 import { type RosterClient } from '../../src/lib/trainerMock';
@@ -221,7 +222,7 @@ function Chip({ t, label, on, onPress }: { t: Theme; label: string; on: boolean;
       flex: 1, alignItems: 'center', paddingVertical: 10,
       borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2,
     }}>
-      <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font('500'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 }
@@ -266,8 +267,9 @@ const NEW_THIS_WEEK_DAYS = 7;
  * words carry the state and the dot repeats it (kit rule two).
  */
 //
-// `chip` is the same state as a NAME from the kit's data palette, for the four
-// states the mockups draw as a chip — red for a check-in owed, amber for
+// `chip` is the same state as a NAME from the kit's data palette, for the
+// states the mockups colour — the monogram's plate, the state's word at the
+// trailing edge and the adherence bar all take it — red for a check-in owed, amber for
 // slipping, purple for the unknown (driftTone's own reason for giving it a hue
 // of its own), blue for new, the accent for on track. Absent wherever `tone`
 // is null, and on the adherence line, which is a sentence and not a state.
@@ -295,11 +297,34 @@ function rowStatus(t: Theme, c: RosterClient, d: Drift | null, driftRead: boolea
   };
 }
 
-/** A client's initials — the roster's only ornament. */
-function Initials({ t, name, size = 38 }: { t: Theme; name: string; size?: number }) {
+/**
+ * A tone's three colours, by name: the MARK (a bar, a stroke), the pale plate
+ * and the INK that may be text on it.
+ *
+ * The kit keeps its own copy of this private, and every part that takes a
+ * `tone` resolves it inside. The roster row is the one shape here the kit has
+ * no part for — a monogram on a plate of the state's hue, the state's word in
+ * its ink, a thin bar in its mark — so the same three lookups are made here,
+ * from the same tokens, and would be the kit's `toneOf` the day it is exported.
+ * Text only ever takes `ink`: the contrast gate refuses a mark as a colour.
+ */
+function toneOf(t: Theme, tone: Tone): { mark: string; soft: string; ink: string } {
+  if (tone === 'brand') return { mark: t.brand, soft: t.brandSoft, ink: t.brandText };
+  if (tone === 'neutral') return { mark: t.ink3, soft: t.surface3, ink: t.ink2 };
+  return { mark: t.data[tone], soft: t.data[`${tone}Soft`], ink: t.data[`${tone}Ink`] };
+}
+
+/** A client's initials on a plate — the accent's by default, and the row's own
+ *  state hue on the roster, the way the mockups colour each monogram. Two
+ *  characters through `Array.from`, the kit's AttentionRow rule: half of an
+ *  emoji or an astral letter is "�". The diameter grows with the reader's
+ *  text so the letters never outgrow the plate. */
+function Initials({ t, name, size = 38, tone = 'brand' }: { t: Theme; name: string; size?: number; tone?: Tone }) {
+  const c = toneOf(t, tone);
+  const D = grown(size);
   return (
-    <View style={{ width: size, height: size, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{name.split(' ').map((x) => x[0]).join('')}</Text>
+    <View style={{ width: D, height: D, borderRadius: radius.pill, backgroundColor: c.soft, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <Text style={{ ...ty.label, ...font('700'), color: c.ink }}>{Array.from(name.split(' ').map((x) => Array.from(x)[0] ?? '').join('')).slice(0, 2).join('')}</Text>
     </View>
   );
 }
@@ -501,7 +526,7 @@ function UnmarkedSessions({ n, failed, hasGym }: { n: number | null; failed: boo
   if (failed) {
     return (
       <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.crit} style={{ marginBottom: sp.md }}>
-        <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+        <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>
           Could not check for unmarked sessions
         </Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
@@ -513,7 +538,7 @@ function UnmarkedSessions({ n, failed, hasGym }: { n: number | null; failed: boo
   if (n === null || n === 0) return null;
   return (
     <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.s3} style={{ marginBottom: sp.md }}>
-      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+      <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>
         {n} session{n === 1 ? '' : 's'} need an outcome
       </Text>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
@@ -559,7 +584,7 @@ function MoneyOwed({ m }: { m: HomeMoney }) {
   if (!homeMoneyDrawn(m)) return null;
   return (
     <Card onPress={() => router.push('/(trainer)/invoices')} tone={m.failed ? t.crit : t.s3} style={{ marginBottom: sp.md }}>
-      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{homeMoneyTitle(m)}</Text>
+      <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{homeMoneyTitle(m)}</Text>
       {/* One row per currency. `minorMoney` is the one money formatter in this
           codebase and it is the only thing here that knows what a minor unit is
           worth; a null from it draws nothing rather than a bare number in a
@@ -1567,15 +1592,26 @@ export default function TrainerClients() {
    *  not been told what they are on", which is what a null means under any
    *  status but 'ready'. Only ever asked behind `isWhole(programStatus)`. */
   const noProgramme = (c: RosterClient): boolean => getProgram(c.id) == null;
-  const AUTO_SEGS = [
+  // `band` marks the four that are a STATE rather than a kind of client, with
+  // the state's hue by name. The mockups draw those as a row of toned chips
+  // under the segment bar and the rest in the bar; both rows set the one `seg`,
+  // so there is still exactly one filter, one list and one set of recipients
+  // for the bulk controls — see `shownRoster`.
+  const AUTO_SEGS: { key: string; label: string; n: number | null; band?: Tone }[] = [
     { key: 'all', label: 'All', n: segN(roster.length) },
     // The drift segments replace the old At-risk chip rather than sitting
     // beside it: two rules for "who needs attention" on one screen is how the
     // product ended up with two status scales in the first place. Before the
     // read lands there is no honest count, so the old chip stands in.
     ...(bands
-      ? [{ key: 'drifting', label: 'Drifting', n: segN(bands.drifting) },
-         { key: 'nodata', label: 'Nothing Recorded', n: segN(bands.unknown) }]
+      // All four bands `summariseDrift` sorts the book into, so the chips add
+      // up to the book and agree with the Roster Health donut slice for slice.
+      // "On Track" and "Slipping" had a count in the donut and no way to list
+      // who they were.
+      ? [{ key: 'steady', label: 'On Track', n: segN(bands.steady), band: 'brand' as const },
+         { key: 'watch', label: 'Slipping', n: segN(bands.watch), band: 'amber' as const },
+         { key: 'drifting', label: 'At Risk', n: segN(bands.drifting), band: 'red' as const },
+         { key: 'nodata', label: 'Nothing Recorded', n: segN(bands.unknown), band: 'purple' as const }]
       : [{ key: 'below', label: 'Below Target', n: segN(belowTarget) }]),
     // ── who is waiting on a reply ─────────────────────────────────────────
     // R6. This row already draws "3 unread" on it and the segment list could
@@ -1634,6 +1670,10 @@ export default function TrainerClients() {
   const matchSeg = (c: RosterClient) =>
     seg === 'all' ? true
     : seg === 'drifting' ? driftFor(c)?.status === 'at_risk'
+    : seg === 'watch' ? driftFor(c)?.status === 'watch'
+    // `summariseDrift`'s own else-branch: assessed, and in none of the other
+    // three. A client with no verdict yet is in no band and in no chip's count.
+    : seg === 'steady' ? driftFor(c)?.status === 'on_track'
     : seg === 'nodata' ? driftFor(c)?.status === 'idle'
     : seg === 'below' ? lowAdherence(c)
     // Only reachable while the chip is on screen, which is only while the
@@ -1656,7 +1696,7 @@ export default function TrainerClients() {
   // cache, and a segment computed off that would quietly become a list of the
   // clients this handset has forgotten rather than the ones nobody has written
   // to. It falls back to the whole book, which is visibly not a filtered list.
-  const segLive = !((!bands && (seg === 'drifting' || seg === 'nodata'))
+  const segLive = !((!bands && (seg === 'drifting' || seg === 'nodata' || seg === 'watch' || seg === 'steady'))
     || (seg === 'noprogramme' && !isWhole(programStatus)));
   const segRoster = segLive ? roster.filter(matchSeg) : roster;
   // What is on screen, and therefore what every control under the list acts on.
@@ -1889,7 +1929,7 @@ export default function TrainerClients() {
    *  every `tagsFor()` come back empty, so a chosen tag matches nobody and
    *  renders identically to a tag that genuinely has nobody in it. */
   const segStatus: LoadStatus =
-    seg === 'drifting' || seg === 'nodata'
+    seg === 'drifting' || seg === 'nodata' || seg === 'watch' || seg === 'steady'
       ? (driftErr ? 'error' : drift ? 'ready' : 'loading')
       : seg === 'noprogramme'
         // Bulk message and bulk assign both act on "everybody in this segment",
@@ -2254,6 +2294,15 @@ export default function TrainerClients() {
   // foreground and on focus — the three moments it changes on a tab that is
   // never unmounted. A bare `new Date()` here would be frozen at launch.
   const now = useNow();
+  // The hero's date, the way client Home writes its own: the reader's locale
+  // decides the order and the words, off the same clock as the greeting.
+  const dayLine = now.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
+  /** The hero's "Next up": today's first booking that has not ENDED. By its end
+   *  and not its start, `bookedAhead`'s rule — a coach ten minutes into the
+   *  nine o'clock is still with the nine o'clock. Null when the diary did not
+   *  answer and when nothing is left today; the hero then draws no column
+   *  rather than a name it has no basis for. */
+  const nextUp = todaySessions?.find((x) => Date.parse(x.startsAt) + x.durationMin * 60_000 > now.getTime()) ?? null;
   const hi = now.getHours() < 12 ? 'Good Morning' : now.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
   const G = layout.gutter;
   /** The green + over the screen. 56pt is the size the board draws it and
@@ -2295,10 +2344,14 @@ export default function TrainerClients() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 + FAB + sp.lg }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
+        {/* The mockups' opening: "Good morning," spoken over the name, then the
+            round controls and the coach's own monogram at the trailing edge —
+            it led the row before, where it pushed the name a plate's width in
+            from the gutter every card under it keeps. */}
         <ScreenHeader
-          eyebrow={hi}
+          greeting
+          eyebrow={`${hi},`}
           title={studio}
-          leading={<Initials t={t} name={studio} size={40} />}
           actions={<>
             {/* Every SCREEN in the coach app, and it is the only way into
                 Explore that does not disappear once Getting Started is done —
@@ -2313,56 +2366,120 @@ export default function TrainerClients() {
                 cannot receive one. The row on Me is the way in for somebody
                 looking for it; this is the way in for somebody glancing. */}
             <NotificationBell group="trainer" />
+            <Initials t={t} name={studio} size={40} />
           </>}
         />
 
-        {/* ── three glanceable truths ───────────────────────────────────────
-            The board's coach home opens on a count of clients, the day's
-            sessions and a third figure — not a display-size vanity figure.
-            Each stays honest the way the Hero this replaces was: the counts
-            are withheld until the roster read is whole, and the day's
-            sessions until the diary answered. The sentence under the strip
-            says which read is short, and why; a dash on its own would only
-            say "something".
+        {/* ── the day, as the hero ──────────────────────────────────────────
+            The approved mockups open the coach's home on one night card: the
+            date, how many sessions today in the hero figure, and who is next
+            with what kind of session it is. The whole card opens Schedule — it
+            is the day, and Schedule is where a day is changed.
 
-            The third was the book's adherence, as the board draws it. The
-            data-layout review names the three — active clients, sessions
-            today, clients needing attention — because this tab's one question
-            is "who needs me today", and a mean of check-in scores does not
-            answer it: 78% is the same figure whether nobody needs a call or
-            four people do. The count is the length of the queue directly
-            under this strip, gated the way that queue's own head is — a
-            whole roster AND a drift read that landed, or a dash. Adherence is
-            not dropped: it is the line under the strip, with the two things
-            a bare percentage never said — what it is a mean OF, and of how
-            many (the review's second rule). */}
-        {/* Three tiles on the ground, as the mockups draw the strip, through
-            the kit's `tiles` mode: each figure in a hue of its own. No trend
-            is passed, because there is no series behind these three counts and
-            a sparkline is not a thing to invent. The line under them is the
-            same line, on the ground now rather than in the card. */}
+            The figure is `todaySessions.length` and only that: null while the
+            diary has not answered or did not, which draws the dash and ONE
+            line saying which — a failed read is not an empty day, and the
+            "0" of a day with nothing booked is only ever printed off a read
+            that came back. "Next up" is the first booking today that has not
+            ENDED, by `bookedAhead`'s rule that the hour somebody is standing
+            in is still theirs, measured against `now` — which re-settles on
+            focus and on foreground, the two moments a coach looks at this.
+
+            Built here from the night tokens rather than on the kit's HeroCard:
+            that part sets its headline at `display` and makes only its words
+            pressable, and this hero is a 44pt figure over its unit with a
+            second column beside it, pressable as one thing. Same ground,
+            radius, shadow, eyebrow and inks, so it is the same card. */}
+        <Pressable onPress={() => router.push('/(trainer)/calendar')} accessibilityRole="button"
+          accessibilityLabel={[
+            `Today, ${dayLine}`,
+            todaySessions === null
+              ? (sessionsUnread ? 'Your diary could not be read, so today’s count is not none' : 'Reading today’s schedule')
+              : `${num(todaySessions.length)} ${todaySessions.length === 1 ? 'session' : 'sessions'} today`,
+            nextUp ? `Next up ${fmtTime(nextUp.startsAt)}, ${nextUp.clientName || 'client name unavailable'}, PT session` : '',
+            'Open Schedule',
+          ].filter(Boolean).join('. ')}
+          style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero }}>
+          {/* The date in the reader's own locale, capitalised by the style and
+              not by the string: an eyebrow is set in capitals, and a transform
+              leaves the words a screen reader is given alone. */}
+          <Text style={{ ...ty.eyebrow, color: t.nightInk3, textTransform: 'uppercase' }}>Today · {dayLine}</Text>
+          {/* Side by side, and one over the other once the reader's text is
+              large: a 44pt figure at 1.35 beside a name is a name cut short. */}
+          <View style={{
+            flexDirection: fontScale >= 1.35 ? 'column' : 'row',
+            alignItems: fontScale >= 1.35 ? 'flex-start' : 'flex-end',
+            justifyContent: 'space-between', gap: sp.md, marginTop: 6,
+          }}>
+            <View>
+              <Text style={{ ...ty.hero, ...numeric, color: t.nightInk }}>{fig(todaySessions === null ? null : num(todaySessions.length))}</Text>
+              <Text style={{ ...ty.label, color: t.nightInk2, marginTop: 4 }}>{todaySessions?.length === 1 ? 'session today' : 'sessions today'}</Text>
+            </View>
+            {nextUp ? (
+              <View style={{ flexShrink: 1, minWidth: 0, alignItems: fontScale >= 1.35 ? 'flex-start' : 'flex-end', gap: 4 }}>
+                <Text style={{ ...ty.micro, color: t.nightInk3 }}>Next up</Text>
+                <Text numberOfLines={2} style={{ ...ty.head, ...numeric, color: t.nightInk, textTransform: nextUp.clientName ? 'capitalize' : 'none' }}>
+                  {fmtTime(nextUp.startsAt)} · {nextUp.clientName || 'Client name unavailable'}
+                </Text>
+                {/* The session's kind as the mockups' bright chip. Every row of
+                    `mySessions` is a PT slot — that is the table — so the kind
+                    is a fact and not a guess; PT is the accent wherever a
+                    session type takes a colour. */}
+                <View style={{ minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3, borderRadius: grown(26) / 2, justifyContent: 'center', backgroundColor: t.brandBright }}>
+                  <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: t.brandDeep }}>PT Session</Text>
+                </View>
+              </View>
+            ) : null}
+          </View>
+          {todaySessions === null ? (
+            <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>
+              {sessionsUnread ? 'Your diary could not be read, so today’s count is not none.' : 'Reading today’s schedule…'}
+            </Text>
+          ) : null}
+        </Pressable>
+
+        {/* ── three glanceable truths ───────────────────────────────────────
+            The mockups' strip under the hero, each figure in a hue of its own
+            and each one a count or a mean this screen already works out: the
+            book (blue), its adherence (green) and the length of the Needs
+            Attention queue below (red). Sessions today was the middle tile; it
+            is the hero now, and saying it twice would be one figure spending
+            two places.
+
+            Each stays honest the way the Hero these replaced was. The counts
+            are withheld until the roster read is whole; Need You is gated the
+            way that queue's own head is — a whole roster AND a drift read that
+            landed, or a dash; adherence is `bookAdherence`, a mean over the
+            clients who HAVE a check-in and never a zero for the ones who have
+            not. The one line under the strip says which read is short, or what
+            the percentage is a mean of and of how many (the data-layout
+            review's second rule) — a dash on its own would only say
+            "something", and 78% on its own does not say 78% of what.
+
+            No trend is passed, because there is no series behind any of the
+            three and a sparkline is not a thing to invent. */}
         <View>
           <KpiRow tiles
             onPress={(k) => { if (k.route) router.push(k.route as never); }}
             items={[
               { label: 'Active Clients', value: fig(rosterCount), route: '/(trainer)/analytics', tone: 'blue' },
-              { label: 'Sessions Today', value: todaySessions === null ? fig(null) : fig(todaySessions.length), route: '/(trainer)/calendar', tone: 'brand' },
-              { label: 'Need Attention', value: fig(isWhole(rosterStatus) && drift ? needsAttention.length : null), route: '/(trainer)/nudges', tone: 'red' },
+              { label: 'Adherence', value: bookAdherence == null ? fig(null) : `${num(bookAdherence)}%`, route: '/(trainer)/analytics', tone: 'brand' },
+              { label: 'Need You', value: fig(isWhole(rosterStatus) && drift ? needsAttention.length : null), route: '/(trainer)/nudges', tone: 'red' },
             ]}
           />
-          {rosterStatus === 'error' || rosterStatus === 'partial' || rosterStatus === 'loading' || sessionsUnread ? (
+          {rosterStatus === 'error' || rosterStatus === 'partial' || rosterStatus === 'loading' ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {rosterStatus === 'error'
-                ? 'Your roster could not be read, so the client count and adherence are not zero — the clients listed below are the ones that did come back.'
+                ? 'Your roster could not be read, so these are not zero — the clients below are the ones that did come back.'
                 : rosterStatus === 'partial'
-                  ? 'Only part of your roster came back, so it cannot be counted or averaged — a subtotal here would read as your whole book.'
-                  : rosterStatus === 'loading'
-                    ? 'Reading your roster…'
-                    : 'Your diary could not be read, so today’s count is not none.'}
+                  ? 'Only part of your roster came back, so it cannot be counted or averaged.'
+                  : 'Reading your roster…'}
             </Text>
-          ) : bookAdherence != null && rosterCount != null ? (
+          ) : rosterCount != null && rosterCount > 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Adherence across your book is {bookAdherence}% — the mean of the latest check-in from {adherenceValues.length} of your {rosterCount} {rosterCount === 1 ? 'client' : 'clients'}.
+              {bookAdherence != null
+                ? `Adherence is the mean of the latest check-in from ${num(adherenceValues.length)} of your ${num(rosterCount)} ${rosterCount === 1 ? 'client' : 'clients'}.`
+                : 'No adherence yet — nobody on your book has submitted a check-in.'}
             </Text>
           ) : null}
         </View>
@@ -2399,68 +2516,15 @@ export default function TrainerClients() {
           );
         })() : null}
 
-        {/* ── today ─────────────────────────────────────────────────────────
-            The day ahead, in booking order, and the one add control the
-            board puts beside it. Rows open the client's record when the
-            booking names one and the diary otherwise; a walk-in slot with no
-            client on it has no record to open. */}
-        <Section style={{ paddingBottom: 0 }}>
-          {/* Through `SectionHead` like every other head on this tab, and not
-              the hand-built row it was. A coach on TestFlight: "the
-              subheadings … blend in too much with the other text, it's easy
-              to miss" — and a head built here in `ty.micro` is one the kit
-              cannot strengthen when it strengthens the rest. The green + that
-              sat beside it is the head's trailing link now, in words: a
-              second green circle on a screen whose one green + means Add
-              Client was two primaries, and this one only ever opened
-              Schedule. */}
-          <SectionHead title="Today" note="Add a Session" onPress={() => router.push('/(trainer)/calendar')} />
-          {sessionsUnread ? (
-            <Text style={{ ...ty.caption, color: t.ink3 }}>Today’s schedule could not be read — this is not an empty day. Open Schedule to try again.</Text>
-          ) : todaySessions === null ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm }}>
-              <ActivityIndicator size="small" color={t.ink3} />
-              <Text style={{ ...ty.caption, color: t.ink3 }}>Reading today’s schedule…</Text>
-            </View>
-          ) : todaySessions.length === 0 ? (
-            <ListRow icon="calendar" title="No Sessions Booked Today"
-              note="Open Schedule to add one or set availability."
-              onPress={() => router.push('/(trainer)/calendar')} />
-          ) : (
-            todaySessions.map((session, index) => {
-              const name = session.clientName || 'Client name unavailable';
-              return (
-                <Pressable key={session.id}
-                  onPress={() => session.clientId
-                    ? router.push({ pathname: '/(trainer)/client', params: { clientId: session.clientId, name: session.clientName || undefined } })
-                    : router.push('/(trainer)/calendar')}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${fmtTime(session.startsAt)}, ${name}, PT session, ${session.durationMin} minutes`}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: index ? hairline : 0, borderTopColor: t.ring }}>
-                  {/* The board's agenda row: the hour first, in figures, then
-                      the name, then what kind of session it is. The time is
-                      a fixed column so the names line up under each other;
-                      it is the thing a coach reads down the list. */}
-                  <Text style={{ ...ty.label, ...numeric, color: t.ink, minWidth: 72 }}>{fmtTime(session.startsAt)}</Text>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{name}</Text>
-                    {/* Every row in `mySessions` is a PT slot — that is the
-                        table — so the kind is stated, and the length is the
-                        only figure that varies between them. */}
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>PT Session · {session.durationMin} min</Text>
-                  </View>
-                  <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
-                </Pressable>
-              );
-            })
-          )}
-        </Section>
-
-        {/* ── the order of everything under the agenda ─────────────────────
+        {/* ── the order of everything under the hero ───────────────────────
             The data-layout review's stack for this tab, which asks one
-            question — who needs me today: greeting · three figures · today's
-            agenda · NEEDS ATTENTION · the roster · invitations and onboarding
-            · then retention, the month and the tools. It used to run agenda ·
+            question — who needs me today — in the approved mockups' flow of
+            hero, infographics, lists: greeting · the day as the hero · three
+            figures · roster health · NEEDS ATTENTION · today's agenda · the
+            roster · invitations and onboarding · then retention, the month and
+            the tools. The agenda sat over the queue until the day's count and
+            the next session became the hero; the rows under it are the rest of
+            the day, which is a list, and lists come last. It used to run agenda ·
             requests · unmarked sessions · money · help · setup · trial ·
             invitations · needs attention · the month · departures · tools ·
             pending invites · roster, so the queue the tab exists for sat
@@ -2484,9 +2548,14 @@ export default function TrainerClients() {
             uses, and a partial or failed read stays visibly partial or failed
             so this queue can never masquerade as the whole book. */}
         <Section>
+          {/* The count left this head for the red Need You tile above, which
+              is the same figure behind the same gate; what the mockups put
+              here is the way to the whole queue. Offered only where there IS
+              a queue this screen can stand behind. */}
           <SectionHead
             title="Needs Attention"
-            note={isWhole(rosterStatus) && drift ? `${needsAttention.length} now` : undefined}
+            note={isWhole(rosterStatus) && drift && needsAttention.length > 0 ? 'See All' : undefined}
+            onPress={isWhole(rosterStatus) && drift && needsAttention.length > 0 ? () => router.push('/(trainer)/nudges') : undefined}
           />
 
           {rosterStatus === 'error' ? (
@@ -2544,7 +2613,14 @@ export default function TrainerClients() {
                      under the words at large text. The monogram is cut by
                      this screen's own rule so it matches the roster below. */
                   <AttentionRow key={c.id} divider={index > 0}
-                    monogram={c.name.split(' ').map((x) => x[0]).join('')}
+                    /* The monogram on a plate of the reason's own hue, as the
+                       mockups draw it and as the roster row below does: red
+                       for a check-in owed, purple for nothing recorded, amber
+                       for a low figure, blue for somebody waiting on a reply.
+                       The words beside it still carry the state. */
+                    avatar={<Initials t={t} name={c.name} size={42}
+                      tone={a == null ? 'amber' : a.kind === 'unread' ? 'blue' : a.kind === 'adherence' ? 'amber'
+                        : driftFor(c)?.status === 'idle' ? 'purple' : 'red'} />}
                     name={c.name}
                     reason={a ? a.line : 'Needs a review.'}
                     status={a ? a.state : undefined}
@@ -2577,6 +2653,74 @@ export default function TrainerClients() {
           ) : null}
         </Section>
 
+
+        {/* ── today ─────────────────────────────────────────────────────────
+            The rest of the day under the hero's count, in booking order, as
+            the mockups' agenda row: a bar in the session type's colour, the
+            hour, the name, and the type again as a chip — so the colour never
+            stands alone. Rows open the client's record when the booking names
+            one and the diary otherwise; a walk-in slot with no client on it
+            has no record to open. */}
+        <Section style={{ paddingBottom: 0 }}>
+          {/* Through `SectionHead` like every other head on this tab, and not
+              the hand-built row it was. A coach on TestFlight: "the
+              subheadings … blend in too much with the other text, it's easy
+              to miss" — and a head built here in `ty.micro` is one the kit
+              cannot strengthen when it strengthens the rest. The green + that
+              sat beside it is the head's trailing link now, in words: a
+              second green circle on a screen whose one green + means Add
+              Client was two primaries, and this one only ever opened
+              Schedule. */}
+          <SectionHead title="Today" note="Add a Session" onPress={() => router.push('/(trainer)/calendar')} />
+          {sessionsUnread ? (
+            <Text style={{ ...ty.caption, color: t.ink3, paddingBottom: layout.section }}>Today’s schedule could not be read — this is not an empty day. Open Schedule to try again.</Text>
+          ) : todaySessions === null ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Reading today’s schedule…</Text>
+            </View>
+          ) : todaySessions.length === 0 ? (
+            <ListRow icon="calendar" tone="brand" title="No Sessions Booked Today"
+              note="Open Schedule to add one or set availability."
+              onPress={() => router.push('/(trainer)/calendar')} />
+          ) : (
+            todaySessions.map((session, index) => {
+              const name = session.clientName || 'Client name unavailable';
+              return (
+                <Pressable key={session.id}
+                  onPress={() => session.clientId
+                    ? router.push({ pathname: '/(trainer)/client', params: { clientId: session.clientId, name: session.clientName || undefined } })
+                    : router.push('/(trainer)/calendar')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${fmtTime(session.startsAt)}, ${name}, PT session, ${session.durationMin} minutes`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(56), paddingVertical: sp.sm, borderTopWidth: index ? hairline : 0, borderTopColor: t.ring }}>
+                  {/* The type's bar. PT is the accent everywhere a session
+                      type takes a colour, and every row of `mySessions` is a
+                      PT slot — that is the table — so there is one colour
+                      here until this read carries a second kind. Stretched to
+                      the row rather than a fixed 34pt, so it still spans the
+                      words when the reader's text is large. */}
+                  <View style={{ width: 4, alignSelf: 'stretch', marginVertical: sp.xs, borderRadius: 2, backgroundColor: t.brand }} />
+                  {/* The hour first, in figures, in a fixed column so the
+                      names line up under each other; it is the thing a coach
+                      reads down the list. */}
+                  <Text style={{ ...ty.label, ...font('600'), ...numeric, color: t.ink2, minWidth: 74 }}>{fmtTime(session.startsAt)}</Text>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ ...ty.head, color: t.ink, textTransform: session.clientName ? 'capitalize' : 'none' }} numberOfLines={1}>{name}</Text>
+                    {/* The length is the only figure that varies between
+                        them; the kind is the chip. */}
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(session.durationMin)} min</Text>
+                  </View>
+                  {/* Hidden from a screen reader: the row's own label already
+                      says "PT session" once. */}
+                  <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                    <TonedChip label="PT" tone="brand" />
+                  </View>
+                </Pressable>
+              );
+            })
+          )}
+        </Section>
 
         {/* Clients who found this coach in the public directory and asked to
             be coached. Renders nothing at all when there are none.
@@ -2629,11 +2773,11 @@ export default function TrainerClients() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                 <Icon name="sparkle" size={20} color={card.expired ? t.ink3 : t.brand} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{card.title}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{card.title}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{card.note}</Text>
                 </View>
                 {billingAvailable() ? (
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade {FORWARD_CHAR}</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>Upgrade {FORWARD_CHAR}</Text>
                 ) : null}
               </View>
             );
@@ -2665,21 +2809,21 @@ export default function TrainerClients() {
 
         </View>
 
-        {/* ── the roster ─────────────────────────────────────────────────── */}
-        <Section>
-          {/* `isWhole(rosterStatus)`, not `active > 0`. `active` is
-              `roster.length`, so under 'partial' this caption was drawn over a
-              FRAGMENT of the book: "2 drifting" counted from part of it, or —
-              worse — "Everyone is holding their own pattern", a flat all-clear
-              about clients whose rows never came back. The Hero twenty lines
-              above was fixed for exactly this and its comment says so; the
-              section head kept the old gate. Every other consumer of `bands`
-              on this screen already asks (`toContact`, `segN`,
-              `bookState.clientsDrifting`). */}
-          <SectionHead title="Clients"
-            note={!isWhole(rosterStatus)
-              ? undefined
-              : active > 0 ? driftNote() : undefined} />
+        {/* ── the roster ───────────────────────────────────────────────────
+            The mockups' Clients page, which on this tab is the second half of
+            the scroll: its title, the search, the segment bar and the status
+            chips on the GROUND, and the names in one card under them. The
+            title is the page's own step — `display`, a header to the rotor —
+            because this is where Home ends and Clients begins.
+
+            The head used to carry `driftNote()` as a caption ("2 drifting · 1
+            with nothing recorded"), gated on `isWhole(rosterStatus)` after it
+            was caught captioning a FRAGMENT of the book with an all-clear. The
+            status chips below say the same counts, one band each, through
+            `segN` — the same gate — so the sentence went rather than say it
+            twice. */}
+        <View style={{ marginTop: sp.xl }}>
+          <Text accessibilityRole="header" style={{ ...ty.display, color: t.ink, marginBottom: sp.md }}>Clients</Text>
 
           {/* ── the two ways onto the book, first ───────────────────────────
               Back over the list, where the coach who tests this build found
@@ -2738,7 +2882,10 @@ export default function TrainerClients() {
               First under the title, the way the board's Clients page opens:
               a search field, then the segment bar, then the rows. The pill is
               the same shape Meals' search row takes. */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface2, marginBottom: sp.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 46, paddingHorizontal: sp.lg, borderRadius: radius.pill, backgroundColor: t.surface, ...elevation.card, marginBottom: sp.md }}>
+            {/* White with the card shadow, now that it sits on the grey ground
+                and not inside a card: `surface2` there is two points of grey
+                from the ground, which is a field nobody can see. */}
             <Icon name="search" size={17} color={t.ink3} />
             <TextInput value={rosterQ} onChangeText={setRosterQ}
               placeholder="Search clients" placeholderTextColor={t.ink3}
@@ -2752,41 +2899,66 @@ export default function TrainerClients() {
             ) : null}
           </View>
 
-          {/* ── the segment bar ─────────────────────────────────────────────
-              The board draws an Active / Inactive bar here. There is no honest
-              "inactive" list on this screen without a second read of
+          {/* ── the segment bar, and the status chips under it ──────────────
+              The mockups draw an Active / Inactive bar and, under it, a row of
+              toned chips: All · On track · Slipping · At risk. There is no
+              honest "inactive" list on this screen without a second read of
               `coaching_relationships` — `UnexplainedDepartures` below already
               reads the endings, and this file's own history (see its header)
               is of the same table read twice by two hands — so the bar holds
-              the segments this book actually has, in the board's shape: one
-              `surface2` pill, the selected segment in ink. Scrolls once there
-              are more than fit, and the segments keep their own width rather
-              than squeezing a label to a syllable. Every count is still a
-              count OF THE ROSTER (`segN`) and dashes under anything but a
-              whole read. */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: sp.md }}
-            contentContainerStyle={{ flexDirection: 'row', minWidth: '100%', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, gap: 2 }}
-            accessibilityRole="tablist">
-            {AUTO_SEGS.map((sg) => {
-              const on = seg === sg.key;
-              return (
-                <Pressable key={sg.key} onPress={() => setSeg(sg.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
-                  style={{ flexGrow: 1, minHeight: 40, paddingHorizontal: sp.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
-                  <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', ...numeric, color: on ? t.bg : t.ink2 }}>{sg.label} {fig(sg.n)}</Text>
-                </Pressable>
-              );
-            })}
-            {allTags.map((tg) => {
-              const on = seg === tg;
-              return (
-                <Pressable key={tg} onPress={() => setSeg(tg)} accessibilityRole="tab" accessibilityState={{ selected: on }}
-                  style={{ flexGrow: 1, minHeight: 40, paddingHorizontal: sp.md, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: on ? t.ink : 'transparent' }}>
-                  <Text style={{ ...ty.label, color: on ? t.bg : t.ink3 }}>#</Text>
-                  <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2, textTransform: 'capitalize' }}>{tg}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+              the kinds of client this book actually has: everybody on it, who
+              is waiting on a reply, who has no programme, how each is coached,
+              and the coach's own tags. "Active" is the whole roster, which is
+              what the Active Clients tile counts. It is the kit's `Segmented`
+              in its scrolling form, because the length of the set is the
+              data's.
+
+              The chips are the four drift bands, each in the hue the donut and
+              the rows give it, and they are absent until the drift read lands —
+              before that there is no honest count and the old Below Target
+              segment stands in, in the bar. Bar and chips set the ONE `seg`:
+              a second filter beside the first would put "Remove 12 From Your
+              Roster" under a list narrowed twice and described once.
+
+              Every count is still a count OF THE ROSTER (`segN`) and dashes
+              under anything but a whole read; a chip still selects then, it
+              just cannot say how many. */}
+          <Segmented scroll style={{ marginBottom: sp.md }}
+            value={seg} onChange={setSeg}
+            options={[
+              ...AUTO_SEGS.filter((sg) => !sg.band).map((sg) => ({
+                key: sg.key,
+                label: `${sg.key === 'all' ? 'Active' : sg.label} · ${fig(sg.n)}`,
+                a11yLabel: `${sg.key === 'all' ? 'Active' : sg.label}, ${sg.n == null ? 'count not available' : num(sg.n)}`,
+              })),
+              ...allTags.map((tg) => ({ key: tg, label: `#${tg}`, a11yLabel: `Tag ${tg}` })),
+            ]} />
+          {bands ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
+              {[AUTO_SEGS[0], ...AUTO_SEGS.filter((sg) => sg.band)].map((sg) => {
+                const on = seg === sg.key;
+                const words = `${sg.label} ${fig(sg.n)}`;
+                return (
+                  <Pressable key={sg.key} onPress={() => setSeg(sg.key)} hitSlop={hitSlopFor(26)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${sg.label}, ${sg.n == null ? 'count not available' : num(sg.n)}`}>
+                    {on ? (
+                      // Selected is the ink fill the segment bar uses, in the
+                      // chip's own shape — and `selected` is said, because a
+                      // fill is not a state a screen reader gets.
+                      <View style={{ minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3, borderRadius: grown(26) / 2, justifyContent: 'center', backgroundColor: t.ink }}>
+                        <Text style={{ ...ty.micro, ...font('700'), ...numeric, letterSpacing: 0, color: t.surface }}>{words}</Text>
+                      </View>
+                    ) : (
+                      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                        <TonedChip label={words} tone={sg.band ?? 'neutral'} />
+                      </View>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
 
           {/* What the search actually searched. Under anything but a whole read
               that is not the roster, and "nobody matches" said over a read that
@@ -2822,12 +2994,26 @@ export default function TrainerClients() {
             </View>
           ) : null}
 
-          {driftRows.map(({ c, d }, idx) => {
+        </View>
+
+        {/* The names, in one card — and no card at all over an empty book that
+            was read whole, where the line above has already said so and the
+            fold below has nothing to act on. */}
+        {driftRows.length > 0 || roster.length > 0 || rosterStatus !== 'ready' ? (
+        <Section style={{ paddingVertical: sp.sm, paddingHorizontal: sp.sm }}>
+          {driftRows.map(({ c, d }) => {
             const st = rowStatus(t, c, d, !!drift, today);
-            // Drift is what tints a row: the two states a coach acts on.
-            const showDrift = !!d && (d.status === 'at_risk' || d.status === 'watch' || d.status === 'idle');
-            // The one line. The state first, then the two facts that are a
-            // reason to open THIS row today and were flags on a second line:
+            const hue = toneOf(t, st.chip ?? 'neutral');
+            // The two states a coach ACTS on take the row tint: a check-in
+            // owed and slipping. Nothing-recorded is a different kind of thing
+            // (see `driftTone`) and keeps its purple without the alarm.
+            const urgent = st.chip === 'red' || st.chip === 'amber';
+            // The bar is the figure THEY submitted at their latest check-in,
+            // and only off a whole roster read — the gate every other
+            // adherence figure on this tab sits behind. No figure, no bar:
+            // not an empty track, which reads as nought per cent.
+            const adherence = st.chip && isWhole(rosterStatus) && c.adherence != null ? c.adherence : null;
+            // The two facts that are a reason to open THIS row today:
             // somebody waiting on a reply, and an injury — which the review
             // wants in front of a coach before they change a program, and a
             // new one is said as new. Words, not marks, so the line reads
@@ -2839,17 +3025,19 @@ export default function TrainerClients() {
             const line = [st.words, ...extras].join(' · ');
             return (
             /* ── one row per client: a catalogue, not a record ────────────
-                A 40pt monogram, the name, ONE line, a chevron — the board's
-                third page, and what the coach who tests this build asked for
-                in as many words: "this portion should be condensed down, to
-                only see information of a client if I choose their profile."
+                The mockups' roster row: a monogram on a plate of the state's
+                hue, the name, the state as a WORD in that hue's ink at the
+                trailing edge, a thin adherence bar under the name in the same
+                hue, a chevron — and what the coach who tests this build asked
+                for in as many words: "this portion should be condensed down,
+                to only see information of a client if I choose their profile."
 
                 This row has been cut twice. It first carried a weight delta,
                 a next-session line, a rate line, a flags row, a reason line,
                 a tags row, a 3px adherence bar and an adherence figure; the
                 last round left the state line, the drift reason, the Next
                 line, a flags row and a tags row, under band headings with a
-                sentence each. What went this time, and where each now lives:
+                sentence each. What went, and where each now lives:
                   · the drift reason — on the Needs Attention row above for
                     anybody it is a reason to call, and the lead line of their
                     profile for everybody;
@@ -2858,47 +3046,48 @@ export default function TrainerClients() {
                   · tags — the segment bar filters by them and the tools sheet
                     edits them;
                   · the band headings — every row already says its own state,
-                    the list is still in drift order, the segment bar still
-                    counts each band, and the help row under this section
+                    the list is still in drift order, the status chips still
+                    count each band, and the help row under this section
                     still says what the words mean.
-                A tinted row for the states a coach acts on, the way the board
-                tints "Needs check-in" and "Missing progress" — at `surface2`
-                strength, never a red or yellow ground: the state is already
-                in the words and the dot. The negative margin lets the tint
-                run to the card's own padding edge. */
-            <Pressable key={c.id} onPress={() => openProfile(c)} accessibilityRole="button" accessibilityLabel={`Open ${c.name}, ${line}`}
-              style={{ paddingVertical: sp.md, paddingHorizontal: sp.sm, marginHorizontal: -sp.sm, borderRadius: radius.sm,
-                backgroundColor: showDrift ? t.surface2 : 'transparent',
-                marginTop: showDrift && idx ? 2 : 0,
-                borderTopWidth: idx === 0 || showDrift ? 0 : hairline, borderTopColor: t.ring }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                <Initials t={t} name={c.name} size={40} />
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{c.name}</Text>
-                  {/* The state in words with its mark beside it — see
-                      `rowStatus` for where each word comes from. The dot is
-                      6pt so it reads at arm's length; the words are what a
-                      screen reader gets. Two lines allowed, so a large text
-                      size wraps the line rather than cutting a figure. */}
-                  {st.chip ? (
-                    // The mockups' status chip: the state's words on a plate
-                    // of its hue, and the row's other facts in plain caption
-                    // after it. Hidden from a screen reader on purpose — the
-                    // row's own label already says the whole line once.
-                    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-                      style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-                      <TonedChip label={st.words} tone={st.chip} />
-                      {extras.length ? <Text style={{ ...ty.caption, color: t.ink2, flexShrink: 1 }} numberOfLines={2}>{extras.join(' · ')}</Text> : null}
-                    </View>
-                  ) : (
+                The bar is back because the mockups draw it and because it is
+                now honest: one figure, the client's own, withheld with the
+                rest. The tint is the state's pale plate at half strength, so
+                the inks on it clear the contrast they are measured for on the
+                full plate; never colour alone — the word is on the row and in
+                its spoken label. */
+            <Pressable key={c.id} onPress={() => openProfile(c)} accessibilityRole="button"
+              accessibilityLabel={`Open ${c.name}, ${line}${adherence != null ? `, ${num(adherence)}% adherence` : ''}`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(72), paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.md, overflow: 'hidden' }}>
+              {urgent ? <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, backgroundColor: hue.soft, opacity: 0.5 }} /> : null}
+              <Initials t={t} name={c.name} size={46} tone={st.chip ?? 'neutral'} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                {/* Name and state share a line and part company when they
+                    cannot: the state wraps under the name rather than cutting
+                    either short at a large text size. */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: sp.sm }}>
+                  <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize', flexShrink: 1 }} numberOfLines={1}>{c.name}</Text>
+                  {st.chip ? <Text style={{ ...ty.micro, ...font('700'), letterSpacing: 0, color: hue.ink }}>{st.words}</Text> : null}
+                </View>
+                {adherence != null ? (
+                  <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, marginTop: 6, overflow: 'hidden' }}>
+                    <View style={{ height: 6, borderRadius: 3, width: `${Math.max(0, Math.min(100, adherence))}%`, backgroundColor: hue.mark }} />
+                  </View>
+                ) : null}
+                {st.chip ? (
+                  extras.length ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }} numberOfLines={2}>{extras.join(' · ')}</Text> : null
+                ) : (
+                  /* No state to colour — a client added by hand, or a book
+                     with no drift read yet — so the row says what it does
+                     know as a sentence, with `rowStatus`'s mark where it gave
+                     one. Two lines allowed, so a large text size wraps the
+                     line rather than cutting a figure. */
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     {st.tone ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: st.tone }} /> : null}
                     <Text style={{ ...ty.caption, color: st.tone ? t.ink2 : t.ink3, flexShrink: 1 }} numberOfLines={2}>{line}</Text>
                   </View>
-                  )}
-                </View>
-                <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+                )}
               </View>
+              <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
             </Pressable>
             );
           })}
@@ -2913,7 +3102,7 @@ export default function TrainerClients() {
               default and remembered, like Coaching Tools. Nothing about what
               they do, refuse or count has changed. */}
           {roster.length > 0 || rosterStatus !== 'ready' ? (
-          <View style={{ marginTop: sp.lg }}>
+          <View style={{ marginTop: driftRows.length ? sp.lg : sp.sm, paddingHorizontal: sp.sm, paddingBottom: sp.sm }}>
           <Fold id="rosterActions" title="Roster Actions"
             note="Export your roster, or message, assign a program to, or remove everyone listed above.">
 
@@ -2981,6 +3170,7 @@ export default function TrainerClients() {
           </View>
           ) : null}
         </Section>
+        ) : null}
 
         {/* What the states on the rows above actually mean. "At risk" is measured
             against each client's OWN earlier rate and not against a target, and
@@ -2999,7 +3189,6 @@ export default function TrainerClients() {
             twice over, for `openInviteEmails` and for the CSV import; this is
             the third place and it was the one a coach reads first. */}
         {inviteStatus === 'error' ? (<>
-          <Rule />
           <Section>
             <SectionHead title="Pending Invites" />
             <Flag t={t} tone={t.warn}
@@ -3008,17 +3197,14 @@ export default function TrainerClients() {
                 + 'inviting them again will be refused.'} />
           </Section>
         </>) : sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
-          <Rule />
           <Section>
             <SectionHead title="Pending Invites"
               note={inviteStatus === 'ready' ? `${sentInvites.filter((i) => i.status === 'pending').length} awaiting` : undefined} />
             {sentInvites.filter((i) => i.status === 'pending').map((i, idx) => (
               <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="message" size={16} color={t.brand} />
-                </View>
+                <IconPlate icon="message" tone="blue" size={36} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{i.email}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{i.email}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHED_MODE_SHORT[i.mode]} · awaiting sign-up / accept</Text>
                 </View>
                 <Ghost label="Cancel" onPress={() => cancelInvite(i.id, i.email)} />
@@ -3393,7 +3579,7 @@ export default function TrainerClients() {
                       <Icon name="heart" size={14} color={t.s3} />
                       <View style={{ flex: 1 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{areaLabel(inj.area)}</Text>
+                          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{areaLabel(inj.area)}</Text>
                           <Text style={{ ...ty.caption, color: t.ink2, textTransform: 'capitalize' }}>· {inj.severity}</Text>
                           {inj.isNew ? <Flag t={t} tone={t.s3} text="New" /> : null}
                         </View>
@@ -3462,7 +3648,7 @@ export default function TrainerClients() {
                     : aiSummary ? `Write the weekly summary for ${sel.name} again` : `Generate an AI weekly summary for ${sel.name}`}
                   style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: aiBusy ? 0.6 : 1 }}>
                   {aiBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{aiBusy ? 'Generating…' : aiSummary ? 'Regenerate summary' : 'Generate AI weekly summary'}</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{aiBusy ? 'Generating…' : aiSummary ? 'Regenerate summary' : 'Generate AI weekly summary'}</Text>
                 </Pressable>
               </View>
 
@@ -3583,7 +3769,7 @@ export default function TrainerClients() {
                     <View key={pos} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                       <View style={{ flex: 1, marginEnd: sp.sm }}>
                         <Text style={{ ...ty.micro, color: t.ink3 }}>{slot}</Text>
-                        <Text style={{ ...ty.label, fontWeight: picked ? '500' : '400', color: picked ? t.ink : t.ink3, marginTop: 2 }} numberOfLines={1}>{picked ? picked.n : 'Auto (client picks)'}</Text>
+                        <Text style={{ ...ty.label, ...font(picked ? '500' : '400'), color: picked ? t.ink : t.ink3, marginTop: 2 }} numberOfLines={1}>{picked ? picked.n : 'Auto (client picks)'}</Text>
                       </View>
                       <View style={{ flexDirection: 'row', gap: 6 }}>
                         {picked ? <Ghost label="Clear" onPress={() => setNutri(sel.id, { mealOverride: (() => { const mm = { ...(getNutri(sel.id)?.mealOverride ?? {}) }; delete mm[pos]; return mm; })() })} /> : null}
@@ -3827,7 +4013,7 @@ export default function TrainerClients() {
                 onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { setSel(null); setEnding({ id: s.id, name: s.name }); } }]); }}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 13, marginTop: sp.lg, marginBottom: sp.sm }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Remove client</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Remove client</Text>
               </Pressable>
               <Cta label="Close" wide onPress={() => setSel(null)} />
             </ScrollView>
@@ -3894,7 +4080,7 @@ export default function TrainerClients() {
                   <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }}
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                     <View style={{ flex: 1, marginEnd: sp.md }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{m.n}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{m.n}</Text>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.k} kcal · P{m.p} / C{m.c} / F{m.f}</Text>
                     </View>
                     <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
@@ -4364,7 +4550,7 @@ export default function TrainerClients() {
               {namedCodes.map((c) => (
                 <View key={c.id ?? c.code} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{codeCountLine(codes.status, c)}</Text>
                     {!c.isLive ? (
                       // Kept on screen with its counts. A campaign that is over
@@ -4513,7 +4699,7 @@ export default function TrainerClients() {
                 const key = c.id ?? '';
                 return (
                   <View key={key || c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(returns.status, c)}</Text>
                     <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
                       <CodeFig t={t} label="Spent" value={fgs.spent} />
@@ -4774,7 +4960,7 @@ function CoachSetupRow() {
                 a coach with two refused reads was told "3 left" for a list
                 with five rows they had not done. src/lib/coachFirstRun.ts
                 holds the wording and the argument. */}
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
               {coachSetupCardLine(rows)}
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
