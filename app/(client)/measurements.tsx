@@ -32,8 +32,8 @@ import { useToast } from '../../src/ui/toast';
 import { useMeasurements, METRICS, type MeasureEntry, type MetricKey } from '../../src/ui/measurements';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, fig, FigureCard } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Cta, Ghost, fig, FigureCard, TonedChip, ChartShell, Spark } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote, weightLabel } from '../../src/lib/units';
 import { pairScan, gapNote, PAIR_WINDOW_DAYS } from '../../src/lib/tapeVsScan';
@@ -94,7 +94,7 @@ function ScanBeside({ t, tapeISO, scans, scansStatus, wu, dense }: {
   return (
    <View style={{ marginTop: dense ? 5 : sp.md }}>
     <Text style={{ ...ty.caption, color: t.ink2 }}>
-     <Text style={{ fontWeight: '600' }}>Scan · </Text>{parts.join(' · ')}
+     <Text style={{ ...font('600') }}>Scan · </Text>{parts.join(' · ')}
     </Text>
     {/* The scan's OWN date, spelled out, never the tape's. Two instruments on
         two days is the thing being shown here, so collapsing them onto one
@@ -277,6 +277,7 @@ export default function Measurements() {
  // How old the newest entry is, in days, so the screen can say how stale rather
  // than leaving a client to compare a date against today in their head. Null
  // when nothing has been logged — never 0, which would claim it was today.
+ const waistSeries = [...entries].reverse().filter((e) => e.waist != null);
  const latestAgo = latest ? agoLabel(latest.at, today) : null;
  const latestDays = latest ? daysBetween(latest.at, today) : null;
  const stale = latestDays != null && latestDays > STALE_AFTER_DAYS
@@ -330,12 +331,25 @@ export default function Measurements() {
         can judge whether a six-week-old waist still describes them, and they
         can only judge it if they are given the six weeks. */}
     {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{stale}</Text> : null}
+    {/* ── the waist over time, under the waist ─────────────────────────────
+        Every tape entry that measured one, oldest first, in the reader's own
+        unit. Through ChartShell, so the line is only ever drawn over a read
+        that came back whole and holds two tapings or more: the list below is
+        newest-first under a row cap, and a trend through the newest part of a
+        record is a wrong trend, not a shorter one. A day with no waist on it
+        contributes nothing rather than a gap — it was not a measurement. */}
+    <View style={{ marginTop: sp.md }}>
+     <ChartShell status={status} points={waistSeries.length}
+      emptyLine="No waist measured yet."
+      onePointLine="One waist measurement so far. The trend appears from the second one.">
+      <Spark area data={waistSeries.map((e) => lengthIn(e.waist, lu))} labels={waistSeries.map((e) => e.at)} unit={` ${lu}`} />
+     </ChartShell>
+    </View>
    </FigureCard>
   ) : stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{stale}</Text> : null}
 
   {/* ── latest snapshot with change vs previous ─────────────────────── */}
   {latest ? (<>
-   <Rule />
    <Section>
     {/* The full date, not just "3 Aug": this heading is what dates every
         figure in the rows beneath it, and a day and month with no year is
@@ -349,7 +363,7 @@ export default function Measurements() {
       <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
        <Text style={{ ...ty.label, color: t.ink2 }}>{label}</Text>
        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-        <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
+        <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
         {/* "This did not move" and "there is no earlier reading of THIS site"
             were both printed as the same em dash, so a member could not tell an
             unchanged waist from one they had not taped last time — while the
@@ -357,10 +371,11 @@ export default function Measurements() {
             "Unchanged" and "First entry". The dot is a direction mark and is
             drawn only where there is a direction. */}
         {d != null ? (
-         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 78, justifyContent: 'flex-end' }}>
-          {d !== 0 ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: goalRead(key, d) ? t.brand : t.ink3 }} /> : null}
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(d, { since: null, unit: lu, noChange: 'Unchanged' })}</Text>
-         </View>
+         // The movement as a chip: the accent only where it moved the way
+         // the member's own goal reads this site, grey for every other
+         // movement and for none. The words carry the sign and the unit.
+         <TonedChip tone={d !== 0 && goalRead(key, d) ? 'brand' : 'neutral'}
+          label={deltaLabel(d, { since: null, unit: lu, noChange: 'Unchanged' })} />
         ) : (
          <Text style={{ ...ty.caption, color: t.ink3, minWidth: 78, textAlign: END_ALIGN }}>{prev ? 'Not measured' : '—'}</Text>
         )}
@@ -380,14 +395,13 @@ export default function Measurements() {
    </Section>
   </>) : null}
 
-  <Rule />
 
   {/* ── new entry ───────────────────────────────────────────────────── */}
   <Section>
    <SectionHead title="Log New Measurements" note={lu} />
    {METRICS.map(({ key, label }) => (
     <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
-     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>{label}</Text>
+     <Text style={{ ...ty.body, ...font('500'), color: t.ink2 }}>{label}</Text>
      <TextInput value={vals[key] ?? ''} onChangeText={(v) => set(key, v)} keyboardType="decimal-pad"
       accessibilityLabel={`${label} in ${lu === 'cm' ? 'centimetres' : 'inches'}`}
       placeholder={lastEntered(key) ?? lu} placeholderTextColor={t.ink3} style={inp} />
@@ -406,7 +420,6 @@ export default function Measurements() {
    <Cta label={send.busy ? 'Saving…' : 'Save Entry'} disabled={send.busy} wide onPress={() => send.run(save)} />
   </Section>
 
-  <Rule />
 
   {/* ── history ─────────────────────────────────────────────────────── */}
   <Section>
@@ -466,7 +479,7 @@ export default function Measurements() {
         accessibilityLabel={`${label} on ${dayLabel(e.at)}. Correct or remove this figure.`}
         hitSlop={hitSlopFor(20)}
         onPress={() => askAbout(e, key, label)}>
-        <Text style={{ ...ty.caption, color: t.ink3 }}>{label} <Text style={{ ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(lengthIn(e[key], lu))}</Text></Text>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>{label} <Text style={{ ...numeric, ...font('500'), color: t.ink2 }}>{fig(lengthIn(e[key], lu))}</Text></Text>
        </Pressable>
       ) : null)}
      </View>

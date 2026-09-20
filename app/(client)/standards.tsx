@@ -36,14 +36,14 @@ import { useCallback } from 'react';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { personalRecords } from '../../src/lib/streaks';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, Ghost, Notice, fig, DayBars, TonedChip } from '../../src/ui/kit';
 import { gradeLift } from '../../src/lib/strengthLevel';
 // Which lift is furthest behind the others, measured on each lift's own ladder
 // rather than on the ratio column. See the note where `balance` is built.
 import { balanceLine, weakestLift } from '../../src/lib/strengthBalance';
 import { STRENGTH_LIFTS, countsFor } from '../../src/lib/strengthLifts';
 import { isWhole } from '../../src/ui/loadStatus';
-import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 
 /** A converted weight in the reader's own spelling, or null for `fig` to dash.
  *  The same two steps `weightLabel` takes, without the unit — this screen draws
@@ -160,12 +160,45 @@ export default function Standards() {
       are is the one quiet line under the title. */}
   <PageHead title="Strength Standards" subtitle="Best lifts vs bodyweight · approximate" />
 
+  {/* ── the five lifts as one picture ─────────────────────────────────────
+      The page opened on a help row and a list; it opens on where the five
+      lifts stand beside each other, which is the question the list made a
+      reader answer by scrolling. A bar is a LEVEL, one to five, and nothing
+      finer — the ratio behind it is on the row below.
+
+      Three different nothings, kept apart the way DayBars keeps them: a lift
+      graded below Beginner is a grey stub (known, and low); a lift with no
+      grade — never logged, or no bodyweight to divide by — draws NOTHING; and
+      under a log read that was not whole every bar is withheld, because a best
+      lift over part of a log may be under-stated and the notice below says so. */}
+  <Section>
+   <SectionHead title="Your Levels" note="Beginner to Elite" />
+   <DayBars h={72} max={LEVELS.length}
+    days={rows.map(({ lift, grade, lvl }) => ({
+     label: lift.name.split(' ')[0],
+     value: liftsWhole && grade.kind === 'graded' ? lvl + 1 : null,
+    }))}
+    spoken={liftsWhole
+     ? 'Your levels. ' + rows.map(({ lift, grade, lvl }) => `${lift.name}, ${grade.kind === 'graded' ? (lvl >= 0 ? LEVELS[lvl] : 'getting started') : 'no level'}`).join('. ') + '.'
+     : 'Your levels are not drawn, because your training log was not read in full.'} />
+   {/* The takeaway, under the picture it is drawn from.
+       Read as text and not as a Notice: a Notice carries a status mark, and
+       nothing here is a warning — a lift sitting lower on its own scale than
+       its neighbours is an ordinary fact about an ordinary training history,
+       and marking it would turn a comparison into a verdict on the reader.
+       Null whenever either read is short, so this never appears beside the
+       caveat below it. */}
+   {balance ? (
+    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+     {balance}
+    </Text>
+   ) : null}
+  </Section>
+
   {/* Above the grades, not below them. A member reads "Novice" first, and this
       card is what stops that landing as a verdict on them rather than as the
       ratio it is — see CLIENT_SCREEN_HELP_KEYS in src/lib/screenHelp.ts. */}
   <ScreenHelp screen="standards" />
-
-  <Rule />
 
   <Section>
    <SectionHead title="The Big Lifts" note={bw != null ? `bodyweight ${weightLabel(bw, wu)}` : bodyWhole ? 'add your weight for ratios' : 'bodyweight not read'} />
@@ -193,22 +226,10 @@ export default function Standards() {
       ? 'Nothing below is a level you are at — it is a level we could not look up. Your lifts are on your record.'
       : 'You have logged more sessions than this screen can read in one go, so a best lift set before that is not counted here and the level beside it may be under-stated.'} />
    ) : null}
-   {/* The takeaway, above the rows it is drawn from.
-       Read as text and not as a Notice: a Notice carries a status mark, and
-       nothing here is a warning — a lift sitting lower on its own scale than
-       its neighbours is an ordinary fact about an ordinary training history,
-       and marking it would turn a comparison into a verdict on the reader.
-       Null whenever either read is short, so this never appears beside the
-       caveat above it. */}
-   {balance ? (
-    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.sm }}>
-     {balance}
-    </Text>
-   ) : null}
    {rows.map(({ lift, best, grade, lvl, nextTarget }, i) => (
     <View key={lift.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{lift.name}</Text>
+      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{lift.name}</Text>
       {best ? (
        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
         <Text style={{ ...value(18), color: t.ink }}>{fig(weightShown(weightIn(best, wu)))}</Text>
@@ -234,18 +255,16 @@ export default function Standards() {
       <View>
        <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.md }}>
         {LEVELS.map((L, li) => (
-         <View key={L} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: li <= lvl ? t.brand : t.surface3 }} />
+         <View key={L} style={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: li <= lvl ? t.brand : t.surface3 }} />
         ))}
        </View>
        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: sp.sm }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-         <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: lvl >= 0 ? t.brand : t.surface3 }} />
-         <Text style={{ ...ty.caption, fontWeight: '500', color: lvl >= 0 ? t.ink : t.ink3 }}>{lvl >= 0 ? LEVELS[lvl] : 'Getting started'}</Text>
-        </View>
+        {/* The level as a chip: the accent once there is one, grey before. */}
+        <TonedChip label={lvl >= 0 ? LEVELS[lvl] : 'Getting Started'} tone={lvl >= 0 ? 'brand' : 'neutral'} />
         {nextTarget ? (
          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Next: {LEVELS[lvl + 1]} @ {plain(nextTarget)} {wu}</Text>
         ) : lvl === LEVELS.length - 1 ? (
-         <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>Top of the scale</Text>
+         <Text style={{ ...ty.caption, ...font('500'), color: t.ink2 }}>Top of the scale</Text>
         ) : null}
        </View>
       </View>
@@ -268,7 +287,6 @@ export default function Standards() {
    ))}
   </Section>
 
-  <Rule />
 
   <Section>
    <Text style={{ ...ty.caption, color: t.ink3 }}>Standards are general guidelines and vary by age, sex &amp; training history.</Text>

@@ -62,12 +62,12 @@
 // that decides whether the window may be named at all, and what to say instead.
 import { useCallback, useMemo, useState } from 'react';
 import { trainIntent } from '../../src/lib/trainIntent';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Meter, Segmented, Expandable, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
+import { sp, layout, hairline, font, type as ty, numeric } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useNow } from '../../src/ui/today';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -188,23 +188,13 @@ export default function Muscles() {
   // below now says in figures.
   const header = <PageHead title="Your Muscles" />;
 
-  // The window as three equal chips, the way Progress draws its range under
-  // the chart: the chosen one filled green. The CAPTION is never built from
-  // this number — see `windowNote`.
+  // The window as the kit's segmented bar, over everything it filters. The
+  // CAPTION is never built from this number — see `windowNote`.
   const picker = (
-    <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-      {WINDOWS.map((d) => {
-        const on = days === d;
-        return (
-          <Pressable key={d} onPress={() => setDays(d)}
-            accessibilityRole="tab" accessibilityState={{ selected: on }}
-            accessibilityLabel={`Last ${d} days`}
-            style={{ flex: 1, minHeight: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-            <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>{d} days</Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <Segmented style={{ marginTop: sp.md }}
+      value={String(days) as `${WindowDays}`}
+      onChange={(k) => setDays(Number(k) as WindowDays)}
+      options={WINDOWS.map((d) => ({ key: String(d) as `${WindowDays}`, label: `${d} Days`, a11yLabel: `Last ${d} days` }))} />
   );
 
   const frame = (children: React.ReactNode) => (
@@ -225,7 +215,7 @@ export default function Muscles() {
   // trained all week reading "nothing we can file to a muscle". Checked first.
   if (signedOut) {
     return frame(
-      <><Rule /><Section>
+      <><Section>
         <SectionHead title="Sign in to see this" />
         <Text style={{ ...ty.body, color: t.ink2 }}>
           The exercise catalogue is only available once you are signed in, so we cannot say which
@@ -242,7 +232,7 @@ export default function Muscles() {
   // claims nothing at all.
   if (board.status === 'loading') {
     return frame(
-      <><Rule /><Section>
+      <><Section>
         <Text style={{ ...ty.label, color: t.ink3 }}>Reading your training and the exercise catalogue&hellip;</Text>
       </Section></>
     );
@@ -255,7 +245,7 @@ export default function Muscles() {
   // a member's own week made by a screen that could not look at it.
   if (board.status === 'error') {
     return frame(
-      <><Rule /><Section>
+      <><Section>
         <SectionHead title="Could not read this" />
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
           We could not read your training, the exercise catalogue, or both, so there is no picture
@@ -291,21 +281,11 @@ export default function Muscles() {
     <Section>
       {/* The body is what this screen is for, so it is the first card and
           the front/back choice is the board's segmented bar over it. */}
-      <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginBottom: sp.lg }}>
-        {(['front', 'back'] as const).map((s) => {
-          const on = side === s;
-          return (
-            <Pressable key={s} onPress={() => setSide(s)}
-              accessibilityRole="tab" accessibilityState={{ selected: on }}
-              accessibilityLabel={s === 'front' ? 'Front of the body' : 'Back of the body'}
-              style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
-              <Text numberOfLines={1} style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.bg : t.ink2 }}>
-                {s === 'front' ? 'Front' : 'Back'}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <Segmented style={{ marginBottom: sp.lg }} value={side} onChange={setSide}
+        options={[
+          { key: 'front', label: 'Front', a11yLabel: 'Front of the body' },
+          { key: 'back', label: 'Back', a11yLabel: 'Back of the body' },
+        ] as const} />
 
       {/* The diagram takes the status because an empty intensity map means two
           different things — nothing trained, or nothing read — and it draws
@@ -332,8 +312,14 @@ export default function Muscles() {
           MuscleBody draws every lit muscle in band 1 and suppresses the key —
           so a scale for a grading that did not happen would be a caption for a
           picture that is not there. */}
+      {/* One tap away rather than under the picture: it is the answer to
+          "what does dark mean", and five lines of it pushed the figures the
+          picture is ABOUT off the first screen. The scale's own number stays
+          inside it, whole. */}
       {whole && shading.hasWork ? (
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+        <View style={{ marginTop: sp.md }}>
+        <Expandable title="How the Colours Work">
+        <Text style={{ ...ty.caption, color: t.ink3 }}>
           {/* "in this window" and not "over the last N days". The window is the
               filter and the record may be shorter than it — naming the window
               beside a figure is the mistake `windowNote` exists to prevent, and
@@ -344,6 +330,8 @@ export default function Muscles() {
           as one and a set where it assists as a half. A quiet fortnight and a brutal one both fill
           the body, so read the list below for the sets themselves.
         </Text>
+        </Expandable>
+        </View>
       ) : null}
 
       {/* The approximations this particular picture is leaning on. Only the
@@ -359,42 +347,27 @@ export default function Muscles() {
       {undrawn ? <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>{undrawn}</Flag> : null}
     </Section>
 
-    <Rule />
 
     {/* ── Training Summary ─────────────────────────────────────────────── */}
     {/* `setsCounted`, never `Σ muscles[].primarySets`. One set of back squats
         is one set here and five muscles on the board below it; summing the
         rows would report a number of sets nobody performed. */}
-    {/* The board's figure card where the Hero was: the label as the head,
-        one big figure, the window caption under it, and the two counts as a
-        KpiRow inside the same card. */}
-    <Section>
-      <SectionHead title={floor ? 'Sets Logged, at Least' : 'Sets Logged'} />
-      <View accessible accessibilityLabel={[floor ? 'Sets logged, at least' : 'Sets logged', fig(num(board.setsCounted)), caption].filter(Boolean).join(', ')}>
-        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink }}>{fig(num(board.setsCounted))}</Text>
-        {caption ? <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{caption}</Text> : null}
-      </View>
-      <View style={{ marginTop: sp.lg }} />
-    <KpiRow items={[
-      {
-        label: 'Muscles Worked',
-        value: fig(num(board.muscles.length)),
-        delta: floor ? 'at least' : undefined,
-      },
-      {
-        label: 'Movements',
-        value: fig(num(movements)),
-        delta: floor ? 'at least' : undefined,
-      },
+    {/* Three tiles on the ground under the picture, where the figure card
+        was: the picture is this page's hero, and these are what it counts.
+        Under a prefix read every one is a floor, and says so as its unit —
+        "at least" is part of the figure, not a footnote to it. */}
+    <KpiRow tiles items={[
+      { label: 'Sets Logged', value: fig(num(board.setsCounted)), unit: floor ? 'at least' : undefined, tone: 'brand' },
+      { label: 'Muscles Worked', value: fig(num(board.muscles.length)), unit: floor ? 'at least' : undefined, tone: 'orange' },
+      { label: 'Movements', value: fig(num(movements)), unit: floor ? 'at least' : undefined, tone: 'blue' },
     ]} />
+    {caption ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{caption}</Text> : null}
     {/* Work that happened and is in NO figure above: a movement we have never
         heard of, and a movement in our own catalogue with no muscles recorded
         against it. Two different problems with two different owners, which is
         why `gapNote` writes them as two sentences. */}
-    {gaps ? <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{gaps}</Flag> : null}
-    </Section>
+    {gaps ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{gaps}</Flag> : null}
 
-    <Rule />
 
     {/* ── the rankings ─────────────────────────────────────────────────── */}
     {/* The list, not the picture, is the information. src/lib/bodyHeat.ts is
@@ -420,8 +393,16 @@ export default function Muscles() {
           logged as time and distance rather than as sets and never appears here.
         </Text>
       ) : rankings.most.map((e, i) => (
-        <View key={e.muscle} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{say(e.muscle)}</Text>
+        <View key={e.muscle} style={{ paddingBottom: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+          {/* ── the bar is the picture's own scale ──────────────────────────
+              Its length is this muscle's score over the hardest-worked
+              muscle's — exactly what shades the body above, in the body's own
+              orange, so the list and the picture are one reading. It is drawn
+              and never printed (see below for why no number may be), and not
+              drawn at all under a read that was not whole: the picture claims
+              no bands there, so the list claims no lengths. */}
+          <Meter label={say(e.muscle)} note={rankingLine(e)} tone="orange"
+            val={whole ? e.primaryEquivalentSets : null} target={shading.fullScaleAt} />
           {/* ── the row carries no figure of its own, on purpose ────────────
               The obvious layout puts a number against the trailing edge, and
               there is no number here that may go in it. `primaryEquivalentSets`
@@ -434,8 +415,7 @@ export default function Muscles() {
               total". So the two figures stay two figures and `rankingLine`
               writes them out, which also fits the case a single number cannot
               say at all — a muscle that only ever assisted. */}
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{rankingLine(e)}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
             {e.exercises.slice(0, 3).map(movement).join(', ')}
             {e.exercises.length > 3 ? `, and ${e.exercises.length - 3} more` : ''}
           </Text>
@@ -479,11 +459,12 @@ export default function Muscles() {
       {showLeast ? (<>
         <View style={{ height: sp.xl }} />
         <SectionHead title="Least Trained" note="Of the muscles you did work" />
-        {rankings.least.map((e, i) => (
-          <View key={e.muscle} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{say(e.muscle)}</Text>
-            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{rankingLine(e)}</Text>
-          </View>
+        {rankings.least.map((e) => (
+          // The same bar on the same scale as the list above, so a short one
+          // here is short BESIDE those — in blue, because this list is not
+          // the heat the body is drawn in.
+          <Meter key={e.muscle} label={say(e.muscle)} note={rankingLine(e)} tone="blue"
+            val={whole ? e.primaryEquivalentSets : null} target={shading.fullScaleAt} />
         ))}
       </>) : null}
 
@@ -520,12 +501,17 @@ export default function Muscles() {
           survive, and they are the two the list itself needs: the first says an
           assisting set counted as a half, and the second stops the ABSENCE of
           an untrained section reading as "you have trained everything". */}
-      {notes.filter((n) => n !== caption && n !== gaps && n !== undrawn).map((n) => (
-        <Text key={n} style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{n}</Text>
-      ))}
+      {notes.some((n) => n !== caption && n !== gaps && n !== undrawn) ? (
+        <View style={{ marginTop: sp.md }}>
+          <Expandable title="How This Is Ranked">
+            {notes.filter((n) => n !== caption && n !== gaps && n !== undrawn).map((n) => (
+              <Text key={n} style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{n}</Text>
+            ))}
+          </Expandable>
+        </View>
+      ) : null}
     </Section>
 
-    <Rule />
 
     {/* ── the Recovery Map ─────────────────────────────────────────────── */}
     {/* Named for what a member calls it and careful about what it says. Every
@@ -543,7 +529,7 @@ export default function Muscles() {
         </Text>
       ) : rests.map((r, i) => (
         <View key={r.muscle} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{say(r.muscle)}</Text>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{say(r.muscle)}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{restLine(r)}</Text>
           {/* What it was asked to DO that day, beside how long ago it was and
               deliberately not combined with it. A single score mixing "three
@@ -567,7 +553,6 @@ export default function Muscles() {
       ) : null}
     </Section>
 
-    <Rule />
 
     {/* Nothing on this screen is a plan. The one thing a member can do about
         any of it is train, so the way out goes there rather than to another

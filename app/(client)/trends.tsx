@@ -38,8 +38,8 @@ import { isTimedSet, holdLabel } from '../../src/lib/timedSets';
 import { holdSeries, heldMovements, liftedMovements, holdChangeSecs, holdLoadNote } from '../../src/lib/holdTrend';
 import { useClientData } from '../../src/ui/clientData';
 import type { WorkoutEntry } from '../../src/lib/mockData';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Ghost, Spark, fig, TonedChip, Expandable } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, elevation, font } from '../../src/theme/scale';
 import { startOfWeek } from '../../src/lib/weekStart';
 import { fmtAxisDay } from '../../src/lib/format';
 // The local calendar day of an instant, so one movement done twice in an
@@ -350,39 +350,33 @@ export default function Trends() {
         {/* The board's pushed-page head: back, the title centred. */}
         <PageHead title="Trends" />
 
-        {/* ── the figure: this week's tonnage ────────────────────────────── */}
-        {/* The board's figure card where the Hero was. */}
-        <Section>
-          <SectionHead title="Lifted This Week" />
+        {/* ── THE HERO: this week's tonnage over the ten weeks behind it ─────
+            One tinted card, as the approved Progress mockup draws its figure:
+            the number, the sentence that qualifies it, and the chart it is the
+            last point of. They were two cards — a figure, then a chart with the
+            same figure repeated under it — and a reader had to join them. */}
+        <View style={{ backgroundColor: t.brandSoft, borderRadius: radius.xl, padding: 18, marginTop: 14, ...elevation.card }}>
           {/* Label, figure, unit and sentence are one fact, and one stop. */}
           <View accessible accessibilityLabel={['Lifted This Week', [logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null), logKnown ? wu : undefined].filter(Boolean).join(' '), weekLine].filter(Boolean).join(', ')}>
+            <Text style={{ ...ty.micro, color: t.ink2 }}>Lifted This Week</Text>
             <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
               {/* Shrunk to fit and never wrapped: a figure broken across two lines
                   is a figure read wrong. */}
               <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
                 style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}</Text>
               {logKnown ? (
-                <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{logKnown ? wu : undefined}</Text>
+                <Text numberOfLines={1} style={{ ...ty.section, ...font('600', 'display'), color: t.ink2, marginStart: 6, flexShrink: 0 }}>{wu}</Text>
               ) : null}
             </View>
-            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{weekLine}</Text>
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{weekLine}</Text>
           </View>
-          {/* Said once, under the figure, rather than beside each figure: a
-              pounds reader is reading kilograms converted, and their coach's
-              console is not, so the two disagreeing is worth explaining before
-              it is seen. */}
-          {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unitNote}</Text> : null}
           {/* And said whenever the tonnage above is short. A bodyweight set
               whose load nobody has recorded is real training that cannot be
               weighed, and a figure printed over it without this is understating
               the week while looking exactly like a measurement. */}
-          {logKnown && weekNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{weekNote}</Text> : null}
-        </Section>
+          {logKnown && weekNote ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs }}>{weekNote}</Text> : null}
 
-
-        {/* ── weekly volume ──────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title={`Weekly volume · last ${WEEKS} weeks`} note={`Total ${wu} lifted`} />
+          <View style={{ marginTop: sp.md }}>
           {anyVolume ? (
             /* The week each column belongs to. Ten bars of tonnage with no
                dates under them told a member the shape of their training and
@@ -391,10 +385,10 @@ export default function Trends() {
                kilograms; labelling it "lb" without passing it through
                volumeIn would put the reader's unit on somebody else's number,
                which is the one thing the units module exists to prevent. The
-               KpiRow beside it converts the same way. */
-            <Spark data={weeks.map((w) => volumeIn(w.vol, wu))} labels={weeks.map((w) => w.iso)} unit={` ${wu}`} />
+               tiles under the card convert the same way. */
+            <Spark area data={weeks.map((w) => volumeIn(w.vol, wu))} labels={weeks.map((w) => w.iso)} unit={` ${wu}`} />
           ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
+            <Text style={{ ...ty.label, color: t.ink2 }}>
               {/* Four arms, matching the Strength Trend block below, which has
                   had them all along. `logKnown` is `isWhole(logStatus)`, so it
                   is false while the FIRST read is still in flight — and this
@@ -410,6 +404,13 @@ export default function Trends() {
                 : 'We couldn’t read your training log, so there is nothing to chart here yet. Your history is intact.'}
             </Text>
           )}
+          </View>
+          {anyVolume ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{`Total ${wu} lifted · last ${WEEKS} weeks`}</Text> : null}
+          {/* Said once, under the chart, rather than beside each figure: a
+              pounds reader is reading kilograms converted, and their coach's
+              console is not, so the two disagreeing is worth explaining before
+              it is seen. */}
+          {unitNote ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs }}>{unitNote}</Text> : null}
           {/* The one Ghost this screen already has points at Targets, which is
               no use to a member with nothing logged. Only on the `logKnown`
               arm — the other three are a read in flight, a read that was cut
@@ -420,14 +421,22 @@ export default function Trends() {
               <Ghost label="Log a Workout" onPress={() => router.push(trainIntent('/(client)/workouts') as any)} />
             </View>
           ) : null}
-          <View style={{ height: sp.lg }} />
-          <KpiRow items={[
-            { label: 'This Week', value: logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined },
-            { label: 'Training Days', value: logKnown ? fig(thisWeek.days) : fig(null) },
-            { label: 'Best Week', value: logKnown ? fig(volumeIn(bestWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined, delta: logKnown && anyVolume ? `w/c ${bestWeek.label}` : undefined },
-          ]} />
-        </Section>
+        </View>
 
+        {/* ── three figures with the ten weeks behind each ──────────────────
+            On the ground under the hero. Every one is a figure over the WHOLE
+            log, so every one is a dash — and its trend an empty strip — under
+            a read that was not whole: "best week" over the part that came back
+            is the best of a sample. This week's tonnage is not repeated here;
+            the hero is it. */}
+        <KpiRow tiles items={[
+          { label: 'Training Days', tone: 'blue', value: logKnown ? fig(thisWeek.days) : fig(null),
+            trend: logKnown ? weeks.map((w) => w.days) : [] },
+          { label: logKnown && anyVolume ? `Best Week · w/c ${bestWeek.label}` : 'Best Week', tone: 'orange',
+            value: logKnown ? fig(volumeIn(bestWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined,
+            trend: logKnown ? weeks.map((w) => volumeIn(w.vol, wu)) : [] },
+          { label: `Weeks Trained of ${WEEKS}`, tone: 'purple', value: logKnown ? fig(weeks.filter((w) => w.days > 0).length) : fig(null) , trend: [] },
+        ]} />
 
         {/* ── per-exercise est-1RM ───────────────────────────────────────── */}
         <Section>
@@ -453,7 +462,7 @@ export default function Trends() {
                     <Pressable key={n} onPress={() => setSel(n)}
                       accessibilityRole="button" accessibilityLabel={movement(n)} accessibilityState={{ selected: on }}
                       style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{movement(n)}</Text>
+                      <Text style={{ ...ty.caption, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{movement(n)}</Text>
                     </Pressable>
                   );
                 })}
@@ -525,7 +534,7 @@ export default function Trends() {
                         bare 'YYYY-MM-DD', which is UTC midnight read through a
                         local getter — so west of Greenwich the first and last
                         sessions were both reported a day early. */}
-                    <Spark data={series.map((s) => s.v)} labels={series.map((s) => s.t)} />
+                    <Spark area tone="blue" data={series.map((s) => s.v)} labels={series.map((s) => s.t)} />
                   </>) : null}
                   {/* A break in the line is a day this rule could not price,
                       and an unexplained hole reads as a day off. It is not:
@@ -568,7 +577,6 @@ export default function Trends() {
               A longest-ever over a truncated read is a subtotal wearing a
               record's clothes. */}
         {holdNames.length ? (<>
-          <Rule />
           <Section>
             <SectionHead title="Hold Trend" note="Time held" />
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: G }}>
@@ -581,7 +589,7 @@ export default function Trends() {
                   <Pressable key={n} onPress={() => setHoldSel(n)}
                     accessibilityRole="button" accessibilityLabel={movement(n)} accessibilityState={{ selected: on }}
                     style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                    <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{movement(n)}</Text>
+                    <Text style={{ ...ty.caption, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{movement(n)}</Text>
                   </Pressable>
                 );
               })}
@@ -631,7 +639,7 @@ export default function Trends() {
                   the same days it plots, so the dates under the line are the
                   days of the holds above them rather than a hand-rolled row
                   that has to be kept in step. */}
-              <Spark data={holds.map((p) => p.secs)} labels={holds.map((p) => p.day)} unit=" s" />
+              <Spark area tone="purple" data={holds.map((p) => p.secs)} labels={holds.map((p) => p.day)} unit=" s" />
             </>) : null}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {holds.length < 2
@@ -717,7 +725,7 @@ export default function Trends() {
                   <View style={{ flex: 1 }}>
                     {/* The chip row above reads in the member's language and
                         keys on the English name; the same rule here. */}
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(v.exercise)}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{movement(v.exercise)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {shortDayLabel(v.at)} · {fig(liftLabel(v.lastWeight, wu))} × {v.lastReps}
                     </Text>
@@ -728,7 +736,11 @@ export default function Trends() {
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{note}</Text>
                     ) : null}
                   </View>
-                  <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>{ACTION_LABEL[v.action]}</Text>
+                  {/* The rule's word as a chip. The same four tones Targets draws
+                      them in: green adds load, amber takes it off, blue and
+                      grey leave the bar alone —
+                      and the word is the reading; the colour only finds it. */}
+                  <TonedChip label={ACTION_LABEL[v.action]} tone={v.action === 'increase' ? 'brand' : v.action === 'reps' ? 'blue' : v.action === 'deload' ? 'amber' : 'neutral'} />
                 </View>
                 );
               })}
@@ -738,11 +750,15 @@ export default function Trends() {
                   the same way and are all on Targets.
                 </Text>
               ) : null}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                Each line reads your most recent session of that lift and nothing before it, so it says where
-                that day landed rather than where the lift is heading. One session is not a direction and two
-                are not either — the chart above is where a movement over time is drawn.
-              </Text>
+              <View style={{ marginTop: sp.md }}>
+                <Expandable title="How to Read This">
+                  <Text style={{ ...ty.caption, color: t.ink3, }}>
+                    Each line reads your most recent session of that lift and nothing before it, so it says where
+                    that day landed rather than where the lift is heading. One session is not a direction and two
+                    are not either — the chart above is where a movement over time is drawn.
+                  </Text>
+                </Expandable>
+              </View>
             </>
           )}
           {/* Said whether or not there were verdicts, and gated on the read

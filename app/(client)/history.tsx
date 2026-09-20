@@ -73,8 +73,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Rect, Line, Text as SvgText } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Cta, Notice, fig, FigureCard, ActionBlock, Expandable } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Ghost, Cta, Notice, fig, FigureCard, ActionBlock, Expandable, Meter, Segmented } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
@@ -104,6 +104,8 @@ import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
 // src/lib/muscleVolume.ts for why it is a join against the catalogue rather
 // than a column on the workout row.
 import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
+// The one map of which colour a muscle GROUP is, shared with the library's chips.
+import { groupTone } from '../../src/ui/ExerciseMuscles';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
@@ -423,7 +425,7 @@ export default function History() {
   /* ── 1 of 3: still asking ─────────────────────────────────────────────── */
   if (load.state === 'loading') {
     return frame(
-      <><Rule /><Section>
+      <><Section>
         <Text style={{ ...ty.label, color: t.ink3 }}>Reading your history…</Text>
       </Section></>
     );
@@ -432,7 +434,7 @@ export default function History() {
   /* ── 2 of 3: the read broke ───────────────────────────────────────────── */
   if (load.state === 'failed') {
     return frame(
-      <><Rule /><Section>
+      <><Section>
         <SectionHead title="Could not read your history" />
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
           {load.reason} Nothing has been lost — this screen only failed to read what is there, so it
@@ -458,7 +460,7 @@ export default function History() {
   // here means the read landed whole and there is genuinely nothing in it.
   if (stage === 'empty' || !span) {
     return frame(
-      <><Rule />
+      <>
       {/* The kit's ActionBlock: on a page with nothing on it the next action
           IS the page, so it gets the title, the reason and the one button. */}
       <ActionBlock title="Nothing Logged Yet"
@@ -574,7 +576,27 @@ export default function History() {
     ) : null}
     </FigureCard>
 
-    <Rule />
+    {/* Three tiles on the ground under the lifetime figure, where they were a
+        strip inside the chart's card two screens down: the figure, then what
+        it is made of, then the chart. */}
+    {/* Days Trained and Lifts are lifetime counts and go blank with the hero.
+        Best Month does not: it is the heaviest of the months ON THIS CHART,
+        which is a true statement about the months on this chart whether or
+        not there are older ones behind them — the label names the month, so
+        the reader can see the window it was picked from. */}
+    {/* Why a dash is a dash goes where the unit would, so it is SEEN on the
+        tile and not only spoken: a tile draws no delta line. */}
+    <KpiRow tiles items={[
+      // Was 'Sessions', showing `life.sessions` with a days delta beside it.
+      // That figure is distinct `performed_at` — saves, not sessions — so a
+      // member who logs as they go read a number several times their real
+      // one, with the true count sitting underneath it as the delta. The
+      // delta was the honest half, so it is now the figure.
+      { label: 'Days Trained', tone: 'blue', value: whole ? fig(life.days) : fig(null), unit: whole ? undefined : 'not all read' },
+      { label: best ? `Best Month · ${monthLabel(best.key)}` : 'Best Month', tone: 'orange', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined },
+      { label: 'Lifts With Weights', tone: 'purple', value: whole ? fig(life.lifts) : fig(null), unit: whole ? undefined : 'not all read' },
+    ]} />
+
 
     {/* ── the shape of it ────────────────────────────────────────────────── */}
     <Section>
@@ -632,7 +654,6 @@ export default function History() {
       </>)}
     </Section>
 
-    <Rule />
 
     {/* ── month by month ─────────────────────────────────────────────────── */}
     <Section>
@@ -653,23 +674,6 @@ export default function History() {
           sessions still count towards the months above.
         </Text>
       )}
-      <View style={{ height: sp.lg }} />
-      {/* Days Trained and Lifts are lifetime counts and go blank with the hero.
-          Best Month does not: it is the heaviest of the months ON THIS CHART,
-          which is a true statement about the months on this chart whether or
-          not there are older ones behind them — the delta names the month, so
-          the reader can see the window it was picked from. */}
-      <KpiRow items={[
-        // Was 'Sessions', showing `life.sessions` with a days delta beside it.
-        // That figure is distinct `performed_at` — saves, not sessions — so a
-        // member who logs as they go read a number several times their real
-        // one, with the true count sitting underneath it as the delta. The
-        // delta was the honest half, so it is now the figure.
-        { label: 'Days Trained', value: whole ? fig(life.days) : fig(null), delta: whole ? undefined : 'not all read' },
-        { label: 'Best Month', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined, delta: best ? monthLabel(best.key) : undefined },
-        { label: 'Lifts', value: whole ? fig(life.lifts) : fig(null), delta: whole ? 'with weights' : 'not all read' },
-      ]} />
-
       {/* ── the three figures the library already returned and nothing drew ──
           `topLift`, `best1RM` and `kcal` are computed for every month in
           `cellFrom` (src/lib/longView.ts) and a lifetime `kcal` in
@@ -718,6 +722,11 @@ export default function History() {
           delta: whole ? 'where a figure was recorded' : 'not all read',
         },
       ]} />
+      {/* What each of the two figures above is NOT, one tap away. Both
+          sentences are kept whole; they are the small print of two figures and
+          were eleven lines between them and the next card. */}
+      <View style={{ marginTop: sp.md }}>
+      <Expandable title="About These Two Figures">
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
         {/* An estimate, and it says so — the same thing src/ui/ExerciseHistory.tsx
             says beside its own copy of this figure. This app holds no tested
@@ -746,6 +755,8 @@ export default function History() {
         one adds nothing rather than a zero, and lifting records reps and weight rather than a burn, so
         this is less than you have burned and not a measurement of it.
       </Text>
+      </Expandable>
+      </View>
 
       {/* `earlier` is derived from `span`, which under truncation is the span
           of what was READ rather than of the member's training — so the count
@@ -854,7 +865,6 @@ export default function History() {
     </>) : null}
 
     {/* ── personal bests over time, not just the current best ────────────── */}
-    <Rule />
     <Section>
       <SectionHead title="Personal Bests Over Time" note={records.length ? 'Newest first' : undefined} />
       {records.length === 0 ? (
@@ -865,7 +875,7 @@ export default function History() {
         <View key={`${m.exercise}-${m.at}`}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(m.exercise)}</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{movement(m.exercise)}</Text>
             <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
               {fig(liftLabel(m.weight, wu))} × {m.reps} · {dstr(m.at)}
             </Text>
@@ -896,7 +906,6 @@ export default function History() {
     </Section>
 
     {/* ── what you have actually trained ─────────────────────────────────── */}
-    <Rule />
     <MuscleSection log={log} unit={wu} weightSeries={weightSeries} />
 
     {/* ── one movement, followed ─────────────────────────────────────────── */}
@@ -910,7 +919,6 @@ export default function History() {
         and the status passed with it says so: under a truncated read nothing
         below claims to be a first or a lifetime, only the earliest day on this
         page. The notice at the top of the screen names the month. */}
-    <Rule />
     <ExerciseHistoryPanel
       log={log}
       status={whole ? 'ready' : 'partial'}
@@ -1111,19 +1119,10 @@ function MuscleSection({ log, unit, weightSeries }: {
   return (
     <Section>
       <SectionHead title="By Muscle Group" note={status === 'ready' ? `last ${days} days` : undefined} />
-      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-        {([7, 28] as const).map((d) => {
-          const on = days === d;
-          return (
-            <Pressable key={d} onPress={() => setDays(d)}
-              accessibilityRole="button" accessibilityState={{ selected: on }}
-              accessibilityLabel={`Last ${d} days`}
-              style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: 999, backgroundColor: on ? t.brand : t.surface2 }}>
-              <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{d} days</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <Segmented style={{ marginBottom: sp.md }}
+        value={String(days) as '7' | '28'}
+        onChange={(k) => setDays(Number(k) as 7 | 28)}
+        options={[{ key: '7', label: '7 Days', a11yLabel: 'Last 7 days' }, { key: '28', label: '28 Days', a11yLabel: 'Last 28 days' }] as const} />
 
       {/* The catalogue read has three answers and only one of them is a board.
           "Nothing trained" off a failed read is the sentence that would send
@@ -1144,21 +1143,15 @@ function MuscleSection({ log, unit, weightSeries }: {
         </Text>
       ) : (<>
         {board.groups.map((g) => (
-          <View key={g.group} style={{ marginTop: sp.md }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{g.group}</Text>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-                {g.sets} set{g.sets === 1 ? '' : 's'}
-                {g.volumeKg != null ? ` · ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}
-              </Text>
-            </View>
+          <View key={g.group}>
             {/* The bar is a share of the most-trained group, so it compares
                 muscles against each other and never against a target nobody
                 set. There is no right number of sets for a back, and drawing
-                one would be this screen inventing a programme. */}
-            <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-              <View style={{ height: 3, borderRadius: 2, width: `${most ? Math.round((g.sets / most) * 100) : 0}%`, backgroundColor: t.brand }} />
-            </View>
+                one would be this screen inventing a programme. The colour is
+                the GROUP's — the one map the library's chips use — so Chest
+                is the same blue here as on the exercise it was trained with. */}
+            <Meter label={g.group} tone={groupTone(g.group)} val={g.sets} target={most || 1}
+              note={`${num(g.sets)} set${g.sets === 1 ? '' : 's'}${g.volumeKg != null ? ` · ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}`} />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
               {/* The names translate; the JOIN does not. A list stitched with a German
                   conjunction inside an English sentence is worse than either —

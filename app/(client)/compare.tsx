@@ -60,8 +60,9 @@ import { useClientData } from '../../src/ui/clientData';
 import { fmtFullDay } from '../../src/lib/format';
 import { useSettings } from '../../src/ui/settings';
 import { reportError } from '../../src/lib/reportError';
-import { Rule, Section, SectionHead, PageHead, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Ghost, Flag, TonedChip } from '../../src/ui/kit';
+import { movementIsProgress } from '../../src/lib/deltaLabel';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { listProgressPhotos, comparePair, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
 import { fetchMyCoach, fetchMyShares, shareStateOf, shareLabel, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
 import {
@@ -335,7 +336,7 @@ export default function Compare() {
                             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture unavailable</Text>
                           </View>
                         )}
-                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginTop: 6 }}>{label}</Text>
+                        <Text style={{ ...ty.label, ...font('500'), color: t.ink, marginTop: 6 }}>{label}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3 }}>{dayOf(ph)}</Text>
                         {/* The view the member said this was. Absent when they
                             were never asked, which is every photo taken before
@@ -348,7 +349,7 @@ export default function Compare() {
                         {/* "Can my coach see this one?" answered on the picture
                             itself, including the honest non-answer when the
                             grants could not be read. */}
-                        <Text style={{ ...ty.caption, fontWeight: '500', color: shareStateOf(ph.id, shares) === 'sent' ? t.brand : t.ink3 }}>
+                        <Text style={{ ...ty.caption, ...font('500'), color: shareStateOf(ph.id, shares) === 'sent' ? t.brand : t.ink3 }}>
                           {shareLabel(shareStateOf(ph.id, shares))}
                         </Text>
                       </View>
@@ -411,7 +412,7 @@ export default function Compare() {
                         <Text style={{ ...ty.micro, color: t.ink3, flex: 1.3 }}>Reading</Text>
                         <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>Before</Text>
                         <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>After</Text>
-                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>Change</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1.2, textAlign: END_ALIGN }}>Change</Text>
                       </View>
                       {rows.map((r) => (
                         <View key={r.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
@@ -419,9 +420,24 @@ export default function Compare() {
                           {/* An unmeasured cell is t.ink3 as well as an
                               em-dash: it must not sit in the same weight as a
                               figure somebody actually recorded. */}
-                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.before === null ? t.ink3 : t.ink, flex: 1, textAlign: END_ALIGN }}>{readingText(r.before, r.unit)}</Text>
-                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.after === null ? t.ink3 : t.ink, flex: 1, textAlign: END_ALIGN }}>{readingText(r.after, r.unit)}</Text>
-                          <Text style={{ ...ty.label, ...numeric, color: r.delta === null ? t.ink3 : t.ink2, flex: 1, textAlign: END_ALIGN }}>{deltaText(r.delta, r.unit)}</Text>
+                          <Text style={{ ...ty.label, ...numeric, ...font('500'), color: r.before === null ? t.ink3 : t.ink, flex: 1, textAlign: END_ALIGN }}>{readingText(r.before, r.unit)}</Text>
+                          <Text style={{ ...ty.label, ...numeric, ...font('500'), color: r.after === null ? t.ink3 : t.ink, flex: 1, textAlign: END_ALIGN }}>{readingText(r.after, r.unit)}</Text>
+                          {/* The change as a chip, and the accent only where it
+                              is movement the member's OWN goal asked for — a
+                              loss is green for somebody cutting and grey for
+                              somebody building. Grey is also every change the
+                              goal has no opinion on; it is never "bad". No
+                              change to show is still the quiet dash: a chip
+                              round nothing would be a verdict on a day nobody
+                              was measured. */}
+                          {r.delta === null ? (
+                            <Text style={{ ...ty.label, ...numeric, color: t.ink3, flex: 1.2, textAlign: END_ALIGN }}>{deltaText(r.delta, r.unit)}</Text>
+                          ) : (
+                            <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+                              <TonedChip label={deltaText(r.delta, r.unit)}
+                                tone={movementIsProgress(r.delta, cd.goal, r.key === 'weightKg' ? 'weight' : r.key === 'bodyFatPct' ? 'bodyFat' : 'muscle') === true ? 'brand' : 'neutral'} />
+                            </View>
+                          )}
                         </View>
                       ))}
                       {/* Which days were scanned, named. A blank column with no
@@ -447,7 +463,6 @@ export default function Compare() {
               )}
             </Section>
 
-            <Rule />
 
             {/* ── the strip you pick from ──────────────────────────────── */}
             <Section>
@@ -495,11 +510,11 @@ export default function Compare() {
                         )}
                         {selIdx >= 0 ? (
                           <View style={{ position: 'absolute', top: 6, end: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                            <Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text>
+                            <Text style={{ ...ty.caption, ...font('600'), color: t.brandInk }}>{selIdx + 1}</Text>
                           </View>
                         ) : null}
                         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingVertical: 3, backgroundColor: 'rgba(0,0,0,0.55)' }}>
-                          <Text style={{ ...ty.caption, fontWeight: '500', textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
+                          <Text style={{ ...ty.caption, ...font('500'), textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
                         </View>
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{dayOf(p)}</Text>

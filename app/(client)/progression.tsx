@@ -16,22 +16,28 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Icon } from '../../src/ui/Icon';
+import type { IconName } from '../../src/ui/Icon';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
 import { liftIn, liftLabel, liftDeltaIn, convertedNote } from '../../src/lib/units';
 import { suggestProgression, type ProgressAction } from '../../src/lib/progression';
 import { deltaLabel } from '../../src/lib/deltaLabel';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Notice, Cta, Ghost, fig, Donut, Legend, IconPlate, TonedChip, Expandable, type Slice, type Tone } from '../../src/ui/kit';
+import { sp, layout, hairline, font, type as ty } from '../../src/theme/scale';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
-const META: Record<ProgressAction, { label: string; icon: string; color: (t: any) => string }> = {
-  increase: { label: 'Add Load', icon: 'trending', color: (t) => t.brand },
-  reps: { label: 'Chase Reps', icon: 'plus', color: (t) => t.good ?? t.brand },
-  hold: { label: 'Hold', icon: 'minus', color: (t) => t.warn },
-  deload: { label: 'Ease Back', icon: 'swap', color: (t) => t.crit },
+// A tone by NAME, not a colour: the kit gives the plate, the chip and the donut
+// slice their own measured pairs from it. Green is the one that adds load and
+// amber the one that takes it off; the two that leave the bar alone are blue
+// and grey, because neither is a verdict on anything.
+const META: Record<ProgressAction, { label: string; icon: IconName; tone: Tone }> = {
+  increase: { label: 'Add Load', icon: 'trending', tone: 'brand' },
+  reps: { label: 'Chase Reps', icon: 'plus', tone: 'blue' },
+  hold: { label: 'Hold', icon: 'minus', tone: 'neutral' },
+  deload: { label: 'Ease Back', icon: 'swap', tone: 'amber' },
 };
+const ACTIONS: ProgressAction[] = ['increase', 'reps', 'hold', 'deload'];
 
 export default function Progression() {
   const t = useTheme();
@@ -54,6 +60,14 @@ export default function Progression() {
   const wu = useSettings().weightUnit;
   const unitNote = convertedNote(wu);
   const tips = suggestProgression(log, wu);
+  const whole = isWhole(logStatus);
+  // The donut's slices and the legend's lines: how many of the targets are each
+  // kind. Null — not zero — under a read that was not whole, which the legend
+  // prints as a dash and the donut does not draw.
+  const mix: Slice[] = ACTIONS.map((a) => {
+    const n = tips.filter((x) => x.action === a).length;
+    return { label: META[a].label, tone: META[a].tone, value: whole ? n : null, shown: whole ? String(n) : null };
+  });
   const G = layout.gutter;
 
   return (
@@ -116,11 +130,33 @@ export default function Progression() {
           </Section>
           )
         ) : (
+          <>
+          {/* ── what next session asks, as one picture ─────────────────────
+              The page opened on a list; it opens on the mix the list adds up
+              to. Counted only over a read that finished whole — under a
+              truncated one a lift last trained before the cut is not on the
+              list, so the shares would be of a sample, and the ring draws its
+              grey track and a dash instead. */}
           <Section>
-            <SectionHead title="Aim for these next time" note={`${tips.length} lift${tips.length === 1 ? '' : 's'}`} />
+            <SectionHead title="Next Session at a Glance" />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+              <Donut
+                slices={mix} centre={whole ? String(tips.length) : null} sub={tips.length === 1 ? 'lift' : 'lifts'}
+                spoken={whole
+                  ? `${tips.length} lift${tips.length === 1 ? '' : 's'}: ${mix.filter((m) => (m.value ?? 0) > 0).map((m) => `${m.shown} ${m.label}`).join(', ')}`
+                  : 'The mix of targets is not counted, because not every session could be read'} />
+              <Legend items={mix} />
+            </View>
+            {!whole && logStatus !== 'error' ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {logStatus === 'loading' ? 'Still reading your training log.' : 'Not every session could be read, so the mix is not counted. Each target below is still drawn from a real last session.'}
+              </Text>
+            ) : null}
+          </Section>
+          <Section>
+            <SectionHead title="Aim for These Next Time" note={`${tips.length} lift${tips.length === 1 ? '' : 's'}`} />
             {tips.map((tip, i) => {
               const m = META[tip.action];
-              const c = m.color(t);
               const bump = tip.nextWeight - tip.lastWeight;
               // The jump is converted as a SPAN. The commonest one this
               // screen produces is 2.5 kg, which is 5.5 lb — and subtracting
@@ -132,17 +168,12 @@ export default function Progression() {
               return (
                 <View key={tip.exercise} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                    <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name={m.icon as any} size={17} color={c} />
-                    </View>
+                    <IconPlate icon={m.icon} tone={m.tone} size={36} />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(tip.exercise)}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{movement(tip.exercise)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Last: {fig(liftLabel(tip.lastWeight, wu))} × {tip.lastReps}</Text>
                     </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c }} />
-                      <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>{m.label}</Text>
-                    </View>
+                    <TonedChip label={m.label} tone={m.tone} />
                   </View>
                   <View style={{ height: sp.md }} />
                   <KpiRow items={[
@@ -161,20 +192,20 @@ export default function Progression() {
                 </View>
               );
             })}
-          </Section>
-        )}
-
-        {tips.length > 0 ? (<>
-          <Rule />
-          <Section>
-            <Text style={{ ...ty.caption, color: t.ink3 }}>Double-progression: clear the top of the rep range on every working set, then the weight goes up and reps reset. These are guidance — log what you actually lift.</Text>
             {/* The targets are worked out on metric plates and read out in
                 pounds, so an imperial rack will not always have the exact
                 figure above. Saying so is the difference between a target and
                 an instruction nobody can follow. */}
             {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{unitNote} Load the nearest thing your gym has.</Text> : null}
+            <View style={{ marginTop: sp.md }}>
+              <Expandable title="How Targets Are Worked Out">
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Double-progression: clear the top of the rep range on every working set, then the weight goes up and reps reset. These are guidance — log what you actually lift.</Text>
+              </Expandable>
+            </View>
           </Section>
-        </>) : null}
+          </>
+        )}
+
       </ScrollView>
     </SafeAreaView>
   );

@@ -12,8 +12,8 @@ import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, grown, type as ty, numeric } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Cta, fig, DayBars, IconPlate } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, grown, type as ty, numeric, elevation } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { shownStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
@@ -304,6 +304,9 @@ export default function Consistency() {
     ? `Best ${best} day${best === 1 ? '' : 's'} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
     : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`;
 
+  // The week the streak is being kept in: the grid's last column.
+  const weekDays = cols[cols.length - 1] ?? [];
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
@@ -312,11 +315,6 @@ export default function Consistency() {
         {/* The board's pushed-page head; the window is the one quiet line
             under the title. */}
         <PageHead title="Consistency" subtitle={`Last ${WEEKS} weeks`} />
-
-        {/* Before the streak figure, which is the number people argue with.
-            What counts as a training day and what breaks a streak decide both
-            the hero and the grid, and neither was stated anywhere on screen. */}
-        <ScreenHelp screen="consistency" />
 
         {/* Said before the hero, because everything below it is a dash until the
             log loads and the reader needs to know why rather than guess. */}
@@ -342,8 +340,11 @@ export default function Consistency() {
             the unit rather than in front of the figure, and the card speaks
             label, figure, unit and note as one sentence, so VoiceOver gets
             "Current Streak, 140 days or more" rather than a bare 140. */}
-        <Section>
-          <SectionHead title="Current Streak" />
+        <View style={{ backgroundColor: t.brandSoft, borderRadius: radius.xl, padding: 18, marginTop: 14, ...elevation.card }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xs }}>
+            <IconPlate icon="flame" tone="orange" size={36} />
+            <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, flex: 1 }}>Current Streak</Text>
+          </View>
           {/* Label, figure, unit and sentence are one fact, and one stop. */}
           <View accessible accessibilityLabel={['Current Streak', [known ? fig(streak) : fig(null), !known ? undefined : claim.bounded ? boundedStreakUnit(streak) : streak === 1 ? 'day' : 'days'].filter(Boolean).join(' '), streakNote].filter(Boolean).join(', ')}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
@@ -352,12 +353,60 @@ export default function Consistency() {
               <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
                 style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{known ? fig(streak) : fig(null)}</Text>
               {known ? (
-                <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{!known ? undefined : claim.bounded ? boundedStreakUnit(streak) : streak === 1 ? 'day' : 'days'}</Text>
+                <Text numberOfLines={1} style={{ ...ty.head, color: t.ink2, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{!known ? undefined : claim.bounded ? boundedStreakUnit(streak) : streak === 1 ? 'day' : 'days'}</Text>
               ) : null}
             </View>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{streakNote}</Text>
           </View>
-        </Section>
+          {/* ── this week, as seven bars ────────────────────────────────────
+              The last column of the grid below, stood up: exercises logged on
+              each day of the week the streak is being kept in. A day still to
+              come draws nothing; a day with nothing logged is the grey stub of
+              a known nothing; and while the log is unread EVERY day draws
+              nothing, because an unread Tuesday is not a rest day. */}
+          <View style={{ marginTop: sp.lg }}>
+            <DayBars
+              days={weekDays.map((d, i) => ({ label: DOW[i]?.[0] ?? '', value: !known || d > today ? null : (counts[key(d)] || 0) }))}
+              spoken={known
+                ? 'This week. ' + weekDays.filter((d) => d <= today).map((d) => dayLabel(d)).join('. ') + '.'
+                : 'This week is not drawn, because your training log has not been read.'} />
+          </View>
+        </View>
+
+        {/* Three all-time totals reduced from `log`, as tiles under the hero.
+            With nothing read, three zeroes under the word "Totals" is a claim
+            about the client's whole training history, and it is the one thing
+            we do not have. The same is true of a read that came back at its
+            row limit, which is why this is `countable` and the heatmap below
+            is `known`. `best` follows the same rule: on a truncated read it is
+            the best of the weeks that fitted. */}
+        <KpiRow tiles items={[
+          { label: 'Exercises', tone: 'blue', value: countable ? fig(totalExercises) : fig(null), unit: logStatus === 'partial' ? 'not all read' : undefined },
+          { label: 'Days Trained', tone: 'purple', value: countable ? fig(trainedDays) : fig(null), unit: logStatus === 'partial' ? 'not all read' : undefined },
+          { label: 'Best Streak', tone: 'orange', value: countable ? fig(best) : fig(null), unit: logStatus === 'partial' ? 'not all read' : undefined },
+        ]} />
+        {known && !countable && logStatus === 'partial' ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            You have trained more times than this screen can read in one go, so these three are
+            left blank rather than added up short.
+            {' '}
+            {/* Only claimed where it is true. The whole point of the gate
+                above is that a figure computed from a prefix is not stated as
+                a fact, and a sentence promising a complete grid is that same
+                kind of claim about the picture underneath it. */}
+            {gridCoverage === 'covered'
+              ? 'The grid below is your recent weeks and is complete.'
+              : gridCompleteFrom
+                ? `The grid below is complete from ${fmtFullDay(gridCompleteFrom.toISOString())} onwards — the weeks before that are older than this screen could read, so their empty squares are not days you missed.`
+                : 'The grid below may not reach all twelve weeks, so an empty square in the earliest ones is not necessarily a day you missed.'}
+          </Text>
+        ) : null}
+
+        {/* What counts as a training day and what breaks a streak decide both
+            the figure above and the grid below, and neither was stated
+            anywhere on screen. One shut row, under the figures it explains
+            rather than over them: the page opens on the streak now. */}
+        <ScreenHelp screen="consistency" />
 
         {/* ── the days a freeze actually covered ────────────────────────────
             The budget is earned from the log, spent silently, and until now
@@ -427,35 +476,6 @@ export default function Consistency() {
         </Section>
 
 
-        <Section>
-          <SectionHead title="Totals" note={logStatus === 'partial' ? 'Not all read' : undefined} />
-          {/* Three all-time totals reduced from `log`. With nothing read, three
-              zeroes under the word "Totals" is a claim about the client's whole
-              training history, and it is the one thing we do not have. The same
-              is true of a read that came back at its row limit, which is why
-              this is `countable` and the heatmap above is `known`. */}
-          <KpiRow items={[
-            { label: 'Exercises', value: countable ? fig(totalExercises) : fig(null) },
-            { label: 'Days Trained', value: countable ? fig(trainedDays) : fig(null) },
-            { label: 'Best Streak', value: countable ? fig(best) : fig(null) },
-          ]} />
-          {known && !countable && logStatus === 'partial' ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              You have trained more times than this screen can read in one go, so these three are
-              left blank rather than added up short.
-              {' '}
-              {/* Only claimed where it is true. The whole point of the gate
-                  above is that a figure computed from a prefix is not stated as
-                  a fact, and a sentence promising a complete grid is that same
-                  kind of claim about the picture underneath it. */}
-              {gridCoverage === 'covered'
-                ? 'The grid below is your recent weeks and is complete.'
-                : gridCompleteFrom
-                  ? `The grid below is complete from ${fmtFullDay(gridCompleteFrom.toISOString())} onwards — the weeks before that are older than this screen could read, so their empty squares are not days you missed.`
-                  : 'The grid below may not reach all twelve weeks, so an empty square in the earliest ones is not necessarily a day you missed.'}
-            </Text>
-          ) : null}
-        </Section>
 
 
         <Section>

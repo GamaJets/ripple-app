@@ -30,9 +30,30 @@ import { exerciseSlug } from '../../src/lib/exerciseId';
 import { holdRecords, holdLabel, timedSetLabel } from '../../src/lib/timedSets';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, Ghost, Notice, Cta, fig, KpiRow, IconPlate, Expandable } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, numeric, value, font, radius, elevation } from '../../src/theme/scale';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
+
+/**
+ * The ranking, drawn: this record beside the best on the same board.
+ *
+ * A board is a ranked list, and the rank was a grey numeral — the bar is how
+ * far down the list a row really is, which "3" does not say (third by a
+ * kilogram and third by forty look the same). It compares rows of ONE board
+ * with each other and with nothing else: an estimated max is never drawn
+ * against a hold. Decoration inside a row that already speaks its own
+ * sentence, so it is hidden from a screen reader; `null` draws the track alone.
+ */
+function RankBar({ share, tone }: { share: number | null; tone: 'blue' | 'orange' | 'purple' }) {
+ const t = useTheme();
+ const pct = share != null && Number.isFinite(share) ? Math.max(0, Math.min(100, Math.round(share * 100))) : null;
+ return (
+  <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+   style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, marginTop: 6, overflow: 'hidden' }}>
+   {pct != null ? <View style={{ height: 6, borderRadius: 3, width: `${pct}%`, backgroundColor: t.data[tone] }} /> : null}
+  </View>
+ );
+}
 
 export default function Records() {
  const t = useTheme();
@@ -201,6 +222,21 @@ export default function Records() {
   const added = r.addedKg ? liftLabel(r.addedKg, wu) : null;
   return `${movement(r.exercise)}, ${bodyweightSetLabel(r.reps, r.addedKg, added)}, on ${dstr(r.at)}`;
  };
+ // ── the three boards, counted ────────────────────────────────────────
+ // Each tile is the length of one board below, in that board's colour —
+ // strength blue, bodyweight orange, holds purple, the same three the bars
+ // under the rows use. A count over a truncated read is the size of what
+ // came back, so it is a dash that says why where its unit would be.
+ // Only a read that finished whole can count a board: 'partial' is the newest
+ // part of it, and 'error' is whatever this phone was already holding.
+ const counted = logStatus === 'ready';
+ const tiles = (
+ <KpiRow tiles items={[
+  { label: 'Lifts on the Board', tone: 'blue', value: !counted ? fig(null) : fig(prs.length), unit: counted ? undefined : 'not all read' },
+  { label: 'Bodyweight Bests', tone: 'orange', value: !counted ? fig(null) : fig(repsOnly.length), unit: counted ? undefined : 'not all read' },
+  { label: 'Longest Holds', tone: 'purple', value: !counted ? fig(null) : fig(holds.length), unit: counted ? undefined : 'not all read' },
+ ]} />
+ );
  const G = layout.gutter;
 
  return (
@@ -226,7 +262,6 @@ export default function Records() {
       pull-up and dip off the estimated-max board — and says nothing, because
       every notice on this screen was gated on the training log alone. */}
   {!bodyKnown && cd.scansStatus !== 'loading' ? (<>
-   <Rule />
    <Section>
     <Notice tone={t.warn} kicker="Records" title="We couldn’t read your weight history"
      note={cd.scansStatus === 'partial'
@@ -240,7 +275,6 @@ export default function Records() {
   </>) : null}
 
   {logStatus === 'error' ? (<>
-   <Rule />
    <Section>
     <Notice tone={t.warn} kicker="Records" title="We couldn’t read your training log"
      note={prs.length === 0
@@ -260,12 +294,10 @@ export default function Records() {
       empty state is now reached only when BOTH boards are empty. */}
   {nothing && logStatus === 'error' ? null
    : nothing && logStatus === 'loading' ? (<>
-   <Rule />
    <Section>
     <Text style={{ ...ty.body, color: t.ink3 }}>Loading your records…</Text>
    </Section>
   </>) : nothing ? (<>
-   <Rule />
    <Section>
     {/* 'partial' had no arm of its own and fell into "No Records Yet". A
         truncated read holds the newest thousand sessions, and a lifter whose
@@ -299,7 +331,6 @@ export default function Records() {
        remained under the words "Personal Records" and rank it first. Said
        before the hero, because the hero is the figure it qualifies. */}
    {logStatus === 'partial' ? (<>
-    <Rule />
     <Section>
      <Notice tone={t.warn} kicker="Records" title="Read from your recent sessions only"
       note="You have logged more sessions than this screen can read in one go, so this board is your best from the most recent ones. A record set before that is still on your log and is not on this list — nothing has been reset." >
@@ -309,6 +340,10 @@ export default function Records() {
      </Notice>
     </Section>
    </>) : null}
+
+   {/* Under the hero when there is one; first when the only boards are
+       bodyweight and holds, which have no estimated max to lead with. */}
+   {!top ? tiles : null}
 
    {/* ── the hero: the heaviest thing you have lifted ────────────────── */}
    {top ? (<>
@@ -320,8 +355,11 @@ export default function Records() {
        own weigh-in, presented as a bar — while the row eleven lines down read
        "12 reps at bodyweight +20 kg" about the very same set. This is the
        figure people quote. See src/lib/bestSet.ts. */}
-   <Section>
-     <SectionHead title={logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift'} />
+   <View style={{ backgroundColor: t.brandSoft, borderRadius: radius.xl, padding: 18, marginTop: 14, ...elevation.card }}>
+     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xs }}>
+       <IconPlate icon="trophy" tone="amber" size={36} />
+       <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, flex: 1 }}>{logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift'}</Text>
+     </View>
      {/* Label, figure, unit and sentence are one fact, and one stop. */}
      <View accessible accessibilityLabel={[logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift', [fig(est1RMIn(top.est1RM, wu)), `${wu} est. 1RM`].filter(Boolean).join(' '), `${top.exercise} · best set ${bestSetLabel(top, setLoad(top), setAdded(top))} on ${dstr(top.at)}`].filter(Boolean).join(', ')}>
        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
@@ -329,7 +367,7 @@ export default function Records() {
              is a figure read wrong. */}
          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
            style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(est1RMIn(top.est1RM, wu))}</Text>
-         <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{`${wu} est. 1RM`}</Text>
+         <Text numberOfLines={1} style={{ ...ty.head, color: t.ink2, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{`${wu} est. 1RM`}</Text>
        </View>
        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{`${top.exercise} · best set ${bestSetLabel(top, setLoad(top), setAdded(top))} on ${dstr(top.at)}`}</Text>
      </View>
@@ -337,10 +375,9 @@ export default function Records() {
          here and the ones on a coach's console are the same lifts said twice
          rather than a discrepancy. Absent for a metric reader, who is being
          shown the record itself. */}
-     {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text> : null}
-   </Section>
-
-   <Rule />
+     {note ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{note}</Text> : null}
+   </View>
+   {tiles}
 
    <Section>
     {/* The count goes on a truncated read for the same reason the totals go
@@ -352,7 +389,7 @@ export default function Records() {
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{i + 1}</Text>
       <View style={{ flex: 1 }}>
-       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(pr.exercise)}</Text>
+       <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{movement(pr.exercise)}</Text>
        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {bestSetLabel(pr, setLoad(pr), setAdded(pr))} · {dstr(pr.at)}</Text>
        {/* Only where it differs from the set above — see `heaviestLine`. The
            word changes with the read: "logged" is a claim about the movement's
@@ -362,6 +399,7 @@ export default function Records() {
          {logStatus === 'partial' ? 'Heaviest read' : 'Heaviest logged'} {heavy}
         </Text>
        ) : null; })()}
+       <RankBar share={top.est1RM > 0 ? pr.est1RM / top.est1RM : null} tone="blue" />
       </View>
       <View style={{ alignItems: 'flex-end' }}>
        <Text style={{ ...value(17), color: t.ink }}>{fig(est1RMIn(pr.est1RM, wu))}</Text>
@@ -371,11 +409,15 @@ export default function Records() {
     ))}
     {/* Why a row can name two loads. Said once, under the board, rather than in
         every row that carries the second line. */}
-    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+    <View style={{ marginTop: sp.md }}>
+    <Expandable title="How This Is Ranked">
+    <Text style={{ ...ty.caption, color: t.ink3 }}>
      Ranked by estimated one-rep max, which is worked out from the reps you logged and is not a max you
      tested. Where the heaviest load you have put on a lift came off a different set, that set is named
      underneath it — the two are different records and this board is about the first.
     </Text>
+    </Expandable>
+    </View>
    </Section>
    </>) : null}
 
@@ -387,7 +429,6 @@ export default function Records() {
        at bodyweight is the record a gymnast actually keeps, and it needs
        nothing the log does not already hold. */}
    {repsOnly.length ? (<>
-    <Rule />
     <Section>
      <SectionHead title="Bodyweight Bests" note={logStatus === 'partial' ? undefined : `${repsOnly.length} movement${repsOnly.length === 1 ? '' : 's'}`} />
      {repsOnly.map((r, i) => (
@@ -395,11 +436,12 @@ export default function Records() {
        accessibilityLabel={repSpoken(r)}
        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
        <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(r.exercise)}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{movement(r.exercise)}</Text>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
          {/* delta-ok: the plus is not a movement, it is the weight hung off a belt. Nothing here changed from anything. */}
          {r.addedKg > 0 ? `+${fig(liftLabel(r.addedKg, wu))} added · ` : 'At bodyweight · '}{dstr(r.at)}
         </Text>
+        <RankBar share={repsOnly[0].reps > 0 ? r.reps / Math.max(...repsOnly.map((x) => x.reps)) : null} tone="orange" />
        </View>
        <View style={{ alignItems: 'flex-end' }}>
         <Text style={{ ...value(17), color: t.ink }}>{r.reps}</Text>
@@ -424,7 +466,6 @@ export default function Records() {
        tie, so a 60-second plank with a plate is never shown as the same
        achievement as a bare 60. */}
    {holds.length ? (<>
-    <Rule />
     <Section>
      <SectionHead title="Longest Holds" note={logStatus === 'partial' ? undefined : `${holds.length} movement${holds.length === 1 ? '' : 's'}`} />
      {holds.map((h, i) => (
@@ -432,13 +473,14 @@ export default function Records() {
        accessibilityLabel={holdSpoken(h)}
        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
        <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(h.exercise)}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink, textTransform: 'capitalize' }}>{movement(h.exercise)}</Text>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
          {/* delta-ok: the plus is a plate on a belt, not a change in anything. */}
          {h.loadKg > 0
           ? `${h.bodyweight ? 'At bodyweight +' : '+'}${fig(liftLabel(h.loadKg, wu))} · `
           : h.bodyweight ? 'At bodyweight · ' : ''}{dstr(h.at)}
         </Text>
+        <RankBar share={h.secs / Math.max(1, ...holds.map((x) => x.secs))} tone="purple" />
        </View>
        <View style={{ alignItems: 'flex-end' }}>
         <Text style={{ ...value(17), color: t.ink }}>{holdLabel(h.secs)}</Text>

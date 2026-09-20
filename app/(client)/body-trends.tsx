@@ -116,9 +116,9 @@ import { useToday } from '../../src/ui/today';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { goalOfKind, goalOnBody } from '../../src/lib/goalOnBody';
-import { Rule, Section, SectionHead, PageHead, Ghost, Notice, Spark } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, Ghost, Notice, Spark, TonedChip, type Tone } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
-import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, type as ty, numeric, value, font } from '../../src/theme/scale';
 
 interface MetricDef {
   key: string; label: string; unit: string; better: 'up' | 'down';
@@ -351,7 +351,7 @@ export default function BodyTrends() {
               </Text>
             ) : (<>
               <SectionHead title="Not Enough Readings Yet" />
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Add another scan to see trends</Text>
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Add another scan to see trends</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Once you've logged two or more readings, each metric graphs here so you can watch it move over time.</Text>
               {/* "Add another scan" was the whole instruction and there was no
                   way to do it from here — the only other control on this screen
@@ -412,7 +412,6 @@ export default function BodyTrends() {
             const groupHead = m.group && (mi === 0 || byMetric[mi - 1].m.group !== m.group) ? m.group : null;
             if (readings.length < 2) return (
               <View key={m.key}>
-                {mi > 0 ? <Rule /> : null}
                 <Section>
                   {groupHead ? <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{groupHead}</Text> : null}
                   <SectionHead title={m.label} note={readings.length ? readingsLabel(readings) : undefined} />
@@ -507,6 +506,14 @@ export default function BodyTrends() {
             const target = gk && isWhole(goalStatus)
               ? goalOnBody(goalOfKind(goals, gk), readings.map((r) => ({ t: r.at, v: r.value })), { weight: !!m.weight, unit: m.unit, wu })
               : null;
+            // The chart's colour NAMES the metric and says nothing about how it
+            // is doing: fat is orange and muscle blue on every screen that
+            // draws them, water is teal, and the sheet's health figures are
+            // purple. Weight and the score take the accent.
+            const tone: Tone = m.from === 'bodyFat' || ib?.key === 'fatMassKg' ? 'orange'
+              : m.from === 'muscle' || ib?.key === 'leanMassKg' || ib?.group === 'Segmental lean' ? 'blue'
+                : ib?.group === 'Water, protein & minerals' ? 'teal'
+                  : ib ? 'purple' : 'brand';
             const improving: boolean | undefined = m.from === 'score'
               ? (rawDelta > 0 ? true : rawDelta < 0 ? false : undefined)
               // The composition metrics ask their own definition, which
@@ -520,29 +527,30 @@ export default function BodyTrends() {
                 : movementIsProgress(rawDelta, cd.goal, m.from);
             return (
               <View key={m.key}>
-                {mi > 0 ? <Rule /> : null}
                 <Section>
                   {groupHead ? <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{groupHead}</Text> : null}
                   <SectionHead title={m.label} note={readingsLabel(readings)} />
-                  <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: sp.md, rowGap: sp.xs }}>
                     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                      <Text style={{ ...value(26), color: t.ink }}>{figure(last)}</Text>
+                      <Text style={{ ...value(30), color: t.ink }}>{figure(last)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginStart: 3 }}>{unit}</Text>
                     </View>
-                    {delta !== 0 ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: improving ? t.brand : t.ink3 }} />
-                        {/* "since your first scan" was wrong the moment the
-                            first point was a weigh-in. The date it is actually
-                            measured from is printed instead of guessed at.
-                            `decimals` is the metric's own grain: at the default
-                            of one, a limb's 0.05 kg movement printed as "+0.1"
-                            beside a figure carrying two decimals. */}
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(delta, { since: dayLabel(readings[0].at), unit, decimals: dp })}</Text>
-                      </View>
-                    ) : (
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>No change since {dayLabel(readings[0].at)}</Text>
-                    )}
+                    {/* The movement as a chip, and the accent only where
+                        `improving` is TRUE — the member's own goal, or the
+                        metric's own direction where no goal disputes it. Grey
+                        is every other movement and none at all: undefined is
+                        "no opinion", and drawing that as anything but quiet
+                        would be a verdict this screen cannot back.
+
+                        "since your first scan" was wrong the moment the first
+                        point was a weigh-in, so the date it is actually
+                        measured from is printed — on the line under the
+                        figure now, beside the chip rather than inside it.
+                        `decimals` is the metric's own grain: at the default of
+                        one, a limb's 0.05 kg movement printed as "+0.1" beside
+                        a figure carrying two decimals. */}
+                    <TonedChip tone={delta !== 0 && improving === true ? 'brand' : 'neutral'}
+                      label={deltaLabel(delta, { since: null, unit, decimals: dp })} />
                   </View>
                   {/* The date and instrument behind the big number above it.
                       "Need to see the dates the weight was measured as well" —
@@ -553,7 +561,7 @@ export default function BodyTrends() {
                       when it came from, then how it moved. A reader deciding
                       whether to believe a number needs its date before they
                       need its slope. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{measuredNote(now, today)}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>since {dayLabel(readings[0].at)} · {measuredNote(now, today)}</Text>
                   {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stale}</Text> : null}
                   {/* ── the rate ──────────────────────────────────────────
                       Through `deltaLabel` like every other movement in this
@@ -596,7 +604,7 @@ export default function BodyTrends() {
                       row assembled beside a chart can. What is left underneath
                       is the part the axis does not say: where the series
                       starts and how far it ranges. */}
-                  <Spark data={vals} labels={readings.map((r) => r.at)} unit={` ${unit}`} />
+                  <Spark area tone={tone} data={vals} labels={readings.map((r) => r.at)} unit={` ${unit}`} />
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>first {figure(first)} {unit}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>range {figure(min)}–{figure(max)} {unit}</Text>
@@ -618,7 +626,6 @@ export default function BodyTrends() {
               that case. */}
           {!anyComposition && bodyWhole ? (
             <View>
-              <Rule />
               <Section>
                 <SectionHead title="The Rest of the Sheet" />
                 <Text style={{ ...ty.label, color: t.ink3 }}>

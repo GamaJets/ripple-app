@@ -37,8 +37,9 @@ import { readinessMadeOf } from '../../src/lib/readiness';
 import { connectedProviders } from '../../src/lib/wearables/sleep';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Section, SectionHead, PageHead, KpiRow, Ring, TonedChip, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
+import { useDeviceHrv } from '../../src/ui/deviceHrv';
+import { sp, layout, radius, hairline, font, type as ty, numeric, value } from '../../src/theme/scale';
 import { localDate } from '../../src/lib/localDate';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -225,6 +226,9 @@ export default function Recovery() {
  const deviceSleep = useDeviceSleep();
  // The home screen's own readiness, not a second opinion about it.
  const rv = useReadiness();
+ // One named device's HRV and the nights kept behind it — the Devices screen's
+ // own hook, so this page prints the figure that one does.
+ const hrv = useDeviceHrv();
  const sleepReads: { reads: SleepRead[]; status: LoadStatus } = { reads: deviceSleep.reads, status: deviceSleep.status };
  const loadDeviceSleep = deviceSleep.refresh;
  // The read, its key, and the merge all live in DeviceSleepProvider now —
@@ -338,8 +342,8 @@ export default function Recovery() {
  // the profile behind readiness — five more reads, none of which the gesture
  // touched, on the screen whose own copy says "pull down to try again".
  const pull = usePullToRefresh(useCallback(() => {
-   deviceSleep.refresh(); void wear.syncAll(); reloadSleep(); reloadHabits(); reloadLog(); cd.reload(); reloadHr();
- }, [deviceSleep, wear, reloadSleep, reloadHabits, reloadLog, cd.reload, reloadHr]));
+   deviceSleep.refresh(); void wear.syncAll(); reloadSleep(); reloadHabits(); reloadLog(); cd.reload(); reloadHr(); void hrv.reload();
+ }, [deviceSleep, wear, reloadSleep, reloadHabits, reloadLog, cd.reload, reloadHr, hrv.reload]));
  /**
   * Take one night back out of the log.
   *
@@ -394,22 +398,31 @@ export default function Recovery() {
       could not be read" arrive at the same null inside readinessScore and mean
       opposite things to the person reading it. */}
   <Section>
-   <SectionHead title="Readiness" note={rv.readiness != null ? rv.readiness.label : undefined} />
-   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
-    {/* The one headline figure on the page, at the board's figure size. */}
-    <Text style={{ ...ty.hero, ...numeric, color: rv.readiness != null ? t.ink : t.ink3 }}>
-     {rv.readiness != null ? String(rv.readiness.score) : fig(null)}
-    </Text>
-    <Text style={{ ...ty.caption, color: t.ink3 }}>out of 100</Text>
+   <SectionHead title="Readiness" />
+   {/* The score as a ring, where a 44pt number was: it is a figure out of a
+       hundred, and an arc says "out of" before anybody reads the caption. The
+       ring takes `null` when there is no score — a track, no arc and a dash,
+       never an empty ring that reads as a score of nothing. The label is a
+       chip beside it and the words stay the verdict; the ring's green is the
+       accent and carries none. */}
+   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+    <Ring size={116}
+     value={rv.readiness != null ? rv.readiness.score / 100 : null}
+     figure={rv.readiness != null ? String(rv.readiness.score) : null}
+     sub="of 100"
+     spoken={rv.readiness != null ? `Readiness ${rv.readiness.score} out of 100, ${rv.readiness.label}` : 'Readiness, no score yet'} />
+    <View style={{ flex: 1, minWidth: 0, gap: sp.sm }}>
+     {rv.readiness != null ? <TonedChip label={rv.readiness.label} tone="neutral" /> : null}
+     {/* The tip and what the tip was computed from, together. A tip standing
+         on its own is advice with no stated basis, which is the thing a member
+         cannot argue with and therefore cannot trust. */}
+     <Text style={{ ...ty.label, color: t.ink2 }}>
+      {rv.readiness != null
+        ? `${rv.readiness.tip} ${readinessMadeOf(rv.readiness)}.`
+        : rv.breakdown.absence}
+     </Text>
+    </View>
    </View>
-   {/* The tip and what the tip was computed from, together. A tip standing on
-       its own is advice with no stated basis, which is the thing a member
-       cannot argue with and therefore cannot trust. */}
-   <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>
-    {rv.readiness != null
-      ? `${rv.readiness.tip} ${readinessMadeOf(rv.readiness)}.`
-      : rv.breakdown.absence}
-   </Text>
 
    {rv.breakdown.lines.map((l) => (
     // "Sleep" and "7h 30m a night over 2 of the last 3 nights" are one fact
@@ -431,7 +444,27 @@ export default function Recovery() {
    ))}
   </Section>
 
-  <Rule />
+  {/* ── what the devices and the log say, as three tiles ────────────────
+      On the ground under the score they feed. Each is one source's own
+      figure and is never blended with another's: last night is what a DEVICE
+      measured, the average is what the member TYPED (and only over a whole
+      read — see `avgSleep`), and HRV is one named device's reading through
+      the same `useDeviceHrv` the Devices screen prints, so the two screens
+      cannot state two of them. A trend is that figure's own kept history and
+      is held back under a read that was not whole. */}
+  <KpiRow tiles
+   onPress={(k) => { if (k.route) router.push(k.route as any); }}
+   items={[
+    { label: 'Last Night', tone: 'purple', route: '/(client)/devices',
+      value: lastNight?.outcome === 'measured' ? formatSleepHours(lastNight.minutesAsleep) : fig(null),
+      delta: lastNight?.outcome === 'measured' ? lastNight.source?.sourceName : undefined,
+      trend: isWhole(deviceSleep.status) ? [...deviceNights].reverse().map((n) => (n.outcome === 'measured' ? n.minutesAsleep : null)) : [] },
+    { label: 'Logged Average', tone: 'blue', value: avgSleep, unit: avgSleep === '—' ? undefined : 'h',
+      trend: sleepWhole ? [...sleep].reverse().map((n) => n.hours) : [] },
+    { label: hrv.tonight ? `HRV · ${hrv.tonight.sourceName}` : 'HRV', tone: 'pink', route: '/(client)/devices',
+      value: hrv.tonight ? num1(hrv.tonight.ms) : fig(null), unit: hrv.tonight ? 'ms' : undefined,
+      trend: isWhole(hrv.status) ? [...hrv.nights].reverse().map((n) => n.ms) : [] },
+   ]} />
 
   {/* ── today's hydration, as a figure card ─────────────────────────── */}
   {/* The board's figure card where the Hero was: Hydration as the head,
@@ -469,8 +502,9 @@ export default function Recovery() {
     <View accessible accessibilityRole="progressbar"
      accessibilityLabel={`${Math.round(Math.max(0, Math.min(100, pct)))}% of today's water goal`}
      accessibilityValue={{ min: 0, max: 100, now: Math.round(Math.max(0, Math.min(100, pct))) }}
-     style={{ height: 4, borderRadius: 2, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
-     <View style={{ height: 4, borderRadius: 2, width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: t.brand }} />
+     style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, marginTop: sp.md, overflow: 'hidden' }}>
+     {/* Teal, because water is teal on every screen that draws it. */}
+     <View style={{ height: 8, borderRadius: 4, width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: t.data.teal }} />
     </View>
    ) : null}
    {/* Dead until the count has arrived, which is the same fact `hydration`
@@ -501,7 +535,6 @@ export default function Recovery() {
   ) : null}
   </Section>
 
-  <Rule />
 
   {/* ── heart-rate zones ────────────────────────────────────────────── */}
   <Section>
@@ -525,7 +558,6 @@ export default function Recovery() {
     } />
   </Section>
 
-  <Rule />
 
   {/* ── sleep ───────────────────────────────────────────────────────── */}
   <Section>
@@ -562,7 +594,7 @@ export default function Recovery() {
        gap: sp.md, paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>{nightLabel(n.night)}</Text>
       <View style={{ alignItems: 'flex-end', flex: 1 }}>
-       <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: n.outcome === 'measured' ? t.ink2 : t.ink3 }}>
+       <Text style={{ ...ty.caption, ...numeric, ...font('500'), color: n.outcome === 'measured' ? t.ink2 : t.ink3 }}>
         {formatSleepHours(n.minutesAsleep)}
        </Text>
        {/* Every row says where it came from, or why there is nothing —
@@ -690,7 +722,7 @@ export default function Recovery() {
     <View key={sx.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
      <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(sx.at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</Text>
      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-      <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>{sx.hours} h</Text>
+      <Text style={{ ...ty.caption, ...numeric, ...font('500'), color: t.ink2 }}>{sx.hours} h</Text>
       <Quality n={sx.quality} color={t.brand} dim={t.surface3} />
       {/* A visible control, not a gesture: a way out that nothing announces is
           not a way out. `Ghost icon="minus"` speaks as "Remove", and the label
@@ -703,7 +735,6 @@ export default function Recovery() {
    ))}
   </Section>
 
-  <Rule />
 
   {/* ── logged recovery sessions ─────────────────────────────────────── */}
   <Section>
@@ -734,7 +765,7 @@ export default function Recovery() {
     recoverySessions.map((l, i) => (
      <View key={(l.id ?? '') + i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
        gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{l.exercise}</Text>
+      <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{l.exercise}</Text>
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
        {[l.cardio?.mins ? `${l.cardio.mins} min` : null,
          new Date(l.t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })]
@@ -754,7 +785,6 @@ export default function Recovery() {
    </View>
   </Section>
 
-  <Rule />
 
   {/* ── mobility routines ───────────────────────────────────────────── */}
   <Section>
@@ -772,7 +802,7 @@ export default function Recovery() {
        accessibilityState={{ expanded: open }}
        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
        <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>
+        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{r.name}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.dur}</Text>
        </View>
        <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}>
@@ -794,7 +824,6 @@ export default function Recovery() {
    })}
   </Section>
 
-  <Rule />
 
   {/* ── rest-day guidance ───────────────────────────────────────────── */}
   <Section>

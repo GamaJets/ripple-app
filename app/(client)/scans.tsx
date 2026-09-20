@@ -97,8 +97,8 @@ import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc,
 import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import { Rule, Section, SectionHead, ScreenHeader, KpiRow, ActionCard, Cta, Ghost, Spark, Field, fig, Flag, ChipGrid } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, PageHead, Segmented, TonedChip, IconPlate, KpiRow, ActionCard, Cta, Ghost, Spark, Expandable, Field, fig, Flag, ChipGrid } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, grown, font, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 // A picture of the printout goes to two named companies. The camera permission
@@ -113,7 +113,7 @@ import {
   SCAN_REFUSED_TITLE, SCAN_REFUSED_NOTE, SCAN_RECORD_FAILED_TITLE, SCAN_RECORD_FAILED_NOTE,
   type ScanSheetAnswer,
 } from '../../src/lib/scanSheetConsent';
-import { trendsByGroup, compositionInsights, metricIsProgress, type ScanMetrics } from '../../src/lib/inbodyMetrics';
+import { trendsByGroup, compositionInsights, metricIsProgress, metricReadings, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 // The finer rule for pounds that let this screen's one unconverted table be
 // converted at all. See its header for the grain each metric is printed at.
 import {
@@ -1780,6 +1780,28 @@ export default function Scans() {
     ? goalOnBody(goalOfKind(goals, 'bodyfat'), cd.bodyFatSeries.map((p) => ({ t: p.t, v: p.v })), { weight: false, unit: '%', wu })
     : null;
 
+  // ── the latest scan as one picture ──────────────────────────────────────
+  // What the Body Composition bar is drawn from: the NEWEST scan only, and only
+  // the figures it carries. `mass` is kilograms and is used for nothing but a
+  // segment's width; `figure` is what the sheet printed, in the member's unit
+  // where it is a mass and in litres where it is water (see compositionUnit.ts
+  // for why a litre does not convert). Null — no card — under two figures, and
+  // under a read that was not whole, where "latest" may not be the latest.
+  const comp = (() => {
+    if (!latest || !scansWhole) return null;
+    const out: { label: string; figure: string; mass: number; hue: 'orange' | 'blue' | 'teal' }[] = [];
+    const w = latest.weightKg, bf = latest.bodyFatPct;
+    const fatKg = latest.metrics?.fatMassKg ?? (Number.isFinite(w) && Number.isFinite(bf) ? (w * bf) / 100 : null);
+    if (Number.isFinite(bf) && fatKg != null && fatKg > 0) out.push({ label: 'Fat', figure: `${plain(bf, 1)}%`, mass: fatKg, hue: 'orange' });
+    const smm = latest.skeletalMuscleKg;
+    if (typeof smm === 'number' && Number.isFinite(smm) && smm > 0) out.push({ label: 'Muscle', figure: fig(weightLabel(smm, wu)), mass: smm, hue: 'blue' });
+    const water = latest.metrics?.bodyWaterL;
+    if (typeof water === 'number' && Number.isFinite(water) && water > 0) out.push({ label: 'Water', figure: `${plain(water, 1)} L`, mass: water, hue: 'teal' });
+    return out.length >= 2 ? out : null;
+  })();
+  // The InBody score's own dated series — the third tile's figure and trend.
+  const scoreReads = metricReadings(cd.scans, 'inbodyScore');
+
   const input = { flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
   const G = layout.gutter;
 
@@ -1787,173 +1809,243 @@ export default function Scans() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
-        {/* ── header ─────────────────────────────────────────────────────── */}
-        <ScreenHeader
-          eyebrow="Your results"
+        {/* ── header ───────────────────────────────────────────────────────
+            The approved mockup's head: the page name centred in Sora, nothing
+            over it. The eyebrow went — "Your results" said what "Progress"
+            already says. The leading slot is an empty blank, not a back
+            control: this is a tab root and there is nowhere to go back to. */}
+        <PageHead
           title="Progress"
+          leading={null}
           // Labelled, not a bare icon: TF-21 was written by somebody who
           // could not tell what the icon would do until they had done it.
-          actions={<Ghost icon="share" label="Share" onPress={shareProgress} />}
+          trailing={<Ghost icon="share" label="Share" onPress={shareProgress} />}
         />
 
         {/* ── one metric at a time, as the board draws it ─────────────────
             Weight and body fat are tabs over one figure and one chart;
-            Photos is the compare screen, which already exists. */}
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3, marginTop: sp.lg }}>
-          {([['weight', 'Weight'], ['bodyfat', 'Body Fat']] as const).map(([key, label]) => {
-            const selected = progressMetric === key;
-            return (
-              <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected }} accessibilityLabel={label} onPress={() => setProgressMetric(key)}
-                style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, backgroundColor: selected ? t.ink : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                <Text numberOfLines={1} style={{ ...ty.label, fontWeight: selected ? '600' : '500', color: selected ? t.bg : t.ink2 }}>{label}</Text>
-              </Pressable>
-            );
-          })}
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: false }} accessibilityLabel="Photos" onPress={() => router.push('/(client)/compare')}
-            style={{ flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center' }}>
-            <Text numberOfLines={1} style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Photos</Text>
-          </Pressable>
-        </View>
+            Photos is the compare screen, which already exists — so it is a
+            segment that GOES somewhere and never draws as selected. */}
+        <Segmented
+          style={{ marginTop: sp.lg }}
+          value={progressMetric}
+          onChange={(k) => { if (k !== 'photos') setProgressMetric(k); }}
+          options={[
+            { key: 'weight', label: 'Weight' },
+            { key: 'bodyfat', label: 'Body Fat' },
+            { key: 'photos', label: 'Photos', onPress: () => router.push('/(client)/compare') },
+          ] as const}
+        />
 
-        {/* ── the figure the screen leads with ─────────────────────────────
+        {/* ── THE HERO: the figure the screen leads with ───────────────────
+            A card tinted with the accent's pale plate, as the approved mockup
+            draws it: the figure at hero size with its unit, the movement as a
+            chip beside it, the day and the instrument under it, then the
+            chart and its range — one card, because they are one statement.
+
             The latest reading of the chosen metric, dated. `measuredNote`
             names the instrument, the day and the age, in that order, and the
-            movement clause names the day it is measured FROM rather than
-            saying "your previous reading" and hoping. Through `deltaLabel`,
-            which is the one place a sign is decided: a reading that has not
-            moved is "No change", never "−0". */}
-        <Pressable onPress={() => router.push('/(client)/body-trends')} accessibilityRole="button"
-          accessibilityLabel={`${progressMetric === 'weight' ? 'Weight' : 'Body fat'}, ${progressNow
-            ? `${progressMetric === 'weight' ? fig(weightIn(progressNow.value, wu)) + ' ' + wu : fig(progressNow.value) + ' percent'}. ${measuredNote(progressNow, today)}`
-            : 'no reading yet'}. Open body composition`}
-          style={{ paddingTop: sp.xl, paddingBottom: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>{progressMetric === 'weight' ? 'Weight' : 'Body Fat'}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: sp.sm }}>
-            <Text style={{ ...value(32), color: t.ink }}>
-              {progressMetric === 'weight' ? fig(weightIn(wNow?.value, wu)) : fig(bfNow?.value)}
-            </Text>
+            line names the day the movement is measured FROM rather than
+            saying "your previous reading" and hoping. The chip's words come
+            through `deltaLabel`, which is the one place a sign is decided: a
+            reading that has not moved is "No change", never "−0". */}
+        <View style={{ backgroundColor: t.brandSoft, borderRadius: radius.xl, padding: 18, marginTop: 14, ...elevation.card }}>
+          <Pressable onPress={() => router.push('/(client)/body-trends')} accessibilityRole="button"
+            accessibilityLabel={`${progressMetric === 'weight' ? 'Weight' : 'Body fat'}, ${progressNow
+              ? `${progressMetric === 'weight' ? fig(weightIn(progressNow.value, wu)) + ' ' + wu : fig(progressNow.value) + ' percent'}. ${progressWas ? deltaLabel(progressDelta, { since: bodyDayLabel(progressWas.at), unit: progressMetric === 'weight' ? wu : '%' }) + (progressGood ? ', on track' : '') : 'First reading'}. ${measuredNote(progressNow, today)}`
+              : 'no reading yet'}. Open body composition`}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 10, rowGap: sp.xs }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', flexShrink: 1 }}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>
+                  {progressMetric === 'weight' ? fig(weightIn(wNow?.value, wu)) : fig(bfNow?.value)}
+                </Text>
+                {progressNow ? (
+                  <Text style={{ ...ty.section, ...font('600', 'display'), color: t.ink2, marginStart: 5 }}>{progressMetric === 'weight' ? wu : '%'}</Text>
+                ) : null}
+              </View>
+              {/* The movement as a chip, the way the mockup draws "−2.4 kg" —
+                  and GREEN only where it is progress towards the member's own
+                  goal. Grey where the goal has no opinion or the number went
+                  the other way: the colour is a verdict, and this screen does
+                  not hand one out it cannot back.
+
+                  The green one is built here and not a `TonedChip`: a brand
+                  chip's plate IS `brandSoft`, which is what this card is made
+                  of, so it would be words with no chip round them. The
+                  mockup's is the solid accent under its own ink, which is the
+                  pair every selected chip in the app already uses. */}
+              {progressNow ? (
+                progressWas && progressGood ? (
+                  <View style={{ minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3, borderRadius: grown(26) / 2, backgroundColor: t.brand, justifyContent: 'center' }}>
+                    <Text style={{ ...ty.micro, ...numeric, ...font('700'), color: t.brandInk }}>
+                      {deltaLabel(progressDelta, { since: null, unit: progressMetric === 'weight' ? wu : '%' })}
+                    </Text>
+                  </View>
+                ) : (
+                  <TonedChip tone="neutral" label={progressWas
+                    ? deltaLabel(progressDelta, { since: null, unit: progressMetric === 'weight' ? wu : '%' })
+                    : 'First Reading'} />
+                )
+              ) : null}
+            </View>
             {progressNow ? (
-              <Text style={{ ...ty.body, ...numeric, color: t.ink3, marginStart: 5 }}>{progressMetric === 'weight' ? wu : '%'}</Text>
-            ) : null}
-          </View>
-          {progressNow ? (
-            <>
-              {/* The movement on its own line under the figure, the way the
-                  board draws "−2.4 kg" — and green only where it is progress
-                  towards the member's own goal. Ink where the goal has no
-                  opinion or the number went the other way: the colour is a
-                  verdict, and this screen does not hand one out it cannot
-                  back. The day it is measured FROM is in the sentence. */}
-              <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: progressGood ? t.brand : t.ink2, marginTop: 3 }}>
-                {progressWas
-                  ? deltaLabel(progressDelta, { since: bodyDayLabel(progressWas.at), unit: progressMetric === 'weight' ? wu : '%' })
-                  : 'First reading'}
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
+                {progressWas ? `since ${bodyDayLabel(progressWas.at)} · ` : ''}{measuredNote(progressNow, today)}
               </Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{measuredNote(progressNow, today)}</Text>
-            </>
-          ) : (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-              {scansReading ? 'Reading your scans…'
-                : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
-                : progressMetric === 'weight' ? 'No weight on record yet — add a check-in or an InBody scan.'
-                : 'No scans yet — add your InBody report to start tracking.'}
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>
+                {scansReading ? 'Reading your scans…'
+                  : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
+                  : progressMetric === 'weight' ? 'No weight on record yet — add a check-in or an InBody scan.'
+                  : 'No scans yet — add your InBody report to start tracking.'}
+              </Text>
+            )}
+            {/* Where a figure is stale, how stale — said under the figure
+                itself, because the client is the only person who can judge
+                whether a scan from eleven weeks ago still describes them, and
+                they can only judge it if they are given the eleven weeks. */}
+            {stalenessNote(progressNow, today) ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{stalenessNote(progressNow, today)}</Text>
+            ) : null}
+          </Pressable>
+
+          {/* The trend over the chosen range. `labels` is what puts a DATE on
+              the readout when the member touches the line — the chart answers
+              "when" as well as "what". Two readings are the least a line can be
+              drawn from; under that the line says what it is waiting for. It
+              sits OUTSIDE the pressable above: a chart inside a button cannot
+              be touched for its readout. */}
+          <View style={{ marginTop: sp.sm }}>
+            {progressTrendReads.length > 1 ? (
+              <Spark area
+                data={progressTrendReads.map((reading) => (progressMetric === 'weight' ? weightIn(reading.value, wu) : reading.value)).filter((v): v is number => v != null)}
+                unit={progressMetric === 'weight' ? ` ${wu}` : '%'}
+                labels={progressTrendReads.map((reading) => reading.at)}
+              />
+            ) : (
+              <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.xs }}>
+                {scansReading ? 'Reading your history…'
+                  : progressReads.length > 1 ? `Nothing in the last ${progressRange === '1M' ? 'month' : progressRange === '3M' ? '3 months' : progressRange === '6M' ? '6 months' : 'year'} — widen the range to see the trend.`
+                  : `Add another ${progressMetric === 'weight' ? 'weight' : 'body-fat'} reading to draw this trend.`}
+              </Text>
+            )}
+          </View>
+          {/* "First 3 Mar" is a claim about the member's whole record. The scan
+              read is ordered `taken_at desc` and capped, so under 'partial' the
+              earliest point on this chart is the earliest of the most recent
+              thousand — not the member's first, and there is no way to tell
+              from inside the page. The count is only named when the read was
+              whole, and the sentence says what the chart actually starts at
+              rather than calling it a first. */}
+          {progressTrendReads.length > 1 ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+              {scansWhole
+                ? `${readingsLabel(progressReads)} · from ${bodyDayLabel(progressTrendReads[0].at)}`
+                : cd.scansStatus === 'partial'
+                  ? `You have more readings on record than we can read at once, so they aren’t counted here. This chart starts at ${bodyDayLabel(progressTrendReads[0].at)}, which isn’t necessarily your first.`
+                  : `Not all of your readings could be read, so they aren’t counted here. This chart starts at ${bodyDayLabel(progressTrendReads[0].at)}, which isn’t necessarily your first.`}
             </Text>
-          )}
-        </Pressable>
+          ) : null}
 
-        {/* The trend over the chosen range. `labels` is what puts a DATE on
-            the readout when the member touches the line — the chart answers
-            "when" as well as "what". Two readings are the least a line can be
-            drawn from; under that the line says what it is waiting for. */}
-        {progressTrendReads.length > 1 ? (
-          <Spark area
-            data={progressTrendReads.map((reading) => (progressMetric === 'weight' ? weightIn(reading.value, wu) : reading.value)).filter((v): v is number => v != null)}
-            unit={progressMetric === 'weight' ? ` ${wu}` : '%'}
-            labels={progressTrendReads.map((reading) => reading.at)}
-          />
-        ) : (
-          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-            {scansReading ? 'Reading your history…'
-              : progressReads.length > 1 ? `Nothing in the last ${progressRange === '1M' ? 'month' : progressRange === '3M' ? '3 months' : progressRange === '6M' ? '6 months' : 'year'} — widen the range to see the trend.`
-              : `Add another ${progressMetric === 'weight' ? 'weight' : 'body-fat'} reading to draw this trend.`}
-          </Text>
-        )}
-        {/* "First 3 Mar" is a claim about the member's whole record. The scan
-            read is ordered `taken_at desc` and capped, so under 'partial' the
-            earliest point on this chart is the earliest of the most recent
-            thousand — not the member's first, and there is no way to tell
-            from inside the page. The count is only named when the read was
-            whole, and the sentence says what the chart actually starts at
-            rather than calling it a first. */}
-        {progressTrendReads.length > 1 ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.md }}>
-            {scansWhole
-              ? `${readingsLabel(progressReads)} · from ${bodyDayLabel(progressTrendReads[0].at)}`
-              : cd.scansStatus === 'partial'
-                ? `You have more readings on record than we can read at once, so they aren’t counted here. This chart starts at ${bodyDayLabel(progressTrendReads[0].at)}, which isn’t necessarily your first.`
-                : `Not all of your readings could be read, so they aren’t counted here. This chart starts at ${bodyDayLabel(progressTrendReads[0].at)}, which isn’t necessarily your first.`}
-          </Text>
-        ) : null}
+          {/* The range as four chips under the chart, as the mockup draws
+              them: sized to their words, the chosen one filled in ink. */}
+          <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: 10 }}>
+            {(['1M', '3M', '6M', '1Y'] as const).map((range) => {
+              const selected = progressRange === range;
+              return (
+                <Pressable key={range} accessibilityRole="tab" accessibilityState={{ selected }}
+                  accessibilityLabel={range === '1M' ? 'Last month' : range === '3M' ? 'Last 3 months' : range === '6M' ? 'Last 6 months' : 'Last year'}
+                  onPress={() => setProgressRange(range)}
+                  // 32pt tall as drawn; the slop makes the target 44.
+                  hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
+                  style={{ minHeight: grown(32), minWidth: MIN_TARGET, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: selected ? t.ink : t.surface, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ ...ty.micro, ...numeric, color: selected ? t.surface : t.ink2 }}>{range}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
-        {/* The range as four chips rather than one bar, which is how the
-            board draws them under the chart: the chosen one filled green. */}
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: sp.sm }}>
-          {(['1M', '3M', '6M', '1Y'] as const).map((range) => {
-            const selected = progressRange === range;
-            return (
-              <Pressable key={range} accessibilityRole="tab" accessibilityState={{ selected }}
-                accessibilityLabel={range === '1M' ? 'Last month' : range === '3M' ? 'Last 3 months' : range === '6M' ? 'Last 6 months' : 'Last year'}
-                onPress={() => setProgressRange(range)}
-                style={{ flex: 1, minHeight: 36, borderRadius: radius.pill, backgroundColor: selected ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: selected ? t.brandInk : t.ink2 }}>{range}</Text>
-              </Pressable>
-            );
-          })}
+          {/* ── What they are aiming at ───────────────────────────────────
+              Two targets, on the two figures this screen leads with. The Goals
+              screen has stored these for months and no body screen has ever
+              read one, so a member set a target weight and then came here — the
+              screen called Progress — and found no mention of it anywhere.
+
+              Absent under a failed goal read rather than reported as "no
+              target": an empty `goals` list under 'error' means the targets
+              could not be read, and printing "no target set" off a dropped
+              connection tells somebody their goal is gone. */}
+          {bfTarget || wtTarget ? (
+            <View style={{ marginTop: sp.md, gap: 3 }}>
+              {bfTarget ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View accessibilityElementsHidden importantForAccessibility="no"
+                    style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: bfTarget.reached ? t.brand : t.ink3 }} />
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2, flex: 1 }}>Body fat · {bfTarget.note}</Text>
+                </View>
+              ) : null}
+              {wtTarget ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View accessibilityElementsHidden importantForAccessibility="no"
+                    style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: wtTarget.reached ? t.brand : t.ink3 }} />
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2, flex: 1 }}>Weight · {wtTarget.note}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
-        {/* The order from here is the data-layout review's: what the figure is
-            measured against and how old it is, then the way to add a new
-            reading, and only then the history. Both blocks used to sit under
-            the dated list — so the one action on the screen was below a list
-            that grows with every scan, and the staleness sentence, which its
-            own comment says belongs under the figure, was a screen away from
-            it. They moved whole; nothing in them changed but their margins. */}
-        {/* ── What they are aiming at ─────────────────────────────────────
-            Two targets, on the two figures this screen leads with. The Goals
-            screen has stored these for months and no body screen has ever read
-            one, so a member set a target weight and then came here — the screen
-            called Progress — and found no mention of it anywhere.
+        {/* ── Body Composition: the latest scan as one picture ─────────────
+            Fat, skeletal muscle and body water off the NEWEST scan, and only
+            the ones that scan actually carries — a gym scale writes a weight
+            and a body fat and no breakdown, and a segment drawn for a figure
+            nobody measured is an invented one. Fewer than two and there is no
+            bar to draw, so there is no card.
 
-            Absent under a failed goal read rather than reported as "no target":
-            an empty `goals` list under 'error' means the targets could not be
-            read, and printing "no target set" off a dropped connection tells
-            somebody their goal is gone. */}
-        {bfTarget || wtTarget ? (
-          <View style={{ marginTop: sp.md, gap: 3 }}>
-            {bfTarget ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <View accessibilityElementsHidden importantForAccessibility="no"
-                  style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: bfTarget.reached ? t.brand : t.ink3 }} />
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Body fat · {bfTarget.note}</Text>
+            What the widths mean, because a bar invites the wrong reading: each
+            segment is that component's MASS beside the other two (fat mass off
+            the sheet, or the scan's own weight × its own body fat where the
+            sheet did not print one; a litre of body water is a kilogram). They
+            are not parts of one whole — muscle is mostly water, so they
+            overlap — which is why the figures under the bar are the sheet's
+            own and no percentage of the bar is ever printed. */}
+        {comp && latest ? (
+          <Section>
+            <SectionHead title="Body Composition" note={bodyDayLabel(latest.takenAt)} onPress={() => router.push('/(client)/body-trends')} />
+            <View accessible accessibilityRole="image"
+              accessibilityLabel={`Body composition from your scan of ${bodyDayLabel(latest.takenAt)}. ${comp.map((c) => `${c.label} ${c.figure}`).join(', ')}.`}>
+              <View style={{ flexDirection: 'row', height: 16, borderRadius: 8, overflow: 'hidden' }}>
+                {comp.map((c) => <View key={c.label} style={{ flexGrow: c.mass, flexBasis: 0, backgroundColor: t.data[c.hue] }} />)}
               </View>
-            ) : null}
-            {wtTarget ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <View accessibilityElementsHidden importantForAccessibility="no"
-                  style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: wtTarget.reached ? t.brand : t.ink3 }} />
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Weight · {wtTarget.note}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: sp.md, rowGap: 2, marginTop: sp.sm }}>
+                {comp.map((c) => (
+                  <Text key={c.label} style={{ ...ty.micro, ...font('400'), color: t.ink2 }}>
+                    <Text style={{ ...numeric, ...font('700'), color: t.data[`${c.hue}Ink`] }}>{c.figure}</Text> {c.label}
+                  </Text>
+                ))}
               </View>
-            ) : null}
-          </View>
+            </View>
+          </Section>
         ) : null}
 
-        {/* Where a figure is stale, how stale — said under the figure itself,
-            because the client is the only person who can judge whether a scan
-            from eleven weeks ago still describes them, and they can only judge
-            it if they are given the eleven weeks. */}
-        {stalenessNote(bfNow, today) ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{stalenessNote(bfNow, today)}</Text>
-        ) : null}
+        {/* ── three figures with their history ─────────────────────────────
+            On the ground between the cards, as the kit asks of tiles. Each is
+            the newest reading that RECORDED the figure (see `mNow` above for
+            why that is not simply the newest scan), and each trend is that
+            figure's own series. The trends are held back under a read that is
+            not whole: the strip stays, empty, rather than a line being drawn
+            through whichever part of the record came back. */}
+        <KpiRow tiles
+          onPress={(k) => { if (k.route) router.push(k.route as any); }}
+          items={[
+            { label: 'Body Fat', value: fig(bfNow?.value), unit: bfNow ? '%' : undefined, tone: 'orange', route: '/(client)/body-trends',
+              trend: scansWhole ? bfReads.map((r) => r.value) : [] },
+            { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, tone: 'blue', route: '/(client)/body-trends',
+              trend: scansWhole ? mReads.map((r) => weightIn(r.value, wu)) : [] },
+            { label: 'InBody Score', value: fig(scoreReads.length ? scoreReads[scoreReads.length - 1].value : null), tone: 'brand', route: '/(client)/body-trends',
+              trend: scansWhole ? scoreReads.map((r) => r.value) : [] },
+          ]}
+        />
 
         {/* ── the one card: the scan you can act on ───────────────────────── */}
         <Section>
@@ -2008,17 +2100,15 @@ export default function Scans() {
                   `${s.bodyFatPct} percent body fat`,
                 ].filter(Boolean).join(', ') + '. Correct its figures or its date, or delete it.'}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                {/* The sheet's own photograph where there is one; a round
-                    plate otherwise, as the board draws every row's icon. */}
+                {/* The sheet's own photograph where there is one; a toned
+                    plate otherwise, as the mockups draw every row's icon. */}
                 {s.image
                   ? <Image source={{ uri: s.image }} style={{ width: 36, height: 36, borderRadius: radius.pill }} />
-                  : (
-                    <View style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name={progressMetric === 'weight' ? 'scale' : 'chart'} size={17} color={t.ink2} />
-                    </View>
-                  )}
+                  // Toned the way the tile above is: body fat is orange
+                  // everywhere on this screen, weight is the accent.
+                  : <IconPlate icon={progressMetric === 'weight' ? 'scale' : 'chart'} tone={progressMetric === 'weight' ? 'brand' : 'orange'} size={36} />}
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmt(s.takenAt)}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{fmt(s.takenAt)}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.source}</Text>
                 </View>
                 {/* The figure follows the segment above: weight under Weight,
@@ -2094,8 +2184,8 @@ export default function Scans() {
             <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => { if (!photoBusy) addPhoto(true); }} /></View>
             <View style={{ flex: 1 }}><Cta label="AI Check" wide disabled={photoBusy} onPress={() => physiqueCheck(false)} /></View>
           </View>
-          {photoBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Saving to your account…</Text> : null}
-          {shareBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Updating what your coach can see…</Text> : null}
+          {photoBusy ? <Text style={{ ...ty.caption, ...font('500'), color: t.ink2, marginBottom: sp.md }}>Saving to your account…</Text> : null}
+          {shareBusy ? <Text style={{ ...ty.caption, ...font('500'), color: t.ink2, marginBottom: sp.md }}>Updating what your coach can see…</Text> : null}
 
           {/* ── who can see these ───────────────────────────────────────────
               The standing answer, always on screen, never inferred. Four
@@ -2141,7 +2231,7 @@ export default function Scans() {
                         {p ? fmtFullDay(p.takenAt) : 'A photo not in the list above'}
                       </Text>
                       <Pressable onPress={() => { if (p && !shareBusy) takeBackFromCoach(p); }} hitSlop={8} disabled={!p || shareBusy}>
-                        <Text style={{ ...ty.caption, fontWeight: '600', color: p ? t.brand : t.ink3 }}>Take back</Text>
+                        <Text style={{ ...ty.caption, ...font('600'), color: p ? t.brand : t.ink3 }}>Take back</Text>
                       </Pressable>
                     </View>
                   );
@@ -2190,7 +2280,7 @@ export default function Scans() {
                         {p ? fmtFullDay(p.takenAt) : 'A photo not in the list above'}
                       </Text>
                       <Pressable onPress={() => { if (p && !pubBusy) stopPublishing(p); }} hitSlop={8} disabled={!p || pubBusy}>
-                        <Text style={{ ...ty.caption, fontWeight: '600', color: p ? t.brand : t.ink3 }}>Take back</Text>
+                        <Text style={{ ...ty.caption, ...font('600'), color: p ? t.brand : t.ink3 }}>Take back</Text>
                       </Pressable>
                     </View>
                   );
@@ -2286,14 +2376,14 @@ export default function Scans() {
                             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture{'\n'}unavailable</Text>
                           </View>
                         )}
-                        {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, end: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text></View> : null}
+                        {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, end: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.caption, ...font('600'), color: t.brandInk }}>{selIdx + 1}</Text></View> : null}
                         {/* Every photo carries its own answer to "can my coach
                             see this?" — including the honest non-answer. The
                             badge is on the picture, not in a list somewhere
                             else, so the question is never open while you look
                             at one. */}
                         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingVertical: 3, backgroundColor: 'rgba(0,0,0,0.55)' }}>
-                          <Text style={{ ...ty.caption, fontWeight: '500', textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
+                          <Text style={{ ...ty.caption, ...font('500'), textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
                         </View>
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{fmtFullDay(p.takenAt)}</Text>
@@ -2312,7 +2402,6 @@ export default function Scans() {
 
         {/* ── body composition, metric by metric ──────────────────────────── */}
         {mByGroup.length > 0 && (<>
-          <Rule />
           <Section>
             {/* ── the table that used to be the exception ──────────────────
                 This was left in the units the InBody sheet printed, on an
@@ -2337,29 +2426,36 @@ export default function Scans() {
                 the sheet reports as a volume, a BMR is energy, and a level and
                 a score are neither. Each metric says which it is through its own
                 declared unit rather than through the shape of its key name. */}
-            <SectionHead title="Body Composition" note="Latest vs previous" />
+            <SectionHead title="Composition Detail" note="Latest vs previous" />
             {/* The units, said out loud — because half of this table converts
                 and half of it cannot, and a member reading 26 lb of fat mass
                 above 41 L of body water has no way to know which of those is a
                 choice. The sentence changes with the member's own unit rather
                 than describing one of the two cases to everybody. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-              {wu === 'kg'
-                ? 'Read from your InBody sheet. The masses are in kilograms, as it printed them; the water is in litres and the level, score and BMR are its own.'
-                : 'The masses are converted to pounds, so they read the way the rest of your app does — your sheet prints them in kilograms. Body water stays in litres, and the level, score and BMR are the sheet’s own figures.'}
-            </Text>
+            {/* Behind a control rather than over the table: it is an answer
+                to "why is this one in litres", which most readers never ask,
+                and it was three lines between the heading and the figures. */}
+            <View style={{ marginBottom: sp.md }}>
+              <Expandable title="About These Units">
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                {wu === 'kg'
+                  ? 'Read from your InBody sheet. The masses are in kilograms, as it printed them; the water is in litres and the level, score and BMR are its own.'
+                  : 'The masses are converted to pounds, so they read the way the rest of your app does — your sheet prints them in kilograms. Body water stays in litres, and the level, score and BMR are the sheet’s own figures.'}
+              </Text>
+              </Expandable>
+            </View>
             {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
               <View style={{ marginBottom: sp.lg }}>
                 {mInsights.improving.length > 0 ? (
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand, marginTop: 6 }} />
-                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}><Text style={{ fontWeight: '500', color: t.ink }}>Improving  </Text>{mInsights.improving.join('  ·  ')}</Text>
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}><Text style={{ ...font('500'), color: t.ink }}>Improving  </Text>{mInsights.improving.join('  ·  ')}</Text>
                   </View>
                 ) : null}
                 {mInsights.watch.length > 0 ? (
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 6 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, marginTop: 6 }} />
-                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}><Text style={{ fontWeight: '500', color: t.ink }}>Watch  </Text>{mInsights.watch.join('  ·  ')}</Text>
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}><Text style={{ ...font('500'), color: t.ink }}>Watch  </Text>{mInsights.watch.join('  ·  ')}</Text>
                   </View>
                 ) : null}
                 {mInsights.balance.map((b, i) => <Text key={i} style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{b}</Text>)}
@@ -2414,7 +2510,7 @@ export default function Scans() {
                             unit it is being read in, so a whole figure still
                             looks whole and a limb keeps the digit the record
                             has for it. */}
-                        <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{numUpTo(shown, dp)} {rowUnit}</Text>
+                        <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink }}>{numUpTo(shown, dp)} {rowUnit}</Text>
                         {shownDelta != null && shownDelta !== 0 ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 52, justifyContent: 'flex-end' }}>
                             <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: good == null ? t.ink3 : good ? t.brand : t.warn }} />
@@ -2475,12 +2571,18 @@ export default function Scans() {
             A summary a physio, a doctor or a new coach can read: your body composition over time, your tape
             measurements, the training you have logged, and any injuries you have recorded.
           </Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            It carries no assessment and no advice of any kind — only what has been recorded, and when. Your
-            progress photos are not in it, and neither is any injury document you have uploaded. If part of your
-            record cannot be read when you make it, the document says so on its own front page rather than
-            looking complete.
-          </Text>
+          {/* What it leaves out, one tap away: the facts are kept whole, but
+              they are the small print of a button, not the screen's content. */}
+          <View style={{ marginTop: sp.sm }}>
+            <Expandable title="What It Leaves Out">
+            <Text style={{ ...ty.caption, color: t.ink3, }}>
+              It carries no assessment and no advice of any kind — only what has been recorded, and when. Your
+              progress photos are not in it, and neither is any injury document you have uploaded. If part of your
+              record cannot be read when you make it, the document says so on its own front page rather than
+              looking complete.
+            </Text>
+            </Expandable>
+          </View>
           <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
             <Cta label="Make the Summary" onPress={shareForProfessional} />
           </View>
@@ -2510,7 +2612,7 @@ export default function Scans() {
               captions={false}
             />
             <View style={{ flex: 1, gap: 6 }}>
-              <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+              <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>
                 {muscleWeek.head}
               </Text>
               {/* A status colour is a 6px mark and never the colour of a
@@ -2587,8 +2689,8 @@ export default function Scans() {
                 question is put every time. See src/lib/scanSheetConsent.ts. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{scanScreenPromise(sheetRecipients)}</Text>
             <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-              <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Take Photo</Text></Pressable>
-              <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Upload scan</Text></Pressable>
+              <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Take Photo</Text></Pressable>
+              <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ ...ty.label, ...font('500'), color: t.ink }}>Upload scan</Text></Pressable>
             </View>
             {img && (
               <View style={{ marginBottom: sp.md }}>
@@ -2601,10 +2703,10 @@ export default function Scans() {
                     fault, and it is ours — so it says plainly that nothing was
                     sent, which is the whole point of writing the row first. */}
                 {reading ? (
-                  <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginTop: 6 }}>Reading your scan…</Text>
+                  <Text style={{ ...ty.caption, ...font('500'), color: t.ink2, marginTop: 6 }}>Reading your scan…</Text>
                 ) : sheetOutcome === 'refused' ? (
                   <View style={{ marginTop: 6 }}>
-                    <Text style={{ ...ty.caption, fontWeight: '600', color: t.ink }}>{SCAN_REFUSED_TITLE}</Text>
+                    <Text style={{ ...ty.caption, ...font('600'), color: t.ink }}>{SCAN_REFUSED_TITLE}</Text>
                     <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{SCAN_REFUSED_NOTE}</Text>
                   </View>
                 ) : sheetOutcome === 'record-failed' ? (
@@ -2621,7 +2723,7 @@ export default function Scans() {
             )}
             <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Scan date</Text>
             <Pressable onPress={() => setShowDate(true)} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{scanDateLabel()}</Text><Icon name="calendar" size={15} color={t.ink3} />
+              <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{scanDateLabel()}</Text><Icon name="calendar" size={15} color={t.ink3} />
             </Pressable>
             {devWeight?.weightKg != null && (
               <Pressable
@@ -2722,7 +2824,7 @@ export default function Scans() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}> </Text>
             <Text style={{ ...ty.head, color: t.ink }}>Scan date</Text>
-            <Pressable onPress={() => setShowDate(false)} hitSlop={8}><Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Done</Text></Pressable>
+            <Pressable onPress={() => setShowDate(false)} hitSlop={8}><Text style={{ ...ty.label, ...font('600'), color: t.brand }}>Done</Text></Pressable>
           </View>
           <View style={{ position: 'relative' }}>
             <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
@@ -2870,7 +2972,7 @@ export default function Scans() {
                 accessibilityLabel={`Scan date, ${fmt(eWheelISO())}`}
                 accessibilityHint="Opens the date wheel to correct the day this scan was taken"
                 style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmt(eWheelISO())}</Text><Icon name="calendar" size={15} color={t.ink3} />
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{fmt(eWheelISO())}</Text><Icon name="calendar" size={15} color={t.ink3} />
               </Pressable>
             </View>
           ) : null}
@@ -2914,7 +3016,7 @@ export default function Scans() {
               <Text style={{ ...ty.micro, color: t.ink3 }}> </Text>
               <Text style={{ ...ty.head, color: t.ink }}>Scan date</Text>
               <Pressable onPress={() => setEShowDate(false)} hitSlop={8}
-                accessibilityRole="button" accessibilityLabel="Done"><Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Done</Text></Pressable>
+                accessibilityRole="button" accessibilityLabel="Done"><Text style={{ ...ty.label, ...font('600'), color: t.brand }}>Done</Text></Pressable>
             </View>
             <View style={{ position: 'relative' }}>
               <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
@@ -2968,14 +3070,14 @@ export default function Scans() {
                 <View>
                   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Focus next on</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                    {phys.focusAreas.map((a) => (<View key={a} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{a}</Text></View>))}
+                    {phys.focusAreas.map((a) => (<View key={a} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: sp.sm }}><Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{a}</Text></View>))}
                   </View>
                   {recommendedExercises(focusToGroups(phys.focusAreas)).length > 0 ? (
                     <View style={{ marginTop: sp.lg }}>
                       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Recommended moves · tap to watch form</Text>
                       {recommendedExercises(focusToGroups(phys.focusAreas)).map((ex) => (
                         <Pressable key={ex.name} onPress={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + ex.name + ' proper form'))} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                          <View style={{ flex: 1 }}><Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{ex.name}</Text><Text style={{ ...ty.caption, color: t.ink3 }}>{ex.group}</Text></View>
+                          <View style={{ flex: 1 }}><Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{ex.name}</Text><Text style={{ ...ty.caption, color: t.ink3 }}>{ex.group}</Text></View>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Icon name="play" size={14} color={t.brand} /><Text style={{ ...ty.label, color: t.ink2 }}>Watch demo</Text></View>
                         </Pressable>
                       ))}
