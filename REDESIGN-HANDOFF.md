@@ -313,6 +313,43 @@ only. Coach-side recipe planning needs a `recipe_refs jsonb` column (described i
 `docs/RECIPES-SPOONACULAR.md`, not written). Not yet seen running: the simulator's account has no body on
 record, so Meals shows the measurements prompt there.
 
+## 4j. The approved look (20 Sep) — read this before any visual work
+
+Six rounds of "match ChatGPT's board" were rejected. What was approved ("YES YES YES! Now you are
+starting to understand!") was a mockup canvas made FIRST and shown to the owner:
+https://claude.ai/artifact/GwAUSeXjCS9DPReraq7JMT (generator: session scratchpad `mock/gen3.py`). His
+acceptance test, in his words: "more infographics and colors", "captivate them", "improve the flow of
+information", "font sizes are small", "basic… no class or elegance", "the icons at the bottom have no style".
+
+**The look:** one night hero per tab root (state + the one action, bright CTA) → infographics (rings,
+meters, day bars, donuts, sparkline tiles, area charts, toned chips/plates) → lists; Sora for titles and
+figures, Plus Jakarta Sans for text, every size a step up; grey ground, borderless shadowed cards; a
+floating tab bar with a night capsule for the current tab; prose behind `Expandable`/info; colour carries
+meaning beside a word (green on track, amber slipping, red needs you; blue/purple/orange/teal/pink name a
+metric, a muscle group or a session type — one map, `src/ui/groupTone.ts`).
+
+**Foundation** (`ff520a6`): fonts via `@expo-google-fonts/*`, loaded in `app/_layout.tsx` and embedded by
+the `expo-font` plugin (needs a native build — done in set three); `font(weight, face)` in
+`src/theme/scale.ts` (write `{...ty.body, ...font('600')}`, never `fontWeight`); new type tokens; theme
+gains `night*`, `brandBright/Deep/Soft/Text`, `data.{hue}|{hue}Soft|{hue}Ink` (text must use `{hue}Ink` —
+the contrast gate rejects the mark as text); kit parts `HeroCard`, `HeroRing`, `Ring`, `MiniRing`, `Meter`,
+`DayBars`, `Donut`+`Legend`, `Spark area|tone`, `KpiTile`/`KpiRow tiles`, `TonedChip`, `IconPlate`,
+`CtaBright`; `src/ui/FloatingTabBar.tsx` on all three layouts. `a11y.test.ts` measures every new pairing on
+all 12 palettes and 216 tenant accents.
+
+**Fifteen screen lanes** (`da6a652` … `5468804`), every screen in all three apps, each picture on real,
+gated reads. Owner bug fixed on the way: Train's hero mixed the PROGRAMME's name with the DAY's picture and
+chips — the hero is now about the selected day; the programme is only the eyebrow.
+
+**Open kit asks from the lanes:** a `HeroCard` figure variant (44pt figure, whole-card press, no-wrap
+money); night-surface `Spark`; export `toneOf`; a bare `Meter` (no label row); `AttentionRow` trailing
+slot; `ScreenHelp` as a header action; a stacked composition bar; `Expandable` with persisted state.
+**Known:** dev builds show an expo-notifications keychain toast (dev only); empty accounts draw dashes —
+a seeded demo client/coach was offered to the owner and not yet answered.
+
+**Builds, set three** (from `a6af80d`+): client iOS 55 / Android 22, coach iOS 26 / Android 12, studio
+iOS 19 / Android 11.
+
 ## 5. What to do next
 
 **Port the implemented screens from `repple-redesign`, file by file, re-applying audit fixes on
