@@ -6,9 +6,12 @@
 // src/lib/recipes.ts (`readRecipeReply`), which is pure and tested; this file
 // is only WHEN to ask, and it is written around one fact —
 //
-// EVERY REQUEST SPENDS POINTS. A search is about two of them, the free plan has
-// fifty a day for every member of every coach put together, and on a paid plan
-// the overrun is billed. So:
+// EVERY REQUEST SPENDS POINTS. A search is about two of them, and this account
+// moved to the Cook plan on 20 Sep 2026 — 1,500 a day for every member of every
+// coach put together. The ceiling went up thirty-fold and the stakes went up
+// with it: the free plan REFUSED a request past the limit, and this one BILLS
+// it at $0.005 a point. Nothing below is a quota brake any more; it is all
+// spending. So:
 //
 //  · Nothing is asked until a screen passes params. Mounting the Meals list
 //    costs nothing; opening the recipe search does.

@@ -22,7 +22,8 @@
 //
 // ── why this is a function at all ─────────────────────────────────────────
 //
-// The key. A Spoonacular key is a metered account — 50 points a day free, and
+// The key. A Spoonacular key is a metered account — the Cook plan this plan is
+// on allows 1,500 points a day and BILLS the overrun rather than refusing it, and
 // on the paid plans every point past the allowance is BILLED — and anything in
 // the app bundle is public: `EXPO_PUBLIC_*` is inlined into JavaScript anybody
 // can unzip. So the key exists in exactly one place, this function's secrets,

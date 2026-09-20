@@ -121,9 +121,16 @@ backlink required, hard stop (402).** Cook $29/mo — 1,500 a day, then $0.005 a
 point. Culinarian $79/mo — 4,500. **Paid plans bill the overrun instead of
 refusing it**, so the limits below protect money, not only a quota.
 
-Fifty points is about twenty-five searches a day across every member of every
-coach. The free plan is for building and testing this; a launch needs Cook at
-least.
+**The account is on Cook as of 20 Sep 2026** — 1,500 points a day, upgraded so a
+coach can search real recipes for a client. That is roughly five hundred searches
+a day shared across every member of every coach, against the twenty-five the free
+plan allowed, which is why this was held until the upgrade.
+
+The change worth remembering is not the ceiling, it is what happens at it: the
+free plan REFUSED the request and this one BILLS it, at $0.005 a point. So every
+limit below now protects money rather than a quota, and the 402 path is no longer
+the thing that stops a runaway — nothing stops it but these limits. Do not relax
+them because the ceiling went up.
 
 What holds spending down:
 
