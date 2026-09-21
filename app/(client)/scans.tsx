@@ -1789,14 +1789,16 @@ export default function Scans() {
   // under a read that was not whole, where "latest" may not be the latest.
   const comp = (() => {
     if (!latest || !scansWhole) return null;
+    // Muscle is the green, water the blue: the owner read the green segment as
+    // muscle (21 Sep 2026), and water is blue to everybody.
     const out: { label: string; figure: string; mass: number; hue: 'orange' | 'blue' | 'teal' }[] = [];
     const w = latest.weightKg, bf = latest.bodyFatPct;
     const fatKg = latest.metrics?.fatMassKg ?? (Number.isFinite(w) && Number.isFinite(bf) ? (w * bf) / 100 : null);
     if (Number.isFinite(bf) && fatKg != null && fatKg > 0) out.push({ label: 'Fat', figure: `${plain(bf, 1)}%`, mass: fatKg, hue: 'orange' });
     const smm = latest.skeletalMuscleKg;
-    if (typeof smm === 'number' && Number.isFinite(smm) && smm > 0) out.push({ label: 'Muscle', figure: fig(weightLabel(smm, wu)), mass: smm, hue: 'blue' });
+    if (typeof smm === 'number' && Number.isFinite(smm) && smm > 0) out.push({ label: 'Muscle', figure: fig(weightLabel(smm, wu)), mass: smm, hue: 'teal' });
     const water = latest.metrics?.bodyWaterL;
-    if (typeof water === 'number' && Number.isFinite(water) && water > 0) out.push({ label: 'Water', figure: `${plain(water, 1)} L`, mass: water, hue: 'teal' });
+    if (typeof water === 'number' && Number.isFinite(water) && water > 0) out.push({ label: 'Water', figure: `${plain(water, 1)} L`, mass: water, hue: 'blue' });
     return out.length >= 2 ? out : null;
   })();
   // The InBody score's own dated series — the third tile's figure and trend.
@@ -2013,14 +2015,19 @@ export default function Scans() {
             <SectionHead title="Body Composition" note={bodyDayLabel(latest.takenAt)} onPress={() => router.push('/(client)/body-trends')} />
             <View accessible accessibilityRole="image"
               accessibilityLabel={`Body composition from your scan of ${bodyDayLabel(latest.takenAt)}. ${comp.map((c) => `${c.label} ${c.figure}`).join(', ')}.`}>
+              {/* Each figure sits centred under ITS OWN segment: the bar and
+                  the labels share one column per component. A wrapped legend
+                  under a bar was read against the wrong segment. The floor
+                  keeps a lean member's fat column wide enough for "8.5%". */}
               <View style={{ flexDirection: 'row', height: 16, borderRadius: 8, overflow: 'hidden' }}>
-                {comp.map((c) => <View key={c.label} style={{ flexGrow: c.mass, flexBasis: 0, backgroundColor: t.data[c.hue] }} />)}
+                {comp.map((c) => <View key={c.label} style={{ flexGrow: c.mass, flexBasis: 0, minWidth: 56, backgroundColor: t.data[c.hue] }} />)}
               </View>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: sp.md, rowGap: 2, marginTop: sp.sm }}>
+              <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
                 {comp.map((c) => (
-                  <Text key={c.label} style={{ ...ty.micro, ...font('400'), color: t.ink2 }}>
-                    <Text style={{ ...numeric, ...font('700'), color: t.data[`${c.hue}Ink`] }}>{c.figure}</Text> {c.label}
-                  </Text>
+                  <View key={c.label} style={{ flexGrow: c.mass, flexBasis: 0, minWidth: 56, alignItems: 'center' }}>
+                    <Text style={{ ...ty.micro, ...numeric, ...font('700'), color: t.data[`${c.hue}Ink`], textAlign: 'center' }}>{c.figure}</Text>
+                    <Text style={{ ...ty.micro, ...font('400'), color: t.data[`${c.hue}Ink`], textAlign: 'center' }}>{c.label}</Text>
+                  </View>
                 ))}
               </View>
             </View>
@@ -2039,7 +2046,7 @@ export default function Scans() {
           items={[
             { label: 'Body Fat', value: fig(bfNow?.value), unit: bfNow ? '%' : undefined, tone: 'orange', route: '/(client)/body-trends',
               trend: scansWhole ? bfReads.map((r) => r.value) : [] },
-            { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, tone: 'blue', route: '/(client)/body-trends',
+            { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, tone: 'teal', route: '/(client)/body-trends',
               trend: scansWhole ? mReads.map((r) => weightIn(r.value, wu)) : [] },
             { label: 'InBody Score', value: fig(scoreReads.length ? scoreReads[scoreReads.length - 1].value : null), tone: 'brand', route: '/(client)/body-trends',
               trend: scansWhole ? scoreReads.map((r) => r.value) : [] },
