@@ -97,7 +97,7 @@ import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc,
 import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import { Rule, Section, SectionHead, PageHead, Segmented, TonedChip, IconPlate, KpiRow, ActionCard, Cta, Ghost, Spark, Expandable, Field, fig, Flag, ChipGrid, HERO_FIT } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Segmented, TonedChip, IconPlate, KpiRow, ActionCard, Cta, Ghost, Spark, Expandable, Field, fig, Flag, ChipGrid, HeroCard } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, font, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
@@ -1842,78 +1842,70 @@ export default function Scans() {
         />
 
         {/* ── THE HERO: the figure the screen leads with ───────────────────
-            A card tinted with the accent's pale plate, as the approved mockup
-            draws it: the figure at hero size with its unit, the movement as a
-            chip beside it, the day and the instrument under it, then the
-            chart and its range — one card, because they are one statement.
+            The approved night card, off the kit: the latest reading of the
+            chosen metric as the headline, `measuredNote` under it (the
+            instrument, the day and the age, in that order), the movement as a
+            chip, and Add Scan as the one action. The chart, the range and the
+            targets are the evidence, in the card under it.
 
-            The latest reading of the chosen metric, dated. `measuredNote`
-            names the instrument, the day and the age, in that order, and the
-            line names the day the movement is measured FROM rather than
-            saying "your previous reading" and hoping. The chip's words come
-            through `deltaLabel`, which is the one place a sign is decided: a
-            reading that has not moved is "No change", never "−0". */}
-        <View style={{ backgroundColor: t.brandSoft, borderRadius: radius.xl, padding: 18, marginTop: 14, ...elevation.card }}>
-          <Pressable onPress={() => router.push('/(client)/body-trends')} accessibilityRole="button"
-            accessibilityLabel={`${progressMetric === 'weight' ? 'Weight' : 'Body fat'}, ${progressNow
-              ? `${progressMetric === 'weight' ? fig(weightIn(progressNow.value, wu)) + ' ' + wu : fig(progressNow.value) + ' percent'}. ${progressWas ? deltaLabel(progressDelta, { since: bodyDayLabel(progressWas.at), unit: progressMetric === 'weight' ? wu : '%' }) + (progressGood ? ', on track' : '') : 'First reading'}. ${measuredNote(progressNow, today)}`
-              : 'no reading yet'}. Open body composition`}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 10, rowGap: sp.xs }}>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', flexShrink: 1 }}>
-                {/* `lineHeight: undefined` is the fix for a blank figure (TF-23):
-                    see HERO_FIT in the kit. */}
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>
-                  {progressMetric === 'weight' ? fig(weightIn(wNow?.value, wu)) : fig(bfNow?.value)}
-                </Text>
-                {progressNow ? (
-                  <Text style={{ ...ty.section, ...font('600', 'display'), color: t.ink2, marginStart: 5 }}>{progressMetric === 'weight' ? wu : '%'}</Text>
-                ) : null}
-              </View>
-              {/* The movement as a chip, the way the mockup draws "−2.4 kg" —
-                  and GREEN only where it is progress towards the member's own
-                  goal. Grey where the goal has no opinion or the number went
-                  the other way: the colour is a verdict, and this screen does
-                  not hand one out it cannot back.
-
-                  The green one is built here and not a `TonedChip`: a brand
-                  chip's plate IS `brandSoft`, which is what this card is made
-                  of, so it would be words with no chip round them. The
-                  mockup's is the solid accent under its own ink, which is the
-                  pair every selected chip in the app already uses. */}
-              {progressNow ? (
-                progressWas && progressGood ? (
-                  <View style={{ minHeight: grown(26), paddingHorizontal: 11, paddingVertical: 3, borderRadius: grown(26) / 2, backgroundColor: t.brand, justifyContent: 'center' }}>
-                    <Text style={{ ...ty.micro, ...numeric, ...font('700'), color: t.brandInk }}>
-                      {deltaLabel(progressDelta, { since: null, unit: progressMetric === 'weight' ? wu : '%' })}
-                    </Text>
-                  </View>
-                ) : (
-                  <TonedChip tone="neutral" label={progressWas
-                    ? deltaLabel(progressDelta, { since: null, unit: progressMetric === 'weight' ? wu : '%' })
+            What it says about data it does not have. While the scans are
+            being read there is no figure: the weight series also carries
+            check-in weigh-ins, and the newest of those is not the newest
+            reading while a newer scan may still be on its way, so the headline
+            says it is reading. A read that FAILED keeps a dated figure that
+            did arrive and says a newer one may be missing; with no figure it
+            says the scans could not be read, never "no scans yet". The chip
+            is a comparison between two readings, so it is withheld unless the
+            scans read landed (a 'partial' read is the most recent part of the
+            record, so its two newest ARE the two newest). The chip's words
+            come through `deltaLabel`, the one place a sign is decided, and it
+            is green only where the movement is towards the member's own goal:
+            the colour is a verdict, and this screen does not hand one out it
+            cannot back. */}
+        {(() => {
+          const unit = progressMetric === 'weight' ? wu : '%';
+          const scansLanded = scansWhole || cd.scansStatus === 'partial';
+          const figure = progressNow && !scansReading
+            ? (progressMetric === 'weight' ? `${fig(weightIn(progressNow.value, wu))} ${wu}` : `${fig(progressNow.value)}%`)
+            : null;
+          const stale = figure ? stalenessNote(progressNow, today) : null;
+          return (
+            <HeroCard
+              eyebrow={progressMetric === 'weight' ? 'WEIGHT · LATEST' : 'BODY FAT · LATEST'}
+              title={figure
+                ?? (scansReading ? 'Reading Your Scans'
+                  : cd.scansStatus === 'error' ? 'Scans Not Read'
+                  : cd.scansStatus === 'partial' ? 'Scans Not Read in Full'
+                  : progressMetric === 'weight' ? 'No Weight Yet' : 'No Body Fat Yet')}
+              meta={figure && progressNow
+                ? `${progressWas && scansLanded ? `since ${bodyDayLabel(progressWas.at)} · ` : ''}${measuredNote(progressNow, today)}${cd.scansStatus === 'error' ? '. Your scans could not be read, so a newer reading may be missing.' : ''}`
+                : scansReading ? 'Your latest figure is shown once your scans are read.'
+                : !scansWhole ? 'Your scans could not be read in full. This is not a body with nothing measured on it.'
+                : progressMetric === 'weight' ? 'No weight on record yet. Add a check-in or an InBody scan.'
+                : 'No scans yet. Add your InBody report to start tracking.'}
+              onPress={() => router.push('/(client)/body-trends')}
+              cta={{ label: latest ? 'Add Scan' : 'Add Your First Scan', onPress: () => setShowAdd(true) }}>
+              {figure && scansLanded ? (
+                <View style={{ marginTop: sp.md }}>
+                  <TonedChip tone={progressWas && progressGood ? 'brand' : 'neutral'} label={progressWas
+                    ? deltaLabel(progressDelta, { since: null, unit })
                     : 'First Reading'} />
-                )
+                </View>
               ) : null}
-            </View>
-            {progressNow ? (
-              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
-                {progressWas ? `since ${bodyDayLabel(progressWas.at)} · ` : ''}{measuredNote(progressNow, today)}
-              </Text>
-            ) : (
-              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>
-                {scansReading ? 'Reading your scans…'
-                  : !scansWhole ? 'Your scans could not be read in full. This is not a body with nothing measured on it.'
-                  : progressMetric === 'weight' ? 'No weight on record yet. Add a check-in or an InBody scan.'
-                  : 'No scans yet. Add your InBody report to start tracking.'}
-              </Text>
-            )}
-            {/* Where a figure is stale, how stale — said under the figure
-                itself, because the client is the only person who can judge
-                whether a scan from eleven weeks ago still describes them, and
-                they can only judge it if they are given the eleven weeks. */}
-            {stalenessNote(progressNow, today) ? (
-              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{stalenessNote(progressNow, today)}</Text>
-            ) : null}
-          </Pressable>
+              {/* Where a figure is stale, how stale: the member is the only
+                  person who can judge whether a scan from eleven weeks ago
+                  still describes them, and only if they are given the weeks. */}
+              {stale ? (
+                <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.sm }}>{stale}</Text>
+              ) : null}
+            </HeroCard>
+          );
+        })()}
+
+        {/* The trend card: the chosen metric's line, its range, and the
+            targets on it. The evidence under the hero, on the accent's pale
+            plate as the approved mockup draws it. */}
+        <View style={{ backgroundColor: t.brandSoft, borderRadius: radius.xl, padding: 18, marginTop: 14, ...elevation.card }}>
 
           {/* The trend over the chosen range. `labels` is what puts a DATE on
               the readout when the member touches the line — the chart answers
@@ -2389,7 +2381,7 @@ export default function Scans() {
                             else, so the question is never open while you look
                             at one. */}
                         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingVertical: 3, backgroundColor: 'rgba(0,0,0,0.55)' }}>
-                          <Text style={{ ...ty.caption, ...font('500'), textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
+                          <Text style={{ ...ty.caption, ...font('500'), textAlign: 'center', color: shState === 'sent' ? t.brand : t.nightInk }}>{shareLabel(shState)}</Text>
                         </View>
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{fmtFullDay(p.takenAt)}</Text>

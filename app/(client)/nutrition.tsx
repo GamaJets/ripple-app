@@ -101,8 +101,8 @@ import type { FoodFacts } from '../../src/lib/foodPortion';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, ListRow, Segmented, Ring, Meter, PageHead, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font, fontScale } from '../../src/theme/scale';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, ListRow, Segmented, HeroCard, HeroRing, Meter, PageHead, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 // The words of the help row, read straight from their source. Round five moves
 // the explanation off the page and behind an info control in the head; the
@@ -1625,86 +1625,58 @@ export default function Nutrition() {
           ]} />
 
         {/* ── the hero: what is left to eat today ──────────────────────────
-            `Calories Left` is `target − eaten`, so an unread log does not make
-            it blank, it makes it BIGGER — the safest-looking direction and the
-            wrong one. It is withheld until the day's log is whole, along with
-            the ring, which would otherwise draw an empty circle around a full
-            allowance. The label goes neutral with it: "Calories Left" over a
-            dash still names the thing being withheld, "Calories Over" would be
-            a claim in itself. */}
-        {/* The sentence under the hero is the densest in the app —
-            "0 of 2,350 kcal eaten · 2,648 kcal burned all day, rest included,
-            97 more than your activity level assumes" — and every clause of it
-            is true and load-bearing. This row decodes it, once. */}
+            The approved night card, off the kit. `Calories Left` is
+            `target − eaten`, so an unread log does not make it blank, it makes
+            it BIGGER: the safest-looking direction and the wrong one. So the
+            headline, the ring and the macros under it wait for a whole read,
+            and until then the headline says in words which read is short and
+            the ring is a track and a dash, never an empty arc round a full
+            allowance. The label goes neutral with it: "Calories Over" over an
+            unread day would be a claim in itself. The ring opens the log; the
+            one button logs. */}
+        <HeroCard
+          eyebrow="TODAY · CALORIES"
+          title={dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'Left' : 'Over'}`
+            : fl.status === 'loading' ? 'Reading Today’s Log'
+            : 'Calories Not Counted'}
+          // One line: the burn clause when the day is whole, and otherwise
+          // WHY the figure is withheld, which is data, not prose.
+          meta={dayWhole ? caloriesNote(cal)
+            : fl.status === 'loading' ? 'What is left is worked out once your food log is read.'
+            : fl.status === 'partial' ? 'More is logged today than can be read in one go, so what is left is unknown.'
+            : 'Today’s food log could not be read, so what is left is unknown. It is not your whole allowance.'}
+          ring={
+            <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
+              accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories are not counted. Open the food log'}
+              hitSlop={8}>
+              <HeroRing
+                value={dayWhole && target.kcal ? eaten.kcal / target.kcal : null}
+                figure={dayWhole ? num(eaten.kcal) : null}
+                sub={`of ${num(target.kcal)}`}
+                spoken={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today` : 'Today’s calories are not counted'} />
+            </Pressable>
+          }
+          cta={{ label: 'Log Meal', onPress: () => router.push('/(client)/foodlog') }}
+        />
 
-        {/* One card: the ring of today's calories, what is left, the three
-            macros against target, and the way to log. The withholding is the
-            hero's: `Calories Left` is `target − eaten`, so an unread log does
-            not make it blank, it makes it BIGGER — the safest-looking
-            direction and the wrong one — so figure, ring and macros wait
-            for a whole read, and the line under the figure says which read
-            is short. undefined arc, not 0: an empty ring drawn for a target
-            we do not have is a figure invented to fill a slot. */}
+        {/* The evidence under the hero: the three macros against target, and
+            where the targets came from. `null` while the day is not whole: no
+            fill and a dash over the target, spoken as "not read", not an empty
+            bar, which would say nothing had been eaten. Rounded HERE; the
+            meter prints what it is handed. */}
         <Section>
-          {/* The mockup's hero: the ring at the leading edge, the three macros
-              beside it. Stacked once the reader's text is large — three
-              "96 / 120 g" meters in what is left of a 390pt card beside a
-              136pt ring is a column of wrapped labels. */}
-          <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
-          {/* The ring is the figure: eaten inside it, the target under it, the
-              way the board draws it. A tap opens the log. */}
-          <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
-            accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories could not be counted. Open the food log'}
-            hitSlop={8}>
-            {/* The kit's <Ring>. `null` for both while the day is not whole or
-                there is no target: track only and a dash, never an empty arc
-                round a full allowance. The button's label above replaces the
-                ring's own, so the two say the same thing. */}
-            <Ring size={136}
-              value={dayWhole && target.kcal ? eaten.kcal / target.kcal : null}
-              figure={dayWhole ? num(eaten.kcal) : null}
-              sub={`of ${num(target.kcal)} kcal`}
-              spoken={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today` : 'Today’s calories could not be counted'} />
-          </Pressable>
-          {/* Intake against target, not the plan's totals: three figures under
-              a sentence about what you have eaten mean what you have eaten. */}
-          {/* The kit's <Meter>, one per macro, each in its own data hue as the
-              mockups draw them. `null` while the day is not whole: no fill and
-              a dash over the target, spoken as "not read" — not an empty bar,
-              which would say nothing had been eaten. Rounded HERE, as the
-              strip this replaces did; the meter prints what it is handed. */}
-          <View style={{ flex: 1, minWidth: 0, alignSelf: 'stretch', justifyContent: 'center', marginTop: -sp.md }}>
-            <Meter label="Protein" tone="blue" val={dayWhole ? Math.round(eaten.protein) : null} target={target.protein} />
-            <Meter label="Carbs" tone="orange" val={dayWhole ? Math.round(eaten.carbs) : null} target={target.carbs} />
-            <Meter label="Fat" tone="purple" val={dayWhole ? Math.round(eaten.fat) : null} target={target.fat} />
-          </View>
-          </View>
-          <Text style={{ ...ty.head, color: t.ink, textAlign: 'center', marginTop: sp.lg }}>
-            {dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'left' : 'over'}` : 'Calories not counted'}
-          </Text>
-          {/* One line: the burn clause when the day is whole, and otherwise
-              WHY the figure above is withheld — which is data, not prose. */}
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: 3 }}>
-            {dayWhole ? caloriesNote(cal)
-              : fl.status === 'loading' ? 'Reading today’s food log…'
-              : fl.status === 'partial' ? 'More is logged today than can be read in one go, so what is left is unknown.'
-              : 'Today’s food log could not be read, so what is left is unknown. It is not your whole allowance.'}
-          </Text>
-          {/* Where the targets above came from, in one line beside them — a
-              target with no source reads as a rule nobody set. Three sources
-              and they are the three this screen really has: the member's own
-              weight goal and date, the general goal from their settings, and
-              a coach's correction over either. The long form, with the
-              figures, is "Why This Target" further down; this opens nothing
-              and claims nothing that sentence does not. */}
-          {/* A coach-adjusted plan is marked, not shouted: a coloured dot beside
-              ink-coloured text. */}
+          <Meter label="Protein" tone="blue" val={dayWhole ? Math.round(eaten.protein) : null} target={target.protein} />
+          <Meter label="Carbs" tone="orange" val={dayWhole ? Math.round(eaten.carbs) : null} target={target.carbs} />
+          <Meter label="Fat" tone="purple" val={dayWhole ? Math.round(eaten.fat) : null} target={target.fat} />
+          {/* Where the targets came from, in one line beside them: a target
+              with no source reads as a rule nobody set. The long form, with
+              the figures, is "Why This Target" further down. A coach-adjusted
+              plan is marked, not shouted: a coloured dot beside ink text. */}
           <View accessible accessibilityLabel={`${coachAdjust ? 'Coach-adjusted. ' : ''}${targetSource}`}
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: sp.md }}>
             {coachAdjust ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} /> : null}
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', flexShrink: 1 }}>{coachAdjust ? 'Coach-adjusted · ' : ''}{targetSource}</Text>
           </View>
-          <View style={{ marginTop: sp.md }}><Cta label="Log Meal" wide onPress={() => router.push('/(client)/foodlog')} /></View>
         </Section>
 
         {/* The burn named in the sentence above is the last thing the device

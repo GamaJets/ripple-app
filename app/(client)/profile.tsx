@@ -29,7 +29,7 @@ import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
-import { Section, SectionHead, KpiRow, ListRow, PageHead, Ghost, Donut, Legend, Field, Flag, fig, toneOf, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, KpiRow, ListRow, PageHead, Ghost, Donut, Legend, Field, Flag, fig, toneOf, HeroCard, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { CLIENT_FEATURES, ME_GROUPS, ME_QUICK, ME_QUICK_TITLE, meGroupFeatures, type Feature } from '../../src/lib/features';
 import { ageFromDob } from '../../src/lib/age';
@@ -605,62 +605,71 @@ export default function Profile() {
         <PageHead title="Profile" leading={null}
           trailing={<Ghost icon="settings" a11yLabel="Settings" onPress={() => router.push('/(client)/settings')} />} />
 
-        {/* ── who you are, on the ground rather than in a card ─────────────── */}
-        <View style={{ alignItems: 'center', gap: sp.xs, marginTop: sp.lg }}>
-          <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityState={{ disabled: photoBusy }} accessibilityRole="button"
-            accessibilityLabel={photoBusy ? 'Uploading your profile photo' : 'Change your profile photo'}>
-            {/* `avatarSource`, not `cd.photo`. A row still holding a device path
-                from before the upload existed would otherwise draw here — and
-                only here, on the one device that can open it, which is exactly
-                how nobody noticed the coach could not. */}
-            {avatarSource(cd.photo) ? (
-              <Image source={{ uri: avatarSource(cd.photo)! }} style={{ width: 84, height: 84, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
-            ) : (
-              <View style={{ width: 84, height: 84, borderRadius: radius.pill, backgroundColor: t.brandSoft, alignItems: 'center', justifyContent: 'center' }}>
-                {cd.init ? (
-                  <Text style={{ ...value(30), color: t.brandText }}>{cd.init}</Text>
-                ) : (
-                  <Icon name="me" size={32} color={t.brandText} />
-                )}
+        {/* ── the hero: who you are, and who you are with ─────────────────
+            The approved night card, off the kit, above the tiles, the search
+            field and the six cards, which are untouched under it. The name is
+            the headline, the photo sits at the trailing edge where a ring
+            would, "Member since" is the eyebrow and the body line is the meta.
+            Edit Profile is the one action.
+
+            An empty name used to read "Add Your Name" while the profile was
+            still being read, and after a read that failed: an instruction to
+            re-enter something the server may well hold. The headline now says
+            which of the three it is, and so does the meta line under it, for
+            the same reason ("Add your height and weight" over a read that has
+            not landed). "Member since" is drawn only when the account's own
+            date was read; see `memberSince` above. */}
+        <HeroCard
+          eyebrow={memberSince ? `MEMBER SINCE ${memberSince.toUpperCase()}` : 'YOUR PROFILE'}
+          title={cd.name
+            || (cd.profileStatus === 'loading' ? 'Reading Your Profile'
+              : !isWhole(cd.profileStatus) ? 'Profile Not Read'
+              : 'Add Your Name')}
+          meta={isWhole(cd.profileStatus) ? statsLine
+            : cd.profileStatus === 'loading' ? 'Reading your details…'
+            : 'Your details could not be read. This is not a profile with nothing on it. Pull down to try again.'}
+          ring={
+            <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityState={{ disabled: photoBusy }} accessibilityRole="button"
+              accessibilityLabel={photoBusy ? 'Uploading your profile photo' : 'Change your profile photo'}>
+              {/* `avatarSource`, not `cd.photo`. A row still holding a device
+                  path from before the upload existed would otherwise draw here,
+                  and only here, on the one device that can open it, which is
+                  exactly how nobody noticed the coach could not. */}
+              {avatarSource(cd.photo) ? (
+                <Image source={{ uri: avatarSource(cd.photo)! }} style={{ width: 84, height: 84, borderRadius: radius.pill, backgroundColor: t.night2 }} />
+              ) : (
+                <View style={{ width: 84, height: 84, borderRadius: radius.pill, backgroundColor: t.night2, alignItems: 'center', justifyContent: 'center' }}>
+                  {cd.init ? (
+                    <Text style={{ ...value(30), color: t.nightInk }}>{cd.init}</Text>
+                  ) : (
+                    <Icon name="me" size={32} color={t.nightInk} />
+                  )}
+                </View>
+              )}
+              <View style={{ position: 'absolute', bottom: -2, end: -2, width: 26, height: 26, borderRadius: radius.pill, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
+                <Icon name="camera" size={14} color={t.ink2} />
               </View>
-            )}
-            <View style={{ position: 'absolute', bottom: -2, end: -2, width: 26, height: 26, borderRadius: radius.pill, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', ...elevation.card }}>
-              <Icon name="camera" size={14} color={t.ink2} />
-            </View>
-          </Pressable>
-          <Pressable onPress={openEdit} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ alignItems: 'center', marginTop: sp.xs }}>
-            {/* An empty name used to render as an empty line. Say what to do
-                about it instead of showing nothing. */}
-            <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', textAlign: 'center' }} numberOfLines={2}>
-              {cd.name || 'Add Your Name'}
-            </Text>
-            {/* Drawn only when the account's own date was read — see
-                `memberSince` above. */}
-            {memberSince ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 2, textAlign: 'center' }}>Member since {memberSince}</Text> : null}
-            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2, textAlign: 'center' }}>{statsLine}</Text>
-          </Pressable>
-          {/* ── who you are WITH, under who you are ──────────────────────
-              The data-layout review's first item for Me is identity and the
-              coach or membership context, and the head said nothing about
-              either: whether anybody is coaching this member was a radio
-              group four sections down that records what they ASKED for, not
-              what is true. `coachLinked` is the fact — `clients.trainer_id`
-              — and it is three-valued: null is a read that has not landed,
-              and under it this line is not drawn at all rather than telling
-              a coached member they are on their own. It opens Your Coach,
-              which says the right thing in either case. No name: a client
-              cannot read their coach's row from here (see the header of
-              app/(client)/my-coach.tsx), and that screen is where it is. */}
+            </Pressable>
+          }
+          cta={{ label: 'Edit Profile', onPress: openEdit }}>
+          {/* ── who you are WITH ─────────────────────────────────────────
+              `coachLinked` is the fact (`clients.trainer_id`), and it is
+              three-valued: null is a read that has not landed, and under it
+              this line is not drawn at all rather than telling a coached
+              member they are on their own. It opens Your Coach, which says the
+              right thing in either case. No name: a client cannot read their
+              coach's row from here (see the header of
+              app/(client)/my-coach.tsx). */}
           {cd.coachLinked != null ? (
             <Pressable onPress={() => router.push('/(client)/my-coach')} accessibilityRole="button" hitSlop={10}
               accessibilityLabel={cd.coachLinked ? 'You are working with a coach. Opens Your Coach' : 'You are training on your own. Opens Your Coach'}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs, marginTop: sp.xs }}>
-              <Icon name="people" size={14} color={t.ink3} />
-              <Text style={{ ...ty.caption, color: t.ink2 }}>{cd.coachLinked ? 'Working With a Coach' : 'Training on Your Own'}</Text>
-              <Icon name={FORWARD_ICON} size={12} color={t.ink3} />
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs, marginTop: sp.md, alignSelf: 'flex-start' }}>
+              <Icon name="people" size={14} color={t.nightInk2} />
+              <Text style={{ ...ty.caption, color: t.nightInk2 }}>{cd.coachLinked ? 'Working With a Coach' : 'Training on Your Own'}</Text>
+              <Icon name={FORWARD_ICON} size={12} color={t.nightInk2} />
             </Pressable>
           ) : null}
-        </View>
+        </HeroCard>
 
         {/* The mockup's three: workouts, badges, best streak — each a tile of
             its own on the ground, in its own hue, over its own eight weeks. All
