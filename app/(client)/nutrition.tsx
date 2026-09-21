@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
   buildPlan, snackIdeas, SNACK_SHARE, swapIndex, searchMeals, mealAt, catalogSize, groceryFromWeek, planWeek, slotsFor, catalogRepeatDay,
-  planGaps, mealAllergens, allergenGapNote, allergenLabel, mealRowSpoken,
+  emptySlots, mealAllergens, allergenGapNote, allergenLabel, mealRowSpoken,
   dislikeFreeIndex, dislikeGaps, dislikeGapNote, normaliseDislike, preferNotDisliked,
   DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen, type Slot,
 } from '../../src/lib/meals';
@@ -998,7 +998,8 @@ export default function Nutrition() {
     // The slot is the PLAN's, not the one the recipe was searched under: a
     // change of meals-per-day moves which slot a position is, and a row filed
     // under a segment the plan no longer has would be a row nobody can find.
-    return dish ? portionRecipe({ ...dish, slot: m.slot }, m.K, m.pos) : m;
+    // An empty slot's own `K` is 0; its share of the day is `slotKcal`.
+    return dish ? portionRecipe({ ...dish, slot: m.slot }, m.slotKcal ?? m.K, m.pos) : m;
   });
   /** The rows of a built day whose planned recipe is NOT in hand — still being
    *  read, or the read failed. The generated meal is standing in for each. */
@@ -1029,7 +1030,12 @@ export default function Nutrition() {
    *  open sheet, and a day that is no longer on screen is not one to plan on. */
   /** Open the meal sheet on a row, remembering WHICH day of the horizon it came
    *  from. Everything the sheet plans, it plans for that day. */
-  const openMeal = (m: PlannedMeal, day: HorizonDay) => { setSheetDay(day); setRecipe(m); };
+  const openMeal = (m: PlannedMeal, day: HorizonDay) => {
+    // An empty slot has no dish to open, cook or log. Tapping it goes where it
+    // can be filled: that slot's recipe search, on Today.
+    if (m.unfillable?.length) { setView('today'); setSlotPick(m.slot); setMealQuery(''); setRecipeSearchOpen(true); return; }
+    setSheetDay(day); setRecipe(m);
+  };
   const planDay: HorizonDay = sheetDay && days.some((d) => d.offset === sheetDay.offset && d.key === sheetDay.key)
     ? sheetDay : today;
   /** Plan a real recipe at its slot — on ONE DATE, or on every such weekday.
@@ -1062,7 +1068,8 @@ export default function Nutrition() {
   // query lists the first of the catalogue, which is what the board draws.
   const slotOptions = useMemo((): PlannedMeal[] => {
     const lead = genSlotMeals[0];
-    if (!slotSel || !lead) return [];
+    // An empty slot has no catalogue to offer; its way out is the recipe search.
+    if (!slotSel || !lead || lead.unfillable?.length) return [];
     const q = mealQuery.trim();
     // Neighbouring indices differ only in the last component — "Berry oats",
     // "Berry oats — warm", "Berry oats — chilled" — so the catalogue is
@@ -1119,7 +1126,7 @@ export default function Nutrition() {
   // `avoid: []` because the profile read failed is the defect they exist for.
   const recipeLead = genSlotMeals[0] ?? null;
   const recipes = useRecipeSearch(recipeSearchOpen && hasBody && !adjustUnknown && !foodRulesUnknown && slotSel && recipeLead
-    ? { slot: slotSel, diet, avoid: c.avoid, query: mealQuery, targetKcal: Math.round(recipeLead.K / 50) * 50, number: 8 }
+    ? { slot: slotSel, diet, avoid: c.avoid, query: mealQuery, targetKcal: Math.round((recipeLead.slotKcal ?? recipeLead.K) / 50) * 50, number: 8 }
     : null);
   const found = recipeSearchOpen ? recipes.result : null;
   // Spoonacular is sent the allergens (`c.avoid`, the union); dislikes are
@@ -1132,7 +1139,7 @@ export default function Nutrition() {
       .filter((m) => m.slot === slotSel)
       // The planned recipe already leads the list; it is not listed twice.
       .filter((m) => !slotMeals.some((x) => isRecipeMeal(x) && x.sourceId === m.sourceId))
-      .map((m) => portionRecipe(m, recipeLead.K, recipeLead.pos))
+      .map((m) => portionRecipe(m, recipeLead.slotKcal ?? recipeLead.K, recipeLead.pos))
     : [];
   // Planned recipes in this slot whose dish is NOT in hand: still reading, or
   // the read failed. The generated row is standing in for each of them. `mine`
@@ -1209,7 +1216,7 @@ export default function Nutrition() {
   // same week and is the artefact somebody actually shops from, never carried
   // it at all.
   const gapNote = useMemo(
-    () => allergenGapNote(planGaps(diet, slotsFor(c.mealsPerDay), c.avoid)),
+    () => allergenGapNote(emptySlots(diet, slotsFor(c.mealsPerDay), c.avoid)),
     [diet, c.mealsPerDay, c.avoid],
   );
   // The dislikes that had to be relaxed. A preference, so it is said in the
@@ -1490,7 +1497,8 @@ export default function Nutrition() {
           // label on it REPLACES the lines below rather than adding
           // to them — and the line it was replacing hardest is the
           // allergen mark. See `mealRowSpoken`.
-          accessibilityLabel={`${mealRowSpoken({
+          accessibilityLabel={m.unfillable?.length ? `${m.slot}. ${m.n}. Search real recipes for it`
+            : `${mealRowSpoken({
             slot: m.slot, coachPick: planned && coachPick(m.pos), name: m.n,
             allergens: inIt, kcal: String(m.K),
           })}${real ? ', a real recipe' : ''}${planned ? ', in your plan' : ''}`}
@@ -1516,7 +1524,12 @@ export default function Nutrition() {
             {/* The slot is the caption, as the mockup draws it, with the macros
                 beside it — the kcal went to the chip. The ingredients are one
                 tap away on the sheet, which is where they can be read whole. */}
-            <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.slot} · P{m.P} · C{m.C} · F{m.F}</Text>
+            {m.unfillable?.length ? (
+              // An empty slot: nothing to count, and the one thing to do.
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{m.slot} · Tap to search real recipes, or ask your coach</Text>
+            ) : (
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.slot} · P{m.P} · C{m.C} · F{m.F}</Text>
+            )}
             {/* Which row is the plan's, said in words: the list is
                 the whole catalogue now, and one of them is today's. */}
             {planned && (whose || !inToday) ? (
@@ -1537,7 +1550,7 @@ export default function Nutrition() {
           </View>
           {/* Calories are orange everywhere in the app, and always beside the
               word. */}
-          <TonedChip tone="orange" label={`${num(m.K)} kcal`} />
+          {m.unfillable?.length ? null : <TonedChip tone="orange" label={`${num(m.K)} kcal`} />}
         </Pressable>
       </View>
     );
@@ -1795,7 +1808,7 @@ export default function Nutrition() {
               shopping list is built from. */}
           {gapNote ? (
             <View style={{ marginBottom: sp.md }}>
-              <Flag tone={t.crit}>{gapNote}</Flag>
+              <Flag tone={t.warn}>{gapNote}</Flag>
             </View>
           ) : null}
           {dislikeNote ? (
@@ -1859,7 +1872,7 @@ export default function Nutrition() {
                     // The mark this arm was given is on the row and in the
                     // sentence. See `mealRowSpoken`.
                     accessibilityLabel={mealRowSpoken({
-                      slot: m.slot, name: m.n, allergens: inIt, kcal: String(m.K),
+                      slot: m.slot, name: m.n, allergens: inIt, kcal: m.unfillable?.length ? null : String(m.K),
                     })}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
                     <View style={{ flex: 1 }}>
@@ -1872,7 +1885,8 @@ export default function Nutrition() {
                         </View>
                       ) : null}
                     </View>
-                    <TonedChip tone="orange" label={`${num(m.K)} kcal`} />
+                    {/* An empty slot counts nothing toward the day, and says so. */}
+                    {m.unfillable?.length ? <TonedChip tone="neutral" label="Empty" /> : <TonedChip tone="orange" label={`${num(m.K)} kcal`} />}
                   </Pressable>
                   );
                 })}
@@ -2689,7 +2703,7 @@ export default function Nutrition() {
                 unfiltered pool rather than leaving a slot empty. This sheet
                 carried no mark of that anywhere, and it is the artefact
                 somebody actually shops from. */}
-            {gapNote ? <Flag tone={t.crit} style={{ marginBottom: sp.md }}>{gapNote}</Flag> : null}
+            {gapNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{gapNote}</Flag> : null}
             {weekAllergens.length ? (
               <Flag tone={t.crit} style={{ marginBottom: sp.md }}>
                 Meals in this week contain {weekAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid, so this list has ingredients for them in it. Check each item before you buy.

@@ -12,8 +12,8 @@
 // NOT dairy, and everything that genuinely is dairy still is. A matcher that
 // stopped flagging butter would be a far worse bug than the one being fixed.
 import {
-  ALLERGENS, allergenGapNote, mealAllergens, mealRowSpoken, planGaps, poolGaps,
-  catalogSize, mealAt,
+  ALLERGENS, allergenGapNote, mealAllergens, mealRowSpoken, emptySlots, poolGaps,
+  catalogSize, mealAt, buildPlan, planWeek, groceryFromWeek, swapIndex, searchMeals, catalogRepeatDay, slotsFor,
   dislikeFreeIndex, dislikeGapNote, dislikeGaps, excludedAllergens, mealDislikes, preferNotDisliked,
   readAllergenColumn, readDislikes, textDislikes, variantStep,
   type Allergen, type Slot,
@@ -117,60 +117,155 @@ ok(!has('gluten', 'white rice', 'White rice (dry)'), 'and rice is still not glut
 // The whole point of the fix. A vegan plan excluding dairy contains no dairy,
 // so there is no gap to report and no sentence claiming otherwise.
 eq(poolGaps('vegan', 'Breakfast', ['dairy']).length, 0, 'a vegan breakfast can be built without dairy');
-eq(planGaps('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack'], ['dairy']).length, 0,
+eq(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack'], ['dairy']).length, 0,
   'and so can a whole vegan day');
-eq(allergenGapNote(planGaps('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack'], ['dairy'])), null,
+eq(allergenGapNote(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack'], ['dairy'])), null,
   'so the member is told nothing, which is the truth');
 
-// The note itself is unchanged and still names what it found. This is the
-// sentence somebody with a real allergy reads, so it is asserted here too.
-const note = allergenGapNote(['dairy']);
-ok(!!note && note.includes('dairy'), 'a real gap still names the allergen');
-ok(!!note && /check every dish/i.test(note), 'and still tells them to check');
+// The note names the slot, the allergen and what to do, and never claims the
+// plan contains anything: the slot was left empty so that it would not.
+{
+  const note = allergenGapNote([{ slot: 'Breakfast', allergens: ['soy'] }])!;
+  ok(/no breakfast in your plan/i.test(note), 'the note names the empty slot');
+  ok(/soy/.test(note), 'and the allergen that is why');
+  ok(/search real recipes/i.test(note) && /coach/i.test(note), 'and what to do instead');
+  ok(!/still contains/i.test(note), 'and does not say the plan contains it, because it does not');
+  ok(!/—/.test(note), 'with no em dash');
+}
 
-/* ── exclusions that only fail TOGETHER ──────────────────────────────────── */
+/* ── an allergen is never inside a generated meal ─────────────────────────── */
 //
-// `poolFilter` filters against the whole exclusion list at once and falls back
-// to the UNFILTERED pool when that empties one. `poolGaps` asked each allergen
-// ALONE. So a pair that empties a pool only in combination — dairy alone leaves
-// something, gluten alone leaves something, dairy and gluten together leave
-// nothing — produced a plan built from the very components the member excluded,
-// with `allergenGapNote` returning null and no banner anywhere.
+// `poolFilter` used to fall back to the UNFILTERED pool when the exclusions
+// emptied one, and the member was served the allergen under a red warning.
+// Now that slot is served EMPTY. Swept over every diet, every slot and every
+// one of the 64 exclusion subsets: no generated meal contains an excluded
+// allergen, and every slot that cannot be made safely is empty and named.
 //
-// The invariant, asserted over every diet, every slot and every subset of the
-// six exclusions: if a generated meal contains something the member excluded,
-// the member is TOLD. Not "which allergen" — that is a judgement — but that the
-// filter was not honoured. A silent plan with dairy in it is the failure.
-
+// Measured when this was written: 76 of the 1,280 combinations have no safe
+// meal, every one of them a breakfast. Vegan breakfasts without soy are 32 of
+// them (every vegan breakfast base is tofu or soy milk), paleo without egg and
+// soy 16, meat 12, vegetarian and keto 8 each (dairy, egg and soy together, or
+// dairy, gluten and egg for meat).
 {
   const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
   const SLOTS: Slot[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
   const ids = ALLERGENS.map((a) => a.id);
-  let silent = 0;
-  let checked = 0;
-  // Every non-empty subset of the six.
-  for (let mask = 1; mask < (1 << ids.length); mask++) {
+  let served = 0, unsafe = 0, empty = 0;
+  const emptyAt = new Set<string>();
+  for (let mask = 0; mask < (1 << ids.length); mask++) {
     const avoid = ids.filter((_, i) => (mask & (1 << i)) !== 0);
     for (const diet of DIETS) {
       for (const slot of SLOTS) {
         const size = catalogSize(diet, slot, avoid);
         const gaps = poolGaps(diet, slot, avoid);
-        // A sample across the catalogue rather than all of it: the pools are a
-        // mixed radix, so the first few indices already cross every dimension
-        // that can carry an excluded component.
-        for (let i = 0; i < Math.min(size, 12); i++) {
-          checked++;
-          const meal = mealAt(diet, slot, i, avoid);
-          const inIt = mealAllergens(meal, avoid);
-          if (inIt.length && gaps.length === 0) silent++;
+        eq(size === 0, gaps.length > 0, `${diet}/${slot}/${avoid.join('+')}: an empty catalogue and a named gap are the same fact`);
+        if (!size) {
+          empty++;
+          emptyAt.add(`${diet}/${slot}`);
+          const m = mealAt(diet, slot, 7, avoid);
+          ok(!!m.unfillable?.length && m.ing.length === 0 && m.k === 0 && m.steps.length === 0,
+            `${diet}/${slot}/${avoid.join('+')}: an unfillable slot is served empty`);
+          ok(gaps.every((a) => avoid.includes(a)) && m.n.includes(gaps.map((a) => ALLERGENS.find((x) => x.id === a)!.label.toLowerCase())[0]),
+            `${diet}/${slot}/${avoid.join('+')}: and named after what it cannot be made without: ${m.n}`);
+          eq(m.idx, 7, 'and the pick it was asked for is carried, not rewritten');
+          continue;
+        }
+        // A spread across the whole catalogue, every dimension crossed.
+        const step = Math.max(1, Math.floor(size / 97));
+        for (let i = 0; i < size; i += step) {
+          served++;
+          const m = mealAt(diet, slot, i, avoid);
+          if (m.unfillable || mealAllergens(m, avoid).length) unsafe++;
         }
       }
     }
   }
-  ok(checked > 0, 'the sweep actually generated meals');
-  eq(silent, 0,
-    'no generated meal contains an excluded allergen while the member is told nothing — the combination case used to be exactly this');
+  ok(served > 100000, 'the sweep actually generated meals');
+  eq(unsafe, 0, 'no generated meal contains an excluded allergen, in any diet, slot or combination');
+  eq(empty, 76, 'and 76 of the 1,280 combinations have no safe meal to serve');
+  eq([...emptyAt].sort().join(','), 'keto/Breakfast,meat/Breakfast,paleo/Breakfast,vegan/Breakfast,vegetarian/Breakfast',
+    'every one of them a breakfast');
+  // The member's own sentence for the common one.
+  eq(mealAt('vegan', 'Breakfast', 0, ['soy']).n, 'No breakfast we can make without soy', 'a vegan avoiding soy is told why');
+  eq(poolGaps('vegan', 'Breakfast', ['dairy', 'soy']).join(), 'soy', 'and dairy is not blamed for what soy did');
+  eq(poolGaps('meat', 'Breakfast', ['dairy', 'gluten', 'shellfish', 'egg']).join(), 'dairy,gluten,egg',
+    'a combination names the ones that fail together and not the bystander');
 }
+
+/* ── no stored index changes meaning ──────────────────────────────────────── */
+//
+// Meals are stored as integer positions in the filtered pools (a coach's plan,
+// a member's swap). The fix changed what happens when a filtered pool is EMPTY
+// and nothing else, so every catalogue that can be built must decode every
+// index exactly as it did before. This digest was taken from the engine at
+// d16a966, BEFORE the change: 1,204 buildable combinations, their sizes, and
+// the meal at 32 points across each. Checked in full at the time too: all
+// 3,125,472 indices of those catalogues decode to the same meal. If this
+// fails, saved plans are pointing at different food.
+{
+  const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
+  const SLOTS: Slot[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  const ids = ALLERGENS.map((a) => a.id);
+  let h = 0x811c9dc5, combos = 0;
+  const mix = (str: string) => { for (let j = 0; j < str.length; j++) { h ^= str.charCodeAt(j); h = Math.imul(h, 16777619) >>> 0; } };
+  for (const d of DIETS) for (const s of SLOTS) for (let m = 0; m < 64; m++) {
+    const av = ids.filter((_, i) => (m >> i) & 1);
+    if (poolGaps(d, s, av).length) continue;
+    combos++;
+    const size = catalogSize(d, s, av);
+    mix(`${d}/${s}/${m}:${size};`);
+    for (let k = 0; k < 32; k++) { const x = mealAt(d, s, Math.floor((k * size) / 32), av); mix(x.n + '|' + x.k + ';'); }
+  }
+  eq(combos, 1204, 'the same 1,204 combinations can be built');
+  eq(h.toString(16), '7f2e797c', 'and every one of them decodes its indices exactly as before');
+}
+
+/* ── an empty slot, all the way down ──────────────────────────────────────── */
+{
+  const same = (a: unknown, b: unknown, msg: string) => eq(JSON.stringify(a), JSON.stringify(b), msg);
+  const input = {
+    id: 'u-vegan-soy', weightKg: 64, bodyFatPct: 26, activity: 1.5, goal: 'fatloss' as const,
+    diet: 'vegan' as Diet, mealsPerDay: 4 as const, avoid: ['soy'] as Allergen[],
+  };
+  const full = buildPlan({ ...input, avoid: [] });
+  const built = buildPlan(input);
+  const empty = built.plan.filter((m) => m.unfillable);
+  eq(empty.length, 1, 'a vegan avoiding soy has one empty slot');
+  eq(empty[0].slot, 'Breakfast', 'and it is breakfast');
+  eq(empty[0].K, 0, 'which carries no calories');
+  eq(empty[0].servings, 0, 'and no servings');
+  ok((empty[0].slotKcal ?? 0) > 0, 'but knows its share, for a recipe put in it');
+  eq(built.tot.K, built.plan.reduce((a, m) => a + m.K, 0), 'the day total is the meals actually served');
+  ok(built.aim < built.target.kcal, 'and the served meals aim at their share, not the whole day');
+  ok(Math.abs(built.tot.K - built.aim) < Math.abs(built.tot.K - built.target.kcal), 'so the total does not read as a full day');
+  eq(full.aim, full.target.kcal, 'a full day still aims at the whole target');
+  same(built.plan.filter((m) => !m.unfillable).map((m) => mealAllergens(m, ['soy']).length), [0, 0, 0], 'and nothing served has soy in it');
+  same(emptySlots('vegan', slotsFor(4), ['soy']), [{ slot: 'Breakfast', allergens: ['soy'] }], 'the screen is told which slot and why');
+
+  // A week, a month, and the shopping for them.
+  const week = planWeek(input, undefined, 7);
+  ok(week.every((day) => day[0].unfillable && day[0].ing.length === 0), 'every day of the week has the same empty breakfast');
+  const groc = groceryFromWeek(week);
+  const items = Object.values(groc.byDept).flat().map((g) => g!.item.toLowerCase());
+  ok(!items.some((i) => /tofu|soy/.test(i)), 'the grocery list buys no soy');
+  eq(groc.mealCount, new Set(week.flat().filter((m) => !m.unfillable).map((m) => m.n)).size, 'and counts only meals that are served');
+  eq(planWeek(input, undefined, 30).length, 30, 'a month plans through an empty slot without failing');
+  eq(catalogRepeatDay('vegan', 'Breakfast', ['soy']), Infinity, 'an empty slot never repeats');
+
+  // Swapping into and out of it.
+  eq(swapIndex('vegan', 'Breakfast', 12, ['soy']), 12, 'swapping an empty slot keeps its pick rather than crashing');
+  ok(Number.isInteger(swapIndex('vegan', 'Breakfast', 12, ['soy'], ['banana'])), 'with dislikes too');
+  same(searchMeals('vegan', 'Breakfast', '', 40, ['soy']), [], 'there is nothing to search in it');
+  same(searchMeals('vegan', 'Breakfast', 'oats', 40, ['soy'], ['banana']), [], 'nothing, with a query and dislikes');
+  // A pick stored before the member disclosed soy is served empty, and comes
+  // back as the same meal if the exclusion is ever lifted.
+  const stored = buildPlan({ ...input, avoid: [], mealOverride: { 0: 123 } }).plan[0];
+  const now = buildPlan({ ...input, mealOverride: { 0: 123 } }).plan[0];
+  ok(!!now.unfillable, 'a stored breakfast pick is not served over a soy exclusion');
+  eq(now.idx, 123, 'and the pick itself is untouched');
+  eq(buildPlan({ ...input, avoid: [], mealOverride: { 0: now.idx } }).plan[0].n, stored.n, 'so it means the same meal again without the exclusion');
+}
+
 
 
 /* ── a diet the union does not have ──────────────────────────────────────── */
@@ -290,7 +385,7 @@ eq(mealRowSpoken({ name: 'Trail mix', kcal: null }), 'Trail mix', 'and neither i
     const size = catalogSize('vegan', slot, union);
     for (let i = 0; i < 60; i++) {
       const m = mealAt('vegan', slot, (i * 97) % size, union);
-      ok(!mealAllergens(m, ['nuts']).length || poolGaps('vegan', slot, union).includes('nuts'),
+      ok(!mealAllergens(m, ['nuts']).length,
         `a coach-noted nut allergy keeps nuts out of ${slot} ${m.n}`);
     }
   }

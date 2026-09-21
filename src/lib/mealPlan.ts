@@ -51,7 +51,7 @@
 // exists for. It is the same shape as the injury acknowledgement in
 // ./injuryGate.ts and is answered the same way: the coach is stopped by news.
 import type { Diet } from './types';
-import { buildPlan, catalogSize, dislikeFreeIndex, mealAt, slotsFor, variantStep, type Allergen, type PlanInput, type Slot } from './meals';
+import { allergenLabel, buildPlan, catalogSize, dislikeFreeIndex, emptySlots, mealAt, slotsFor, variantStep, type Allergen, type PlanInput, type Slot } from './meals';
 import { weekdayOfIso } from './dayPlan';
 import { WEEK_DAYS, dayIndexInWeek, jsDayForIndex } from './weekStart';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -354,9 +354,10 @@ export function planStale(
   if (!mealsPerDayChanged && (dietChanged || !sameSet(plan.avoid, now))) {
     plan.days.forEach((day, dayIdx) => {
       day.meals.forEach((m, pos) => {
+        // A slot that can no longer be made safely resolves to its empty,
+        // named row, which differs from the meal the coach chose: diverged.
         const size = catalogSize(diet, m.slot, now);
-        if (!size) return;
-        const resolved = mealAt(diet, m.slot, m.idx % size, now);
+        const resolved = mealAt(diet, m.slot, size ? m.idx % size : m.idx, now);
         if (resolved.n !== m.n) diverged.push({ dayIdx, pos, slot: m.slot, was: m.n, now: resolved.n });
       });
     });
@@ -399,6 +400,28 @@ function listOf(a: readonly string[]): string {
   const l = a.map((x) => x);
   if (l.length === 1) return l[0];
   return `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}`;
+}
+
+/**
+ * The slots this client's plan cannot fill, said to the coach, or null when
+ * every slot has a meal.
+ *
+ * A slot that cannot be made without one of their allergens is sent EMPTY (see
+ * `mealAt`), and the client is told so on their phone. That is not a plan that
+ * is "fine": the coach is told which slot, which allergen, and what they can do
+ * about it, beside the control that sends it. Sending is not withheld, because
+ * every other slot is still worth sending and the empty one is safe; withholding
+ * it would leave the client with no plan at all over one meal nobody can build.
+ */
+export function planEmptySlotsLine(diet: Diet, mealsPerDay: 3 | 4 | 5, avoid: readonly Allergen[], who: string): string | null {
+  const empty = emptySlots(diet, slotsFor(mealsPerDay), [...avoid]);
+  if (!empty.length) return null;
+  const parts = empty.map(({ slot, allergens }) => {
+    const names = allergens.map(allergenLabel);
+    const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+    return `${who}'s ${slot.toLowerCase()} reaches them empty: every ${slot.toLowerCase()} in their catalogue has ${list} in it, so none is generated.`;
+  });
+  return `${parts.join(' ')} Pin a recipe to ${empty.length === 1 ? 'that slot' : 'those slots'} on each day, or talk to them about what they eat instead. They are told the same on their phone.`;
 }
 
 /** Whether a coach may send this plan, and what to say when they may not. */

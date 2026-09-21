@@ -8,7 +8,7 @@
 import {
   PLAN_DAYS, PLAN_VERSION, PLAN_WEEKDAYS,
   capturePlanMeal, copyPlanDay, guardPlan, parsePlan, planDayBaseKcal, planDayIndex,
-  planDayOverride, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
+  planDayOverride, planEmptySlotsLine, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
   type CoachMealPlan,
 } from './mealPlan';
 import { buildPlan, catalogSize, excludedAllergens, mealAt, mealDislikes, planWeek, searchMeals, slotsFor, swapIndex, type Allergen, type PlanInput } from './meals';
@@ -481,6 +481,38 @@ ok(searchMeals('meat', 'Dinner', 'pemmican', 40, []).length === 0,
   ok(!mealDislikes(mealAt('meat', 'Dinner', sw, []), ['salmon', 'chicken']).length, 'a swap lands on a meal they do not dislike');
   ok(searchMeals('meat', 'Dinner', '', 20, [], ['salmon']).every((m) => !/salmon/i.test(m.n)), 'the picker leaves disliked meals out');
   ok(searchMeals('meat', 'Dinner', 'salmon', 20, [], ['salmon']).length > 0, 'unless that is what they searched for');
+}
+
+/* ── a slot their allergens leave empty ──────────────────────────────────── */
+//
+// A vegan client avoiding soy has no breakfast the catalogue can make (every
+// vegan breakfast base is tofu or soy milk). The coach's week sends that slot
+// EMPTY, the coach is told which slot and why beside Send, and the plan still
+// round-trips and still sends: the empty slot is safe, the rest is worth having.
+{
+  const soyFree = client({ diet: 'vegan', avoid: ['soy'] });
+  const plan = seedPlan(soyFree, WRITTEN);
+  ok(plan.days.every((d) => d.meals[0].slot === 'Breakfast' && d.meals[0].k === 0 && /without soy/.test(d.meals[0].n)),
+    'every day of the seeded week carries the empty, named breakfast');
+  ok(plan.days.every((d) => d.meals.slice(1).every((m) => m.k > 0)), 'and a real meal in every other slot');
+  ok(parsePlan(JSON.parse(JSON.stringify(plan))) !== null, 'a plan with an empty slot survives being stored and read back');
+  eq(planStale(plan, 'vegan', ['soy'], 4).stale, false, 'and is current against the client it was written for');
+  const line = planEmptySlotsLine('vegan', 4, ['soy'], 'Sam');
+  ok(!!line && /Sam's breakfast reaches them empty/.test(line) && /soy/.test(line) && /Pin a recipe/.test(line),
+    'the coach is told which slot, which allergen, and what to do');
+  ok(!/\u2014/.test(line ?? ''), 'with no em dash');
+  eq(planEmptySlotsLine('vegan', 4, ['dairy'], 'Sam'), null, 'and told nothing when every slot has a meal');
+  eq(guardPlan('ready', 'ready', planStale(plan, 'vegan', ['soy'], 4), 'Sam').allowed, true, 'sending is not withheld over it');
+  // Written before the soy was disclosed: the breakfast they chose now
+  // resolves to the empty slot, and the coach is told the plan has moved.
+  const before = seedPlan(client({ diet: 'vegan', avoid: [] }), WRITTEN);
+  const after = planStale(before, 'vegan', ['soy'], 4);
+  ok(after.stale && after.addedAvoid.includes('soy'), 'a soy disclosure after the plan was written makes it stale');
+  ok(after.diverged.some((d) => d.slot === 'Breakfast' && /without soy/.test(d.now)), 'and names the breakfast that is now empty');
+  // The coach's builder, on this client: the served plates aim at their share.
+  const built = buildPlan({ ...soyFree, mealOverride: planDayOverride(plan, 0) });
+  ok(built.plan[0].unfillable?.includes('soy') === true, 'the builder draws the empty breakfast');
+  ok(built.aim < built.target.kcal && built.tot.K < built.target.kcal, 'and does not total the day as if it were full');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

@@ -117,112 +117,95 @@ function componentAllergens(comp: Comp): Allergen[] {
   return out;
 }
 /**
- * The components of a pool that honour the exclusions — and the fallback, said
- * out loud instead of buried.
+ * The components of a pool that honour the exclusions. Possibly none.
  *
- * ── What was wrong ────────────────────────────────────────────────────────
+ * This used to fall back to the UNFILTERED pool when the exclusions emptied
+ * it, on the argument that a meal built from nothing would crash `mealAt` and
+ * a crash tells the member less than a warning. That was never the choice. The
+ * fallback served a member with a declared allergy a generated meal containing
+ * it, with a red "Your plan still contains ..." over the top, and people skim
+ * warnings. The safe option was always to serve NO meal in a slot that cannot
+ * be made safely and to say so: `mealAt` returns an empty, named slot for it
+ * (`unfillable`), and `allergenGapNote` says which slot, which allergen and
+ * what to do instead.
  *
- * This was `return filtered.length ? filtered : pool;` and nothing anywhere
- * told the member. On the one screen where a quiet failure is least acceptable,
- * an allergen that emptied a required pool was silently abandoned and the
- * planner went on building meals out of the very components it had been asked
- * to leave out. A member who ticked Dairy got a plan with dairy in it, drawn
- * and priced and shopped for, with nothing on screen to suggest anything had
- * happened.
- *
- * ── Why the fallback survives ─────────────────────────────────────────────
- *
- * Because the alternative is worse in a way that is harder to see. The pools
- * are mixed-radix dimensions and every slot needs one component from each; an
- * empty dimension means there is NO meal in this diet and this slot that
- * honours every exclusion. Returning nothing would make `mealAt` build a meal
- * out of nulls — it reads `base.step`, `pr.n`, `a.ico` straight off the parts —
- * and a screen that crashes tells the member even less than one that lies.
- *
- * So the pool still falls back AND `poolGaps` names exactly which exclusions
- * could not be honoured, `mealAllergens` says which of them are actually in a
- * given meal, and app/(client)/nutrition.tsx prints both. The plan is drawn,
- * and it is drawn with a warning on it rather than as though nothing were
- * wrong.
+ * Only the EMPTY case changed. A pool with anything left in it is filtered
+ * exactly as before, so every stored index into a catalogue that could be
+ * built still names the same meal (pinned in src/lib/mealAllergens.test.ts).
  */
 function poolFilter(pool: Comp[], avoid: Allergen[]): Comp[] {
   if (!avoid.length) return pool;
-  const filtered = pool.filter((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
-  return filtered.length ? filtered : pool;
+  return pool.filter((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
+}
+
+/** The component pools a slot draws one of each from, before any diet. */
+function slotPools(slot: Slot): Comp[][] {
+  return slot === 'Breakfast' ? [BREK_BASE, BREK_TOP, BREK_BOOST, BREK_STYLE]
+    : slot === 'Snack' ? [SNACK_A, SNACK_B, SNACK_PREP]
+    : [PROTEINS, CARBS, VEGS, FLAVORS];
 }
 
 /**
- * The exclusions this diet and slot cannot honour, because honouring them would
- * leave a required component pool with nothing in it.
+ * Why this diet and slot cannot be made without an excluded allergen, or [] when
+ * it can. Non-empty means the slot is UNFILLABLE: every option for some
+ * required part of the meal carries one of these, so no meal is generated.
  *
- * Per allergen rather than per pool, because that is the sentence a member
- * needs: "we could not keep dairy out of your breakfasts" is actionable and
- * "component dimension 2 is empty" is not. An allergen is reported when
- * removing it ALONE would empty a pool, so a member excluding four things is
- * told which of the four is the problem rather than being handed all four back.
+ * Named per allergen, because that is the sentence a member acts on: "every
+ * breakfast has soy in it" rather than "component dimension 2 is empty". The
+ * names are a smallest set of their exclusions that still empties the slot, so
+ * a vegan avoiding dairy and soy hears "soy" (dairy was never the problem) and
+ * a meat-eater avoiding dairy, gluten, egg and shellfish hears the three that
+ * fail together and not the one that has nothing to do with it.
+ *
+ * A pool the diet itself empties is not an exclusion's doing and is skipped:
+ * that is a dimension with nothing in it, which `mealAt` already closes around.
  */
 export function poolGaps(diet: Diet, slot: Slot, avoid: Allergen[] = []): Allergen[] {
   if (!avoid.length) return [];
-  const pools = slot === 'Breakfast' ? [BREK_BASE, BREK_TOP, BREK_BOOST, BREK_STYLE]
-    : slot === 'Snack' ? [SNACK_A, SNACK_B, SNACK_PREP]
-    : [PROTEINS, CARBS, VEGS, FLAVORS];
-  const out: Allergen[] = [];
+  const pools = slotPools(slot).map((pool) => forDiet(pool, diet)).filter((pool) => pool.length);
+  const blocks = (list: Allergen[]) => list.length > 0
+    && pools.some((pool) => pool.every((cp) => componentAllergens(cp).some((a) => list.includes(a))));
+  if (!blocks(avoid)) return [];
+  let named = [...avoid];
   for (const a of avoid) {
-    const empties = pools.some((pool) => {
-      const forThisDiet = forDiet(pool, diet);
-      if (!forThisDiet.length) return false;   // the diet already empties it; not this allergen's doing
-      return !forThisDiet.some((cp) => !componentAllergens(cp).includes(a));
-    });
-    if (empties) out.push(a);
+    const without = named.filter((x) => x !== a);
+    if (blocks(without)) named = without;
   }
-  // ── the exclusions that only fail TOGETHER ──────────────────────────────
-  //
-  // The loop above asks each allergen ALONE, and `poolFilter` filters against
-  // the whole list AT ONCE. Those are different questions, and the gap between
-  // them is silent: dairy alone may leave a pool with something in it, gluten
-  // alone may too, and dairy-and-gluten together may empty it. `poolFilter`
-  // then falls back to the UNFILTERED pool — the fallback whose entire
-  // justification, twenty lines up, is that the plan is "drawn with a warning
-  // on it rather than as though nothing were wrong" — while this function
-  // returned nothing to warn with. The member got a plan that had quietly
-  // ignored their filter, with no banner anywhere.
-  //
-  // So the same question `poolFilter` actually asks is asked here: does the
-  // whole exclusion list empty a required pool? When it does, every exclusion
-  // still standing is named — none of them can be singled out as the culprit,
-  // because it is the combination, and the member needs to know the filter was
-  // not honoured rather than which half to blame.
-  const combinedEmpties = pools.some((pool) => {
-    const forThisDiet = forDiet(pool, diet);
-    if (!forThisDiet.length) return false;
-    return !forThisDiet.some((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
-  });
-  if (combinedEmpties) for (const a of avoid) if (!out.includes(a)) out.push(a);
-  return out;
+  return named;
 }
 
-/** Every exclusion that cannot be honoured across a whole day's slots. */
-export function planGaps(diet: Diet, slots: Slot[], avoid: Allergen[] = []): Allergen[] {
-  const seen = new Set<Allergen>();
-  for (const slot of slots) for (const a of poolGaps(diet, slot, avoid)) seen.add(a);
-  return [...seen];
+/** One slot of a day that has no generated meal, and the allergens that are why. */
+export interface EmptySlot { slot: Slot; allergens: Allergen[] }
+
+/** Every slot of a day that cannot be made without an excluded allergen, once
+ *  per slot, in the day's order. */
+export function emptySlots(diet: Diet, slots: readonly Slot[], avoid: Allergen[] = []): EmptySlot[] {
+  const out: EmptySlot[] = [];
+  for (const slot of new Set(slots)) {
+    const allergens = poolGaps(diet, slot, avoid);
+    if (allergens.length) out.push({ slot, allergens });
+  }
+  return out;
 }
 
 /**
  * Which of the excluded allergens are actually present in a generated meal.
  *
- * The per-meal half of the same honesty. `poolGaps` says the filter could not
- * be honoured somewhere in the slot; this says whether THIS meal, the one on
- * screen with a name and a picture, contains the thing the member asked to
- * avoid. A member is owed the flag on the row they are about to cook, not only
- * a warning at the top of the screen.
+ * A generated meal never does any more (`poolFilter`, and the sweep in
+ * src/lib/mealAllergens.test.ts). This is still the reader for everything that
+ * is NOT generated from the pools, a real recipe above all, and the second
+ * lock on the ones that are. A member is owed the flag on the row they are
+ * about to cook, not only a warning at the top of the screen.
  *
  * Read off the meal's own name and ingredients with the same matcher the
  * components go through, so a meal assembled from parts is tested as the dish
  * it became.
  */
-export function mealAllergens(meal: { n: string; ing: Ing[] }, avoid: Allergen[] = []): Allergen[] {
-  if (!avoid.length) return [];
+export function mealAllergens(meal: { n: string; ing: Ing[]; unfillable?: readonly Allergen[] }, avoid: Allergen[] = []): Allergen[] {
+  // An empty slot's NAME is the allergen ("No breakfast we can make without
+  // soy") and its plate holds nothing. Read as a dish, it would be marked as
+  // containing the one thing it was left empty to keep out.
+  if (!avoid.length || meal.unfillable?.length) return [];
   const found = componentAllergens({ n: meal.n, k: 0, p: 0, c: 0, f: 0, ing: meal.ing, d: [] });
   return avoid.filter((a) => found.includes(a));
 }
@@ -297,21 +280,33 @@ export function mealRowSpoken(row: {
   ].filter(Boolean).join('. ');
 }
 
+/** "dairy", "dairy or soy", "dairy, gluten or egg". `or`, because each
+ *  option has at least one of them, not necessarily all. */
+function orList(names: readonly string[]): string {
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
+/** What an empty slot is called on its row: which meal, and why, in one line. */
+export function unfillableName(slot: Slot, allergens: readonly Allergen[]): string {
+  return `No ${slot.toLowerCase()} we can make without ${orList(allergens.map(allergenLabel))}`;
+}
+
 /**
- * What to say when an exclusion could not be honoured, or null when they all
- * were.
+ * What to say about the slots that have no generated meal, or null when every
+ * slot has one.
  *
- * The wording has one job: make it unmistakable that the plan below contains
- * something the member asked to keep out, and say which. It does not apologise
- * and it does not hedge — somebody with a real allergy has to be able to read
- * this once and know.
+ * Addressed to the member, and written to be acted on: which meal is empty,
+ * which allergen is why, and the three things they can do about it. It does
+ * not say the plan contains anything, because it does not: the slot was left
+ * empty precisely so that it would not.
  */
-export function allergenGapNote(gaps: Allergen[]): string | null {
-  if (!gaps.length) return null;
-  const names = gaps.map(allergenLabel);
-  const list = names.length === 1 ? names[0]
-    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `Your plan still contains ${list}. There are not enough ${list.includes('and') ? 'suitable components' : `${list}-free components`} in this diet to build every meal without ${names.length === 1 ? 'it' : 'them'}, so the meals below have been built anyway and are marked where ${names.length === 1 ? 'it appears' : 'they appear'}. Check every dish before you cook it.`;
+export function allergenGapNote(empty: readonly EmptySlot[]): string | null {
+  if (!empty.length) return null;
+  const lines = empty.map(({ slot, allergens }) => {
+    const s = slot.toLowerCase();
+    return `There is no ${s} in your plan. Every ${s} we can build for your diet has ${orList(allergens.map(allergenLabel))} in it, so we left it empty rather than give you something you avoid.`;
+  });
+  return `${lines.join(' ')} Search real recipes for ${empty.length === 1 ? 'that meal' : 'those meals'}, choose one you know is safe and log it yourself, or ask your coach to plan ${empty.length === 1 ? 'it' : 'them'}.`;
 }
 
 // ── whose exclusions, and how many of them were read ────────────────────────
@@ -626,26 +621,39 @@ export interface GeneratedMeal {
   n: string; slot: Slot; ico: string;
   k: number; p: number; c: number; f: number;
   ing: Ing[]; steps: string[]; diet: Diet; idx: number;
+  /** Set, and non-empty, when this slot cannot be made without one of these
+   *  excluded allergens. The meal is then EMPTY: no ingredients, no macros, no
+   *  method, and `n` says why (`unfillableName`). Never cook, log or shop it. */
+  unfillable?: Allergen[];
 }
 export interface PlannedMeal extends GeneratedMeal {
   pos: number; servings: number; K: number; P: number; C: number; F: number;
+  /** On an `unfillable` slot only: the calories this slot would have carried,
+   *  so a recipe put in it is portioned to the slot's share rather than to 0. */
+  slotKcal?: number;
 }
 
 /** Component pools for a given diet + slot (mixed-radix dimensions). */
 function dims(diet: Diet, slot: Slot, avoid: Allergen[] = []): Comp[][] {
-  const f = (arr: Comp[]) => poolFilter(forDiet(arr, diet), avoid);
-  if (slot === 'Breakfast') return [f(BREK_BASE), f(BREK_TOP), f(BREK_BOOST), f(BREK_STYLE)];
-  if (slot === 'Snack')     return [f(SNACK_A), f(SNACK_B), f(SNACK_PREP)];
-  return [f(PROTEINS), f(CARBS), f(VEGS), f(FLAVORS)];
+  return slotPools(slot).map((arr) => poolFilter(forDiet(arr, diet), avoid));
 }
 
-/** Number of distinct meals available for a diet + slot. */
+/** Number of distinct meals available for a diet + slot. Zero when the slot
+ *  cannot be made without an excluded allergen (`poolGaps`). */
 export function catalogSize(diet: Diet, slot: Slot, avoid: Allergen[] = []): number {
+  if (poolGaps(diet, slot, avoid).length) return 0;
   return dims(diet, slot, avoid).reduce((a, p) => a * Math.max(1, p.length), 1);
 }
 
 /** Deterministic index → concrete meal (macros, ingredients, method). */
 export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = []): GeneratedMeal {
+  // A slot that cannot be made safely is served EMPTY, never as the nearest
+  // thing. `idx` is handed back untouched: it may be a stored pick that means
+  // something again once the exclusions change, and nothing here rewrites it.
+  const unfillable = poolGaps(diet, slot, avoid);
+  if (unfillable.length) {
+    return { n: unfillableName(slot, unfillable), slot, ico: '🚫', k: 0, p: 0, c: 0, f: 0, ing: [], steps: [], diet, idx, unfillable };
+  }
   const pools = dims(diet, slot, avoid);
   const sizes = pools.map((p) => Math.max(1, p.length));
   const total = sizes.reduce((a, b) => a * b, 1);
@@ -747,7 +755,12 @@ function mealSeed(c: PlanInput, slotIdx: number): number {
 }
 
 /** Build a day's plan scaled toward the client's calorie target. */
-export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnType<typeof macrosFor>; tot: { K: number; P: number; C: number; F: number } } {
+export function buildPlan(c: PlanInput): {
+  plan: PlannedMeal[]; target: ReturnType<typeof macrosFor>; tot: { K: number; P: number; C: number; F: number };
+  /** The calories the served plates are sized to: the target, less an equal
+   *  share for each slot left empty. Equal to `target.kcal` on a full day. */
+  aim: number;
+} {
   const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
   const slots = slotsFor(c.mealsPerDay);
   const override = c.mealOverride ?? {};
@@ -759,10 +772,25 @@ export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnTy
     // which draw from the same pools — came out as the same protein twice a
     // day with a different sauce on it.
     const seeded = dislikeFreeIndex(c.diet, slot, mealSeed(c, i) + i * variantStep(c.diet, slot, avoid), avoid, c.dislikes);
-    const idx = (override[i] != null ? override[i] : seeded) % size;
+    const raw = override[i] != null ? override[i] : seeded;
+    // An unfillable slot has no catalogue to take the index modulo; its pick
+    // is carried through as it was (see `mealAt`).
+    const idx = size ? raw % size : raw;
     const meal = mealAt(c.diet, slot, idx, avoid);
-    return { ...meal, pos: i, servings: 1, K: meal.k, P: meal.p, C: meal.c, F: meal.f };
+    return { ...meal, pos: i, servings: meal.unfillable ? 0 : 1, K: meal.k, P: meal.p, C: meal.c, F: meal.f };
   });
+  // ── an empty slot is not a smaller day ───────────────────────────────────
+  //
+  // The plates below are sized to land the day on its target. With a slot left
+  // empty, sizing the rest to the WHOLE target would pile the missing meal onto
+  // the others, so the member who then eats their own breakfast eats it twice,
+  // and the day's total would read as a full day. The served plates aim at
+  // their slots' share instead, one equal share per slot (the same weight the
+  // day-wide multiplier has always given each), and the total says what is
+  // actually served.
+  const served = plan.filter((x) => !x.unfillable).length;
+  const aim = served === plan.length ? target.kcal : target.kcal * served / plan.length;
+  const share = plan.length ? Math.round(target.kcal / plan.length) : 0;
   const base = plan.reduce((a, x) => a + x.k, 0) || 1;
   // ── portions, per plate rather than per day ──────────────────────────────
   //
@@ -791,17 +819,17 @@ export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnTy
   // number printed above it in silence.
   const QUARTER = 0.25;
   const MIN_SERVING = 0.5;
-  const serv = plan.map(() => Math.max(MIN_SERVING, Math.round((target.kcal / base) * 4) / 4));
+  const serv = plan.map((x) => x.unfillable ? 0 : Math.max(MIN_SERVING, Math.round((aim / base) * 4) / 4));
   let running = plan.reduce((a, x, i) => a + x.k * serv[i], 0);
   // At most four quarter-steps per plate, which is the whole span a residual
   // smaller than one day-wide quarter can need. Bounded so this cannot spin.
   for (let pass = 0; pass < plan.length * 4; pass++) {
-    const dir = target.kcal > running ? QUARTER : -QUARTER;
+    const dir = aim > running ? QUARTER : -QUARTER;
     let best = -1;
-    let bestErr = Math.abs(target.kcal - running);
+    let bestErr = Math.abs(aim - running);
     for (let i = 0; i < plan.length; i++) {
-      if (serv[i] + dir < MIN_SERVING) continue;
-      const err = Math.abs(target.kcal - (running + plan[i].k * dir));
+      if (plan[i].unfillable || serv[i] + dir < MIN_SERVING) continue;
+      const err = Math.abs(aim - (running + plan[i].k * dir));
       // Strictly better, so a move that only ties is not taken and the loop
       // cannot oscillate between two plates forever.
       if (err < bestErr) { bestErr = err; best = i; }
@@ -812,13 +840,14 @@ export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnTy
   }
   plan = plan.map((x, i) => {
     const s = serv[i];
-    return { ...x, servings: s, K: Math.round(x.k * s), P: Math.round(x.p * s), C: Math.round(x.c * s), F: Math.round(x.f * s) };
+    const out: PlannedMeal = { ...x, servings: s, K: Math.round(x.k * s), P: Math.round(x.p * s), C: Math.round(x.c * s), F: Math.round(x.f * s) };
+    return x.unfillable ? { ...out, slotKcal: share } : out;
   });
   const tot = {
     K: plan.reduce((a, x) => a + x.K, 0), P: plan.reduce((a, x) => a + x.P, 0),
     C: plan.reduce((a, x) => a + x.C, 0), F: plan.reduce((a, x) => a + x.F, 0),
   };
-  return { plan, target, tot };
+  return { plan, target, tot, aim };
 }
 
 /**
@@ -919,6 +948,8 @@ export function variantStep(diet: Diet, slot: Slot, avoid: Allergen[] = []): num
  */
 export function catalogRepeatDay(diet: Diet, slot: Slot, avoid: Allergen[] = []): number {
   const size = catalogSize(diet, slot, avoid);
+  // An empty slot serves nothing, so nothing in it can come round again.
+  if (!size) return Infinity;
   const step = variantStep(diet, slot, avoid) % size;
   // A stride that is a whole number of catalogues over is no stride at all:
   // every day is day zero, and the repeat is on day one.
@@ -931,6 +962,8 @@ export function catalogRepeatDay(diet: Diet, slot: Slot, avoid: Allergen[] = [])
 /** Next meal in the catalog for a slot (the "swap" action). */
 export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = [], dislikes: readonly string[] = []): number {
   const size = catalogSize(diet, slot, avoid);
+  // Nothing to swap to in a slot that cannot be made safely; the pick stays.
+  if (!size) return currentIdx;
   const step = variantStep(diet, slot, avoid);
   // The next step whose dislike-free meal is not the one being swapped away
   // from. Bounded: a slot whose every option collapses to one meal swaps to
@@ -971,6 +1004,7 @@ export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, a
   // member who searches for the very thing they said they dislike still finds
   // it. Allergens were settled by `dims` before any row existed.
   if (dislikes.length) return preferNotDisliked(searchMeals(diet, slot, query, limit * 3, avoid), dislikes).rows.slice(0, limit);
+  if (!catalogSize(diet, slot, avoid)) return [];
   const pools = dims(diet, slot, avoid);
   const sizes = pools.map((p) => Math.max(1, p.length));
   const total = sizes.reduce((a, b) => a * b, 1);
@@ -1102,6 +1136,8 @@ export function groceryFromWeek(week: readonly (readonly GroceryRow[])[]): Groce
   const loose = new Set<string>();
   for (const day of week) {
     for (const meal of day) {
+      // An empty slot is not a meal and has nothing to buy.
+      if (meal.unfillable?.length) continue;
       meals.add(meal.n);
       meal.ing.forEach(([item, qty, unit, dept]) => {
         const key = `${dept}||${item}||${unit}`;

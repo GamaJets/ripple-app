@@ -92,7 +92,7 @@ import {
 import { writeFailure } from '../../src/lib/wroteRows';
 import {
   PLAN_DAYS, PLAN_WEEKDAYS, copyPlanDay, guardPlan, planDayBaseKcal, planDayIndex,
-  planDayOverride, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
+  planDayOverride, planEmptySlotsLine, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
   type CoachMealPlan,
 } from '../../src/lib/mealPlan';
 import {
@@ -512,6 +512,12 @@ export default function ClientNutrition() {
   );
 
   const guard = guardPlan(profileStatus, cn.status, draftStale, client?.name ?? 'this client');
+  // A slot their allergens leave nothing to generate for. Sent empty, never
+  // filled with the allergen, and said here beside Send so it is not a
+  // plan that merely looks complete.
+  const emptyLine = profile?.diet && profile.mealsPerDay
+    ? planEmptySlotsLine(profile.diet, profile.mealsPerDay, profile.avoid, who)
+    : null;
 
   // The day being edited, run through the client's own builder. This is the
   // whole point of the screen: what is drawn below is what their phone draws.
@@ -558,13 +564,13 @@ export default function ClientNutrition() {
     avoid: profile ? profile.ownAvoid : null,
     coachAvoid: profile ? profile.coachAvoid : null,
     query,
-    targetKcal: picking?.K ?? null,
+    targetKcal: picking ? (picking.slotKcal ?? picking.K) : null,
     number: 8,
   });
   const recipes = useRecipeSearch(recipeParams);
   const found = recipes.result;
   const recipeRows = found && (found.status === 'ready' || found.status === 'partial')
-    ? preferNotDisliked(found.meals, profile?.dislikes ?? []).rows.map((m) => portionRecipe(m, picking?.K ?? null, pick?.pos ?? 0))
+    ? preferNotDisliked(found.meals, profile?.dislikes ?? []).rows.map((m) => portionRecipe(m, picking ? (picking.slotKcal ?? picking.K) : null, pick?.pos ?? 0))
     : [];
   /** What the coach pinned at this day's slot, drawn instead of the generated
    *  meal's name. The ref carries a title and an image and no figures — that
@@ -941,6 +947,8 @@ export default function ClientNutrition() {
                               // coach opens the row.
                               accessibilityLabel={ref
                                 ? `${m.slot}: ${ref.title}, a recipe. Its figures are read from the recipe library on their phone. Choose a different meal`
+                                : m.unfillable?.length
+                                ? `${m.slot}: ${m.n}. Nothing is generated for this slot. Pin a recipe`
                                 : `${m.slot}: ${m.n}. ${num(m.K)} kcal, ${num(m.P)} protein, ${num(m.C)} carbs, ${num(m.F)} fat at ${m.servings} servings. Choose a different meal`}
                               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                               {/* The dish's own glyph in a circle where the board
@@ -970,6 +978,12 @@ export default function ClientNutrition() {
                                   // nobody is serving.
                                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                                     Recipe · its own figures and ingredients are read on their phone
+                                  </Text>
+                                ) : m.unfillable?.length ? (
+                                  // Empty: no figures to show, and the one
+                                  // thing the coach can put here.
+                                  <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
+                                    Nothing generated · tap to pin a recipe
                                   </Text>
                                 ) : (
                                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
@@ -1030,6 +1044,9 @@ export default function ClientNutrition() {
                           {!guard.allowed && guard.reason ? (
                             <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{guard.reason}</Flag>
                           ) : null}
+                          {emptyLine ? (
+                            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{emptyLine}</Flag>
+                          ) : null}
                           <View style={{ opacity: guard.allowed && !sending ? 1 : 0.4 }}
                             pointerEvents={guard.allowed && !sending ? 'auto' : 'none'}>
                             <Cta wide label={sending ? 'Sending…' : (guard.label ?? `Send ${PLAN_DAYS} Days to ${client?.name ?? 'Client'}`)} onPress={send} />
@@ -1073,7 +1090,10 @@ export default function ClientNutrition() {
                               hundred calories — so breakfast's multiplier is no
                               longer the day's. */}
                           <Text style={{ ...ty.body, color: t.ink2 }}>
-                            {planServingNote(built.plan.map((m) => m.servings), planDayBaseKcal(draft, dayIdx), built.target.kcal)}
+                            {/* The plates actually served, against what they
+                                are sized to: an empty slot has no plate, and
+                                the rest aim at their share of the day. */}
+                            {planServingNote(built.plan.filter((m) => !m.unfillable).map((m) => m.servings), planDayBaseKcal(draft, dayIdx), Math.round(built.aim))}
                           </Text>
                           <View style={{ marginTop: sp.md }}>
                             <Meter label="Protein" tone="blue" val={built.tot.P} target={built.target.protein} />
@@ -1417,8 +1437,9 @@ export default function ClientNutrition() {
               }) : null}
               {!recipesOpen && !results.length ? (
                 <Text style={{ ...ty.body, color: t.ink3, paddingVertical: sp.lg }}>
-                  Nothing in this slot matches that. Clear the search to see what is available for
-                  their diet with their allergens taken out.
+                  {picking?.unfillable?.length
+                    ? `${picking.n} for ${who}. Every option has one of their allergens in it, so this slot is empty until you pin a recipe.`
+                    : 'Nothing in this slot matches that. Clear the search to see what is available for their diet with their allergens taken out.'}
                 </Text>
               ) : null}
             </ScrollView>
