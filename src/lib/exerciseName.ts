@@ -187,3 +187,21 @@ export function canonicalExerciseName(raw: string, catalogue: readonly NamedRow[
 
   return titleCaseName(typed);
 }
+
+/**
+ * A meal's name for display: Title Case, and whatever is in brackets kept on
+ * one line. "(with a Pinch of Sea Salt)" was breaking across two lines, which
+ * the owner asked to stop on 21 Sep 2026. The spaces inside a bracket become
+ * non-breaking; the name itself still wraps between its words.
+ */
+export function mealTitle(raw: string): string {
+  return titleCaseName(raw).replace(/\([^)]*\)/g, (b) => b.replace(/ /g, '\u00A0'));
+}
+
+/** A meal's name split for a two-line title: the dish, and what was in its
+ *  closing bracket ("with a Pinch of Sea Salt"), or null when there is none. */
+export function mealTitleParts(raw: string): { main: string; note: string | null } {
+  const full = titleCaseName(raw);
+  const m = full.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+  return m && m[1] ? { main: m[1], note: m[2].replace(/ /g, '\u00A0') } : { main: full, note: null };
+}

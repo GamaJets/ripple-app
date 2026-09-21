@@ -14,7 +14,7 @@
 // number up.
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
-import { titleCaseName } from '../../src/lib/exerciseName';import { num, numUpTo } from '../../src/lib/format';
+import { titleCaseName, mealTitle, mealTitleParts } from '../../src/lib/exerciseName';import { num, numUpTo } from '../../src/lib/format';
 import { fmtDay, fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
@@ -1513,6 +1513,15 @@ export default function Nutrition() {
   /** `inToday` is the Today’s Meals card, where every row is the plan’s: the
    *  words "In your plan" would be said of all of them, so only WHOSE pick it
    *  is survives there. */
+  /** Protein, Carbs and Fat, one line each, the word and its grams in bold
+   *  ink (owner, 21 Sep 2026: the one grey run-on line was hard to read). */
+  const macroLines = (p: number, cc: number, f: number) => (
+    <View style={{ marginTop: 2 }}>
+      {([['Protein', p], ['Carbs', cc], ['Fat', f]] as const).map(([w, g]) => (
+        <Text key={w} style={{ ...ty.caption, ...numeric, ...font('700'), color: t.ink }}>{w} {num(Math.round(g))}{'\u00A0'}g</Text>
+      ))}
+    </View>
+  );
   const mealRow = (m: PlannedMeal, ruled: boolean, dim = false, inToday = false) => {
     const real = isRecipeMeal(m) ? m : null;
     // Read once and used twice — for the mark and for the sentence.
@@ -1539,55 +1548,61 @@ export default function Nutrition() {
             slot: m.slot, coachPick: planned && coachPick(m.pos), name: m.n,
             allergens: inIt, kcal: String(m.K),
           })}${real ? ', a real recipe' : ''}${planned ? ', in your plan' : ''}`}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: 64, paddingVertical: sp.sm }}>
-          {/* The dish's own glyph on a plate where the mockup puts a
-              photograph. There is no photography of a generated
-              meal, and none is invented.
-
-              A real recipe HAS one, and it is drawn over the glyph rather
-              than instead of it: while it loads, when the publisher has
-              none, and when it fails, the tile underneath is what shows.
-              `cachePolicy="memory"` because Spoonacular's terms let the
-              image URL be kept and say nothing that lets the bytes be. */}
-          <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: plate, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-            <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
-            {real?.image ? (
-              <GuardedImage source={{ uri: real.image }} contentFit="cover" cachePolicy="memory"
-                style={{ position: 'absolute', width: 52, height: 52 }} />
-            ) : null}
+          style={{ paddingVertical: sp.md, gap: sp.sm }}>
+          {/* ── the row, laid out to use its width (owner, 21 Sep 2026) ──────
+              It was picture | narrow text column | kcal chip, with the chip's
+              column running the full height of the row, so every name wrapped
+              into a third of the card and the right side sat empty. Now the
+              name has the width beside the picture, and the four figures run
+              across the whole card underneath in one strip. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+            {/* The dish's own glyph on a plate; a real recipe's photograph is
+                drawn over it (Spoonacular's terms: URL kept, bytes not). */}
+            <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: plate, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
+              {real?.image ? (
+                <GuardedImage source={{ uri: real.image }} contentFit="cover" cachePolicy="memory"
+                  style={{ position: 'absolute', width: 52, height: 52 }} />
+              ) : null}
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ ...ty.caption, ...font('700'), color: t.ink }}>
+                {m.slot}{planned && (whose || !inToday) ? <Text style={{ color: t.brandText }}>{' · ' + [inToday ? null : 'In Your Plan', whose].filter(Boolean).join(' · ')}</Text> : null}
+              </Text>
+              {(() => { const nm = mealTitleParts(m.n); return (<>
+                <Text style={{ ...ty.head, color: t.ink }}>{nm.main}</Text>
+                {nm.note ? <Text style={{ ...ty.caption, color: t.ink2 }}>({nm.note})</Text> : null}
+              </>); })()}
+            </View>
           </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{titleCaseName(m.n)}</Text>
-            {/* The slot is the caption, as the mockup draws it, with the macros
-                beside it — the kcal went to the chip. The ingredients are one
-                tap away on the sheet, which is where they can be read whole. */}
-            {m.unfillable?.length ? (
-              // An empty slot: nothing to count, and the one thing to do.
-              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{m.slot} · Tap to search real recipes, or ask your coach</Text>
-            ) : (
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.slot} · {macroWords(m.P, m.C, m.F)}</Text>
-            )}
-            {/* Which row is the plan's, said in words: the list is
-                the whole catalogue now, and one of them is today's. */}
-            {planned && (whose || !inToday) ? (
-              <Text style={{ ...ty.caption, ...font('600'), color: t.brandText, marginTop: 2 }}>{[inToday ? null : 'In Your Plan', whose].filter(Boolean).join(' · ')}</Text>
-            ) : null}
-            {/* On the row somebody is about to cook, not only at the
-                top of the screen. A warning about the plan does not
-                tell you which dish. crit in the MARK, the words in
-                ink — colour is never the only channel. */}
-            {inIt.length ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                <Text style={{ ...ty.caption, color: t.ink2 }}>
-                  Contains {inIt.map(allergenLabel).join(' and ')}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          {/* Calories are orange everywhere in the app, and always beside the
-              word. */}
-          {m.unfillable?.length ? null : <TonedChip tone="orange" label={`${num(m.K)} kcal`} />}
+          {m.unfillable?.length ? (
+            // An empty slot: nothing to count, and the one thing to do.
+            <Text style={{ ...ty.caption, color: t.ink2 }}>Tap to search real recipes, or ask your coach</Text>
+          ) : (
+            <View style={{ flexDirection: 'row', borderRadius: radius.md, backgroundColor: t.surface2, paddingVertical: sp.sm }}>
+              {([
+                [num(m.K), 'kcal', t.data.orangeInk],
+                [`${num(Math.round(m.P))}\u00A0g`, 'Protein', t.ink],
+                [`${num(Math.round(m.C))}\u00A0g`, 'Carbs', t.ink],
+                [`${num(Math.round(m.F))}\u00A0g`, 'Fat', t.ink],
+              ] as const).map(([v, w, ink], i) => (
+                <View key={w} style={{ flex: 1, alignItems: 'center', borderStartWidth: i ? hairline : 0, borderStartColor: t.ring }}>
+                  <Text style={{ ...ty.label, ...numeric, ...font('700'), color: ink }}>{v}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>{w}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+          {/* On the row somebody is about to cook: crit in the MARK, the
+              words in ink, so colour is never the only channel. */}
+          {inIt.length ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+              <Text style={{ ...ty.caption, color: t.ink2 }}>
+                Contains {inIt.map(allergenLabel).join(' and ')}
+              </Text>
+            </View>
+          ) : null}
         </Pressable>
       </View>
     );
@@ -1970,7 +1985,7 @@ export default function Nutrition() {
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
-                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{titleCaseName(m.n)}</Text>
+                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }}>{mealTitle(m.n)}</Text>
                       {inIt.length ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
@@ -2345,8 +2360,11 @@ export default function Nutrition() {
                     accessibilityLabel={mealRowSpoken({ name: m.n, allergens: inIt, kcal: num(m.K) })}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{titleCaseName(m.n)}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>{macroWords(m.P, m.C, m.F)}</Text>
+                      {(() => { const nm = mealTitleParts(m.n); return (<>
+                        <Text style={{ ...ty.head, color: t.ink }}>{nm.main}</Text>
+                        {nm.note ? <Text style={{ ...ty.caption, color: t.ink2 }}>({nm.note})</Text> : null}
+                      </>); })()}
+                      {macroLines(m.P, m.C, m.F)}
                       {inIt.length ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
@@ -2512,7 +2530,7 @@ export default function Nutrition() {
             <View style={{ flex: 1, padding: sp.xl, paddingTop: 60, justifyContent: 'space-between' }}>
               <View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.xl }}>
-                  <Text style={{ ...ty.label, color: t.ink3, flex: 1 }} numberOfLines={1}>{titleCaseName(recipe.n)}</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>{mealTitle(recipe.n)}</Text>
                   <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Done</Text></Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 5, marginBottom: sp.xxl }}>
@@ -2564,7 +2582,10 @@ export default function Nutrition() {
               <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}{sheetRecipe ? ' · Recipe' : ''}</Text>
               {/* A non-breaking hyphen, so "(Pre-Workout)" wraps as a word
                   rather than leaving "(Pre-" at the end of a line (TF-24). */}
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 4 }}>{titleCaseName(recipe.n).replace(/-/g, '\u2011')}</Text>
+              {(() => { const nm = mealTitleParts(recipe.n); return (<>
+                <Text style={{ ...ty.title, color: t.ink, marginTop: 4 }}>{nm.main.replace(/-/g, '\u2011')}</Text>
+                {nm.note ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>({nm.note})</Text> : null}
+              </>); })()}
               <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{num(Math.round(recipe.K * batch))} kcal · {macroWords(recipe.P * batch, recipe.C * batch, recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
               {/* What the recipe says of itself. The figures above are THIS
                   slot's portion of it; "makes 4" is the recipe as written, and
