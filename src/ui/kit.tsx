@@ -937,7 +937,7 @@ export function QuickRow({ items }: { items: { icon: IconName; label: string; on
           <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name={q.icon} size={17} color={t.brand} />
           </View>
-          <Text style={{ ...ty.micro, letterSpacing: 0.3, color: t.ink2, marginTop: 7 }}>{q.label}</Text>
+          <Text style={{ ...ty.micro, letterSpacing: 0.3, color: t.ink2, marginTop: 7, textAlign: 'center', paddingHorizontal: 4 }}>{q.label}</Text>
         </Pressable>
       ))}
     </View>

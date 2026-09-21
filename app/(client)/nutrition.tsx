@@ -585,6 +585,13 @@ export default function Nutrition() {
   // The meal list, the shopping list and the recipe reads all follow it, so
   // "this month" is not a longer list drawn over a week's worth of shopping.
   const [view, setView] = useState<Horizon>('today');
+  // "How does a client build a meal plan for themselves? I don't see how to."
+  // (owner, 21 Sep 2026). Every choice existed, scattered: meals per day inside
+  // Swap or Search, diet and exclusions at the foot of the screen, the horizon
+  // on the plan card. This sheet puts them in one place, in order, behind a
+  // button that says what it does. It writes through the same setters, so the
+  // plan it shows is the one the screen already builds from them.
+  const [buildOpen, setBuildOpen] = useState(false);
   // The board's meal list is one slot at a time — Breakfast, Lunch, Dinner
   // segments over the rows. null is "the first slot of the plan", so a plan
   // rebuilt with fewer meals never points at a slot it no longer has.
@@ -1630,6 +1637,30 @@ export default function Nutrition() {
   }
   const recipesUnread = seenRefs.size - recipesToRead.length;
 
+  const dietPills = (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+      {DIETS.map((d) => { const on = diet === d; return (
+        <Pressable key={d} onPress={() => c.setDiet(d)}
+          accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={DIET_LABEL[d]}
+          style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+          <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{DIET_LABEL[d]}</Text>
+        </Pressable>
+      ); })}
+    </View>
+  );
+  const avoidPills = (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+      {ALLERGENS.map((al) => { const on = c.ownAvoid.includes(al.id); return (
+        <Pressable key={al.id} onPress={() => c.setOwnAvoid(on ? c.ownAvoid.filter((x) => x !== al.id) : [...c.ownAvoid, al.id])}
+          accessibilityRole="button" accessibilityState={{ selected: on }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.surface3 : t.surface2 }}>
+          {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
+          <Text style={{ ...ty.label, ...font(on ? '500' : '400'), color: on ? t.ink : t.ink2 }}>{al.label}</Text>
+        </Pressable>
+      ); })}
+    </View>
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
@@ -1804,6 +1835,9 @@ export default function Nutrition() {
               { key: 'week', label: 'This Week' },
               { key: 'month', label: 'This Month' },
             ]} />
+          <View style={{ marginBottom: sp.md }}>
+            <Cta label="Build My Plan" wide onPress={() => setBuildOpen(true)} />
+          </View>
 
           {/* An exclusion the engine could not honour, said before the plan
               rather than buried in it. `poolFilter` falls back to the
@@ -2315,26 +2349,9 @@ export default function Nutrition() {
           {showAvoid ? (
             <View style={{ marginTop: sp.lg }}>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet Style</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
-                {DIETS.map((d) => { const on = diet === d; return (
-                  <Pressable key={d} onPress={() => c.setDiet(d)}
-                    accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={DIET_LABEL[d]}
-                    style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{DIET_LABEL[d]}</Text>
-                  </Pressable>
-                ); })}
-              </View>
+              <View style={{ marginBottom: sp.xl }}>{dietPills}</View>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Anything to Avoid</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-              {ALLERGENS.map((al) => { const on = c.ownAvoid.includes(al.id); return (
-                <Pressable key={al.id} onPress={() => c.setOwnAvoid(on ? c.ownAvoid.filter((x) => x !== al.id) : [...c.ownAvoid, al.id])}
-                  accessibilityRole="button" accessibilityState={{ selected: on }}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.surface3 : t.surface2 }}>
-                  {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
-                  <Text style={{ ...ty.label, ...font(on ? '500' : '400'), color: on ? t.ink : t.ink2 }}>{al.label}</Text>
-                </Pressable>
-              ); })}
-            </View>
+            {avoidPills}
             {/* What their coach recorded for them, shown so nothing is kept
                 out of their meals on their behalf without them seeing it. Not
                 tappable: it is the coach's note, and the coach's to correct. */}
@@ -2691,6 +2708,59 @@ export default function Nutrition() {
       </Modal>
 
       {/* ── grocery sheet ────────────────────────────────────────────────── */}
+      {/* ── Build My Plan ─────────────────────────────────────────────────
+          Four choices in the order a person makes them, then the plan. Each
+          takes effect as it is tapped, through the setters the rest of this
+          screen uses; the button at the foot only closes the sheet onto the
+          plan it has just shaped. */}
+      <Modal visible={buildOpen} transparent animationType="slide" onRequestClose={() => setBuildOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBuildOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '86%', ...elevation.e2 }}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30, gap: sp.xl }}>
+            <View>
+              <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink }}>Build My Plan</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
+                Meals are made to your {num(target.kcal)} kcal target{coachAdjust ? ', as your coach set it' : ''}. Choose below; every change applies straight away.
+              </Text>
+            </View>
+            <View>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>1 · Meals per Day</Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                {([3, 4, 5] as const).map((n) => { const on = c.mealsPerDay === n; return (
+                  <Pressable key={n} onPress={() => { setRecipeSearchOpen(false); c.setMealsPerDay(n); }}
+                    accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`${n} meals per day`}
+                    style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.md, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.head, ...numeric, color: on ? t.brandInk : t.ink }}>{n}</Text>
+                    <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3 }}>{n === 3 ? 'No Snacks' : n === 4 ? 'One Snack' : 'Two Snacks'}</Text>
+                  </Pressable>
+                ); })}
+              </View>
+            </View>
+            <View>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>2 · Diet Style</Text>
+              {dietPills}
+            </View>
+            <View>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>3 · Anything to Avoid</Text>
+              {avoidPills}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Allergens are never in your meals. Foods you just dislike go under Diet and Exclusions on the Meals screen.</Text>
+            </View>
+            <View>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>4 · How Far Ahead</Text>
+              <Segmented value={view} onChange={(v) => setView(v)}
+                options={[
+                  { key: 'today', label: 'Today' },
+                  { key: 'week', label: 'This Week' },
+                  { key: 'month', label: 'This Month' },
+                ]} />
+            </View>
+            <Cta label={view === 'today' ? 'Show My Day' : view === 'week' ? 'Show My Week' : 'Show My Month'} wide onPress={() => setBuildOpen(false)} />
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Then swap any meal you don’t fancy, or search real recipes, from the plan.</Text>
+          </ScrollView>
+        </View>
+      </Modal>
+
       <Modal visible={showGrocery} transparent animationType="slide" onRequestClose={() => setShowGrocery(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
