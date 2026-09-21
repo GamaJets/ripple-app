@@ -1073,7 +1073,7 @@ export default function TrainerAnalytics() {
         {/* The same search control every coach tab root carries now. It was on
             Clients alone, so the other five roots — this one included — had no
             way into app/(trainer)/explore.tsx at all. */}
-        <ScreenHeader eyebrow="Your coaching business" title="Analytics"
+        <ScreenHeader eyebrow="Your Coaching Business" title="Analytics"
           actions={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />} />
 
         {/* ── the hero: the month so far, and the one thing to do about it ──

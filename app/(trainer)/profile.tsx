@@ -419,7 +419,7 @@ export default function CoachProfile() {
   ];
   const filledN = filled.filter((f) => f.done).length;
   const missing = filled.filter((f) => !f.done).map((f) => f.what);
-  const PAGE_TITLE = { live: 'Your Page Is Live', ready: 'Your Page Is Off', 'no-address': 'Listed, With No Page Address', 'off-directory': 'Not Listed in Find a Trainer' } as const;
+  const PAGE_TITLE = { live: 'Your Page Is Live', ready: 'Your Page Is Off', 'no-address': 'Needs a Page Address', 'off-directory': 'Not Listed in Find a Trainer' } as const;
 
   const G = layout.gutter;
 
@@ -438,7 +438,9 @@ export default function CoachProfile() {
             the back chevron, which this screen keeps. Search is the same
             control, to the same screen, as the one on every other coach tab
             root. */}
-        <PageHead trailing={
+        {/* No back chevron: this is a tab root, and back from a tab went
+            nowhere a coach meant to go. */}
+        <PageHead leading={null} trailing={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
             <Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />
             <Ghost icon="settings" a11yLabel="Open settings" onPress={() => router.push('/(trainer)/settings')} />

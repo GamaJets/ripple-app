@@ -915,7 +915,10 @@ export default function CoachMoney() {
                 : !monthIn.total
                   ? monthIn.reason ?? undefined
                   : !pots.length
-                    ? ledgerEmptyLine('in', monthIn.status)
+                    // One line in the hero. The full sentence (why cash and
+                    // transfers are not here) is Recent Payments' own, just
+                    // below; it was printed twice, word for word.
+                    ? (monthIn.status === 'ready' ? 'Nothing recorded as paid to you yet.' : ledgerEmptyLine('in', monthIn.status))
                     : `Gross · ${paid} ${plural(paid, 'payment', 'payments')}${pots.length > 1 ? ` · ${pots.length} currencies, never added` : ''}`}>
               {pots.map((x) => {
                 const pct = deltaFor(x.currency);
