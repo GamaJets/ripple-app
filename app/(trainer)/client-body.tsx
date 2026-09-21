@@ -218,6 +218,9 @@ const COMPOSITION_CAVEAT =
   'against: somebody deliberately building will move both the way this table ' +
   'calls a warning.';
 
+
+/** One figure column of the composition table: Now, Before, Change. */
+const COMP_COL = 68;
 export default function ClientBody() {
   const t = useTheme();
   const router = useRouter();
@@ -818,32 +821,33 @@ export default function ClientBody() {
     const moved = it.delta == null
       ? 'One reading, so there is nothing to compare it against.'
       : deltaLabel(it.delta, { since: null, decimals: it.def.decimals ?? 0, noChange: 'unchanged' });
+    const before = it.prev == null ? '' : `${numUpTo(it.prev, it.def.decimals ?? 0)} ${it.def.unit}`;
+    // Now, Before and Change as columns, the member's own table (owner,
+    // 21 Sep 2026): the previous reading is a figure on the row, not a
+    // subtraction the coach has to do.
     const inner = (
       <>
-        <Text style={{ ...ty.label, color: t.ink2 }}>
-          {it.def.label}{canOpen ? (open ? '  \u25B4' : '  \u25BE') : ''}
+        <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
+          {it.def.label}{canOpen ? (open ? '\u00A0\u00A0\u25B4' : '\u00A0\u00A0\u25BE') : ''}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-          <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink }}>{figure}</Text>
-          {it.delta == null ? (
-            <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: END_ALIGN }}>1 reading</Text>
-          ) : (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 62, justifyContent: 'flex-end' }}>
-              {/* No dot on a movement of nothing. `good` is null there by
-                  construction, and a neutral dot beside the word "unchanged"
-                  is a mark standing in for an absence of one. */}
-              {it.good != null ? (
-                <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: it.good ? t.brand : t.warn, flexShrink: 0 }} />
-              ) : null}
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{moved}</Text>
-            </View>
-          )}
-        </View>
+        <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink, minWidth: COMP_COL, textAlign: END_ALIGN }}>{figure}</Text>
+        <Text style={{ ...ty.label, ...numeric, color: t.ink3, minWidth: COMP_COL, textAlign: END_ALIGN }}>{before}</Text>
+        {it.delta == null ? (
+          <Text style={{ ...ty.caption, color: t.ink3, minWidth: COMP_COL, textAlign: END_ALIGN }}>First Scan</Text>
+        ) : it.delta === 0 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, minWidth: COMP_COL, textAlign: END_ALIGN }}>Same</Text>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: COMP_COL, justifyContent: 'flex-end' }}>
+            {it.good != null ? (
+              <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: it.good ? t.brand : t.warn, flexShrink: 0 }} />
+            ) : null}
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{moved}</Text>
+          </View>
+        )}
       </>
     );
     const rowStyle = {
-      flexDirection: 'row' as const, alignItems: 'center' as const,
-      justifyContent: 'space-between' as const,
+      flexDirection: 'row' as const, alignItems: 'center' as const, gap: sp.sm,
       paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring,
     };
     return (
@@ -1097,7 +1101,7 @@ export default function ClientBody() {
                               means exactly that, and not that it has stood still.
                             </Text>
                           ) : null}
-                          {compInsights.improving.length > 0 || compInsights.watch.length > 0 || compInsights.balance.length > 0 ? (
+                          {compInsights.improving.length > 0 || compInsights.watch.length > 0 || compInsights.unchanged.length > 0 || compInsights.balance.length > 0 ? (
                             <View style={{ marginTop: sp.md, marginBottom: sp.lg }}>
                               {compInsights.improving.length > 0 ? (
                                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
@@ -1112,8 +1116,17 @@ export default function ClientBody() {
                                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 6 }}>
                                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, marginTop: 6 }} />
                                   <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
-                                    <Text style={{ ...font('500'), color: t.ink }}>Watch  </Text>
+                                    <Text style={{ ...font('500'), color: t.ink }}>Getting Worse  </Text>
                                     {compInsights.watch.join('  \u00B7  ')}
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {compInsights.unchanged.length > 0 ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 6 }}>
+                                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.ink3, marginTop: 6 }} />
+                                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
+                                    <Text style={{ ...font('500'), color: t.ink }}>Unchanged  </Text>
+                                    {compInsights.unchanged.join('  \u00B7  ')}
                                   </Text>
                                 </View>
                               ) : null}
@@ -1127,9 +1140,15 @@ export default function ClientBody() {
                               ))}
                             </View>
                           ) : null}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.xs }}>
+                            <View style={{ flex: 1 }} />
+                            {['NOW', 'BEFORE', 'CHANGE'].map((h) => (
+                              <Text key={h} style={{ ...ty.eyebrow, color: t.ink2, minWidth: COMP_COL, textAlign: END_ALIGN }}>{h}</Text>
+                            ))}
+                          </View>
                           {compTrends.map((grp) => (
                             <View key={grp.group} style={{ marginBottom: sp.lg }}>
-                              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{grp.group}</Text>
+                              <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: sp.sm, marginBottom: sp.xs }}>{grp.group}</Text>
                               {grp.items.map(compRow)}
                             </View>
                           ))}
