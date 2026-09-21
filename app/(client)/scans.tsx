@@ -83,7 +83,7 @@ import { fmtFullDay, monthNamesShort, num, numUpTo } from '../../src/lib/format'
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote, readNumber } from '../../src/lib/units';
+import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote, readNumber, weightShown } from '../../src/lib/units';
 import { readBodyFromDevices, hasBodyFigure, type BodyRead } from '../../src/lib/wearables/body';
 import { useWearables } from '../../src/ui/wearables';
 import { macrosFor } from '../../src/lib/nutrition';
@@ -1872,7 +1872,7 @@ export default function Scans() {
           const unit = progressMetric === 'weight' ? wu : '%';
           const scansLanded = scansWhole || cd.scansStatus === 'partial';
           const figure = progressNow && !scansReading
-            ? (progressMetric === 'weight' ? `${fig(weightIn(progressNow.value, wu))} ${wu}` : `${fig(progressNow.value)}%`)
+            ? (progressMetric === 'weight' ? `${fig(weightShown(progressNow.value, wu))} ${wu}` : `${fig(progressNow.value)}%`)
             : null;
           const stale = figure ? stalenessNote(progressNow, today) : null;
           return (
@@ -1942,7 +1942,7 @@ export default function Scans() {
               whole, and the sentence says what the chart actually starts at
               rather than calling it a first. */}
           {progressTrendReads.length > 1 ? (
-            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm, textAlign: 'center' }}>
               {scansWhole
                 ? `${readingsLabel(progressReads)} · from ${bodyDayLabel(progressTrendReads[0].at)}`
                 : cd.scansStatus === 'partial'
@@ -1951,9 +1951,10 @@ export default function Scans() {
             </Text>
           ) : null}
 
-          {/* The range as four chips under the chart, as the mockup draws
-              them: sized to their words, the chosen one filled in ink. */}
-          <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: 10 }}>
+          {/* The range as four chips under the chart, sharing the width
+              evenly, the chosen one filled in ink. Sized to their words they
+              sat in a clump at the left edge (owner, 21 Sep 2026). */}
+          <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
             {(['1M', '3M', '6M', '1Y'] as const).map((range) => {
               const selected = progressRange === range;
               return (
@@ -1962,7 +1963,7 @@ export default function Scans() {
                   onPress={() => setProgressRange(range)}
                   // 32pt tall as drawn; the slop makes the target 44.
                   hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
-                  style={{ minHeight: grown(32), minWidth: MIN_TARGET, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: selected ? t.ink : t.surface, alignItems: 'center', justifyContent: 'center' }}>
+                  style={{ flex: 1, minHeight: grown(32), minWidth: MIN_TARGET, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: selected ? t.ink : t.surface, alignItems: 'center', justifyContent: 'center' }}>
                   <Text style={{ ...ty.micro, ...numeric, color: selected ? t.surface : t.ink2 }}>{range}</Text>
                 </Pressable>
               );
@@ -1980,19 +1981,19 @@ export default function Scans() {
               could not be read, and printing "no target set" off a dropped
               connection tells somebody their goal is gone. */}
           {bfTarget || wtTarget ? (
-            <View style={{ marginTop: sp.md, gap: 3 }}>
+            <View style={{ marginTop: sp.md, gap: 3, alignItems: 'center' }}>
               {bfTarget ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <View accessibilityElementsHidden importantForAccessibility="no"
                     style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: bfTarget.reached ? t.brand : t.ink3 }} />
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2, flex: 1 }}>Body fat · {bfTarget.note}</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2, flexShrink: 1 }}>Body Fat · {bfTarget.note}</Text>
                 </View>
               ) : null}
               {wtTarget ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <View accessibilityElementsHidden importantForAccessibility="no"
                     style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: wtTarget.reached ? t.brand : t.ink3 }} />
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2, flex: 1 }}>Weight · {wtTarget.note}</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2, flexShrink: 1 }}>Weight · {wtTarget.note}</Text>
                 </View>
               ) : null}
             </View>
@@ -2049,7 +2050,7 @@ export default function Scans() {
           items={[
             { label: 'Body Fat', value: fig(bfNow?.value), unit: bfNow ? '%' : undefined, tone: 'orange', route: '/(client)/body-trends',
               trend: scansWhole ? bfReads.map((r) => r.value) : [] },
-            { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, tone: 'teal', route: '/(client)/body-trends',
+            { label: 'Muscle', value: fig(weightShown(mNow?.value, wu)), unit: mNow ? wu : undefined, tone: 'teal', route: '/(client)/body-trends',
               trend: scansWhole ? mReads.map((r) => weightIn(r.value, wu)) : [] },
             { label: 'InBody Score', value: fig(scoreReads.length ? scoreReads[scoreReads.length - 1].value : null), tone: 'brand', route: '/(client)/body-trends',
               trend: scansWhole ? scoreReads.map((r) => r.value) : [] },
@@ -2159,8 +2160,8 @@ export default function Scans() {
               // `!wWas ||` was the other half of it: with nothing to compare
               // against, a first-ever reading was congratulated unconditionally.
               // There is no delta then, so there is nothing to be on track with.
-              { label: 'Weight', value: fig(weightIn(wNow?.value, wu)), unit: wNow ? wu : undefined, route: '/(client)/body-trends', good: wNow && wWas ? movementIsProgress(wNow.value - wWas.value, cd.goal, 'weight') : undefined, delta: (wNow && wWas ? dlt(wNow.value, wWas.value) : null) ?? undefined },
-              { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, route: '/(client)/body-trends', good: mNow && mWas ? movementIsProgress(mNow.value - mWas.value, cd.goal, 'muscle') : undefined, delta: (mNow && mWas ? dlt(mNow.value, mWas.value) : null) ?? undefined },
+              { label: 'Weight', value: fig(weightShown(wNow?.value, wu)), unit: wNow ? wu : undefined, route: '/(client)/body-trends', good: wNow && wWas ? movementIsProgress(wNow.value - wWas.value, cd.goal, 'weight') : undefined, delta: (wNow && wWas ? dlt(wNow.value, wWas.value) : null) ?? undefined },
+              { label: 'Muscle', value: fig(weightShown(mNow?.value, wu)), unit: mNow ? wu : undefined, route: '/(client)/body-trends', good: mNow && mWas ? movementIsProgress(mNow.value - mWas.value, cd.goal, 'muscle') : undefined, delta: (mNow && mWas ? dlt(mNow.value, mWas.value) : null) ?? undefined },
               // A count over a read that is not whole is the size of what came
               // back, and `fig(0)` prints "0" rather than a dash.
               { label: 'Scans', value: scansWhole ? fig(scans.length) : fig(null), delta: (scansWhole ? ago : 'not read') ?? undefined },
@@ -2191,7 +2192,7 @@ export default function Scans() {
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
             <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => { if (!photoBusy) addPhoto(false); }} /></View>
             <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => { if (!photoBusy) addPhoto(true); }} /></View>
-            <View style={{ flex: 1 }}><Cta label="AI Check" wide disabled={photoBusy} onPress={() => physiqueCheck(false)} /></View>
+            <View style={{ flex: 1 }}><Cta label="AI Check" disabled={photoBusy} onPress={() => physiqueCheck(false)} /></View>
           </View>
           {photoBusy ? <Text style={{ ...ty.caption, ...font('500'), color: t.ink2, marginBottom: sp.md }}>Saving to your account…</Text> : null}
           {shareBusy ? <Text style={{ ...ty.caption, ...font('500'), color: t.ink2, marginBottom: sp.md }}>Updating what your coach can see…</Text> : null}

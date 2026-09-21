@@ -29,7 +29,7 @@ import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, PageHead, fig, 
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, lengthIn, lengthLabel, lengthDeltaIn, weightDeltaIn } from '../../src/lib/units';
+import { weightIn, weightLabel, lengthIn, lengthLabel, lengthDeltaIn, weightDeltaIn, weightShown } from '../../src/lib/units';
 import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaLabel';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useMeasurements } from '../../src/ui/measurements';
@@ -554,7 +554,7 @@ export default function WeeklyReport() {
     // `'no change'` was printed for a member weighed once — see `wChangeKnown`.
     // The figure is theirs and stays; the caption says what the app actually
     // knows about how it has moved, which so far is nothing.
-    { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu,
+    { label: 'Weight', value: fig(weightShown(c.weightKg, wu)), unit: wu,
       delta: !wChangeKnown ? 'one weigh-in so far'
         : deltaMoved(wDeltaShown) ? `${deltaLabel(wDeltaShown, { since: null, unit: wu })} overall` : 'no change',
       good: wChangeKnown && movementIsProgress(wDeltaShown, c.goal, 'weight') },
@@ -562,7 +562,7 @@ export default function WeeklyReport() {
     // check-in without ever having a scan, in which case body fat and muscle are
     // still unknown and used to print the 20% / 0 kg placeholders.
     { label: 'Body Fat', value: c.bodyFatPct != null ? `${c.bodyFatPct}` : '—', unit: c.bodyFatPct != null ? '%' : undefined },
-    { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: c.muscleKg != null ? wu : undefined },
+    { label: 'Muscle', value: fig(weightShown(c.muscleKg, wu)), unit: c.muscleKg != null ? wu : undefined },
     ...(waistDShown != null && mLatest ? [{ label: 'Waist', value: fig(lengthIn(mLatest.waist, lu)), unit: lu, delta: deltaMoved(waistDShown) ? deltaLabel(waistDShown, { since: null, unit: lu }) : 'no change', good: movementIsProgress(waistDShown, c.goal, 'girth') }] : []),
   ];
 

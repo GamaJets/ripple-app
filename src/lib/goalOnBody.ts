@@ -92,7 +92,7 @@ export function goalOnBody(
   const unit = opts.weight ? opts.wu : opts.unit;
 
   if (p.reached) {
-    return { target, unit, remaining: null, reached: true, note: `target of ${plain(target, 1)} ${unit} reached` };
+    return { target, unit, remaining: null, reached: true, note: `Target of ${plain(target, 1)} ${unit} Reached` };
   }
 
   // Converted as a SPAN, once, rather than as the difference between two
@@ -108,14 +108,14 @@ export function goalOnBody(
     // Within a rounding step of the target and not across it. Saying "0.0 kg to
     // go" is worse than saying nothing; saying "reached" would be claiming
     // something `progressOf` explicitly did not.
-    return { target, unit, remaining: null, reached: false, note: `target ${plain(target, 1)} ${unit}, all but there` };
+    return { target, unit, remaining: null, reached: false, note: `Target ${plain(target, 1)} ${unit} · All but There` };
   }
   return {
     target,
     unit,
     remaining: gap,
     reached: false,
-    note: `${plain(gap, 1)} ${unit} to go · target ${plain(target, 1)} ${unit}`,
+    note: `${plain(gap, 1)} ${unit} To Go · Target ${plain(target, 1)} ${unit}`,
   };
 }
 

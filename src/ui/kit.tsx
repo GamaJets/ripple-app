@@ -18,13 +18,13 @@ import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font, fontScale, grown } from '../theme/scale';
 import { DATA_HUES, type DataHue, type Theme } from '../theme/tokens';
-import { effectiveWidth, linesAtScale } from '../lib/typeScale';
+import { linesAtScale } from '../lib/typeScale';
 import { hitSlopFor, readableInkOn } from '../lib/a11y';
 import { appLocale } from '../lib/locale';
 import { num } from '../lib/format';
 import { plainExact } from '../lib/units';
 import {
-  axisLabel, pointLabel, tickIndices, maxTicksForWidth,
+  axisLabel, pointLabel,
   segments, readablePoints, hasInteriorGap, nearestPoint,
 } from '../lib/chartAxis';
 import { BACK_ICON, END_ALIGN, FORWARD_CHAR, FORWARD_ICON, turn } from './direction';
@@ -1165,15 +1165,6 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
     : (Math.round(shownPoint.v * 10) / 10).toLocaleString(appLocale());
   const when = shownPoint == null || !labels ? null : pointLabel(labels[shownPoint.i]);
 
-  // How many dates the axis carries is decided by the width it was actually
-  // given, measured — not by the viewBox, which is a drawing unit and the same
-  // 320 on every handset.
-  // Fewer dates, not smaller ones. At 200% text a 54pt axis label holds "14 A…"
-  // and the fix is not a smaller font — it is to stop trying to fit six labels
-  // where three now belong. `maxTicksForWidth` already decides this from a
-  // MEASURED width, so it is handed a width divided by the reader's text scale
-  // rather than taught a second rule about type.
-  const ticks = labels ? tickIndices(n, maxTicksForWidth(effectiveWidth(boxW || w, fontScale))) : [];
   const gapped = hasInteriorGap(data);
 
   return (
@@ -1186,7 +1177,7 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
           ends. At the left edge it read "12.1" beside a different point than
           the one touched (owner, 21 Sep 2026). LTR for the same reason as the
           axis below: the line is SVG and never mirrors. */}
-      <View style={{ height: grown(16), justifyContent: 'center', direction: 'ltr' }}>
+      <View style={{ height: grown(16), justifyContent: 'center', direction: 'ltr', marginBottom: sp.sm }}>
         {shownValue != null && shownPoint != null ? (
           <Text onLayout={(e) => setReadW(e.nativeEvent.layout.width)}
             style={{
@@ -1197,7 +1188,7 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
             {shownValue}{unit}{when ? ` · ${when}` : ''}
           </Text>
         ) : (
-          <Text style={{ ...ty.caption, color: t.ink3 }}>
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
             {labels ? 'Touch the line for a value and date' : 'Touch the line for a value'}
           </Text>
         )}
@@ -1264,42 +1255,10 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
           <Circle cx={x(last.i)} cy={y(last.v)} r={area ? 3.5 : 4} fill={area ? t.surface : c.mark} stroke={c.mark} strokeWidth={area ? 3 : 0} />
         </Svg>
       </View>
-      {/* The axis. Each label is placed at its own point's x fraction, so it
-          sits under the thing it names; the two ends are pulled flush to the
-          edges, where a centred box would be clipped by the container.
-
-          rtl-ok: this strip is pinned LTR and stays on physical left/right.
-          The line above it is an <Svg> in user-space coordinates and
-          react-native-svg mirrors nothing, so the polyline runs oldest-on-the-
-          left in every locale. Mirror the labels and every date sits under the
-          wrong point — a chart that renders perfectly and is false, which is
-          worse than one that leans the wrong way. `direction: 'ltr'` is what
-          holds it: without it `alignItems: 'flex-start'` would flip on its own,
-          because flex-start is a LOGICAL edge in Yoga even when left is not.
-          See src/lib/direction.ts for the rule and what else it covers. */}
-      {ticks.length ? (
-        <View style={{ height: grown(14), marginTop: 3, direction: 'ltr' }}>
-          {ticks.map((i) => {
-            const end = i === 0 ? 'first' : i === n - 1 ? 'last' : null;
-            const frac = (6 + (i / (n - 1)) * (w - 12)) / w;
-            // rtl-ok: physical sides, under the `direction: 'ltr'` pin above.
-            // These three placements are the x coordinates of the polyline
-            // restated in layout terms, and the polyline is SVG user-space:
-            // mirror one without the other and every label names a different
-            // point than the one it sits under.
-            const place: StyleProp<ViewStyle> = end === 'first' ? { left: 0, alignItems: 'flex-start' }
-              : end === 'last' ? { right: 0, alignItems: 'flex-end' }
-                : { left: `${frac * 100}%`, marginLeft: -grown(54) / 2, width: grown(54), alignItems: 'center' };
-            return (
-              <View key={i} style={[{ position: 'absolute', top: 0 }, place]}>
-                <Text numberOfLines={1} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>
-                  {axisLabel(labels![i])}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
+      {/* No date axis under the line. The owner read seven dates under a
+          chart as clutter (21 Sep 2026): the readout above the touched point
+          already gives that point's figure and date, and the date labels only
+          restated them unasked. */}
       {/* Said only where it is true. An even axis over an uneven series is the
           claim this whole component was rebuilt to stop making, so where the
           series really does have a hole the chart says which kind of hole. */}

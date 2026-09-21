@@ -61,7 +61,7 @@ import {
 import { useSettings } from '../../src/ui/settings';
 import {
   readLift, liftIn, liftLabel, est1RMIn, weightIn, weightLabel, convertedNote, plain,
-  type WeightUnit,
+  type WeightUnit, weightShown,
 } from '../../src/lib/units';
 import { est1RM } from '../../src/lib/streaks';
 import { BARS, PLATES, loadBar } from '../../src/lib/plateMath';
@@ -349,9 +349,9 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
      the same figure their profile shows in pounds — two numbers for one
      body, and no way to tell which the grams below were worked out from. */}
  <KpiRow items={[
- { label: 'Bodyweight', value: fig(weightIn(c.weightKg, wu)), unit: wu },
+ { label: 'Bodyweight', value: fig(weightShown(c.weightKg, wu)), unit: wu },
  { label: 'Body Fat', value: fig(c.bodyFatPct), unit: '%' },
- { label: 'Lean Mass', value: fig(weightIn(m.leanMassKg, wu)), unit: wu },
+ { label: 'Lean Mass', value: fig(weightShown(m.leanMassKg, wu)), unit: wu },
  ]} />
  {convertedNote(wu) ? (
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{convertedNote(wu)}</Text>

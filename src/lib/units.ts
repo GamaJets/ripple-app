@@ -145,12 +145,13 @@ const roundTo = (n: number, dp: number) => {
  * read as a sign.
  */
 const ASCII_FIGURE = /^\d+(?:[.,]\d+)?$/;
-function spell(n: number, dp: number): string {
+function spell(n: number, dp: number, minDp = 0): string {
   const mag = Math.abs(n);
-  let body = String(mag);
+  let body = minDp > 0 ? mag.toFixed(Math.min(dp, minDp)) : String(mag); // locale-ok: the fallback when Intl throws; String(mag) beside it is ASCII too.
   try {
     const out = new Intl.NumberFormat(appLocale(), {
       maximumFractionDigits: Math.min(20, Math.max(0, Math.trunc(dp) || 0)),
+      minimumFractionDigits: Math.min(Math.max(0, Math.trunc(dp) || 0), Math.max(0, Math.trunc(minDp) || 0)),
       useGrouping: false,
       // Cast because `numberingSystem` landed in the ES2023 lib and this file is
       // compiled against ES2020 for the test runner. Every runtime this ships to
@@ -298,10 +299,24 @@ export function weightIn(kg: number | null | undefined, unit: WeightUnit): numbe
   return unit === 'lb' ? Math.round(kgToLb(kg)) : roundTo(kg, 1);
 }
 
-/** The same figure with its unit attached, for a line of prose. */
+/** The same figure with its unit attached, for a line of prose. A kilogram
+ *  weight always carries its one decimal, 74.0 kg, so a list of them lines up
+ *  (owner, 21 Sep 2026); a pound is whole, so it never has one. */
 export function weightLabel(kg: number | null | undefined, unit: WeightUnit): string | null {
   const v = weightIn(kg, unit);
-  return v == null ? null : `${plain(v)} ${unit}`;
+  return v == null ? null : `${weightFigure(v, unit)} ${unit}`;
+}
+
+/** `weightIn`, spelled: "74.0" in kilograms, "163" in pounds, or null. */
+export function weightShown(kg: number | null | undefined, unit: WeightUnit): string | null {
+  const v = weightIn(kg, unit);
+  return v == null ? null : weightFigure(v, unit);
+}
+
+/** A body weight ALREADY in the reader's unit, spelled for display: one fixed
+ *  decimal in kilograms, whole in pounds. */
+export function weightFigure(v: number, unit: WeightUnit): string {
+  return unit === 'kg' ? spell(roundTo(v, 1), 1, 1) : plain(v);
 }
 
 /**

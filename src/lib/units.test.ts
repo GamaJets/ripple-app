@@ -181,7 +181,8 @@ ok(weightToKg(' 82.4 ', 'kg') === 82.4, 'surrounding spaces are not part of the 
 // ── presentation ──
 ok(plain(82) === '82', 'a whole number does not grow a ".0"');
 ok(plain(82.4) === '82.4', 'and a tenth is kept');
-ok(weightLabel(82.0, 'kg') === '82 kg', `82 kg reads as "82 kg", got "${weightLabel(82.0, 'kg')}"`);
+ok(weightLabel(82.0, 'kg') === '82.0 kg', `a whole kilogram keeps its decimal so a list lines up, got "${weightLabel(82.0, 'kg')}"`);
+ok(weightLabel(lbToKg(180), 'lb') === '180 lb', 'and a pound stays whole');
 // The honesty note, which is the difference between a converted figure and a
 // figure presented as a measurement.
 ok(convertedNote('kg') === null, 'a client reading their record in its own unit needs no caveat');

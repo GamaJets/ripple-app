@@ -25,7 +25,7 @@ import { sp, layout, radius, elevation, type as ty, value, font } from '../../sr
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightDeltaIn } from '../../src/lib/units';
+import { weightIn, weightDeltaIn, weightShown } from '../../src/lib/units';
 import { deltaLabel, deltaMoved } from '../../src/lib/deltaLabel';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -251,7 +251,7 @@ export default function Cards() {
     // The unread sentence names WHICH read: "we couldn't read your training
     // log" over a log that came back whole and a weight history that did not
     // points the member at the wrong thing to pull down on.
-    { kicker: 'Top Lift', big: hasPr ? fig(weightIn(topPr.est1RM, wu)) : '—', unit: hasPr ? wu : '', sub: hasPr ? `${topPr.exercise} · est 1RM` : !logKnown ? UNREAD : !scansKnown ? UNWEIGHED : 'Log a lift to unlock', available: hasPr },
+    { kicker: 'Top Lift', big: hasPr ? fig(weightShown(topPr.est1RM, wu)) : '—', unit: hasPr ? wu : '', sub: hasPr ? `${topPr.exercise} · est 1RM` : !logKnown ? UNREAD : !scansKnown ? UNWEIGHED : 'Log a lift to unlock', available: hasPr },
     // No second weigh-in means no measured change — show the card locked rather
     // than a manufactured "+0 kg since you started".
     // `hasProgress` asks whether there are two weigh-ins; it never asked
