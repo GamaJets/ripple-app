@@ -115,6 +115,12 @@ function systemPrompt(ctx: any): string {
   say('Sleep', c.sleep);
   say('Injuries / limitations', has(c.injuries) ? c.injuries : c.injuryAreas);
   say('Focus areas to emphasise (from progress photo)', c.focusAreas);
+  // The member's own list and their coach's notes, combined. Health tier on a
+  // member ask (so absent when they declined) and sent on a coach ask; absent
+  // too when either half could not be read. An absent line is NOT "none": the
+  // rule below makes the model say it does not know, which is the same
+  // null-is-not-zero rule every figure in this app runs on.
+  say('Allergies (their own list and their coach\'s notes combined)', c.allergens);
 
   // The coach's own business. None of this was read before, which is why the
   // assistant could not answer the most obvious question a coach would ask it.
@@ -142,6 +148,8 @@ function systemPrompt(ctx: any): string {
     'When relevant, factor in their readiness, what they have eaten today, and their streak. For example, suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +
     'Match your advice to how they are coached: never tell a client training alone to ask their coach, or to book a session they have no coach to book with; for a client coached in person, defer form checks and loading decisions to the session they already have; for a hybrid client, say which of the two a suggestion belongs to. ' +
     'If the client has disclosed injuries or limitations, ALWAYS train around them: avoid or regress exercises that load the injured area, suggest pain-free alternatives, and never program through pain. ' +
+    'Allergies are a hard rule. If you were given an allergy line, never suggest a food, meal, recipe, snack or supplement that contains a listed allergen, not even as an option, a swap or a small amount. If you are asked for one, say plainly that it contains their allergen and offer something that does not. ' +
+    'If you were not given an allergy line, you do not know their allergies. That is not the same as having none. Before naming a specific food, meal, recipe or supplement, say that you do not know their allergies and ask, or keep the suggestion general. Never assume they have no allergies because none were listed. ' +
     'Give practical next steps. You are not a doctor, so for pain, injury or medical questions, advise seeing a professional. Never invent data you were not given, and do not describe a figure you were not given as zero or as unknown-but-fine. Say plainly that you were not given it. ' +
     'Write the way a good coach talks: short, plain sentences. Never use an em dash or an en dash. Where you might reach for one, use a full stop, a comma or a colon instead.',
   ].join('\n');

@@ -66,6 +66,8 @@ const WHOLE: MemberAskInput = {
   muscleKg: 24.2,
   injuries: [KNEE],
   focusAreas: ['glutes', 'rear delts'],
+  ownAvoid: ['dairy'],
+  coachAvoid: ['nuts'],
   macros: { kcal: 1840, protein: 140, carbs: 160, fat: 62 },
   targetInputsUnknown: false,
   adjustUnread: false,
@@ -250,6 +252,23 @@ const sleep = (over: Partial<ReadinessSleep>): ReadinessSleep => ({
   eq(new Set(said).size, 4, 'the four coaching answers are four different sentences');
   ok(/never in the room/.test(said[3]), 'online says the coach is not in the room');
   ok(/in the room/.test(said[1]) && !/never/.test(said[1]), 'in-person says they are');
+}
+
+/* ── allergens: the combined list, or nothing ───────────────────────────── */
+
+{
+  eq(memberAskFacts(WHOLE).allergens, 'dairy, nuts', 'the member’s own list AND their coach’s notes go, together');
+  eq(memberAskFacts({ ...WHOLE, coachAvoid: [] }).allergens, 'dairy', 'a coach who noted nothing adds nothing');
+  eq(memberAskFacts({ ...WHOLE, ownAvoid: [] }).allergens, 'nuts', 'a coach’s note goes even when the member declared none');
+  eq(memberAskFacts({ ...WHOLE, coachAvoid: null }).allergens, undefined,
+    'an unread coach half sends nothing: a partial list reads as the whole one');
+  eq(memberAskFacts({ ...WHOLE, ownAvoid: null }).allergens, undefined, 'and so does an unread member half');
+  for (const s of ['error', 'partial', 'loading'] as const) {
+    eq(memberAskFacts({ ...WHOLE, profileStatus: s, ownAvoid: [], coachAvoid: [] }).allergens, undefined,
+      `${s}: the constructed empty defaults are not sent as "none declared"`);
+  }
+  ok(/^none declared/.test(String(memberAskFacts({ ...WHOLE, ownAvoid: [], coachAvoid: [] }).allergens)),
+    'two READ empty lists are said as none declared');
 }
 
 if (errors.length) {

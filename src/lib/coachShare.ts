@@ -65,6 +65,7 @@
 // in src/lib/coach.ts, which will not call the function without an answer.
 
 import { activeInjuries, areaLabel, type Injury } from './injuries';
+import { ALLERGENS, allergenLabel, type Allergen } from './meals';
 
 /**
  * Has this member agreed to send their health details to the model?
@@ -155,11 +156,21 @@ export const FITNESS_KEYS = [
  * `injuries` is in here AND is redacted before it arrives — see
  * `sharedInjuries`. Consent gates whether the injury goes at all; it does not
  * unlock the note, which never goes.
+ *
+ * `allergens` is here too, and it is the one that costs something to gate. An
+ * allergy is a medical condition, which is health information by any reading,
+ * and the member is in the room to be asked; the rule for this side is that
+ * such a thing waits for their yes, and safety does not buy an exception when
+ * the person entitled to decide can simply be asked. What makes that safe is
+ * the prompt, not the tier: coach-chat tells the model that NO allergy line
+ * means it does not know their allergies, never that they have none, so a
+ * member who said no gets a coach that asks before naming a food rather than
+ * one that assumes an all-clear nobody gave. See `allergenFact`.
  */
 export const HEALTH_KEYS = [
   'weightKg', 'bodyFatPct', 'muscleKg',
   'readiness', 'readinessGaps', 'sleep',
-  'injuries', 'focusAreas',
+  'injuries', 'focusAreas', 'allergens',
 ] as const;
 
 export type FitnessKey = typeof FITNESS_KEYS[number];
@@ -194,6 +205,27 @@ export function sharedInjuries(injs: Injury[] = []): string {
 export function sharedAreas(list: readonly { area: string; severity: string }[] = []): string {
   if (!list.length) return '';
   return list.map((i) => `${areaLabel(i.area)} (${i.severity})`).join('; ');
+}
+
+/**
+ * The allergy line as a model may see it, off the COMBINED list.
+ *
+ * Takes the union, `excludedAllergens(avoid, coach_avoid)` in src/lib/meals.ts,
+ * never the member's half alone: a coach's note is as binding on a suggestion
+ * as the member's own chip. `undefined` when that union is unknown (either
+ * half unread, or a client with no account to have been asked), so the field
+ * is dropped and coach-chat's rule for an absent allergy line applies: it does
+ * not know, it asks. A partial list would read as a complete one.
+ *
+ * An empty known list says what it covers. The app records six allergens, so
+ * "none" is a statement about those six and not about sesame.
+ */
+export function allergenFact(avoid: readonly Allergen[] | null | undefined): string | undefined {
+  if (avoid == null) return undefined;
+  if (!avoid.length) {
+    return `none declared by them or noted by their coach, among the ones this app records (${ALLERGENS.map((a) => allergenLabel(a.id)).join(', ')})`;
+  }
+  return avoid.map(allergenLabel).join(', ');
 }
 
 /**
@@ -255,6 +287,7 @@ export const SENT_WITH_PERMISSION: string[] = [
   'your sleep: the hours, how many nights, and how many a device measured',
   'your readiness score and what it could not see',
   'your injuries, as the area and how bad it is',
+  'your allergies, from your own list and what your coach has noted',
   'the focus areas read off your progress photos',
 ];
 
@@ -298,7 +331,7 @@ export const WHERE_IT_GOES =
 export const CONSENT_TITLE = 'Before your coach can use your numbers';
 
 export const CONSENT_BODY =
-  'The AI coach answers better when it knows your body, your sleep and your injuries. That is health information, so it does not go anywhere until you say it can. You can change this at any time, and either answer lets you use the coach.';
+  'The AI coach answers better when it knows your body, your sleep, your injuries and your allergies. That is health information, so it does not go anywhere until you say it can. You can change this at any time, and either answer lets you use the coach.';
 
 /**
  * What the coach loses when the answer is no. Specific, and not softened.
@@ -309,7 +342,7 @@ export const CONSENT_BODY =
  * does not train around it, and the member needs to know that before choosing.
  */
 export const WITHHELD_NOTE =
-  'Your coach will not know your weight, your body fat, your sleep or your recovery, so it cannot tell you to train lighter on a bad night or judge whether your targets still fit you. It will not know about your injuries either, so it may suggest a movement that loads one. Check anything it gives you against your own limitations, or turn this back on.';
+  'Your coach will not know your weight, your body fat, your sleep or your recovery, so it cannot tell you to train lighter on a bad night or judge whether your targets still fit you. It will not know about your injuries either, so it may suggest a movement that loads one, and it will not know your allergies, so it will ask before naming a food. Check anything it gives you against your own limitations, or turn this back on.';
 
 /* ── the Weekly Report's half of the same door ─────────────────────────────
  *
@@ -556,12 +589,20 @@ export const COACH_BUSINESS_KEYS = [
  * answer that loads an injured knee is the failure this whole feature would be
  * judged on — and the AREA is what stops it. The note adds nothing to that
  * decision and is the part that came off a medical document.
+ *
+ * `allergens` is here for the same reason, and is health-tier on the member's
+ * side: a coach asking what a client should eat and getting peanut butter for
+ * a nut allergy is that failure on a plate. It is `allergenFact` output, six
+ * category words off the combined list, and carries no note because the
+ * columns hold none. The member's side can ask; this side cannot, and the one
+ * thing that stops the harm is the list itself.
  */
 export const COACH_CLIENT_KEYS = [
   'goal', 'coachedMode', 'adherence', 'lastActive', 'joinedMonthsAgo',
   'programTitle', 'programFocus', 'nextLift', 'lastTrained', 'streak',
   'sessionsLast30', 'unread', 'injuryAreas', 'reason',
   'kcal', 'protein', 'carbs', 'fat', 'eatenToday', 'mealsLoggedCount', 'diet',
+  'allergens',
 ] as const;
 
 /**
@@ -654,7 +695,7 @@ export function fillName(text: string, name: string | null | undefined, coach?: 
 /** What the coach is told about their assistant, on the screen. Sentence case;
  *  it is prose under a heading. */
 export const COACH_ASK_WHAT_GOES =
-  'Your own figures go: sessions, clients, adherence, takings and the currency they are in. When you ask about one client, what goes is their goal, how they are coached, whether they are turning up, what they are training and which areas they have flagged as injured.';
+  'Your own figures go: sessions, clients, adherence, takings and the currency they are in. When you ask about one client, what goes is their goal, how they are coached, whether they are turning up, what they are training and which areas they have flagged as injured, and the allergies they or you have recorded.';
 
 export const COACH_ASK_WHAT_NEVER_GOES =
   'No name, no email and nothing that says who anybody is. No weight, body fat, scan, sleep or recovery figure. Nothing written in an injury note or read off a document, and nothing from your messages. Replies come back saying {name} and this screen fills it in.';

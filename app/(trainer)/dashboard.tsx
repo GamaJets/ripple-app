@@ -76,7 +76,7 @@ import { daysBetween } from '../../src/lib/bodyFigures';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askAboutClient } from '../../src/lib/coach';
-import { sharedAreas, fillName } from '../../src/lib/coachShare';
+import { sharedAreas, fillName, allergenFact } from '../../src/lib/coachShare';
 import { useRoster } from '../../src/ui/roster';
 import { searchRoster, rosterSearchLine } from '../../src/lib/rosterSearch';
 import { hitSlopFor } from '../../src/lib/a11y';
@@ -1929,6 +1929,10 @@ export default function TrainerClients() {
       // exists for. And for a linked client the empty array really is "the
       // coach has recorded none", which is a fact about the RECORD: "none
       // disclosed" says something about the CLIENT that nobody established.
+      // The combined list (the roster runs `excludedAllergens`), or absent when
+      // either half is unread or there is no account, which the prompt reads as
+      // "not known", never as "none".
+      allergens: allergenFact(client.avoid),
       injuryAreas: !clientIsQueryable(client.id, client.handAdded)
         ? 'unknown: they have no account in the app and have never been asked to record an injury, so nothing '
           + 'here says they have none. Treat no area as cleared'
@@ -2243,6 +2247,7 @@ export default function TrainerClients() {
       // last of them is about the record rather than about the client. The
       // prompt below ends "do not suggest anything that loads a flagged injury
       // area", and an empty list is not a flag that nothing is wrong.
+      allergens: allergenFact(client.avoid),
       injuryAreas: !clientIsQueryable(client.id, client.handAdded)
         ? 'unknown: they have no account in the app and have never been asked to record an injury, so nothing '
           + 'here says they have none: treat no area as cleared'

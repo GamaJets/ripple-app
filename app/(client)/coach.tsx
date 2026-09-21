@@ -197,6 +197,7 @@ export default function Coach() {
     goal: cd.goal, diet: cd.diet, mealsPerDay: cd.mealsPerDay,
     weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg,
     injuries: cd.injuries, focusAreas: cd.focusAreas,
+    ownAvoid: cd.ownAvoid, coachAvoid: cd.coachAvoid,
     macros, targetInputsUnknown, adjustUnread: profileWhole && targetInputsUnknown,
     programTitle: program.title, programFocus: program.focus.join(', '),
     programUnknown, programCachedNote: assigned.cachedNote,

@@ -21,7 +21,7 @@ import {
   ALWAYS_SENT, SENT_WITH_PERMISSION, NEVER_SENT,
   WITHHELD_NOTE, NOT_MEDICAL_ADVICE, WHERE_IT_GOES,
   weeklyFacts, REPORT_WITHHELD_NOTE, REPORT_CONSENT_TITLE, REPORT_CONSENT_BODY,
-  WITHHELD_FACTS_INSTRUCTION,
+  WITHHELD_FACTS_INSTRUCTION, allergenFact, clientAskContext, COACH_CLIENT_KEYS,
   type ShareConsent,
 } from './coachShare';
 import type { Injury } from './injuries';
@@ -76,6 +76,7 @@ const FULL: Record<string, unknown> = {
   readiness: '83/100 (good)', readinessGaps: 'No hydration was logged.',
   sleep: '6.2h average over 7 nights, 7 measured by a device',
   injuries: 'Left Knee (moderate)', focusAreas: 'glutes, shoulders',
+  allergens: 'nuts, dairy',
 };
 
 eq(shareableContext(FULL, 'unknown'), null,
@@ -293,6 +294,27 @@ ok(String(REPORT_CONSENT_TITLE).length > 10 && String(REPORT_CONSENT_BODY).lengt
   'the question put on the report is a real explanation rather than a label');
 ok(/language model/i.test(REPORT_CONSENT_BODY),
   'and it names what the paragraph actually is before anybody agrees to it');
+
+/* ── allergens: which tier, and what an unknown list sends ─────────────── */
+
+// The file's rule: a health fact about a member waits for their yes, because
+// they are in the room to be asked. On a coach ask nobody can be asked, and the
+// list goes on the same safety argument as `injuryAreas`.
+ok((HEALTH_KEYS as readonly string[]).includes('allergens'), 'a member’s allergies are health information and go on a yes');
+ok(!(FITNESS_KEYS as readonly string[]).includes('allergens'), 'and not on a no');
+eq(no != null && 'allergens' in no, false, 'a member who declined does not send their allergies');
+eq(yes != null && yes.allergens, 'nuts, dairy', 'a member who agreed does');
+ok(SENT_WITH_PERMISSION.some((b) => /allerg/i.test(b)), 'the consent list says allergies are in it');
+ok(/allerg/i.test(WITHHELD_NOTE), 'and saying no says what the coach will not know');
+ok((COACH_CLIENT_KEYS as readonly string[]).includes('allergens'), 'a coach ask carries the allergy list, like the injury area');
+eq(clientAskContext({ allergens: 'nuts' }).allergens, 'nuts', 'and it survives the client filter');
+eq(clientAskContext({ allergens: undefined }).allergens, undefined, 'an unknown list is absent, not a null');
+
+eq(allergenFact(['nuts', 'dairy']), 'nuts, dairy', 'the combined list, as words');
+eq(allergenFact(null), undefined, 'an unread list sends nothing, so the prompt says it does not know');
+eq(allergenFact(undefined), undefined, 'and so does a list nobody could have been asked for');
+ok(/^none declared/.test(String(allergenFact([]))), 'a READ empty list is said as none declared');
+ok(/nuts/.test(String(allergenFact([]))), 'and names what the app records, so "none" is not a claim about sesame');
 
 if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);

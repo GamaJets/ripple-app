@@ -33,7 +33,8 @@
 // Pure — no React, no providers. Every input is a value the screen already has.
 import type { LoadStatus } from '../ui/loadStatus';
 import { isWhole } from '../ui/loadStatus';
-import { sharedInjuries } from './coachShare';
+import { allergenFact, sharedInjuries } from './coachShare';
+import { excludedAllergens, type Allergen } from './meals';
 import type { Injury } from './injuries';
 import type { CoachingMode, Diet, Goal } from './types';
 import type { ReadinessSleep } from './readiness';
@@ -57,6 +58,12 @@ export interface MemberAskInput {
   muscleKg: number | null;
   injuries: readonly Injury[];
   focusAreas: readonly string[];
+  /** The member's own allergen list and their coach's notes, both off the
+   *  profile row: `clientData.ownAvoid` and `clientData.coachAvoid`. Null for
+   *  a half known to be unread. Either way they count only under a whole
+   *  profile, which is the one status that says both halves were read. */
+  ownAvoid: readonly Allergen[] | null;
+  coachAvoid: readonly Allergen[] | null;
   /** Null when there was nothing honest to scale a day to. */
   macros: AskMacros | null;
   /**
@@ -99,6 +106,9 @@ export interface MemberAskFacts {
   programFocus: string;
   injuries: string;
   focusAreas: string;
+  /** Undefined when not known: the field is then not sent, and coach-chat's
+   *  rule for an absent allergy line (it does not know, it asks) applies. */
+  allergens: string | undefined;
 }
 
 /**
@@ -228,5 +238,9 @@ export function memberAskFacts(i: MemberAskInput): MemberAskFacts {
     focusAreas: pWhole
       ? (i.focusAreas.length ? i.focusAreas.join(', ') : 'none set')
       : `not known: ${pGap}`,
+    // The combined list or nothing. Under an unread profile both halves are
+    // constructed defaults, and `[]` there is the "no allergens" all-clear the
+    // header of this file quotes. Absent, the prompt says it does not know.
+    allergens: pWhole ? allergenFact(excludedAllergens(i.ownAvoid, i.coachAvoid)) : undefined,
   };
 }
