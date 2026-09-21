@@ -116,7 +116,7 @@ const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, crea
 
 const DIETS: readonly Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const GOALS: readonly Goal[] = ['fatloss', 'tone', 'muscle'];
-const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
+const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat Loss', tone: 'Tone', muscle: 'Build Muscle' };
 const ALLERGEN_LABEL = new Map(ALLERGENS.map((a) => [a.id, a.label]));
 
 /** The recipe library's backlink. Reported rather than swallowed, so a handset

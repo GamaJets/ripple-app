@@ -1749,7 +1749,7 @@ export default function ClientScreen() {
                 the ring, not dressed as a grey "on track". */}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {!unasked && drift ? <TonedChip label={DRIFT_LABEL[drift.status]} tone={driftName} /> : null}
-              {client ? <TonedChip label={client.goal} tone="blue" /> : null}
+              {client ? <TonedChip label={client.goal.replace(/\b[a-z]/g, (c) => c.toUpperCase())} tone="blue" /> : null}
               {/* A manual lead is not an app user, and the head has to say so
                   before anything under it is read: every dash below means
                   "there is no account to ask", not "they have done nothing".

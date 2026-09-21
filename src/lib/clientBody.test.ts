@@ -223,7 +223,7 @@ ok(!manualFigures(onlyWeight, 'kg', 'Sam').includes('body fat'), 'a typed weight
 
 ok(bodyLine(true, false, null, false, '2026-08-20', 'Sam').includes('unknown rather than none'), 'a failed read is not an empty one');
 ok(bodyLine(false, true, null, false, '2026-08-20', 'Sam') === 'Reading their scans…', 'a read in flight says so');
-ok(bodyLine(false, false, null, false, '2026-08-20', 'Sam').includes('No InBody scan on record'), 'never scanned is its own answer');
+ok(bodyLine(false, false, null, false, '2026-08-20', 'Sam') === 'No InBody scan yet', 'never scanned is its own answer');
 ok(bodyLine(false, false, '2026-08-18', false, '2026-08-20', 'Sam').includes('A second one'), 'one scan is a reading, not a trend');
 ok(bodyLine(false, false, '2026-08-18', true, '2026-08-20', 'Sam').includes('earlier scans'), 'two or more is a trend');
 ok(bodyLine(false, false, '2026-08-18', true, '2026-08-20', 'Sam').includes('2 days ago'), 'and it dates the newest one');

@@ -124,7 +124,7 @@ import { appLocale } from '../../src/lib/locale';
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
 const GOALS: Goal[] = ['fatloss', 'tone', 'muscle'];
-const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
+const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat Loss', tone: 'Tone', muscle: 'Build Muscle' };
 
 // The three day types, each with the definition shown in the info sheet. A
 // tester asked for these ("need a brief definition in each tab for Training

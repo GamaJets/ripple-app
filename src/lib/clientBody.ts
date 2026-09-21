@@ -528,7 +528,9 @@ export function bodyLine(
   }
   if (loading) return 'Reading their scans…';
   if (newestISO == null) {
-    return `No InBody scan on record. The read came back and it was empty, so this is about ${who} rather than about the connection.`;
+    // One line, as the board's rows are. The failed read above says itself;
+    // this one only has to say there is nothing yet.
+    return 'No InBody scan yet';
   }
   const when = whenLabel(newestISO, todayISO).toLowerCase();
   const on = dayHeading(newestISO);

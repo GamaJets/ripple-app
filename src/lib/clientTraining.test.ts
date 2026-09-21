@@ -310,9 +310,10 @@ ok(!/Nothing logged yet/.test(trainingLine('error', broken, WHO)),
   'and never reaches for the empty-state sentence — a failed read stating "nothing logged yet" is '
   + 'the one sentence this file exists to prevent. (It may still say what it is NOT: "not the same '
   + 'as having logged none" is a denial, and denying the claim is the opposite of making it.)');
-ok(/Nothing logged yet/.test(trainingLine('ready', empty, WHO))
-   && /came back empty/.test(trainingLine('ready', empty, WHO)),
-  'an empty read that actually landed may say so, and says why it is entitled to');
+// One line, as the board's rows are: the failed read has its own sentence, so
+// the empty one no longer has to argue the difference.
+ok(trainingLine('ready', empty, WHO) === 'Nothing logged yet',
+  'an empty read that actually landed may say so, in one line');
 ok(/^3 days logged\./.test(trainingLine('ready', whole, WHO)),
   'a whole read is counted in days');
 ok(/^1 day logged\./.test(trainingLine('ready', tapped, WHO)),

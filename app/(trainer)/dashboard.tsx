@@ -1003,7 +1003,7 @@ export default function TrainerClients() {
     setImpResult({ rows });
   };
   const [newName, setNewName] = useState('');
-  const [newGoal, setNewGoal] = useState('Fat loss');
+  const [newGoal, setNewGoal] = useState('Fat Loss');
   const [newMode, setNewMode] = useState<CoachedMode>('online');
   const [invOpen, setInvOpen] = useState(false);
   // Copying the bare link, for the places an online coach actually earns
@@ -2397,7 +2397,7 @@ export default function TrainerClients() {
   /** Open the Add Client sheet. Lifted out of the button it used to live in
    *  because the button is now the pinned + at the bottom of the screen. */
   const openAdd = async () => {
-    setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true);
+    setNewName(''); setNewEmail(''); setNewGoal('Fat Loss'); setNewMode('online'); setAddOpen(true);
     // The code is needed by the alert at the end of THIS flow, so it has to be
     // loaded on this path too. It was only ever fetched by the Invite button.
     if (!myCode) {
@@ -4201,7 +4201,7 @@ export default function TrainerClients() {
               <TextInput value={newEmail} onChangeText={setNewEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
               <SheetHead t={t} title="Goal" />
               <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-                {['Fat loss', 'Build muscle', 'Tone'].map((g) => (
+                {['Fat Loss', 'Build Muscle', 'Tone'].map((g) => (
                   <Chip key={g} t={t} label={g} on={newGoal === g} onPress={() => setNewGoal(g)} />
                 ))}
               </View>

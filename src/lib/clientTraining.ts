@@ -527,7 +527,7 @@ export function trainingLine(status: LoadStatus, board: TrainingBoard, who: stri
     return `Their logged training could not be read. That is not the same as ${who} having logged none.`;
   }
   if (board.state === 'none') {
-    return `Nothing logged yet. The read came back empty, so that is about ${who} rather than about the connection.`;
+    return 'Nothing logged yet';
   }
   const when = board.newestDay ? dayLabel(board.newestDay) : '—';
   const last = when === '—' ? '' : ` Last trained ${when}.`;
