@@ -220,25 +220,21 @@ const TRAINER_TABS: GuideSection[] = [
   // Money takes the slot. Nine screens of a coach's money hung off Profile and
   // Analytics with no tab at all, so the part of the job that decides whether
   // the coaching pays was the part the tour never mentioned.
+  // Money and Analytics are one tab, Business, with a switch between them:
+  // the owner put them together on 21 Sep 2026 because each reads the other.
   {
-    title: 'Money',
-    summary: 'What you are owed, what came in, and what went out.',
+    title: 'Business',
+    summary: 'Money and Analytics: what you are owed and took, and how the coaching is going.',
     points: [
-      'It opens on what is outstanding: the invoices you have issued that are past their due date, counted and totalled per currency.',
+      'The switch at the top moves between Money and Analytics. They are one tab because each explains the other.',
+      'Money opens on what is outstanding: the invoices you have issued that are past their due date, counted and totalled per currency.',
       'Total Taken is gross: what clients were charged, before Stripe’s fee and ours, plus anything you recorded by hand.',
       'Two currencies are always two figures. Repple never adds them together and never converts one into the other.',
-      'Cash and transfers never reach Repple on their own, so every figure here is a floor until you record them.',
-      'Payments, Invoices, Cash and Transfers, What It Costs You, Ad Spend, Billing, the Statement of Record and Who Brings You Clients are all on this tab.',
+      'Cash and transfers never reach Repple on their own, so every money figure is a floor until you record them.',
+      'Payments, Invoices, Cash and Transfers, What It Costs You, Ad Spend, Billing, the Statement of Record and Who Brings You Clients are all under Money.',
       'The Statement of Record is what you hand an accountant for a quarter or a year. It is a record of what this app was told, never a tax return.',
-    ],
-  },
-  {
-    title: 'Analytics',
-    summary: 'How the coaching business is actually going.',
-    points: [
-      'Sessions Delivered counts this month’s sessions whose time has already gone by. It is not attendance. Somebody who did not turn up is still in it.',
-      'Roster health splits your clients into on track, watch and at risk.',
-      'What those sessions are worth is your own session rate multiplied out. Repple does not process that money and is not told it, so it is arithmetic rather than a payout.',
+      'Analytics counts this month’s Sessions Delivered whose time has already gone by. It is not attendance. Somebody who did not turn up is still in it.',
+      'Roster health splits your clients into on track, watch and at risk, and what sessions are worth is your own session rate multiplied out, not a payout.',
       'Figures stay empty until there is real activity behind them, and a read that failed says so rather than showing you a zero.',
     ],
   },
@@ -421,14 +417,14 @@ export function topicsFor(v: AppVariant): GuideSection[] {
  *  items and was described as five for as long as Profile has been in the bar. */
 export const GUIDE_INTRO: Record<AppVariant, string> = {
   client: 'Five tabs, and the things that run across them.',
-  trainer: 'Six tabs for running your coaching, and the things that run across them.',
+  trainer: 'Five tabs for running your coaching, and the things that run across them.',
   owner: 'Five tabs across the business.',
 };
 
 /** The line under the title on the first-run tour, which shows tabs only. */
 export const TOUR_INTRO: Record<AppVariant, string> = {
   client: 'Five tabs. Here is what each one is for.',
-  trainer: 'Six tabs for running your coaching. Here is what each one does.',
+  trainer: 'Five tabs for running your coaching. Here is what each one does.',
   owner: 'Five tabs across the business.',
 };
 

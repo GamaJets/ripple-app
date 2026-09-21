@@ -66,7 +66,7 @@ export default function TrainerLayout() {
     <>
       <Tabs
         backBehavior="history"
-        tabBar={(props) => <FloatingTabBar {...props} />}
+        tabBar={(props) => <FloatingTabBar {...props} partOf={{ analytics: 'money' }} />}
         screenOptions={{
           headerShown: false,
           tabBarHideOnKeyboard: true,
@@ -80,8 +80,10 @@ export default function TrainerLayout() {
         <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color, size }) => <Icon name="people" size={size} color={color} /> }} />
         <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color, size }) => <Icon name="train" size={size} color={color} /> }} />
         <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color, size }) => <Icon name="calendar" size={size} color={color} /> }} />
-        <Tabs.Screen name="money" options={{ title: 'Money', tabBarIcon: ({ color, size }) => <Icon name="trending" size={size} color={color} /> }} />
-        <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color, size }) => <Icon name="chart" size={size} color={color} /> }} />
+        <Tabs.Screen name="money" options={{ title: 'Business', tabBarIcon: ({ color, size }) => <Icon name="trending" size={size} color={color} /> }} />
+        {/* Part of the Business tab (src/ui/BusinessSwitch.tsx): no button of
+            its own, and the bar lights Business while it is open. */}
+        <Tabs.Screen name="analytics" options={{ href: null, title: 'Analytics' }} />
         <Tabs.Screen name="sessions" options={{ href: null, title: 'Mark Sessions' }} />
         <Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
         <Tabs.Screen name="client-attendance" options={{ href: null, title: 'Their Attendance' }} />

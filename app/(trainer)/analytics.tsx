@@ -37,7 +37,8 @@ import { useNow } from '../../src/ui/today';
 // the app does — 1,248 sessions, not 1248.
 import { num } from '../../src/lib/format';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ScreenHeader, HeroCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead, TonedChip, Donut, Legend, Meter, Expandable, Scrim, type Slice, HERO_FIT } from '../../src/ui/kit';
+import { BusinessHead } from '../../src/ui/BusinessSwitch';
+import { Rule, Section, SectionHead, HeroCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead, TonedChip, Donut, Legend, Meter, Expandable, Scrim, type Slice, HERO_FIT } from '../../src/ui/kit';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { sharePercent } from '../../src/lib/sharePercent';
@@ -1073,8 +1074,7 @@ export default function TrainerAnalytics() {
         {/* The same search control every coach tab root carries now. It was on
             Clients alone, so the other five roots — this one included — had no
             way into app/(trainer)/explore.tsx at all. */}
-        <ScreenHeader eyebrow="Your Coaching Business" title="Analytics"
-          actions={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />} />
+        <BusinessHead current="analytics" />
 
         {/* ── the hero: the month so far, and the one thing to do about it ──
             The approved night card, first on the screen. WHICH figure leads is

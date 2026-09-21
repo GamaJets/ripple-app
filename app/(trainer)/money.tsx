@@ -119,6 +119,7 @@ import { useTheme } from '../../src/ui/components';
 // The month window's instant, recomputed at midnight, on foreground and on
 // focus — never frozen at mount. See src/ui/today.ts.
 import { useNow, useToday } from '../../src/ui/today';
+import { BusinessHead } from '../../src/ui/BusinessSwitch';
 import { Rule, Section, SectionHead, PageHead, Ghost, Card, Notice, Flag, ListRow, PartialRead, fig, HeroCard, KpiRow, Meter, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { minorMoney, wholeMoney, type Taken, type TakenRow } from '../../src/lib/coachMoney';
@@ -831,8 +832,7 @@ export default function CoachMoney() {
             carries that name. No back control: a tab root has nothing to go
             back to, so the leading slot is a blank of the control's width and
             the trailing one is the search every tab root now carries. */}
-        <PageHead title="Money" leading={null}
-          trailing={<Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} a11yLabel="Search every screen" />} />
+        <BusinessHead current="money" />
 
         {/* ── what is owed, before what was taken ─────────────────────────
             The tab leads with the question a coach opens it to ask. Every

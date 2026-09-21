@@ -58,7 +58,9 @@ const PILL = atScale(50, Math.min(fontScale, CAP));
 // react-navigation: that path is an implementation detail of one SDK.
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
 
-export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) {
+/** `partOf` names a hidden route that belongs to a visible tab, so that tab
+ *  stays lit while it is open: the coach's Analytics is part of Business. */
+export function FloatingTabBar({ state, descriptors, navigation, partOf }: TabBarProps & { partOf?: Record<string, string> }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -93,11 +95,14 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
           if (StyleSheet.flatten(options.tabBarItemStyle)?.display === 'none') return null;
-          const focused = state.index === index;
+          const here = state.routes[state.index].name;
+          const focused = state.index === index || partOf?.[here] === route.name;
           const name = options.title ?? route.name;
           const onPress = () => {
             const e = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-            if (!focused && !e.defaultPrevented) navigation.navigate(route.name, route.params);
+            // `state.index`, not `focused`: a tab lit by `partOf` still goes to
+            // its own screen when pressed from the one it is lit for.
+            if (state.index !== index && !e.defaultPrevented) navigation.navigate(route.name, route.params);
           };
           return (
             <Pressable key={route.key} onPress={onPress}
