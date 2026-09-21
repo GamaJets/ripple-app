@@ -10,6 +10,7 @@
 // post-mortem anyway before changing anything here, because the probes it
 // explains still have to stay for anybody on an older binary.
 import { Share } from 'react-native';
+import { macroWords } from './nutrition';
 // The CSV writer is not written again here. gymExport.ts already quotes on
 // every delimiter src/lib/csv.ts is willing to sniff — not just the comma — so
 // a value cannot turn into a column break for somebody opening the file in a
@@ -357,8 +358,8 @@ export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow
   // in the text. A 2,400 kcal target read "2,400 kcal" in the PDF a member
   // opened and "2400 kcal" in the message body it was attached to.
   const text = `${first}'s meal plan (${brand}) · target ~${num(targetKcal)} kcal\n` +
-    meals.map((m) => `• ${m.slot}: ${m.name} · ${m.K} kcal (P${m.P}/C${m.C}/F${m.F})`).join('\n') +
-    `\nTotal: ${totK} kcal · P${totP} C${totC} F${totF}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '') +
+    meals.map((m) => `• ${m.slot}: ${m.name} · ${m.K} kcal (${macroWords(m.P, m.C, m.F)})`).join('\n') +
+    `\nTotal: ${totK} kcal · ${macroWords(totP, totC, totF)}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '') +
     (note ? `\n\n${note}` : '');
   return { html: page('Meal Plan', body, brand, accent), text };
 }

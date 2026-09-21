@@ -91,7 +91,8 @@ function capSeg(seg: string, forced: boolean): string {
   const known = CAPS.get(lower);
   if (known) return known;
   if (hasOwnCase(seg)) return seg;
-  if (!forced && SMALL.has(lower)) return lower;
+  // A small word stays small behind an opening bracket too: "(with Cinnamon)".
+  if (!forced && SMALL.has(lower.replace(/^[^a-z0-9]+/, ''))) return lower;
   return upFirst(lower);
 }
 

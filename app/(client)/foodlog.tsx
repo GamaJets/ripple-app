@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
-import { caloriesLeft, dayBurn } from '../../src/lib/nutrition';
+import { caloriesLeft, dayBurn, macroWords } from '../../src/lib/nutrition';
 // ONE target, shared with the Meals tab. This screen used to build its own out
 // of `macrosFor` plus the coach's adjust and nothing else, while the Meals tab
 // one tap away passed the goal-date energy plan and the day type into the same
@@ -1531,7 +1531,7 @@ export default function FoodLog() {
           accessibilityHint="Opens a sheet to say how much of it you had, and logs it against today"
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: 6 }}>
           <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(fe.kcal)} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(fe.kcal)} kcal · {macroWords(fe.protein, fe.carbs, fe.fat)}</Text>
           <Icon name="plus" size={14} color={t.brand} />
          </Pressable>
         ))}

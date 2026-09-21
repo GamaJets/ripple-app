@@ -12,7 +12,7 @@
 // 16F "Meal (photo)" entry whenever vision was unavailable or failed. Nothing is
 // logged now — the app says it could not read the photo rather than making a
 // number up.
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 import { titleCaseName } from '../../src/lib/exerciseName';import { num, numUpTo } from '../../src/lib/format';
 import { fmtDay, fmtFullDay } from '../../src/lib/format';
@@ -65,7 +65,7 @@ import { useRecipeSearch, useRecipeDetail } from '../../src/ui/useRecipeSearch';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { reportError } from '../../src/lib/reportError';
 import { useWearables } from '../../src/ui/wearables';
-import { caloriesLeft, caloriesNote, dayBurn, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
+import { caloriesLeft, caloriesNote, dayBurn, macrosFor, applyCoachAdjust, maintenanceFor, macroWords } from '../../src/lib/nutrition';
 import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
 // The one place the coach's adjust and the day type are folded together. The
 // Food Log reads its target through the same file — see src/lib/dayTarget.ts,
@@ -406,6 +406,11 @@ export default function Nutrition() {
   // until somebody taps "Search Real Recipes", and again after they change
   // slot, which is a different search they have not asked for yet.
   const [recipeSearchOpen, setRecipeSearchOpen] = useState(false);
+  // Where the Swap or Search card sits in the scroll, so the Recipes tab can
+  // take the member to the recipe search rather than open one meal.
+  const scrollRef = useRef<ScrollView>(null);
+  const swapY = useRef<number | null>(null);
+  const [wantRecipes, setWantRecipes] = useState(false);
   // Slot position → the recipe the member planned there. Refs only, under a key
   // with their account in it: see src/lib/recipePlan.ts for both halves.
   const [recipePlan, setRecipePlan] = useState<RecipePlan>({});
@@ -1087,13 +1092,23 @@ export default function Nutrition() {
     // sampled at a stride when nothing is typed, and a search is thinned to
     // one row per base dish. Eight different breakfasts, not eight oats.
     const size = catalogSize(diet, slotSel, c.avoid);
-    const stride = Math.max(1, Math.floor(size / 8));
+    // Sampled wide (32 draws) and thinned twice: one row per base dish AND one
+    // per leading flavour. Thinned on the dish alone, the list opened on five
+    // "Apple & Cinnamon" breakfasts in a row (owner, 21 Sep 2026).
+    const stride = Math.max(1, Math.floor(size / 32));
     const raw = q
       ? searchMeals(diet, slotSel, q, 60, c.avoid, c.dislikes)
-      : Array.from({ length: 8 }, (_, i) => mealAt(diet, slotSel, dislikeFreeIndex(diet, slotSel, (lead.idx + stride * (i + 1) + i * 7) % size, c.avoid, c.dislikes), c.avoid));
+      : Array.from({ length: 32 }, (_, i) => mealAt(diet, slotSel, dislikeFreeIndex(diet, slotSel, (lead.idx + stride * (i + 1) + i * 7) % size, c.avoid, c.dislikes), c.avoid));
+    const flavour = (n: string) => n.trim().split(/\s+/)[0].toLowerCase();
     const seen = new Set<string>([mealDish(lead.n)]);
+    const seenFlavour = new Set<string>(q ? [] : [flavour(lead.n)]);
     return raw
-      .filter((m) => { const base = mealDish(m.n); if (m.idx === lead.idx || seen.has(base)) return false; seen.add(base); return true; })
+      .filter((m) => {
+        const base = mealDish(m.n);
+        if (m.idx === lead.idx || seen.has(base)) return false;
+        if (!q && seenFlavour.has(flavour(m.n))) return false;
+        seen.add(base); seenFlavour.add(flavour(m.n)); return true;
+      })
       .slice(0, 12)
       .map((m) => ({ ...m, pos: lead.pos, servings: lead.servings,
         K: Math.round(m.k * lead.servings), P: Math.round(m.p * lead.servings), C: Math.round(m.c * lead.servings), F: Math.round(m.f * lead.servings) }));
@@ -1550,7 +1565,7 @@ export default function Nutrition() {
               // An empty slot: nothing to count, and the one thing to do.
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{m.slot} · Tap to search real recipes, or ask your coach</Text>
             ) : (
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.slot} · P{m.P} · C{m.C} · F{m.F}</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.slot} · {macroWords(m.P, m.C, m.F)}</Text>
             )}
             {/* Which row is the plan's, said in words: the list is
                 the whole catalogue now, and one of them is today's. */}
@@ -1690,7 +1705,7 @@ export default function Nutrition() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* Draw nothing; read the member's planned recipes back from their ids.
             Mounted here, below the three doors above, so nothing is read for a
@@ -1727,7 +1742,14 @@ export default function Nutrition() {
           options={[
             { key: 'plan', label: 'Plan' },
             { key: 'targets', label: 'Targets', onPress: () => router.push('/(client)/goal') },
-            { key: 'recipes', label: 'Recipes', disabled: plan.length === 0, onPress: () => { if (todayPlan[0]) openMeal(todayPlan[0], today); } },
+            // The recipe library, not the first meal of the day: it opened one
+            // recipe (Apple & Cinnamon Oats) and nothing else (owner, 21 Sep
+            // 2026). Now it opens the real search on Swap or Search and scrolls
+            // there; the meal tabs on that card pick breakfast, lunch or dinner.
+            { key: 'recipes', label: 'Recipes', disabled: plan.length === 0, onPress: () => {
+              setView('today'); setRecipeSearchOpen(true); setWantRecipes(true);
+              if (swapY.current != null) scrollRef.current?.scrollTo({ y: Math.max(0, swapY.current - 12), animated: true });
+            } },
           ]} />
 
         {/* ── today, as the board draws it ──────────────────────────────────
@@ -1969,6 +1991,12 @@ export default function Nutrition() {
             it, and the real recipe library. Below the day, because the day is
             read every time and a swap is made now and then. */}
         {view === 'today' ? (
+        <View onLayout={(e) => {
+          swapY.current = e.nativeEvent.layout.y;
+          // Switching to Today from the week draws this card for the first
+          // time, so the scroll waits for it to have a place.
+          if (wantRecipes) { setWantRecipes(false); scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 12), animated: true }); }
+        }}>
         <Section>
               <SectionHead title="Swap or Search" note={`${num(plan.length)} Meals a Day`} />
               {/* One slot at a time, the way the board lists meals. The slots
@@ -2143,6 +2171,7 @@ export default function Nutrition() {
                 })}
               </View>
         </Section>
+        </View>
         ) : null}
 
         {/* The order below the plan is the review's: what was eaten and the
@@ -2317,7 +2346,7 @@ export default function Nutrition() {
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{titleCaseName(m.n)}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>{macroWords(m.P, m.C, m.F)}</Text>
                       {inIt.length ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
@@ -2483,7 +2512,7 @@ export default function Nutrition() {
             <View style={{ flex: 1, padding: sp.xl, paddingTop: 60, justifyContent: 'space-between' }}>
               <View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.xl }}>
-                  <Text style={{ ...ty.label, color: t.ink3, textTransform: 'capitalize', flex: 1 }} numberOfLines={1}>{recipe.n}</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, flex: 1 }} numberOfLines={1}>{titleCaseName(recipe.n)}</Text>
                   <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Done</Text></Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 5, marginBottom: sp.xxl }}>
@@ -2535,8 +2564,8 @@ export default function Nutrition() {
               <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}{sheetRecipe ? ' · Recipe' : ''}</Text>
               {/* A non-breaking hyphen, so "(Pre-Workout)" wraps as a word
                   rather than leaving "(Pre-" at the end of a line (TF-24). */}
-              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', marginTop: 4 }}>{recipe.n.replace(/-/g, '\u2011')}</Text>
-              <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 4 }}>{titleCaseName(recipe.n).replace(/-/g, '\u2011')}</Text>
+              <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{num(Math.round(recipe.K * batch))} kcal · {macroWords(recipe.P * batch, recipe.C * batch, recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
               {/* What the recipe says of itself. The figures above are THIS
                   slot's portion of it; "makes 4" is the recipe as written, and
                   is here so the two are not mistaken for each other. */}

@@ -85,7 +85,7 @@ import { isoToday } from '../../src/lib/dayPlan';
 import { num } from '../../src/lib/format';
 import { readGoals, seriesFrom, type GoalRow, type ScanRow, type WeighInRow } from '../../src/lib/clientGoals';
 import { energyPlanFor } from '../../src/lib/goalEnergy';
-import { maintenanceFor, DIET_LABEL } from '../../src/lib/nutrition';
+import { maintenanceFor, DIET_LABEL, macroWords } from '../../src/lib/nutrition';
 import {
   buildPlan, catalogSize, searchMeals, swapIndex, ALLERGENS, excludedAllergens, normaliseDislike, preferNotDisliked,
   readAllergenColumn, readDislikes, type Allergen, type PlanInput, type Slot,
@@ -988,7 +988,7 @@ export default function ClientNutrition() {
                                   </Text>
                                 ) : (
                                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
-                                    {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} · {m.servings}× serving
+                                    {num(m.K)} kcal · {macroWords(m.P, m.C, m.F)} · {m.servings}× serving
                                   </Text>
                                 )}
                               </View>
@@ -1364,7 +1364,7 @@ export default function ClientNutrition() {
                           <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{titleCaseName(m.n)}</Text>
                           {pinnedHere ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the Plan</Text> : null}
                           <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
-                            {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} · at {m.servings}× serving
+                            {num(m.K)} kcal · {macroWords(m.P, m.C, m.F)} · at {m.servings}× serving
                           </Text>
                           {/* The library's own filter let this through and
                               Repple's re-check did not. On the ROW somebody
@@ -1431,7 +1431,7 @@ export default function ClientNutrition() {
                     <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{g.n}</Text>
                     {inPlan ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the Plan</Text> : null}
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
-                      {num(g.k)} kcal · P{num(g.p)} · C{num(g.c)} · F{num(g.f)} · per serving, before
+                      {num(g.k)} kcal · {macroWords(g.p, g.c, g.f)} · per serving, before
                       their day is scaled to target
                     </Text>
                   </View>
