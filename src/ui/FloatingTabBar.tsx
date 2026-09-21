@@ -34,9 +34,11 @@
 //     quiet tabs show no name, so their name is their accessibility label —
 //     colour and a capsule are the visual channel for "selected", and neither
 //     reaches a screen reader.
-//   · The bar grows with the reader's text: the capsule is `grown(50)` and the
-//     name shrinks to fit before it would clip. Six tabs (the coach app) on a
-//     narrow phone at Larger Text is the case that sizes this.
+//   · The bar grows with the reader's text up to 1.3x (LARGE_TYPE_SCALE) and
+//     no further, as the system's own tab bar does. At the accessibility sizes
+//     it grew a 125pt circle whose name spilled out of it (seen 21 Sep 2026 on
+//     the simulator); the name is the accessibility label and every screen
+//     above keeps growing, so nothing is lost by stopping the chrome.
 //
 // No badge support: no layout sets `tabBarBadge`. When one does, it is a dot
 // on the icon here, and the count in the accessibility label.
@@ -46,7 +48,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Tabs } from 'expo-router';
 import { useTheme } from './components';
 import { HERO_FIT } from './kit';
-import { elevation, grown, type as ty } from '../theme/scale';
+import { elevation, fontScale, type as ty } from '../theme/scale';
+import { atScale, LARGE_TYPE_SCALE } from '../lib/typeScale';
+
+const CAP = LARGE_TYPE_SCALE;
+const PILL = atScale(50, Math.min(fontScale, CAP));
 
 // Derived from <Tabs> rather than imported from expo-router's vendored
 // react-navigation: that path is an implementation detail of one SDK.
@@ -103,13 +109,13 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
                 // 1.9 to 1: the capsule is wide enough for its name and the
                 // quiet tabs share what is left, as the mockups divide it.
                 flexGrow: focused ? 1.9 : 1, flexBasis: 0, minWidth: 0,
-                height: grown(50), borderRadius: grown(50) / 2,
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                height: PILL, borderRadius: PILL / 2,
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: focused ? 12 : 0,
                 backgroundColor: focused ? t.night : 'transparent',
               }}>
               {options.tabBarIcon?.({ focused, color: focused ? t.brandBright : t.ink3, size: focused ? 22 : 24 })}
               {focused ? (
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={CAP}
                   style={{ ...ty.tab, ...HERO_FIT, color: t.nightInk, flexShrink: 1 }}>{name}</Text>
               ) : null}
             </Pressable>

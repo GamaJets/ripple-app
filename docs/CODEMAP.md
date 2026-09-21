@@ -26,7 +26,7 @@ is paid again on every turn of the session that opened it.
 | 2,554 | 32k | `src/lib/gymExport.ts` |
 | 2,505 | 32k | `studio-web/app/staff/page.tsx` |
 | 2,474 | 30k | `studio-web/app/members/page.tsx` |
-| 2,433 | 32k | `src/ui/kit.tsx` |
+| 2,440 | 32k | `src/ui/kit.tsx` |
 | 2,260 | 30k | `studio-web/app/timetable/page.tsx` |
 | 2,189 | 34k | `supabase/functions/stripe-webhook/index.ts` |
 | 2,110 | 29k | `src/ui/sessions.tsx` |
@@ -56,7 +56,7 @@ is paid again on every turn of the session that opened it.
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 
-Total: 46 files, 117,042 lines, ~1691k tokens if every one were read whole.
+Total: 46 files, 117,049 lines, ~1691k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -1748,7 +1748,7 @@ Total: 46 files, 117,042 lines, ~1691k tokens if every one were read whole.
 
 ## `src/ui/kit.tsx`
 
-2,433 lines · ~32k tokens · 72 anchors
+2,440 lines · ~32k tokens · 72 anchors
 
 ```
 1-71          §        The kit
@@ -1759,70 +1759,70 @@ Total: 46 files, 117,042 lines, ~1691k tokens if every one were read whole.
 124-159       fn       Rule
 160-182       fn       Section
 183-270       fn       ScreenHeader
-271-333       fn       PageHead
-334-435       fn       SectionHead
-436-461       fn       arcPct
-462-470       type     Chip
-471-497       fn       ChipGrid
-498-512       type     KpiItem
-513-602       fn       KpiRow
-603-623       fn       Card
-624-708       fn       ActionCard
-709-731       fn       ListRow
-732-833       fn       Cta
-834-869       fn       Field
-870-922       fn       Ghost
-923-982       fn       QuickRow
-983-1009      fn       Scrim
-1010-1107     fn       Meter
-1108-1132     fn       Spark
-1133-1135     fn         vals
-1136-1136     fn         x
-1137-1144     fn         y
-1145-1203     fn         pick
-1204-1307     fn               at
-1308-1321     fn       Flag
-1322-1360     fn       Notice
-1361-1392     fn       PartialRead
-1393-1407     fn       Dot
-1408-1494     type     FigureItem
-1495-1526     fn       FigureCard
-1527-1530     fn         say
-1531-1590     fn         one
-1591-1619     type     SyncState
-1620-1664     fn       SyncBadge
-1665-1765     fn       AttentionRow
-1766-1822     fn       ActionBlock
-1823-1887     fn       Expandable
-1888-1899     fn       ChartShell
-1900-1941     fn         quiet
-1942-1942     fn       clamp01
-1943-1948     fn       known
-1949-1965     fn       IconPlate
-1966-1988     fn       TonedChip
-1989-2028     fn       RingBase
-2029-2042     type     RingProps
-2043-2049     fn       Ring
-2050-2058     fn       HeroRing
-2059-2066     fn       MiniRing
-2067-2113     fn       CtaBright
-2114-2152     fn       HeroCard
-2153-2166     type     DayBar
-2167-2168     fn       DayBars
-2169-2194     fn         top
-2195-2211     type     Slice
-2212-2217     fn       Donut
-2218-2218     fn         drawn
-2219-2249     fn         total
-2250-2267     fn       Legend
-2268-2269     fn       plot
-2270-2272     fn         vals
-2273-2273     fn         x
-2274-2288     fn         y
-2289-2333     fn       KpiTile
-2334-2376     type     Segment
-2377-2385     fn       Segmented
-2386-2433     fn         segs
+271-340       fn       PageHead
+341-442       fn       SectionHead
+443-468       fn       arcPct
+469-477       type     Chip
+478-504       fn       ChipGrid
+505-519       type     KpiItem
+520-609       fn       KpiRow
+610-630       fn       Card
+631-715       fn       ActionCard
+716-738       fn       ListRow
+739-840       fn       Cta
+841-876       fn       Field
+877-929       fn       Ghost
+930-989       fn       QuickRow
+990-1016      fn       Scrim
+1017-1114     fn       Meter
+1115-1139     fn       Spark
+1140-1142     fn         vals
+1143-1143     fn         x
+1144-1151     fn         y
+1152-1210     fn         pick
+1211-1314     fn               at
+1315-1328     fn       Flag
+1329-1367     fn       Notice
+1368-1399     fn       PartialRead
+1400-1414     fn       Dot
+1415-1501     type     FigureItem
+1502-1533     fn       FigureCard
+1534-1537     fn         say
+1538-1597     fn         one
+1598-1626     type     SyncState
+1627-1671     fn       SyncBadge
+1672-1772     fn       AttentionRow
+1773-1829     fn       ActionBlock
+1830-1894     fn       Expandable
+1895-1906     fn       ChartShell
+1907-1948     fn         quiet
+1949-1949     fn       clamp01
+1950-1955     fn       known
+1956-1972     fn       IconPlate
+1973-1995     fn       TonedChip
+1996-2035     fn       RingBase
+2036-2049     type     RingProps
+2050-2056     fn       Ring
+2057-2065     fn       HeroRing
+2066-2073     fn       MiniRing
+2074-2120     fn       CtaBright
+2121-2159     fn       HeroCard
+2160-2173     type     DayBar
+2174-2175     fn       DayBars
+2176-2201     fn         top
+2202-2218     type     Slice
+2219-2224     fn       Donut
+2225-2225     fn         drawn
+2226-2256     fn         total
+2257-2274     fn       Legend
+2275-2276     fn       plot
+2277-2279     fn         vals
+2280-2280     fn         x
+2281-2295     fn         y
+2296-2340     fn       KpiTile
+2341-2383     type     Segment
+2384-2392     fn       Segmented
+2393-2440     fn         segs
 ```
 
 ## `studio-web/app/timetable/page.tsx`

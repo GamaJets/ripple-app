@@ -283,20 +283,27 @@ export function PageHead({ title, subtitle, leading, trailing, onBack, backLabel
   backLabel?: string;
 }) {
   const t = useTheme();
+  // At the accessibility sizes the title gets its own row under the controls.
+  // Between a back control and a labelled "Share" it was left a column one
+  // word wide, and "Progress" broke mid-word (simulator, 21 Sep 2026). The
+  // controls do not move, so the back control is still where the thumb is.
+  const own = fontScale >= 1.35;
+  const heading = title ? (
+    <Text accessibilityRole="header" numberOfLines={linesAtScale(fontScale, 2)}
+      style={{ ...ty.page, color: t.ink, flex: own ? undefined : 1, minWidth: 0, textAlign: 'center', marginTop: own ? sp.sm : 0 }}>
+      {title}
+    </Text>
+  ) : null;
   return (
     <View style={{ paddingTop: sp.md }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
         {leading === undefined
           ? <Ghost icon={BACK_ICON} a11yLabel={backLabel} onPress={onBack ?? (() => router.back())} />
           : (leading ?? <View style={{ width: ROUND }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />)}
-        {title ? (
-          <Text accessibilityRole="header" numberOfLines={linesAtScale(fontScale, 2)}
-            style={{ ...ty.page, color: t.ink, flex: 1, minWidth: 0, textAlign: 'center' }}>
-            {title}
-          </Text>
-        ) : <View style={{ flex: 1 }} />}
+        {own ? <View style={{ flex: 1 }} /> : (heading ?? <View style={{ flex: 1 }} />)}
         {trailing ?? <View style={{ width: ROUND }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />}
       </View>
+      {own ? heading : null}
       {subtitle ? (
         <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{subtitle}</Text>
       ) : null}
