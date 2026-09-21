@@ -213,20 +213,20 @@ function WaiverScreen({ state, accept, reload, insets }: {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 + insets.bottom }}>
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>Before You Start</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>
-          Read This and Agree to Carry On
+          A Quick Word Before You Train
         </Text>
         <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
-          {BRAND.label} gives you training and nutrition suggestions. It is not medical advice, and
-          nobody here — your coach included — is your doctor. Please read both points and tick
-          them only if you agree.
+          {BRAND.label} suggests training and nutrition to help you reach your goals. It isn't
+          medical advice, so if you have any health concerns, check with your doctor first. Read the
+          two points below and tick each one you agree with.
         </Text>
 
         {state === 'unknown' ? (
           <View style={{ marginTop: sp.lg, padding: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
             <Text style={{ ...ty.label, color: t.ink, fontWeight: '600' }}>We couldn’t check your record</Text>
             <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs }}>
-              You may have agreed to this already — we just couldn’t read it. Try again, or agree
-              below and we’ll record it.
+              You may have agreed to this already, but we couldn’t read it just now. Try again, or
+              agree below and we’ll record it.
             </Text>
             <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
               <Cta label="Try Again" onPress={reload} />
@@ -247,11 +247,11 @@ function WaiverScreen({ state, accept, reload, insets }: {
 
         <View style={{ marginTop: sp.lg }}>
           <Cta wide disabled={!ready || busy}
-            label={busy ? 'Saving…' : ready ? 'I Agree — Continue' : 'Tick Both to Continue'}
+            label={busy ? 'Saving…' : ready ? 'Agree and Continue' : 'Tick Both to Continue'}
             onPress={submit} />
         </View>
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
-          Your agreement is recorded against your account with the date. Version {WAIVER_VERSION}.
+          We save your agreement with today’s date. Version {WAIVER_VERSION}.
         </Text>
         {/* The exit. Not a way past the gate — see `SignOutWay`. */}
         <SignOutWay label="Sign Out Instead" />

@@ -40,6 +40,7 @@ import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { num, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import { useAuth } from '../../src/ui/auth';
+import { accountCacheKey } from '../../src/lib/deviceAccountCache';
 import {
   compareDrift, bandTitle,
   DEFAULT_WINDOWS, localDayKey, type Drift,
@@ -338,11 +339,15 @@ function Flag({ t, tone, text }: { t: Theme; tone: string; text: string }) {
   );
 }
 
-/** Where this tab keeps which of its folds a coach left open. One key and a
- *  map under it, the way `repple.screenHelp.dismissed` keeps its list: it is a
- *  preference about THIS handset's screen, not a fact about the account, so it
- *  does not belong on the server and a reinstall forgetting it costs a tap. */
-const FOLDS_KEY = 'repple.coachHome.folds';
+/** Where this tab keeps which of its folds a coach left open. One key per
+ *  account and a map under it. It is a preference about THIS handset's screen,
+ *  so it does not belong on the server and a reinstall forgetting it costs a
+ *  tap; but a gym handset is signed in and out all day, so it is scoped the way
+ *  app/(trainer)/statement.tsx scopes its year start, through
+ *  `accountCacheKey`, which answers null (do not persist) for no account. The
+ *  unqualified key it replaces is removed unread, once per mount. */
+const FOLDS_PREFIX = 'repple.coachHome.folds:';
+const LEGACY_FOLDS_KEY = 'repple.coachHome.folds';
 
 /**
  * A section of this tab that is shut until a coach opens it, and stays the way
@@ -374,30 +379,40 @@ const FOLDS_KEY = 'repple.coachHome.folds';
  */
 function Fold({ id, title, note, children }: { id: string; title: string; note?: string; children: ReactNode }) {
   const t = useTheme();
+  const { user } = useAuth();
+  const key = accountCacheKey(FOLDS_PREFIX, user?.id);
   const [open, setOpen] = useState(false);
   useEffect(() => {
+    void AsyncStorage.removeItem(LEGACY_FOLDS_KEY).catch(() => {});
+  }, []);
+  useEffect(() => {
     let live = true;
+    // Shut first, on every change of account, so the last coach's choice is
+    // never on screen under the next coach's name while the read is in flight.
+    setOpen(false);
+    if (!key) return () => { live = false; };
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(FOLDS_KEY);
+        const raw = await AsyncStorage.getItem(key);
         const map = raw ? JSON.parse(raw) : null;
         if (live && map && typeof map === 'object' && map[id] === true) setOpen(true);
       } catch { /* shut, which is what it already is */ }
     })();
     return () => { live = false; };
-  }, [id]);
+  }, [id, key]);
   const toggle = () => {
     const next = !open;
     setOpen(next);
     // Read-modify-write, because two folds share the key and neither may
     // forget the other. Best effort: a preference that could not be written
     // costs one tap on the next launch, and failing the tap would cost more.
+    if (!key) return;
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(FOLDS_KEY);
+        const raw = await AsyncStorage.getItem(key);
         const was = raw ? JSON.parse(raw) : null;
         const map = was && typeof was === 'object' && !Array.isArray(was) ? was : {};
-        await AsyncStorage.setItem(FOLDS_KEY, JSON.stringify({ ...map, [id]: next }));
+        await AsyncStorage.setItem(key, JSON.stringify({ ...map, [id]: next }));
       } catch { /* on screen for this session either way */ }
     })();
   };
@@ -826,6 +841,22 @@ export default function TrainerClients() {
   // It narrows what the segment already selected, so what the bulk controls act
   // on stays exactly what is listed under them — see `shownRoster`.
   const [rosterQ, setRosterQ] = useState('');
+  // ── who the bulk controls act on ────────────────────────────────────────
+  //
+  // The rows a coach has ticked, and nobody else. Message, Assign Program and
+  // Remove From Your Roster are not on screen until at least one row is ticked:
+  // the tester's screenshot of this tab (TestFlight, coach build 20) is mostly
+  // those buttons, with "Remove 1 From Your Roster" standing open under a
+  // one-client list. Ticking starts from the Select control over the list or a
+  // long press on a row. See `pickedRoster`.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const togglePick = (id: string) => setPicked((was) => {
+    const next = new Set(was);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const stopPicking = () => { setPicking(false); setPicked(new Set()); };
   const [tagDraft, setTagDraft] = useState('');
   /**
    * Accept an invitation to a gym, and say which of the two things happened.
@@ -1734,6 +1765,10 @@ export default function TrainerClients() {
   // which is the worst version of a control this file already takes care to
   // print a count on. One list, one count, one set of recipients.
   const shownRoster = searchRoster(segRoster, rosterQ);
+  // Ticked AND still listed. A search or segment that hides a ticked row takes
+  // it out of what the controls act on, so the count on the button is always a
+  // count of names the coach can see ticked.
+  const pickedRoster = shownRoster.filter((c) => picked.has(c.id));
   /** The sentence a search over an incomplete read owes the coach, or null.
    *  Only a whole read may say a person is not on the book. */
   const rosterQLine = rosterSearchLine({
@@ -1987,7 +2022,7 @@ export default function TrainerClients() {
   const nameOf = (id: string) => roster.find((c) => c.id === id)?.name.split(' ')[0] ?? 'A client';
 
   const openBulkMessage = () => {
-    if (!shownRoster.length) return;
+    if (!pickedRoster.length) return;
     if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
     setMsgBody(''); setMsgFailed([]); setMsgOpen(true);
   };
@@ -2030,7 +2065,7 @@ export default function TrainerClients() {
     if (bulkBusy) return;
     if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
     if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
-    const list = shownRoster;
+    const list = pickedRoster;
     if (!list.length) return;
     const targets: AssignTarget[] = list.map((c) => ({
       clientId: c.id, name: c.name.split(' ')[0], onProgram: !!getProgram(c.id),
@@ -2088,7 +2123,7 @@ export default function TrainerClients() {
   const bulkEnd = async () => {
     if (endBusy) return;
     if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
-    const list = shownRoster;
+    const list = pickedRoster;
     if (!list.length) return;
     const targets: EndTarget[] = list.map((c) => ({
       clientId: c.id, name: c.name.split(' ')[0], handAdded: c.handAdded === true,
@@ -3028,6 +3063,62 @@ export default function TrainerClients() {
             fold below has nothing to act on. */}
         {driftRows.length > 0 || roster.length > 0 || rosterStatus !== 'ready' ? (
         <Section style={{ paddingVertical: sp.sm, paddingHorizontal: sp.sm }}>
+          {/* ── ticking rows, and what can be done to the ticked ones ────────
+              One quiet line until a coach asks to select. The bulk controls
+              appear here, over the names they act on, only once somebody is
+              ticked, so nothing that messages, reassigns or removes people is
+              on screen by default. */}
+          {shownRoster.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
+              <Text style={{ ...ty.caption, color: t.ink3, flexShrink: 1 }}>
+                {picking ? (pickedRoster.length ? `${num(pickedRoster.length)} selected` : 'Tap names to select them') : ''}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: sp.lg }}>
+                {picking && pickedRoster.length < shownRoster.length ? (
+                  <Pressable onPress={() => setPicked(new Set(shownRoster.map((c) => c.id)))} hitSlop={hitSlopFor(24)}
+                    accessibilityRole="button" accessibilityLabel={`Select all ${shownRoster.length} listed`}>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>Select All</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable onPress={() => (picking ? stopPicking() : setPicking(true))} hitSlop={hitSlopFor(24)}
+                  accessibilityRole="button" accessibilityLabel={picking ? 'Stop selecting clients' : 'Select clients to message, assign or remove'}>
+                  <Text style={{ ...ty.label, ...font('600'), color: t.brandText }}>{picking ? 'Done' : 'Select'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+          {pickedRoster.length > 0 ? (
+            <View style={{ paddingHorizontal: sp.sm, paddingBottom: sp.sm }}>
+              {/* The count on each button is what the coach consents to, so it
+                  is only a number when the reads behind the list came back
+                  whole. Under anything else the control carries the reason
+                  instead and the handler refuses as well, because a message
+                  cannot be taken back. */}
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
+                <View style={{ flex: 1 }}><Ghost icon="message"
+                  label={segClaim.allowed ? `Message ${pickedRoster.length}` : 'Cannot Message Yet'}
+                  onPress={openBulkMessage} /></View>
+                <View style={{ flex: 1 }}><Ghost icon="grid"
+                  label={segClaim.allowed && bulkGuard.allowed ? 'Assign Program' : 'Cannot Assign Yet'}
+                  onPress={() => {
+                    if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+                    if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
+                    setBulkTplOpen(true);
+                  }} /></View>
+              </View>
+              {/* On its own row, away from Message, because it cannot be taken
+                  back for anybody it reaches; the count is on the label because
+                  this is the last thing read before the dialog. */}
+              <Ghost
+                label={!segClaim.allowed
+                  ? 'Cannot Remove Yet'
+                  : endBusy ? 'Removing…' : `Remove ${pickedRoster.length} From Your Roster`}
+                onPress={() => {
+                  if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+                  void bulkEnd();
+                }} />
+            </View>
+          ) : null}
           {driftRows.map(({ c, d }) => {
             const st = rowStatus(t, c, d, !!drift, today);
             const hue = toneOf(t, st.chip ?? 'neutral');
@@ -3082,8 +3173,12 @@ export default function TrainerClients() {
                 the inks on it clear the contrast they are measured for on the
                 full plate; never colour alone — the word is on the row and in
                 its spoken label. */
-            <Pressable key={c.id} onPress={() => openProfile(c)} accessibilityRole="button"
-              accessibilityLabel={`Open ${c.name}, ${line}${adherence != null ? `, ${num(adherence)}% adherence` : ''}`}
+            <Pressable key={c.id}
+              onPress={() => (picking ? togglePick(c.id) : openProfile(c))}
+              onLongPress={() => { if (!picking) setPicking(true); togglePick(c.id); }}
+              accessibilityRole={picking ? 'checkbox' : 'button'}
+              accessibilityState={picking ? { checked: picked.has(c.id) } : undefined}
+              accessibilityLabel={`${picking ? '' : 'Open '}${c.name}, ${line}${adherence != null ? `, ${num(adherence)}% adherence` : ''}`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, minHeight: grown(72), paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.md, overflow: 'hidden' }}>
               {urgent ? <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, backgroundColor: hue.soft, opacity: 0.5 }} /> : null}
               <Initials t={t} name={c.name} size={46} tone={st.chip ?? 'neutral'} />
@@ -3114,87 +3209,24 @@ export default function TrainerClients() {
                   </View>
                 )}
               </View>
-              <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+              {picking ? (
+                <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center',
+                  borderColor: picked.has(c.id) ? t.brand : t.ink3, backgroundColor: picked.has(c.id) ? t.brand : 'transparent' }}>
+                  {picked.has(c.id) ? <Icon name="check" size={13} color={t.brandInk} /> : null}
+                </View>
+              ) : <Icon name={FORWARD_ICON} size={15} color={t.ink3} />}
             </Pressable>
             );
           })}
 
-          {/* ── acting on what is listed ─────────────────────────────────────
-              Under the list, and behind a fold. Export, message everybody
-              listed, assign them all a program, remove them all: each acts on
-              exactly the rows above, none is a thing a coach does on most
-              visits, and the last cannot be taken back — four full-width
-              buttons standing open under the names were the loudest thing in
-              the section (they fill the tester's screenshot of it). Shut by
-              default and remembered, like Coaching Tools. Nothing about what
-              they do, refuse or count has changed. */}
+          {/* Out of the app, and only ever the whole book, so it is not one of
+              the controls that wait for a tick. `exportRoster` refuses on a read
+              that failed and marks the file INCOMPLETE on one that was
+              truncated; see src/lib/rosterExport.ts. */}
           {roster.length > 0 || rosterStatus !== 'ready' ? (
-          <View style={{ marginTop: driftRows.length ? sp.lg : sp.sm, paddingHorizontal: sp.sm, paddingBottom: sp.sm }}>
-          <Fold id="rosterActions" title="Roster Actions"
-            note="Export your roster, or message, assign a program to, or remove everyone listed above.">
-
-          {/* Out of the app, and only ever the whole book. `exportRoster`
-              refuses on a read that failed and marks the file INCOMPLETE on one
-              that was truncated — see src/lib/rosterExport.ts. Offered whatever
-              the segment or the search is, and it exports `roster` rather than
-              what is listed, because a coach exporting their clients means all
-              of them. */}
-          {roster.length > 0 || rosterStatus !== 'ready' ? (
-            <View style={{ marginBottom: sp.md }}>
+            <View style={{ marginTop: driftRows.length ? sp.lg : sp.sm, paddingHorizontal: sp.sm, paddingBottom: sp.sm }}>
               <Ghost icon="share" label={exportBusy ? 'Exporting…' : 'Export Roster'} onPress={exportRoster} />
             </View>
-          ) : null}
-
-          {/* Offered on every segment including All, which is the one a coach
-              most often means by "everybody". It used to be hidden there, so
-              the two bulk controls appeared only once a filter had been chosen
-              and the most ordinary case had no control at all. */}
-          {shownRoster.length > 0 ? (
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-              {/* The count on this button is what the coach consents to, so
-                  it is only a number when the two reads behind the segment came
-                  back whole. Under anything else the control carries the reason
-                  instead and the handler refuses as well — belt and braces,
-                  because a message cannot be taken back. */}
-              <View style={{ flex: 1 }}><Ghost icon="message"
-                label={segClaim.allowed ? `Message ${shownRoster.length}` : 'Cannot Message This Segment'}
-                onPress={openBulkMessage} /></View>
-              <View style={{ flex: 1 }}><Ghost icon="grid"
-                label={segClaim.allowed && bulkGuard.allowed ? 'Assign Program' : 'Cannot Assign Yet'}
-                onPress={() => {
-                  if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
-                  if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
-                  setBulkTplOpen(true);
-                }} /></View>
-            </View>
-          ) : null}
-
-          {/* Removing the segment. On its own row rather than beside the other
-              two, because a destructive control the width of a Ghost sitting
-              next to "Message 12" is a thumb-width away from it — and this one
-              cannot be taken back for anybody it reaches.
-
-              The count is on the label for the same reason it is in the dialog:
-              this button is the last thing the coach reads before the dialog,
-              and a bare "Remove" beside a segment chip is how somebody removes
-              a book they thought was a filter. Withheld with the reason under
-              anything but a whole read of the segment — `guardRecipients`
-              refuses rather than warns, and forty irreversible writes over a
-              list nobody read whole is the case it was written for. */}
-          {shownRoster.length > 0 ? (
-            <View>
-              <Ghost
-                label={!segClaim.allowed
-                  ? 'Cannot Remove This Segment'
-                  : endBusy ? 'Removing…' : `Remove ${shownRoster.length} From Your Roster`}
-                onPress={() => {
-                  if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
-                  void bulkEnd();
-                }} />
-            </View>
-          ) : null}
-          </Fold>
-          </View>
           ) : null}
         </Section>
         ) : null}
@@ -4852,15 +4884,15 @@ export default function TrainerClients() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={sheet(t, { maxHeight: '86%' })}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-              <Text style={{ ...ty.title, color: t.ink }}>Message {shownRoster.length} Clients</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>Message {pickedRoster.length} Clients</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
-                Everyone in {segLabel}. This goes out as you, in your words.
+                Everyone you selected. This goes out as you, in your words.
               </Text>
 
               {/* Every name, before anything is sent. The count is the alarm and
                   the list is what a coach checks a specific person against. */}
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.lg }}>
-                {shownRoster.map((c) => c.name).join(', ')}
+                {pickedRoster.map((c) => c.name).join(', ')}
               </Text>
 
               {msgFailed.length > 0 ? (
@@ -4876,13 +4908,13 @@ export default function TrainerClients() {
                   "sent to 12 clients" would put words the coach did not write
                   into a message signed by the coach, and the client could not
                   tell which sentence came from which of them. */}
-              {bulkThreadNote(shownRoster.length) ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{bulkThreadNote(shownRoster.length)}</Text>
+              {bulkThreadNote(pickedRoster.length) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{bulkThreadNote(pickedRoster.length)}</Text>
               ) : null}
 
-              <Cta label={msgBusy ? 'Sending…' : `Send to ${shownRoster.length}`} wide
-                disabled={!msgBody.trim() || msgBusy || !shownRoster.length}
-                onPress={() => deliverBulk(shownRoster.map((c) => c.id))} />
+              <Cta label={msgBusy ? 'Sending…' : `Send to ${pickedRoster.length}`} wide
+                disabled={!msgBody.trim() || msgBusy || !pickedRoster.length}
+                onPress={() => deliverBulk(pickedRoster.map((c) => c.id))} />
 
               {/* Retry reaches the threads that failed and no others. Sending to
                   the segment again would put the same words a second time in
@@ -4905,15 +4937,15 @@ export default function TrainerClients() {
         <Pressable style={SCRIM} onPress={() => setBulkTplOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={sheet(t, { maxHeight: '78%' })}>
-          <Text style={{ ...ty.title, color: t.ink }}>Assign to {shownRoster.length} Clients</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick a program template for everyone in {segLabel}.</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Assign to {pickedRoster.length} Clients</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick a program template for everyone you selected.</Text>
           {/* Said before the template is chosen as well as in the confirmation
               after it, because this is the sheet a coach is scanning while they
               decide — and only sayable off a whole read of assigned_programs,
               which is what `bulkGuard` above has already established. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>
             {(() => {
-              const on = shownRoster.filter((c) => !!getProgram(c.id));
+              const on = pickedRoster.filter((c) => !!getProgram(c.id));
               return on.length === 0
                 ? 'None of them are on a coach-assigned program, so nothing here is replaced.'
                 : `${on.length} of them are on a program now — ${listNames(on.slice(0, 4).map((c) => c.name.split(' ')[0]))}${on.length > 4 ? ` and ${on.length - 4} more` : ''}. Whichever template you pick replaces what they are training.`;
