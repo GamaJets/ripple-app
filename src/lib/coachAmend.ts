@@ -40,18 +40,24 @@ export function coachMayAmend(e: Pick<WorkoutEntry, 'id' | 'loggedBy'>, coachId:
  *
  * The figures are read by `readWorkoutEdit`, the member's own reader, so a
  * coach and a member cannot disagree about what a valid correction is. Null for
- * an untouched sheet so that opening and saving does not stamp `amended_at` on
- * a record nobody changed: the mark would tell the member something happened.
+ * an untouched sheet, so that opening and saving writes nothing at all.
+ *
+ * No `amended_at` and no `amended_by` in what is sent. Both are the server's
+ * (supabase/parts/3230): the trigger discards whatever a client sends and
+ * stamps `now()` and the signed-in user only when the recorded content really
+ * changed. This used to send the date from the coach's own handset clock,
+ * which made the one piece of evidence a member has that their record moved
+ * something the person moving it could set.
  */
 export function coachAmendment(
-  entry: WorkoutEntry, draft: WorkoutDraft, now: Date = new Date(),
+  entry: WorkoutEntry, draft: WorkoutDraft,
 ): Edit<Record<string, unknown> | null> {
   const read = readWorkoutEdit(entry, draft);
   if (!read.ok) return read;
   const after = patchToRow(read.value);
   const before = patchToRow(Object.fromEntries(Object.keys(read.value).map((k) => [k, entry[k as keyof WorkoutEntry]])));
   const changed = Object.keys(after).some((k) => JSON.stringify(after[k]) !== JSON.stringify(before[k]));
-  return { ok: true, value: changed ? { ...after, amended_at: now.toISOString() } : null };
+  return { ok: true, value: changed ? after : null };
 }
 
 /** What came back from a coach's write: the rows it touched, or an error, or

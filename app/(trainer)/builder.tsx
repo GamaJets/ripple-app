@@ -125,7 +125,7 @@ import { deltaLabel } from '../../src/lib/deltaLabel';
 import { dayLabel } from '../../src/lib/adherence';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
-import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { rowToEntry, WORKOUT_COLS, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useProgramGroups } from '../../src/ui/groupProgram';
@@ -801,7 +801,7 @@ export default function Builder() {
     setReviewLog(null); setReviewLogStatus('loading');
     void (async () => {
       const { data, error } = await supabase.from('workouts')
-        .select('id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at')
+        .select(WORKOUT_COLS)
         .eq('user_id', clientId)
         .order('performed_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit());

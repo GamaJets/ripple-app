@@ -47,6 +47,7 @@ export interface WorkoutRow {
   /** Stamped by the guard_workout_attribution trigger when the client edits a
    *  workout their coach logged. Read-only from the app. */
   amended_at?: string | null;
+  amended_by?: string | null;
 }
 
 /**
@@ -93,7 +94,7 @@ export interface WorkoutRow {
  * this is the line to add it to.
  */
 export const WORKOUT_COLS =
-  'id, performed_at, exercise, sets, bw, timed, tempos, feel, cardio, kcal, session_mins, logged_by, amended_at';
+  'id, performed_at, exercise, sets, bw, timed, tempos, feel, cardio, kcal, session_mins, logged_by, amended_at, amended_by';
 
 export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   id: r.id,
@@ -111,6 +112,7 @@ export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   loggedBy: r.logged_by ?? undefined,
   sessionId: r.session_id ?? undefined,
   amendedAt: r.amended_at ?? undefined,
+  amendedBy: r.amended_by ?? undefined,
 });
 
 export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({

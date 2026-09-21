@@ -135,8 +135,13 @@ export interface WorkoutEntry {
    *  `entryToRow` does not send it. src/ui/floorQueue.ts puts it on the insert.
    *  src/lib/loggedSession.ts is what reads it back. */
   sessionId?: string;
-  /** When the client changed something their coach had logged. Absent means
+  /** When a coach-logged set was changed after it was filed. Absent means
    *  untouched since. Server-set: the trigger stamps it, the app only reads it,
    *  which is why it is not in PERSISTED_FIELDS. */
   amendedAt?: string;
+  /** WHO made that change: the member it is about, or the coach who logged it
+   *  (supabase/parts/3230). Server-set with `amendedAt` and read-only for the
+   *  same reason. Absent on a change stamped before the column existed, which
+   *  is why a caption must still be able to say "changed" without a name. */
+  amendedBy?: string;
 }

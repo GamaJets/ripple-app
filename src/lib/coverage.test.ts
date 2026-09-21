@@ -2196,6 +2196,24 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
        'and the client is told the record moved, without claiming who moved it: amended_at has no author');
     ok(attributionLine({ loggedBy: 'coach-1', amendedAt: 'not-a-date' }, 'Dave', true) === 'Logged by Dave · changed after it was filed',
        'an unreadable timestamp drops the date rather than rendering Invalid Date');
+
+    // Part 3230: `amended_by` names who. Only the member or the coach who logged
+    // the set can stamp it, so equal to loggedBy is the coach, anything else the member.
+    const at = '2026-09-21T09:00:00Z';
+    const byCoach = { loggedBy: 'coach-1', amendedAt: at, amendedBy: 'coach-1' };
+    const byMember = { loggedBy: 'coach-1', amendedAt: at, amendedBy: 'member-9' };
+    ok(attributionLine(byCoach, 'Dave', true)!.startsWith('Logged by Dave · changed by Dave'),
+       'a member told their coach corrected the set names the coach');
+    ok(attributionLine(byMember, 'Dave', true)!.startsWith('Logged by Dave · changed by you'),
+       'a member told they changed it hears "you"');
+    ok(attributionLine(byCoach, 'Dave', false)!.startsWith('Logged by you · changed by you'),
+       'a coach told they corrected their own set hears "you"');
+    ok(attributionLine(byMember, 'Dave', false)!.startsWith('Logged by you · changed by your client'),
+       'a coach told the member changed it hears "your client"');
+    ok(attributionLine({ loggedBy: 'coach-1', amendedAt: at }, 'Dave', true)!.startsWith('Logged by Dave · changed after it was filed'),
+       'a change stamped before amended_by existed still says only what is known, and names nobody');
+    ok(!/\u2014/.test(attributionLine(byCoach, 'Dave', true)!),
+       'and none of these captions carries an em-dash');
   }
 
   // A coach's own exercise names, merged into the picker ahead of the built-ins.

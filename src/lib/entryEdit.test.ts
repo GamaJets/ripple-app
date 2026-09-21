@@ -244,10 +244,9 @@ ok(!readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: 'six', wa
   const same = coachAmendment(mine, draft);
   ok(same.ok && same.value === null, 'an untouched sheet writes nothing and stamps nothing');
 
-  const now = new Date('2026-09-21T08:00:00Z');
-  const fixed = coachAmendment(mine, { ...draft, sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 80 }] }, now);
-  ok(fixed.ok && fixed.value != null && fixed.value.amended_at === now.toISOString(),
-     'a real correction carries amended_at so the member sees the record moved');
+  const fixed = coachAmendment(mine, { ...draft, sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 80 }] });
+  ok(fixed.ok && fixed.value != null && !('amended_at' in fixed.value) && !('amended_by' in fixed.value),
+     'a real correction sends no date and no author: the server stamps both (part 3230), so a handset cannot set either');
   ok(fixed.ok && JSON.stringify(fixed.value?.sets) === '[[5,100],[5,80]]', 'and the corrected figures');
   ok(fixed.ok && fixed.value != null && !('logged_by' in fixed.value) && !('performed_at' in fixed.value),
      'and never who logged it or which day it was');
