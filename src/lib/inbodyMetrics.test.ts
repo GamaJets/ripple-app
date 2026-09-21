@@ -50,14 +50,14 @@ eq(grouped.reduce((n, g) => n + g.items.length, 0), metricTrends(two).length,
 
 // A heading with nothing measured under it is not drawn empty. These two scans
 // carry no InBody score and no BMR but do carry visceral fat, so 'Health &
-// metabolism' survives with one row; nothing at all under 'Segmental lean'
+// Metabolism' survives with one row; nothing at all under 'Segmental Lean'
 // would remove that heading entirely.
 const armsOnly = trendsByGroup([
   scan('2026-06-01', { leanArmLKg: 3.2, leanArmRKg: 3.3 }),
   scan('2026-08-01', { leanArmLKg: 3.3, leanArmRKg: 3.4 }),
 ]);
 eq(armsOnly.length, 1, 'a heading with nothing under it is dropped, not drawn empty');
-eq(armsOnly[0].group, 'Segmental lean', 'and the one that survives is the measured one');
+eq(armsOnly[0].group, 'Segmental Lean', 'and the one that survives is the measured one');
 eq(armsOnly[0].items.length, 2, 'carrying only the metrics that were actually measured');
 
 eq(trendsByGroup([]).length, 0, 'no scans is no table');

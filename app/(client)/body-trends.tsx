@@ -507,12 +507,12 @@ export default function BodyTrends() {
               ? goalOnBody(goalOfKind(goals, gk), readings.map((r) => ({ t: r.at, v: r.value })), { weight: !!m.weight, unit: m.unit, wu })
               : null;
             // The chart's colour NAMES the metric and says nothing about how it
-            // is doing: fat is orange and muscle blue on every screen that
-            // draws them, water is teal, and the sheet's health figures are
-            // purple. Weight and the score take the accent.
+            // is doing: fat is orange and muscle green (teal) on every screen
+            // that draws them, water is blue, and the sheet's health figures
+            // are purple. Weight and the score take the accent.
             const tone: Tone = m.from === 'bodyFat' || ib?.key === 'fatMassKg' ? 'orange'
-              : m.from === 'muscle' || ib?.key === 'leanMassKg' || ib?.group === 'Segmental lean' ? 'blue'
-                : ib?.group === 'Water, protein & minerals' ? 'teal'
+              : m.from === 'muscle' || ib?.key === 'leanMassKg' || ib?.group === 'Segmental Lean' ? 'teal'
+                : ib?.group === 'Water, Protein & Minerals' ? 'blue'
                   : ib ? 'purple' : 'brand';
             const improving: boolean | undefined = m.from === 'score'
               ? (rawDelta > 0 ? true : rawDelta < 0 ? false : undefined)

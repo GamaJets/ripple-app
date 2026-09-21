@@ -163,6 +163,9 @@ import { yearsAround } from '../../src/lib/scanYears';
 import { scanDay, wheelPosition, isoFromWheel, planDateMove, daysInMonth } from '../../src/lib/scanDateEdit';
 import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 
+/** One figure column of the Composition Detail table: Now, Before, Change. */
+const COL = 68;
+
 // The twelve month names, in the reader's own language, for the date WHEEL —
 // which is the one shape a formatted string cannot take, and is what
 // `monthNamesShort` exists for (src/lib/format.ts).
@@ -2312,9 +2315,6 @@ export default function Scans() {
               No photos yet. Add one from your camera or library. They are saved privately to your account,
               so they are here on any device you sign in to. Your coach cannot see any of them: the only way
               they ever see one is if you send that one photo, and you can take it back afterwards.
-              {/* rtl-ok: "before → after" is time inside an English sentence.
-                  See the note on the Alert above. */}
-              Tap two to compare before → after; press and hold one for the options.
             </Text>
           ) : (
             <View>
@@ -2432,7 +2432,7 @@ export default function Scans() {
                 the sheet reports as a volume, a BMR is energy, and a level and
                 a score are neither. Each metric says which it is through its own
                 declared unit rather than through the shape of its key name. */}
-            <SectionHead title="Composition Detail" note="Latest vs previous" />
+            <SectionHead title="Composition Detail" note="Latest vs Previous" />
             {/* The units, said out loud — because half of this table converts
                 and half of it cannot, and a member reading 26 lb of fat mass
                 above 41 L of body water has no way to know which of those is a
@@ -2450,23 +2450,37 @@ export default function Scans() {
               </Text>
               </Expandable>
             </View>
+            {/* A count, not the list. The list ran every improving metric
+                into one wrapped sentence (a "jumbled" paragraph, the owner
+                said, 21 Sep 2026) and each row below already carries its own
+                dot for the same verdict. */}
             {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
-              <View style={{ marginBottom: sp.lg }}>
-                {mInsights.improving.length > 0 ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand, marginTop: 6 }} />
-                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}><Text style={{ ...font('500'), color: t.ink }}>Improving  </Text>{mInsights.improving.join('  ·  ')}</Text>
-                  </View>
-                ) : null}
-                {mInsights.watch.length > 0 ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 6 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, marginTop: 6 }} />
-                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}><Text style={{ ...font('500'), color: t.ink }}>Watch  </Text>{mInsights.watch.join('  ·  ')}</Text>
-                  </View>
-                ) : null}
-                {mInsights.balance.map((b, i) => <Text key={i} style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{b}</Text>)}
+              <View style={{ marginBottom: sp.lg, gap: 6 }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: sp.lg, rowGap: 4 }}>
+                  {mInsights.improving.length > 0 ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{mInsights.improving.length} improving</Text>
+                    </View>
+                  ) : null}
+                  {mInsights.watch.length > 0 ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{mInsights.watch.length} to watch</Text>
+                    </View>
+                  ) : null}
+                </View>
+                {mInsights.balance.map((b, i) => <Text key={i} style={{ ...ty.caption, color: t.ink3 }}>{b}</Text>)}
               </View>
             )}
+            {/* Column heads, so "Before" is a figure on the row and not a
+                subtraction the reader has to do. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.xs }}>
+              <View style={{ flex: 1 }} />
+              <Text style={{ ...ty.micro, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>Now</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>Before</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>Change</Text>
+            </View>
             {mByGroup.map((grp) => (
               <View key={grp.group} style={{ marginBottom: sp.lg }}>
                 <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{grp.group}</Text>
@@ -2499,51 +2513,31 @@ export default function Scans() {
                   // one; see MetricDef.goalMetric.
                   const good = metricIsProgress(it.def, shownDelta, cd.goal, dp);
                   const series = mass ? it.series.map((v) => compositionIn(v, wu, kgDp) ?? v) : it.series;
+                  const before = it.prev == null ? null : mass ? (compositionIn(it.prev, wu, kgDp) ?? it.prev) : it.prev;
                   return (
                   <View key={String(it.def.key)}>
-                    <Pressable onPress={() => { if (it.series.length >= 2) setMxOpen(mxOpen === String(it.def.key) ? null : String(it.def.key)); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                      <Text style={{ ...ty.label, color: t.ink2 }}>{it.def.label}{it.series.length >= 2 ? (mxOpen === String(it.def.key) ? '  ▴' : '  ▾') : ''}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                        {/* Through `numUpTo`, not interpolated. BMR is the one
-                            metric on this table that passes a thousand, and
-                            `{it.latest}` printed it as 1750 with no separator —
-                            beside a "1,204.5 kg lifted" from `num1` on another
-                            screen of the same app. It also puts the decimal
-                            separator in the reader's own language, which a bare
-                            interpolation cannot: a German handset showed 3.42 kg
-                            of left arm where 3,42 is what that reader parses.
-                            `dp` is the grain this figure is honest to in the
-                            unit it is being read in, so a whole figure still
-                            looks whole and a limb keeps the digit the record
-                            has for it. */}
-                        <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink }}>{numUpTo(shown, dp)} {rowUnit}</Text>
-                        {shownDelta != null && shownDelta !== 0 ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 52, justifyContent: 'flex-end' }}>
-                            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: good == null ? t.ink3 : good ? t.brand : t.warn }} />
-                            {/* Through `deltaLabel` rather than interpolating
-                                the number. A positive got a '+' written here
-                                and a negative got whatever JS renders, which is
-                                an ASCII hyphen — so this column showed "-1"
-                                while the summary line six rows above it, which
-                                already goes through the helper, showed "−1"
-                                with the real minus. Two different characters
-                                for the same idea, in one screenful.
-
-                                It carries its own unit now that it is a
-                                converted figure. The reading beside it says
-                                "lb" and this said "−3", which is a number the
-                                reader has to assume shares a unit with its
-                                neighbour — and on the one screen where half the
-                                rows convert and half do not, that assumption is
-                                exactly what must not be asked of them. */}
-                            <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
-                              {deltaLabel(shownDelta, { since: null, decimals: dp, unit: rowUnit })}
-                            </Text>
-                          </View>
-                        ) : (
-                          <Text style={{ ...ty.caption, color: t.ink3, minWidth: 52, textAlign: END_ALIGN }}>—</Text>
-                        )}
-                      </View>
+                    <Pressable onPress={() => { if (it.series.length >= 2) setMxOpen(mxOpen === String(it.def.key) ? null : String(it.def.key)); }} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                      <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{it.def.label}{it.series.length >= 2 ? (mxOpen === String(it.def.key) ? '\u00A0\u00A0▴' : '\u00A0\u00A0▾') : ''}</Text>
+                      {/* Through `numUpTo`: BMR passes a thousand, and it puts
+                          the decimal separator in the reader's own language. */}
+                      <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink, minWidth: COL, textAlign: END_ALIGN }}>{numUpTo(shown, dp)} {rowUnit}</Text>
+                      <Text style={{ ...ty.label, ...numeric, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>{before == null ? '' : `${numUpTo(before, dp)} ${rowUnit}`}</Text>
+                      {/* Words for the two cases a dash used to cover, which
+                          are opposites: nothing to compare against, and a
+                          comparison that came out level. */}
+                      {shownDelta == null ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>First scan</Text>
+                      ) : shownDelta === 0 ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>Same</Text>
+                      ) : (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: COL, justifyContent: 'flex-end' }}>
+                          <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: good == null ? t.ink3 : good ? t.brand : t.warn }} />
+                          {/* `deltaLabel` for the real minus sign and the unit. */}
+                          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
+                            {deltaLabel(shownDelta, { since: null, decimals: dp, unit: rowUnit })}
+                          </Text>
+                        </View>
+                      )}
                     </Pressable>
                     {mxOpen === String(it.def.key) && it.series.length >= 2 ? (
                       <View style={{ paddingVertical: sp.sm }}><Spark data={series} h={54} /></View>

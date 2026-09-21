@@ -47,22 +47,22 @@ export interface MetricDef {
 }
 
 // Groups match the four the owner chose to track.
-export const METRIC_GROUPS = ['Health & metabolism', 'Fat vs lean', 'Segmental lean', 'Water, protein & minerals'] as const;
+export const METRIC_GROUPS = ['Health & Metabolism', 'Fat vs Lean', 'Segmental Lean', 'Water, Protein & Minerals'] as const;
 
 export const METRIC_DEFS: MetricDef[] = [
-  { key: 'visceralFat', label: 'Visceral Fat', unit: 'lvl', better: 'down', group: 'Health & metabolism' },
-  { key: 'inbodyScore', label: 'InBody Score', unit: 'pts', better: 'up', group: 'Health & metabolism' },
-  { key: 'bmr', label: 'BMR', unit: 'kcal', better: 'up', group: 'Health & metabolism' },
-  { key: 'fatMassKg', label: 'Fat Mass', unit: 'kg', better: 'down', group: 'Fat vs lean', decimals: 1, goalMetric: 'bodyFat' },
-  { key: 'leanMassKg', label: 'Lean Mass', unit: 'kg', better: 'up', group: 'Fat vs lean', decimals: 1, goalMetric: 'muscle' },
-  { key: 'leanArmLKg', label: 'Left Arm', unit: 'kg', better: 'up', group: 'Segmental lean', decimals: 2 },
-  { key: 'leanArmRKg', label: 'Right Arm', unit: 'kg', better: 'up', group: 'Segmental lean', decimals: 2 },
-  { key: 'leanTrunkKg', label: 'Trunk', unit: 'kg', better: 'up', group: 'Segmental lean', decimals: 1 },
-  { key: 'leanLegLKg', label: 'Left Leg', unit: 'kg', better: 'up', group: 'Segmental lean', decimals: 2 },
-  { key: 'leanLegRKg', label: 'Right Leg', unit: 'kg', better: 'up', group: 'Segmental lean', decimals: 2 },
-  { key: 'bodyWaterL', label: 'Body Water', unit: 'L', better: 'up', group: 'Water, protein & minerals', decimals: 1 },
-  { key: 'proteinKg', label: 'Protein', unit: 'kg', better: 'up', group: 'Water, protein & minerals', decimals: 1 },
-  { key: 'mineralsKg', label: 'Minerals', unit: 'kg', better: 'up', group: 'Water, protein & minerals', decimals: 2 },
+  { key: 'visceralFat', label: 'Visceral Fat', unit: 'lvl', better: 'down', group: 'Health & Metabolism' },
+  { key: 'inbodyScore', label: 'InBody Score', unit: 'pts', better: 'up', group: 'Health & Metabolism' },
+  { key: 'bmr', label: 'BMR', unit: 'kcal', better: 'up', group: 'Health & Metabolism' },
+  { key: 'fatMassKg', label: 'Fat Mass', unit: 'kg', better: 'down', group: 'Fat vs Lean', decimals: 1, goalMetric: 'bodyFat' },
+  { key: 'leanMassKg', label: 'Lean Mass', unit: 'kg', better: 'up', group: 'Fat vs Lean', decimals: 1, goalMetric: 'muscle' },
+  { key: 'leanArmLKg', label: 'Left Arm', unit: 'kg', better: 'up', group: 'Segmental Lean', decimals: 2 },
+  { key: 'leanArmRKg', label: 'Right Arm', unit: 'kg', better: 'up', group: 'Segmental Lean', decimals: 2 },
+  { key: 'leanTrunkKg', label: 'Trunk', unit: 'kg', better: 'up', group: 'Segmental Lean', decimals: 1 },
+  { key: 'leanLegLKg', label: 'Left Leg', unit: 'kg', better: 'up', group: 'Segmental Lean', decimals: 2 },
+  { key: 'leanLegRKg', label: 'Right Leg', unit: 'kg', better: 'up', group: 'Segmental Lean', decimals: 2 },
+  { key: 'bodyWaterL', label: 'Body Water', unit: 'L', better: 'up', group: 'Water, Protein & Minerals', decimals: 1 },
+  { key: 'proteinKg', label: 'Protein', unit: 'kg', better: 'up', group: 'Water, Protein & Minerals', decimals: 1 },
+  { key: 'mineralsKg', label: 'Minerals', unit: 'kg', better: 'up', group: 'Water, Protein & Minerals', decimals: 2 },
 ];
 
 export interface ScanLike { takenAt: string; metrics?: ScanMetrics }
