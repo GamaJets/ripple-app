@@ -330,16 +330,18 @@ export default function BuildWorkout() {
                 // replaced, and the injury check has to be asked about the
                 // movement in front of the member.
                 const group = (row?.group || '').trim() || e.group;
-                // Everything the day currently holds, so a second replacement
-                // out of a two-deep pool cannot put the same movement on the
-                // day twice.
+                // Everything the day currently holds, so a replacement cannot
+                // put the same movement on the day twice.
                 const used = d.exercises.map((x) => swaps[x.key] || x.name);
-                const alt = nextAlternative(e.alternatives, used, group, cd.injuries, cd.profileStatus);
+                const alt = nextAlternative(e.alternatives, used, group, cd.injuries, cd.profileStatus, name);
                 const chk = checkInjury(name, group, cd.injuries, cd.profileStatus);
-                const alts = e.alternatives
-                  .filter((a) => !used.some((u) => u.trim().toLowerCase() === a.trim().toLowerCase()))
-                  .map((a) => byName.get(a)?.display.text ?? a)
-                  .join(', ');
+                // The line names exactly the movement Replace will put in, and
+                // nothing else. It used to name the first two free movements at
+                // the top of the pool while Replace walked on from the current
+                // one, so after a swap the screen named one movement and the
+                // button delivered another. A hint that disagrees with its own
+                // button is worse than no hint.
+                const alts = alt ? (byName.get(alt)?.display.text ?? alt) : '';
                 return (
                   <View key={e.key} style={{ borderTopWidth: ei === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <Pressable

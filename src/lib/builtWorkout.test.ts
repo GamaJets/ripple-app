@@ -46,6 +46,15 @@ eq(nextAlternative(['Cable Pushdown', 'Skullcrusher'], ['Cable Pushdown', 'Skull
   'an exhausted pool returns null so the screen can say so rather than offer a dead control');
 eq(nextAlternative([], [], 'Arms', [], 'ready'), null, 'and a target with no alternatives at all');
 
+eq(nextAlternative(['A', 'B', 'C', 'D'], ['X', 'C'], 'Arms', [], 'ready', 'C'), 'D',
+  'the search starts after the movement on the row, so repeated presses walk forward');
+eq(nextAlternative(['A', 'B', 'C', 'D'], ['X', 'D'], 'Arms', [], 'ready', 'D'), 'A',
+  'and wraps at the end of the pool');
+eq(nextAlternative(['A', 'B'], ['X', 'Q'], 'Arms', [], 'ready', 'Q'), 'A',
+  'a movement not in the pool (the one the day was built with) starts from the top');
+eq(nextAlternative(['Goblet Squat', 'Lat Pulldown', 'Box Jump'], ['Goblet Squat'], 'Back', [inj('knee')], 'ready', 'Goblet Squat'), 'Lat Pulldown',
+  'the injury preference still holds across the whole pool');
+
 // The pattern app/(client)/workouts.tsx already applies to a coach's plan:
 // prefer an alternative that does not flag.
 eq(nextAlternative(['Goblet Squat', 'Lat Pulldown'], [], 'Back', [inj('knee')], 'ready'), 'Lat Pulldown',

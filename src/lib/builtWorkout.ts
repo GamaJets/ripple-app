@@ -69,11 +69,17 @@ export function checkInjury(
 /**
  * The movement to put in this row's place, or null when there is none.
  *
- * `alternatives` is what `targetedProgram` attached: real rows from the SAME
- * target's pool, taken from past the end of the day so none of them is already
- * prescribed. `used` is every movement the day currently holds, including the
- * swaps made before this one — without it, replacing two rows out of a
- * two-alternative pool puts the same movement on the day twice.
+ * `alternatives` is what `targetedProgram` attached: the SAME target's whole
+ * pool, real rows, the ones past the end of the day first. `used` is every
+ * movement the day currently holds, including the swaps made before this one;
+ * without it, two rows could become the same movement. Null means every
+ * movement in the pool is on the day, which is the only time it is true that
+ * none is left.
+ *
+ * `current` is the movement on the row now. The search starts just after it
+ * in `alternatives` and wraps, so pressing Replace on one row walks forward
+ * through the pool. Without it, the movement a swap just freed is the first
+ * free one again, and two presses flip a row between the same two movements.
  *
  * An alternative that does not flag is preferred over one that does, which is
  * the rule app/(client)/workouts.tsx already applies to a coach's plan. It is a
@@ -90,9 +96,13 @@ export function nextAlternative(
   group: string,
   injuries: Injury[] | null | undefined,
   status: LoadStatus,
+  current?: string,
 ): string | null {
-  const taken = new Set((used || []).map((x) => x.trim().toLowerCase()));
-  const free = (alternatives || []).filter((a) => a && !taken.has(a.trim().toLowerCase()));
+  const key = (x: string) => x.trim().toLowerCase();
+  const taken = new Set((used || []).map(key));
+  const all = alternatives || [];
+  const at = current ? all.findIndex((a) => a && key(a) === key(current)) + 1 : 0;
+  const free = [...all.slice(at), ...all.slice(0, at)].filter((a) => a && !taken.has(key(a)));
   if (!free.length) return null;
   const clear = free.find((a) => checkInjury(a, group, injuries, status).state === 'unflagged');
   return clear ?? free[0];

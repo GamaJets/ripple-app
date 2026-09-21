@@ -16,6 +16,7 @@ import {
   MUSCLE_TARGETS, targetedProgram, targetedCoverageNote, targetForMuscle, targetsUnder,
   type TargetRow,
 } from './targetedWorkout';
+import { nextAlternative } from './builtWorkout';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -118,11 +119,77 @@ const catalogue: TargetRow[] = [
   eq(targetedProgram(catalogue, [{ kind: 'muscle', name: 'Triceps' }]).program, program,
     'the same catalogue gives the same workout twice');
 
-  // Alternatives are real rows from the same pool and never already in the day.
+  // Alternatives are real rows from the same pool: the whole of it bar the row
+  // itself, with the movements NOT on the day first.
   for (const e of program.days[0].exercises) {
     ok(e.alternatives.every((a) => byName.has(a)), `${e.name}'s alternatives are catalogue rows`);
-    ok(e.alternatives.every((a) => !picked.includes(a)), `${e.name}'s alternatives are not already prescribed`);
+    eq(e.alternatives.length, 8, `${e.name} carries the whole triceps pool, not a slice of it`);
+    eq(nextAlternative(e.alternatives, picked, 'Arms', [], 'ready', e.name) !== null
+      && !picked.includes(nextAlternative(e.alternatives, picked, 'Arms', [], 'ready', e.name)!), true,
+      `${e.name} is never replaced by a movement already on the day, itself included`);
+    eq(e.alternatives.slice(0, 3).some((a) => picked.includes(a)), false,
+      `${e.name}'s first alternatives are movements the day does not already hold`);
   }
+}
+
+/* ── Replace draws from the real pool, not a slice of it ───────────────────
+ *
+ * The defect: two alternatives per day, shared by every row, so a five-movement
+ * triceps day could be replaced twice and then said "No other triceps movement
+ * left in the catalogue" over a catalogue holding fifty. Simulated exactly the
+ * way app/(client)/build-workout.tsx drives it: `used` is the day as it stands,
+ * swaps included. */
+{
+  const tri = Array.from({ length: 50 }, (_, i) =>
+    row(`Triceps Move ${String(i).padStart(2, '0')}`, 'Arms', ['triceps brachii'], 'dumbbell', false, { mechanic: 'isolation' }));
+  const replaceAll = (rows: TargetRow[], rounds: number): number => {
+    const day = targetedProgram(rows, [{ kind: 'muscle', name: 'Triceps' }]).program.days[0];
+    const swaps: Record<string, string> = {};
+    let done = 0;
+    for (let r = 0; r < rounds; r++) {
+      for (const e of day.exercises) {
+        const used = day.exercises.map((x) => swaps[x.key] || x.name);
+        const alt = nextAlternative(e.alternatives, used, 'Arms', [], 'ready', swaps[e.key] || e.name);
+        if (!alt) return done;
+        ok(!used.includes(alt), `swap ${done + 1} puts a movement on the day that is not already there`);
+        swaps[e.key] = alt;
+        done++;
+      }
+    }
+    return done;
+  };
+  // 45 fresh movements, then the swapped-out ones come back round: Replace
+  // never claims the pool is empty while the pool holds more than the day.
+  eq(replaceAll(tri, 20), 100, 'a five-movement day out of fifty is never told the catalogue ran out');
+  {
+    const day = targetedProgram(tri, [{ kind: 'muscle', name: 'Triceps' }]).program.days[0];
+    const seen = new Set<string>();
+    const swaps: Record<string, string> = {};
+    for (let i = 0; i < 45; i++) {
+      const e = day.exercises[i % 5];
+      const alt = nextAlternative(e.alternatives, day.exercises.map((x) => swaps[x.key] || x.name), 'Arms', [], 'ready', swaps[e.key] || e.name)!;
+      seen.add(alt); swaps[e.key] = alt;
+    }
+    eq(seen.size, 45, 'the first 45 swaps are 45 different movements, none of them the original five');
+  }
+  // One row, Replace pressed again and again, walks the pool rather than
+  // flipping between the two movements a swap keeps freeing.
+  {
+    const day = targetedProgram(tri, [{ kind: 'muscle', name: 'Triceps' }]).program.days[0];
+    const e = day.exercises[0];
+    const used = day.exercises.map((x) => x.name);
+    const walked: string[] = [];
+    for (let i = 0; i < 45; i++) {
+      const alt = nextAlternative(e.alternatives, used, 'Arms', [], 'ready', used[0])!;
+      walked.push(alt); used[0] = alt;
+    }
+    eq(new Set(walked).size, 45, 'one row pressed 45 times shows 45 different movements');
+    eq(nextAlternative(e.alternatives, used, 'Arms', [], 'ready', used[0]), e.name,
+      'and the 46th press brings back the movement it started with');
+  }
+  // "None left" is true only when the pool IS the day.
+  eq(replaceAll(tri.slice(0, 5), 1), 0, 'five triceps movements, five on the day: nothing to swap, and the screen says so');
+  eq(replaceAll(tri.slice(0, 6), 3), 15, 'one spare movement keeps Replace working, rotating through the pool');
 }
 
 // ── the group level is a different question and gets a different answer ───

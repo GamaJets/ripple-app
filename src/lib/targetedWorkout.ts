@@ -310,11 +310,16 @@ export function targetedProgram(
       group: (row.group || '').trim() || s.target.name,
       sets: setsFor(row),
       reps: repsFor(row),
-      // The next two movements in this target's own pool — real rows, never
-      // invented, and taken from PAST the day so an alternative is never a
-      // movement already prescribed three lines up. Empty is the honest answer
-      // for a target whose pool the day exhausted.
-      alternatives: s.rows.slice(perDay, perDay + 2).map((x) => x.name),
+      // This target's WHOLE pool, as real rows, never invented. It was once
+      // the next two past the day, shared by every row, so a five-movement
+      // triceps day ran dry after two swaps and told the member the catalogue
+      // had no more triceps work when it holds fifty. Rows past the day come
+      // first, in pool order; the day's own rows follow, so a movement swapped
+      // out earlier comes back only once the fresh ones are spent.
+      // `nextAlternative` drops whatever the day currently holds (this row
+      // included), so "none left" is said only when every movement the pool
+      // has is on the day already.
+      alternatives: [...s.rows.slice(perDay), ...s.rows.slice(0, perDay)].map((x) => x.name),
     }));
     return { day: dayNameAt(d, fit.length), focus: s.target.name, exercises };
   });
