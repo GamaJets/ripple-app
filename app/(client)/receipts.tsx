@@ -54,7 +54,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Flag, Notice, PartialRead, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useAuth } from '../../src/ui/auth';
@@ -378,11 +378,11 @@ export default function Receipts() {
               <View key={p.id}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{paidOn(p.takenAt)}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{paidOn(p.takenAt)}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{methodLabel(p.method)}</Text>
                 </View>
                 {/* The row's own currency, never a screen-level symbol. */}
-                <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{amount(p.amountCents, p.currency)}</Text>
+                <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{amount(p.amountCents, p.currency)}</Text>
               </View>
             ))
           )}
@@ -414,14 +414,14 @@ export default function Receipts() {
               <View key={p.id}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{dayOn(p.issuedOn)}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{dayOn(p.issuedOn)}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                     {passUsesLine(p)}{p.expiresOn ? ` · expires ${dayOn(p.expiresOn)}` : ''}
                   </Text>
                 </View>
                 {/* A pass with no price recorded is not a free pass, and a dash
                     is the only honest thing to put where the figure goes. */}
-                <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: p.paidCents == null ? t.ink3 : t.ink }}>
+                <Text style={{ ...ty.body, ...numeric, ...font('600'), color: p.paidCents == null ? t.ink3 : t.ink }}>
                   {p.paidCents == null ? fig(null) : amount(p.paidCents, p.currency)}
                 </Text>
               </View>
@@ -455,10 +455,10 @@ export default function Receipts() {
               <View key={p.id}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{paidOn(p.createdAt)}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{paidOn(p.createdAt)}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{saleLabel(p)}</Text>
                 </View>
-                <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{amount(p.amountCents, p.currency)}</Text>
+                <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{amount(p.amountCents, p.currency)}</Text>
               </View>
             ))
           )}
@@ -488,10 +488,10 @@ export default function Receipts() {
                   {/* The date the money moved. A renewal whose date the payment
                       processor never stated shows a dash rather than the day a
                       webhook happened to write the row. */}
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.paidAt ? paidOn(r.paidAt) : fig(null)}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{r.paidAt ? paidOn(r.paidAt) : fig(null)}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Coaching subscription</Text>
                 </View>
-                <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{amount(r.amountCents, r.currency)}</Text>
+                <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{amount(r.amountCents, r.currency)}</Text>
               </View>
             ))
           )}

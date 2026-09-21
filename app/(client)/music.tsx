@@ -44,7 +44,7 @@ import { reportError } from '../../src/lib/reportError';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 
 // ── Apple Music is not a connectable service, and no longer pretends to be ──
 //
@@ -89,7 +89,7 @@ function Chip({ on, label, onPress }: { on: boolean; label: string; onPress: () 
  return (
  <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}
  style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
- <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+ <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
  </Pressable>
  );
 }
@@ -489,7 +489,7 @@ export default function Music() {
  <Pressable onPress={() => generate(salt + 1)} disabled={genBusy} accessibilityState={{ disabled: genBusy, busy: genBusy }} accessibilityRole="button"
  style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginTop: sp.xl, opacity: genBusy ? 0.7 : 1, flexDirection: 'row', justifyContent: 'center', gap: sp.sm }}>
  {genBusy ? <ActivityIndicator color={t.brandInk} size="small" /> : null}
- <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{genBusy ? 'Finding songs…' : pl ? 'Regenerate Playlist' : 'Generate Workout Playlist'}</Text>
+ <Text style={{ ...ty.label, ...font('600'), color: t.brandInk }}>{genBusy ? 'Finding songs…' : pl ? 'Regenerate Playlist' : 'Generate Workout Playlist'}</Text>
  </Pressable>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
  {/* Three sentences, because there are three situations and the old two
@@ -516,7 +516,7 @@ export default function Music() {
  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
  <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{i + 1}</Text>
  <View style={{ flex: 1 }}>
- <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{tr.title}</Text>
+ <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{tr.title}</Text>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>{tr.artist || '—'}</Text>
  </View>
  <View style={{ alignItems: 'flex-end' }}>
@@ -601,7 +601,7 @@ export default function Music() {
  <Icon name="play" size={17} color={t.brand} />
  </View>
  <View style={{ flex: 1 }}>
- <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.name}</Text>
+ <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{s.name}</Text>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
  </View>
  <Pressable onPress={() => toggleService(s.id)} disabled={busy} accessibilityState={{ disabled: busy, busy }}
@@ -609,7 +609,7 @@ export default function Music() {
  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, minWidth: 92, alignItems: 'center', backgroundColor: held ? t.surface2 : t.brand }}>
  {busy
  ? <ActivityIndicator color={t.brandInk} size="small" />
- : <Text numberOfLines={1} style={{ ...ty.label, fontWeight: '500', color: held ? t.ink : t.brandInk }}>{label}</Text>}
+ : <Text numberOfLines={1} style={{ ...ty.label, ...font('500'), color: held ? t.ink : t.brandInk }}>{label}</Text>}
  </Pressable>
  </View>
  );
@@ -636,7 +636,7 @@ export default function Music() {
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.label, color: t.ink2 }}>{mineProblem}</Text>
  <Pressable onPress={loadMine} accessibilityRole="button" style={{ marginTop: sp.sm }}>
- <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try Again</Text>
+ <Text style={{ ...ty.label, ...font('500'), color: t.brand }}>Try Again</Text>
  </Pressable>
  </View>
  </View>
@@ -665,7 +665,7 @@ export default function Music() {
  <Icon name="play" size={16} color={t.ink3} />
  </View>}
  <View style={{ flex: 1 }}>
- <Text numberOfLines={1} style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
+ <Text numberOfLines={1} style={{ ...ty.body, ...font('500'), color: t.ink }}>{p.name}</Text>
  <Text numberOfLines={1} style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{playlistLine(p)}</Text>
  </View>
  </Pressable>
@@ -692,7 +692,7 @@ export default function Music() {
  <View style={{ paddingVertical: sp.sm }}>
  <Text style={{ ...ty.label, color: t.ink2 }}>{openProblem}</Text>
  <Pressable onPress={() => { void toggleTracks(p); }} accessibilityRole="button" style={{ marginTop: sp.sm }}>
- <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try Again</Text>
+ <Text style={{ ...ty.label, ...font('500'), color: t.brand }}>Try Again</Text>
  </Pressable>
  </View>
  ) : openTracks == null ? (

@@ -29,7 +29,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { sp, radius, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, radius, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -110,7 +110,7 @@ export default function Access() {
             {c.profileStatus !== 'loading' ? (
               <Pressable onPress={() => c.reload()} accessibilityRole="button" accessibilityLabel="Try reading your account again"
                 style={{ marginTop: sp.xl, paddingVertical: 13, paddingHorizontal: sp.xxl, borderRadius: radius.sm, backgroundColor: '#1c1c1c' }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: '#fff' }}>Try Again</Text>
+                <Text style={{ ...ty.label, ...font('500'), color: '#fff' }}>Try Again</Text>
               </Pressable>
             ) : null}
           </View>

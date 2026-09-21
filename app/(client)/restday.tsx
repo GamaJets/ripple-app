@@ -33,7 +33,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, PageHead, KpiRow, Notice, Flag, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -328,7 +328,7 @@ export default function RestDay() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                 <Icon name={a.icon} size={18} color={t.ink2} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{a.label}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{a.label}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{a.note}</Text>
                 </View>
               </View>

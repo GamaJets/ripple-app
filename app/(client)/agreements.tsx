@@ -44,7 +44,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
-import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, grown, type as ty, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
@@ -380,7 +380,7 @@ export default function ClientGymAgreementsScreen() {
                           // nobody has given yet is still an unsigned document,
                           // and drawing it in the same grey as a signed one is
                           // how it disappeared from the top of this screen.
-                          fontWeight: outstanding(a) ? '600' : '500',
+                          ...font(outstanding(a) ? '600' : '500'),
                           color: t.ink,
                         }}>
                           {a.title}
@@ -581,7 +581,7 @@ function Tick({ on, label, detail, onPress }: {
         {on ? <Icon name="check" size={16} color={t.brandInk} /> : null}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, color: t.ink, fontWeight: '500' }}>{label}</Text>
+        <Text style={{ ...ty.body, color: t.ink, ...font('500') }}>{label}</Text>
         <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs }}>{detail}</Text>
       </View>
     </Pressable>

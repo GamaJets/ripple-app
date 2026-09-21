@@ -42,7 +42,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 // 44pt. Every answer on this form is a tap target and they sit in rows — see
 // the note on `Pill`.
 import { MIN_TARGET } from '../../src/lib/a11y';
@@ -105,7 +105,7 @@ function Pill({ t, label, on, onPress }: { t: Theme; label: string; on: boolean;
         minHeight: MIN_TARGET, justifyContent: 'center',
         backgroundColor: on ? t.brand : t.surface2,
       }}>
-      <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 }

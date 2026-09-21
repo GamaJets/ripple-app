@@ -38,7 +38,7 @@ import { usePhotoAI } from '../../src/ui/photoAI';
 import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../../src/lib/machines';
 import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
 import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Notice, Field } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, readLift, readNumber } from '../../src/lib/units';
 import { readHold, holdLabel } from '../../src/lib/timedSets';
@@ -379,7 +379,7 @@ export default function ScanMachine() {
                 <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={onScan}>
                   <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                     <View style={{ width: '62%', aspectRatio: 1, borderWidth: 2, borderColor: t.brand, borderRadius: radius.md }} />
-                    <Text style={{ ...ty.label, fontWeight: '500', color: '#fff', marginTop: sp.lg }}>Point at the code on the machine</Text>
+                    <Text style={{ ...ty.label, ...font('500'), color: '#fff', marginTop: sp.lg }}>Point at the code on the machine</Text>
                   </View>
                 </CameraView>
               </View>
@@ -444,7 +444,7 @@ export default function ScanMachine() {
               {group ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
                   <View style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>{group}</Text>
+                    <Text style={{ ...ty.caption, ...font('500'), color: t.ink }}>{group}</Text>
                   </View>
                   {/* "Strength · switch" — a lowercase verb hanging off a
                       Title-Cased sibling in a ·-joined run, at caption size
@@ -480,7 +480,7 @@ export default function ScanMachine() {
                         accessibilityRole="button" accessibilityLabel={`${m.name}, ${m.group}`}
                         accessibilityState={{ selected: on }}
                         style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: sp.sm }}>
-                        <Text style={{ ...ty.caption, fontWeight: '500', color: on ? t.brandInk : t.ink }}>{m.name}</Text>
+                        <Text style={{ ...ty.caption, ...font('500'), color: on ? t.brandInk : t.ink }}>{m.name}</Text>
                         <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3 }}>{m.group}</Text>
                       </Pressable>
                     );
@@ -520,7 +520,7 @@ export default function ScanMachine() {
                       accessibilityState={{ selected: unit === u }}
                       accessibilityLabel={unit === u ? `Distance is in ${UNIT_SPOKEN[u]}` : `Measure the distance in ${UNIT_SPOKEN[u]} instead`}
                       style={{ backgroundColor: unit === u ? t.brand : t.surface2, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: sp.lg }}>
-                      <Text style={{ ...ty.caption, fontWeight: unit === u ? '600' : '500', color: unit === u ? t.brandInk : t.ink2 }}>{u}</Text>
+                      <Text style={{ ...ty.caption, ...font(unit === u ? '600' : '500'), color: unit === u ? t.brandInk : t.ink2 }}>{u}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -545,7 +545,7 @@ export default function ScanMachine() {
                     hitSlop={hitSlopFor(36)}
                     onPress={() => { setBwSet((v) => !v); tapLight(); }}
                     style={{ minHeight: 36, justifyContent: 'center', backgroundColor: bwSet ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md }}>
-                    <Text style={{ ...ty.caption, fontWeight: bwSet ? '600' : '500', color: bwSet ? t.brandInk : t.ink2 }}>My Own Bodyweight</Text>
+                    <Text style={{ ...ty.caption, ...font(bwSet ? '600' : '500'), color: bwSet ? t.brandInk : t.ink2 }}>My Own Bodyweight</Text>
                   </Pressable>
                   <Pressable
                     accessibilityRole="switch"
@@ -554,7 +554,7 @@ export default function ScanMachine() {
                     hitSlop={hitSlopFor(36)}
                     onPress={() => { setTimedSet((v) => !v); setReps(''); tapLight(); }}
                     style={{ minHeight: 36, justifyContent: 'center', backgroundColor: timedSet ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md }}>
-                    <Text style={{ ...ty.caption, fontWeight: timedSet ? '600' : '500', color: timedSet ? t.brandInk : t.ink2 }}>Held, Not Repeated</Text>
+                    <Text style={{ ...ty.caption, ...font(timedSet ? '600' : '500'), color: timedSet ? t.brandInk : t.ink2 }}>Held, Not Repeated</Text>
                   </Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
@@ -594,7 +594,7 @@ export default function ScanMachine() {
                               where a weight would be — the dash is what made a
                               dip indistinguishable from a barbell lift whose
                               load somebody forgot to type. */}
-                          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>
+                          <Text style={{ ...ty.caption, ...numeric, ...font('500'), color: t.ink2 }}>
                             Set {i + 1}: {s.timed
                               ? `${holdLabel(s.reps)}${s.kg ? ` × ${liftLabel(s.kg, wu)}` : s.bw ? ' at bodyweight' : ''}`
                               : `${s.reps}×${s.kg ? liftLabel(s.kg, wu) : s.bw ? 'bodyweight' : '–'}`}

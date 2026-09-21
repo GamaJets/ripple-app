@@ -60,7 +60,7 @@ import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { fmtFullDay } from '../../src/lib/format';
 import { ensureMediaPermission } from '../../src/ui/permissions';
@@ -168,7 +168,7 @@ export default function InjuryDoc() {
     backgroundColor: on ? t.brand : t.surface2,
   });
   const chipText = (on: boolean) => ({
-    ...ty.label, fontWeight: (on ? '600' : '500') as '600' | '500', color: on ? t.brandInk : t.ink2,
+    ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2,
   });
 
   // Shared by all three ways in, so a PDF chosen from Files and a photo taken
@@ -309,7 +309,7 @@ export default function InjuryDoc() {
   // beside a medical record is two places for them to drift apart.
   const renderDoc = (doc: InjuryDocFile, idx: number) => (
     <View key={doc.path} style={{ paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{doc.name}</Text>
+      <Text style={{ ...ty.body, ...font('500'), color: t.ink }} numberOfLines={1}>{doc.name}</Text>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
         {dayLabel(doc.createdAt) ?? 'Date unknown'}
         {doc.url === null ? ' · cannot be opened right now' : ''}
@@ -782,7 +782,7 @@ export default function InjuryDoc() {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }} edges={['top', 'bottom']}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingVertical: sp.md }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: '#fff' }} numberOfLines={1}>
+              <Text style={{ ...ty.body, ...font('500'), color: '#fff' }} numberOfLines={1}>
                 {viewing?.name ?? ''}
               </Text>
               {/* Repeated here rather than assumed from the screen behind it.
@@ -795,7 +795,7 @@ export default function InjuryDoc() {
             <Pressable onPress={() => setViewing(null)} hitSlop={12}
               accessibilityRole="button" accessibilityLabel="Close this document"
               style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: '#fff' }}>Close</Text>
+              <Text style={{ ...ty.label, ...font('600'), color: '#fff' }}>Close</Text>
             </Pressable>
           </View>
           {viewing?.url && !viewErr ? (
@@ -817,7 +817,7 @@ export default function InjuryDoc() {
             />
           ) : viewing ? (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.xl, gap: sp.md }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: '#fff', textAlign: 'center' }}>
+              <Text style={{ ...ty.body, ...font('500'), color: '#fff', textAlign: 'center' }}>
                 This document did not open
               </Text>
               <Text style={{ ...ty.label, color: '#fff', opacity: 0.8, textAlign: 'center' }}>

@@ -517,7 +517,7 @@ export default function Receipts() {
                       <Pressable key={c.id} onPress={() => { setPaidBy(c.name); setClientId(isQueryableId(c.id) ? c.id : null); }}
                         accessibilityRole="button" accessibilityLabel={`Paid by ${c.name}`}
                         style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: paidBy === c.name ? t.brand : t.surface2 }}>
-                        <Text style={{ ...ty.caption, color: paidBy === c.name ? '#fff' : t.ink2 }}>{c.name}</Text>
+                        <Text style={{ ...ty.caption, color: paidBy === c.name ? t.brandInk : t.ink2 }}>{c.name}</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -541,7 +541,7 @@ export default function Receipts() {
                   <Pressable key={m.id} onPress={() => setMethod(m.id)} accessibilityRole="button"
                     accessibilityLabel={m.label} accessibilityState={{ selected: method === m.id }}
                     style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.sm, backgroundColor: method === m.id ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, color: method === m.id ? '#fff' : t.ink2 }}>{m.label}</Text>
+                    <Text style={{ ...ty.label, color: method === m.id ? t.brandInk : t.ink2 }}>{m.label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -561,7 +561,7 @@ export default function Receipts() {
                       accessibilityRole="button" accessibilityLabel={label}
                       accessibilityState={{ selected: receivedOn === when }}
                       style={{ flex: 1, paddingVertical: 8, borderRadius: radius.sm, alignItems: 'center', backgroundColor: receivedOn === when ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.micro, color: receivedOn === when ? '#fff' : t.ink2 }}>{label}</Text>
+                      <Text style={{ ...ty.micro, color: receivedOn === when ? t.brandInk : t.ink2 }}>{label}</Text>
                     </Pressable>
                   );
                 })}

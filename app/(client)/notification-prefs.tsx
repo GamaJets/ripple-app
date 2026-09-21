@@ -240,7 +240,7 @@ function TriSwitch({ t, label, state, onPress }: {
       accessibilityState={{ checked: unknown ? 'mixed' : on }}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
       style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: unknown ? t.surface2 : on ? t.brand : t.surface3, borderWidth: hairline, borderColor: t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
-      <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: unknown ? t.ink3 : '#fff', alignSelf: unknown ? 'center' : on ? 'flex-end' : 'flex-start', opacity: unknown ? 0.45 : 1 }} />
+      <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: unknown ? t.ink3 : on ? t.brandInk : t.ink3, alignSelf: unknown ? 'center' : on ? 'flex-end' : 'flex-start', opacity: unknown ? 0.45 : 1 }} />
     </Pressable>
   );
 }
@@ -515,7 +515,7 @@ export default function NotificationPrefs() {
                   accessibilityState={{ checked: on, disabled: !canWrite }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
                   style={{ opacity: canWrite ? 1 : 0.4, width: 48, height: 28, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
-                  <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: on ? 'flex-end' : 'flex-start' }} />
+                  <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: on ? t.brandInk : t.ink3, alignSelf: on ? 'flex-end' : 'flex-start' }} />
                 </Pressable>
               </View>
             );
@@ -573,7 +573,7 @@ export default function NotificationPrefs() {
                 accessibilityState={{ checked: quietOn }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
                 style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: quietOn ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
-                <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: quietOn ? 'flex-end' : 'flex-start' }} />
+                <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: quietOn ? t.brandInk : t.ink3, alignSelf: quietOn ? 'flex-end' : 'flex-start' }} />
               </Pressable>
             </View>
 

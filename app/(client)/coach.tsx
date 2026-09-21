@@ -31,7 +31,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Notice, Flag, Cta, Ghost, PageHead } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 // 44pt, from the one place that holds the number. See the send button below.
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { useClientData } from '../../src/ui/clientData';
@@ -594,7 +594,7 @@ export default function Coach() {
               {SUGGESTIONS.map((s) => (
                 <Pressable key={s} onPress={() => send(s)} accessibilityRole="button" accessibilityLabel={s}
                   style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{s}</Text>
+                  <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>{s}</Text>
                 </Pressable>
               ))}
             </View>

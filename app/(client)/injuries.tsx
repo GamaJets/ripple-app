@@ -41,7 +41,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, ListRow, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { INJURY_AREAS, areaLabel, newInjuryId, type Injury, type InjurySeverity } from '../../src/lib/injuries';
 import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle, injuryStanding } from '../../src/lib/injuryEdit';
@@ -201,7 +201,7 @@ export default function Injuries() {
         accessibilityLabel={`${areaLabel(areaId)}, ${status === 'active' ? `${severity} injury, active` : 'recovered'}${nt ? `. ${nt}` : ''}${age.line ? `. ${age.line}` : ''}`}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: status === 'active' ? sevColor(severity) : t.ink3 }} />
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{areaLabel(areaId)}</Text>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{areaLabel(areaId)}</Text>
           <Text style={{ ...ty.caption, color: t.ink2, textTransform: 'capitalize' }}>{status === 'active' ? severity : 'recovered'}</Text>
         </View>
         {nt ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{nt}</Text> : null}
@@ -338,7 +338,7 @@ export default function Injuries() {
                   <Text style={{ ...ty.micro, color: t.ink3 }}>Assigned Knowing About These</Text>
                   {mine.choices.slice(0, 5).map((ch, i) => (
                     <View key={i}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmtDay(ch.at)}</Text>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{fmtDay(ch.at)}</Text>
                       <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>
                         {/* The movement in the reader's language; the join stays
                             English, because the sentence around it is — see
@@ -372,7 +372,7 @@ export default function Injuries() {
         {c.injuries.length === 0 && c.profileStatus === 'ready' ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
             <Icon name="check" size={30} color={t.ink3} />
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, marginTop: sp.md }}>No Injuries Disclosed</Text>
+            <Text style={{ ...ty.body, ...font('500'), color: t.ink2, marginTop: sp.md }}>No Injuries Disclosed</Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, maxWidth: 260 }}>If something's bothering you, add it here so your plan can adapt.</Text>
           </View>
         ) : c.injuries.length === 0 && c.profileStatus === 'loading' ? (
@@ -412,7 +412,7 @@ export default function Injuries() {
                   accessibilityRole="radio" accessibilityState={{ selected: on, checked: on }}
                   accessibilityLabel={a.label} accessibilityHint="The part of your body that is injured"
                   style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{a.label}</Text>
+                  <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{a.label}</Text>
                 </Pressable>); })}
             </View>
 
@@ -423,7 +423,7 @@ export default function Injuries() {
                   accessibilityRole="radio" accessibilityState={{ selected: on, checked: on }}
                   accessibilityLabel={sv.label} accessibilityHint="How bad the injury is"
                   style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{sv.label}</Text>
+                  <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{sv.label}</Text>
                 </Pressable>); })}
             </View>
 
@@ -443,7 +443,7 @@ export default function Injuries() {
             <Pressable onPress={closeSheet} accessibilityRole="button"
               accessibilityLabel={editing ? 'Cancel without changing this injury' : 'Cancel without disclosing an injury'}
               style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+              <Text style={{ ...ty.label, ...font('500'), color: t.ink3 }}>Cancel</Text>
             </Pressable>
           </ScrollView>
         </View>

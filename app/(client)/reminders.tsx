@@ -343,7 +343,7 @@ export default function Reminders() {
               accessibilityState={{ checked: hydration }}
               hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
               style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: hydration ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
-              <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: hydration ? 'flex-end' : 'flex-start' }} />
+              <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: hydration ? t.brandInk : t.ink3, alignSelf: hydration ? 'flex-end' : 'flex-start' }} />
             </Pressable>
           </View>
           {hydration ? (
@@ -426,7 +426,7 @@ export default function Reminders() {
                     accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: f.on }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
                     style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: f.on ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
-                    <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: f.on ? 'flex-end' : 'flex-start' }} />
+                    <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: f.on ? t.brandInk : t.ink3, alignSelf: f.on ? 'flex-end' : 'flex-start' }} />
                   </Pressable>
                 </View>
                 {f.on ? (

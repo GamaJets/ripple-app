@@ -516,7 +516,7 @@ export default function Costs() {
                   <Pressable key={c.id} onPress={() => setCategory(c.id)} accessibilityRole="button"
                     accessibilityLabel={c.label} accessibilityState={{ selected: category === c.id }}
                     style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.sm, backgroundColor: category === c.id ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, color: category === c.id ? '#fff' : t.ink2 }}>{c.label}</Text>
+                    <Text style={{ ...ty.label, color: category === c.id ? t.brandInk : t.ink2 }}>{c.label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -547,7 +547,7 @@ export default function Costs() {
                       accessibilityRole="button" accessibilityLabel={label}
                       accessibilityState={{ selected: paidOn === when }}
                       style={{ flex: 1, paddingVertical: 8, borderRadius: radius.sm, alignItems: 'center', backgroundColor: paidOn === when ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.micro, color: paidOn === when ? '#fff' : t.ink2 }}>{label}</Text>
+                      <Text style={{ ...ty.micro, color: paidOn === when ? t.brandInk : t.ink2 }}>{label}</Text>
                     </Pressable>
                   );
                 })}

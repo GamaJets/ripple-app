@@ -51,7 +51,7 @@ function Toggle({ t, on, onPress, label }: { t: Theme; on: boolean; onPress: () 
       accessibilityLabel={switchLabel(label, on)}
       hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
       style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', padding: 3 }}>
-      <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: on ? 'flex-end' : 'flex-start' }} />
+      <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: on ? t.brandInk : t.ink3, alignSelf: on ? 'flex-end' : 'flex-start' }} />
     </Pressable>
   );
 }

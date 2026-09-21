@@ -57,7 +57,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Ghost, Cta, Flag, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { worstStatus } from '../../src/ui/loadStatus';
 import { withDeadline } from '../../src/lib/readDeadline';
@@ -319,8 +319,8 @@ export default function GymPlans() {
             return (
               <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{p.name}</Text>
-                  <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{planPrice(p)}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{p.name}</Text>
+                  <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>{planPrice(p)}</Text>
                 </View>
                 {/* The NOTE was the other half of the same defect, and it
                     survived the fix directly above. Under an unknown membership
@@ -414,8 +414,8 @@ export default function GymPlans() {
             return (
               <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{p.name}</Text>
-                  <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(offerMoney(p.priceCents, p.currency))}</Text>
+                  <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>{p.name}</Text>
+                  <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>{fig(offerMoney(p.priceCents, p.currency))}</Text>
                 </View>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{passNote(p, today)}</Text>
                 {/* `passNote` still runs and still says what the pass buys —
@@ -484,10 +484,10 @@ export default function GymPlans() {
               {waiting.map((o, i) => (
                 <View key={o.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink, flex: 1 }}>
                       {o.kind === 'membership' ? 'Membership' : 'Pass'}
                     </Text>
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(offerMoney(o.amountCents, o.currency))}</Text>
+                    <Text style={{ ...ty.label, ...numeric, ...font('500'), color: t.ink2 }}>{fig(offerMoney(o.amountCents, o.currency))}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 5 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: o.status === 'failed' ? t.crit : t.warn }} />

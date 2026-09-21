@@ -43,7 +43,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Ghost, PageHead, ActionBlock } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useFoodLog } from '../../src/ui/foodLog';
@@ -209,7 +209,7 @@ export default function GettingStarted() {
             >
               {tick(r.state, t)}
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' ? t.ink3 : t.ink }}>{r.item.title}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: r.state === 'done' ? t.ink3 : t.ink }}>{r.item.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.item.note}</Text>
               </View>
               <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
@@ -260,7 +260,7 @@ export default function GettingStarted() {
                 <Icon name={r.icon} size={15} color={t.ink3} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.title}</Text>
+                <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{r.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.note}</Text>
               </View>
               <Icon name={FORWARD_ICON} size={15} color={t.ink3} />

@@ -20,7 +20,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Notice, Cta, PageHead } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import type { LoadStatus } from '../../src/ui/loadStatus';
@@ -204,7 +204,7 @@ export default function Offers() {
               paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, letterSpacing: 1 }}>{r.code}</Text>
+                <Text style={{ ...ty.body, ...font('600'), color: t.ink, letterSpacing: 1 }}>{r.code}</Text>
                 {/* The code is what the member takes to the desk; the
                     percentage is what they expect off. An unreadable figure
                     says so rather than printing a nought, which is a number

@@ -45,7 +45,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag, PageHead } from '../../src/ui/kit';
-import { sp, layout, type as ty } from '../../src/theme/scale';
+import { sp, layout, type as ty, font } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 // Who is signed in, with the failure kept rather than collapsed into "nobody".
 // See the note in `load` for the sentence this screen used to print at a member
@@ -329,7 +329,7 @@ export default function ClientCoachDocumentsScreen() {
                       <Pressable onPress={() => open(d)} accessibilityRole="button" accessibilityLabel={`Open ${d.title}`}>
                         <Text style={{
                           ...ty.body,
-                          fontWeight: outstanding(d) ? '600' : '500',
+                          ...font(outstanding(d) ? '600' : '500'),
                           color: d.retired ? t.ink2 : t.ink,
                         }}>
                           {d.title}

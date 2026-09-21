@@ -51,7 +51,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
@@ -164,7 +164,7 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {/* Each percentage is taken off the KILOGRAM estimate and read out once,
      rather than off the already-converted figure — so the 100% row is the
      hero to the pound rather than a pound away from it. */}
- <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{fig(est1RMIn((oneRmKg * p) / 100, wu))} {wu}</Text>
+ <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{fig(est1RMIn((oneRmKg * p) / 100, wu))} {wu}</Text>
  </View>
  </View>
  ))}
@@ -219,7 +219,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  return (
  <Pressable key={b} onPress={() => setBarIdx(i)} accessibilityRole="button" accessibilityState={{ selected: on }}
  style={{ paddingHorizontal: sp.md, paddingVertical: 11, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
- <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{b} {wu}</Text>
+ <Text style={{ ...ty.label, ...numeric, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{b} {wu}</Text>
  </Pressable>
  );
  })}
@@ -260,7 +260,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {i > 0 ? <Rule /> : null}
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
  <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{r.pct}%</Text>
- <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>
+ <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>
  {plain(r.weight)} {wu} × {r.reps}
  </Text>
  </View>
@@ -280,7 +280,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
  {load.plates.map((p, i) => (
  <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
- <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink }}>{p}</Text>
+ <Text style={{ ...ty.label, ...numeric, ...font('600'), color: t.ink }}>{p}</Text>
  </View>
  ))}
  </View>
@@ -321,8 +321,8 @@ function TargetRow({ t, name, grams, from }: { t: Theme; name: string; grams: st
  return (
  <View style={{ paddingVertical: sp.md }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
- <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
- <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{grams}</Text>
+ <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{name}</Text>
+ <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{grams}</Text>
  </View>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{from}</Text>
  </View>
@@ -418,8 +418,8 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {i > 0 ? <Rule /> : null}
  <View style={{ paddingVertical: sp.md }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
- <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{k}</Text>
- <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{cal}</Text>
+ <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{k}</Text>
+ <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>{cal}</Text>
  </View>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text>
  </View>
@@ -502,7 +502,7 @@ export default function Tools() {
  return (
  <Pressable key={k} onPress={() => setTab(k)} accessibilityRole="button" accessibilityState={{ selected: on }}
  style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
- <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+ <Text style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.brandInk : t.ink2 }}>{label}</Text>
  </Pressable>
  );
  })}

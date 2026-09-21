@@ -1272,7 +1272,7 @@ export default function Invoices() {
                       <Pressable key={c.id} onPress={() => { setBillTo(c.name); setClientId(isQueryableId(c.id) ? c.id : null); }}
                         accessibilityRole="button" accessibilityLabel={`Bill ${c.name}`}
                         style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: billTo === c.name ? t.brand : t.surface2 }}>
-                        <Text style={{ ...ty.caption, color: billTo === c.name ? '#fff' : t.ink2 }}>{c.name}</Text>
+                        <Text style={{ ...ty.caption, color: billTo === c.name ? t.brandInk : t.ink2 }}>{c.name}</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -1297,7 +1297,7 @@ export default function Invoices() {
                   <Pressable key={k} onPress={() => setKind(k)} accessibilityRole="button"
                     accessibilityLabel={kindLabel(k)} accessibilityState={{ selected: kind === k }}
                     style={{ flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center', backgroundColor: kind === k ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, color: kind === k ? '#fff' : t.ink2 }}>
+                    <Text style={{ ...ty.label, color: kind === k ? t.brandInk : t.ink2 }}>
                       {k === 'requested' ? 'Asking for It' : 'Already Paid'}
                     </Text>
                   </Pressable>
@@ -1369,7 +1369,7 @@ export default function Invoices() {
                       accessibilityState={{ selected: on, disabled: !when }}
                       disabled={!when}
                       style={{ flex: 1, paddingVertical: 8, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.micro, color: on ? '#fff' : t.ink2 }} numberOfLines={2}>{term.label}</Text>
+                      <Text style={{ ...ty.micro, color: on ? t.brandInk : t.ink2 }} numberOfLines={2}>{term.label}</Text>
                     </Pressable>
                   );
                 })}

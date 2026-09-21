@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useCheckIns } from '../../src/ui/checkins';
@@ -533,7 +533,7 @@ export default function Activity() {
                     <Icon name={e.icon as any} size={17} color={t.brand} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.title}</Text>
+                    <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{e.title}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }} numberOfLines={isOpen ? undefined : 2}>{e.sub}</Text>
                     {/* Who wrote it, or why a figure on it is short. One line,
                         beside the thing it qualifies, and drawn shut as well as

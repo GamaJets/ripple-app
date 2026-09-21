@@ -46,7 +46,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Ghost, Flag, Notice, PartialRead, fig, PageHead } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useAuth } from '../../src/ui/auth';
@@ -246,7 +246,7 @@ export default function Invoices() {
                       {/* The number is what a member quotes on a bank transfer
                           (part 180). Rows raised before the column existed were
                           never numbered and are not given one here. */}
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>
                         {inv.number == null ? day(inv.issuedOn) : `No. ${inv.number} · ${day(inv.issuedOn)}`}
                       </Text>
                       {/* The gym's own statement of what the charge is for. A
@@ -256,7 +256,7 @@ export default function Invoices() {
                         {inv.note ?? 'Your gym did not record what this is for.'}
                       </Text>
                     </View>
-                    <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>
+                    <Text style={{ ...ty.body, ...numeric, ...font('600'), color: t.ink }}>
                       {amount(inv.amountCents, inv.currency)}
                     </Text>
                   </View>
